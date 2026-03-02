@@ -1,179 +1,94 @@
-import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server'
 import { NextResponse } from 'next/server'
+import type { NextRequest } from 'next/server'
+import { getCurrentUser } from './lib/standalone-auth'
 
-const isAdminRoute = createRouteMatcher(['/admin(.*)'])
-const isProtectedRoute = createRouteMatcher(['/dashboard(.*)', '/requests(.*)', '/admin(.*)'])
-const isSignInRoute = createRouteMatcher(['/sign-in(.*)', '/sign-up(.*)'])
+export async function middleware(req: NextRequest) {
+  const { pathname } = req.nextUrl
 
-export default clerkMiddleware(async (auth, req) => {
-  const { userId } = await auth()
-
-  // Debug logging to understand the flow
+  // Debug logging
   console.log('===== MIDDLEWARE DEBUG =====')
   console.log('🔍 URL:', req.url)
-  console.log('🔍 Path:', req.nextUrl.pathname)
-  console.log('🔍 userId:', userId)
-  console.log('🔍 isSignInRoute:', isSignInRoute(req))
+  console.log('🔍 Path:', pathname)
 
-  // Protect admin routes - only users with 'admin' role can access
-  if (isAdminRoute(req)) {
-    if (!userId) {
+  // Get current user
+  const user = await getCurrentUser()
+  console.log('🔍 User:', user?.email || 'Not authenticated')
+
+  // Define route patterns
+  const isAdminRoute = pathname.startsWith('/admin')
+  const isProtectedRoute = pathname.startsWith('/dashboard') || pathname.startsWith('/requests') || pathname.startsWith('/admin')
+  const isSignInRoute = pathname.startsWith('/sign-in') || pathname.startsWith('/sign-up')
+
+  // Protect admin routes
+  if (isAdminRoute) {
+    if (!user) {
       const signInUrl = new URL('/sign-in', req.url)
       return NextResponse.redirect(signInUrl)
     }
-
-    // For admin routes, we rely on the server-side layout check
-    // which does a database query. Middleware just ensures authentication.
-    // This is because publicMetadata is not included in JWT by default.
-    console.log('✅ Admin route access - authenticated, layout will verify admin role')
+    if (user.role !== 'admin') {
+      const dashboardUrl = new URL('/dashboard', req.url)
+      return NextResponse.redirect(dashboardUrl)
+    }
+    console.log('✅ Admin route access granted')
   }
 
-  // Protect dashboard routes - must be authenticated
-  if (isProtectedRoute(req)) {
-    const { redirectToSignIn } = await auth()
-    const isAuthenticated = await auth().then(a => a.isAuthenticated)
-    if (!isAuthenticated) {
-      return redirectToSignIn()
+  // Protect dashboard routes
+  if (isProtectedRoute) {
+    if (!user) {
+      const signInUrl = new URL('/sign-in', req.url)
+      return NextResponse.redirect(signInUrl)
     }
+    console.log('✅ Protected route access granted')
 
-    // Role-based redirect: if user is on /dashboard but their role suggests they should be elsewhere
-    if (req.nextUrl.pathname === '/dashboard' && userId) {
-      console.log('🎯 User on /dashboard, checking role...')
-      const { sessionClaims } = await auth()
-      let role = (sessionClaims as any)?.metadata?.role as string | undefined
-      console.log('📋 Role from Clerk metadata:', role)
-
-      // If role is not set in Clerk metadata, fall back to API endpoint
-      if (!role) {
-        console.log('⚠️ No role in Clerk metadata, calling API for userId:', userId)
-        try {
-          const apiUrl = new URL('/api/user/role', req.url)
-          // Pass cookies to maintain auth context
-          const cookieHeader = req.headers.get('cookie')
-          const response = await fetch(apiUrl.toString(), {
-            headers: {
-              ...(cookieHeader && { cookie: cookieHeader })
-            }
-          })
-          if (response.ok) {
-            const data = await response.json()
-            role = data.role
-            console.log('📋 Role from API:', role, 'for user:', userId)
-          } else {
-            console.error('❌ API returned error:', response.status)
-          }
-        } catch (error) {
-          console.error('❌ Error calling API for role:', error)
-        }
-      }
-
-      // Redirect engineering users to /engineering
-      if (role === 'engineering') {
-        console.log('✅ Engineering user on /dashboard, redirecting to /engineering')
+    // Role-based redirects from /dashboard
+    if (pathname === '/dashboard') {
+      if (user.role === 'engineering') {
+        console.log('✅ Engineering user, redirecting to /engineering')
         return NextResponse.redirect(new URL('/engineering', req.url))
       }
-
-      // Redirect admin users to /admin
-      if (role === 'admin') {
-        console.log('✅ Admin user on /dashboard, redirecting to /admin')
+      if (user.role === 'admin') {
+        console.log('✅ Admin user, redirecting to /admin')
         return NextResponse.redirect(new URL('/admin', req.url))
       }
-
-      // general_dept users stay on /dashboard
-      console.log('✅ General dept user on /dashboard, allowing access')
+      console.log('✅ General dept user staying on /dashboard')
     }
   }
 
-  // Role-based redirect after sign-in completion
-  // When authenticated user visits sign-in page (which happens after login),
-  // redirect them to their appropriate dashboard based on role
-  if (isSignInRoute(req) && userId) {
-    console.log('✅ Sign-in route detected with authenticated user - checking role')
-    const { sessionClaims } = await auth()
-    let role = (sessionClaims as any)?.metadata?.role as string | undefined
-
-    console.log('✅ User role from Clerk metadata:', role)
-
-    // If role is not set in Clerk metadata, fall back to API endpoint
-    if (!role) {
-      console.log('⚠️ Role not in Clerk metadata, calling API...')
-      try {
-        const apiUrl = new URL('/api/user/role', req.url)
-        const cookieHeader = req.headers.get('cookie')
-        const response = await fetch(apiUrl.toString(), {
-          headers: {
-            ...(cookieHeader && { cookie: cookieHeader })
-          }
-        })
-        if (response.ok) {
-          const data = await response.json()
-          role = data.role
-          console.log('✅ User role from API:', role)
-        }
-      } catch (error) {
-        console.error('❌ Error calling API for role:', error)
-      }
-    }
-
-    // Redirect based on role
-    if (role === 'engineering') {
-      const engineeringUrl = new URL('/engineering', req.url)
+  // Redirect authenticated users from sign-in to appropriate dashboard
+  if (isSignInRoute && user) {
+    console.log('✅ Authenticated user on sign-in page, redirecting based on role')
+    
+    if (user.role === 'engineering') {
       console.log('✅ Redirecting to /engineering')
-      return NextResponse.redirect(engineeringUrl)
-    } else if (role === 'admin') {
-      const adminUrl = new URL('/admin', req.url)
+      return NextResponse.redirect(new URL('/engineering', req.url))
+    } else if (user.role === 'admin') {
       console.log('✅ Redirecting to /admin')
-      return NextResponse.redirect(adminUrl)
+      return NextResponse.redirect(new URL('/admin', req.url))
     }
-    // Default to dashboard for general_dept and unknown roles
-    const dashboardUrl = new URL('/dashboard', req.url)
+    
+    // Default to dashboard
     console.log('✅ Redirecting to /dashboard')
-    return NextResponse.redirect(dashboardUrl)
+    return NextResponse.redirect(new URL('/dashboard', req.url))
   }
 
-  // Check if user is landing on root URL after sign-in
-  if (req.nextUrl.pathname === '/' && userId) {
-    console.log('✅ Root URL detected with authenticated user - redirecting based on role')
-    const { sessionClaims } = await auth()
-    let role = (sessionClaims as any)?.metadata?.role as string | undefined
-
-    console.log('✅ User role from Clerk metadata:', role)
-
-    // If role is not set in Clerk metadata, fall back to API endpoint
-    if (!role) {
-      console.log('⚠️ Role not in Clerk metadata, calling API...')
-      try {
-        const apiUrl = new URL('/api/user/role', req.url)
-        const cookieHeader = req.headers.get('cookie')
-        const response = await fetch(apiUrl.toString(), {
-          headers: {
-            ...(cookieHeader && { cookie: cookieHeader })
-          }
-        })
-        if (response.ok) {
-          const data = await response.json()
-          role = data.role
-          console.log('✅ User role from API:', role)
-        }
-      } catch (error) {
-        console.error('❌ Error calling API for role:', error)
-      }
-    }
-
-    if (role === 'engineering') {
-      const engineeringUrl = new URL('/engineering', req.url)
+  // Redirect authenticated users from root to appropriate dashboard
+  if (pathname === '/' && user) {
+    console.log('✅ Authenticated user on root, redirecting based on role')
+    
+    if (user.role === 'engineering') {
       console.log('✅ Redirecting to /engineering')
-      return NextResponse.redirect(engineeringUrl)
-    } else if (role === 'admin') {
-      const adminUrl = new URL('/admin', req.url)
+      return NextResponse.redirect(new URL('/engineering', req.url))
+    } else if (user.role === 'admin') {
       console.log('✅ Redirecting to /admin')
-      return NextResponse.redirect(adminUrl)
+      return NextResponse.redirect(new URL('/admin', req.url))
     }
-    const dashboardUrl = new URL('/dashboard', req.url)
+    
     console.log('✅ Redirecting to /dashboard')
-    return NextResponse.redirect(dashboardUrl)
+    return NextResponse.redirect(new URL('/dashboard', req.url))
   }
-})
+
+  return NextResponse.next()
+}
 
 export const config = {
   matcher: [
