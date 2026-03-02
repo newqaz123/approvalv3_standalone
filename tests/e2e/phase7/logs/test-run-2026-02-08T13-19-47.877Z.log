@@ -1,0 +1,50 @@
+================================================================================
+
+[2026-02-08T13:19:48.503Z] [INFO] 
+================================================================================
+[2026-02-08T13:19:48.503Z] [INFO] STARTING TEST: Admin Authentication Setup
+[2026-02-08T13:19:48.503Z] [INFO] ================================================================================
+
+[2026-02-08T13:19:48.565Z] [INFO] ACTION: Navigating to login page
+[2026-02-08T13:19:49.725Z] [INFO] ACTION: Waiting for Clerk form to load
+[2026-02-08T13:19:51.035Z] [INFO] ACTION: Filling login credentials
+[2026-02-08T13:19:51.089Z] [INFO] ACTION: Clicking sign in button
+[2026-02-08T13:19:51.140Z] [INFO] ACTION: Waiting for navigation to complete
+[2026-02-08T13:19:52.537Z] [SUCCESS] VERIFY: Login successful - ✓ PASS (Redirected to http://localhost:3000/admin)
+[2026-02-08T13:19:52.538Z] [INFO] 
+================================================================================
+[2026-02-08T13:19:52.539Z] [INFO] STARTING TEST: Navigate to Admin Hierarchy Page
+[2026-02-08T13:19:52.539Z] [INFO] ================================================================================
+
+[2026-02-08T13:19:52.539Z] [INFO] ACTION: Navigating to hierarchy page - http://localhost:3000/admin/hierarchy
+[2026-02-08T13:19:53.378Z] [INFO] ACTION: Waiting for hierarchy to load
+[2026-02-08T13:19:53.457Z] [INFO] ACTION: Capturing original hierarchy state for rollback
+[2026-02-08T13:19:53.463Z] [SUCCESS] VERIFY: Hierarchy page loaded - ✓ PASS (Found 3 levels)
+[2026-02-08T13:19:53.464Z] [INFO] 
+================================================================================
+[2026-02-08T13:19:53.464Z] [INFO] STARTING TEST: Test 2: Hierarchy Reset
+[2026-02-08T13:19:53.464Z] [INFO] ================================================================================
+
+[2026-02-08T13:19:53.465Z] [INFO] ACTION: Capturing initial user positions
+[2026-02-08T13:19:53.468Z] [ERROR] 
+================================================================================
+[2026-02-08T13:19:53.469Z] [ERROR] TEST FAILED: Test 2: Hierarchy Reset
+[2026-02-08T13:19:53.469Z] [INFO] Duration: 4ms
+[2026-02-08T13:19:53.469Z] [ERROR] ================================================================================
+
+[2026-02-08T13:19:53.469Z] [WARNING] 
+⚠ CORRECTION NEEDED:
+[2026-02-08T13:19:53.469Z] [WARNING]   Reason: Test failed: page.evaluate: SyntaxError: Failed to execute 'querySelectorAll' on 'Document': '.min-w-[200px]' is not a valid selector.
+    at eval (eval at evaluate (:290:30), <anonymous>:2:34)
+    at UtilityScript.evaluate (<anonymous>:292:16)
+    at UtilityScript.<anonymous> (<anonymous>:1:44)
+[2026-02-08T13:19:53.469Z] [WARNING]   Action: Reset hierarchy to original state
+[2026-02-08T13:19:53.469Z] [WARNING]   Rollback: Restore original hierarchy state before test
+
+[2026-02-08T13:19:53.510Z] [INFO] ACTION: Closing admin browser context
+[2026-02-08T13:19:53.528Z] [INFO] 
+================================================================================
+[2026-02-08T13:19:53.528Z] [SUCCESS] Phase 7 Tests Complete
+[2026-02-08T13:19:53.528Z] [INFO] ================================================================================
+
+[2026-02-08T13:19:53.528Z] [INFO] Original hierarchy state captured for rollback:

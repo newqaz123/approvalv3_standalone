@@ -1,0 +1,46 @@
+================================================================================
+
+[2026-02-08T13:48:52.498Z] [INFO] 
+================================================================================
+[2026-02-08T13:48:52.499Z] [INFO] STARTING TEST: Admin Authentication Setup
+[2026-02-08T13:48:52.499Z] [INFO] ================================================================================
+
+[2026-02-08T13:48:52.739Z] [INFO] ACTION: Navigating to login page
+[2026-02-08T13:48:54.192Z] [INFO] ACTION: Waiting for Clerk form to load
+[2026-02-08T13:48:55.504Z] [INFO] ACTION: Filling login credentials
+[2026-02-08T13:48:55.586Z] [INFO] ACTION: Clicking sign in button
+[2026-02-08T13:48:55.788Z] [INFO] ACTION: Waiting for navigation to complete
+[2026-02-08T13:48:59.808Z] [SUCCESS] VERIFY: Login successful - ✓ PASS (Redirected to http://localhost:3000/admin)
+[2026-02-08T13:48:59.809Z] [INFO] 
+================================================================================
+[2026-02-08T13:48:59.810Z] [INFO] STARTING TEST: Navigate to Admin Hierarchy Page
+[2026-02-08T13:48:59.811Z] [INFO] ================================================================================
+
+[2026-02-08T13:48:59.811Z] [INFO] ACTION: Navigating to hierarchy page - http://localhost:3000/admin/hierarchy
+[2026-02-08T13:49:02.193Z] [INFO] ACTION: Waiting for hierarchy to load
+[2026-02-08T13:49:02.224Z] [SUCCESS] VERIFY: Hierarchy page loaded - ✓ PASS (Page loaded successfully)
+[2026-02-08T13:49:02.225Z] [INFO] 
+================================================================================
+[2026-02-08T13:49:02.225Z] [INFO] STARTING TEST: Test 1: Hierarchy Batch Save UI
+[2026-02-08T13:49:02.225Z] [INFO] ================================================================================
+
+[2026-02-08T13:49:02.225Z] [INFO] ACTION: Verifying page title
+[2026-02-08T13:49:02.230Z] [SUCCESS] VERIFY: Page title correct - ✓ PASS (Title: Hierarchy Management)
+[2026-02-08T13:49:02.230Z] [INFO] ACTION: Checking hierarchy structure
+[2026-02-08T13:49:02.232Z] [SUCCESS] VERIFY: Level headers found - ✓ PASS (Found 3 levels)
+[2026-02-08T13:49:02.232Z] [INFO] ACTION: Checking for instructional text
+[2026-02-08T13:49:02.235Z] [SUCCESS] VERIFY: Instructional text found - ✓ PASS (Drag instruction visible)
+[2026-02-08T13:49:02.235Z] [INFO] ACTION: Capturing current hierarchy state
+[2026-02-08T13:49:02.241Z] [ERROR] 
+================================================================================
+[2026-02-08T13:49:02.241Z] [ERROR] TEST FAILED: Test 1: Hierarchy Batch Save UI
+[2026-02-08T13:49:02.242Z] [INFO] Duration: 16ms
+[2026-02-08T13:49:02.242Z] [ERROR] ================================================================================
+
+[2026-02-08T13:49:02.285Z] [SUCCESS] 
+================================================================================
+[2026-02-08T13:49:02.285Z] [SUCCESS] TEST PASSED: Current test
+[2026-02-08T13:49:02.285Z] [INFO] Duration: 1770558542285ms
+[2026-02-08T13:49:02.285Z] [SUCCESS] ================================================================================
+
+[2026-02-08T13:49:02.285Z] [INFO] ACTION: Closing admin browser context

@@ -1,0 +1,61 @@
+---
+status: resolved
+trigger: "Design&CostApproval approval status shows 'Level X' instead of approver's name"
+created: 2026-02-22T00:00:00Z
+updated: 2026-02-22T00:00:00Z
+---
+
+## Current Focus
+
+hypothesis: Solution approval creation doesn't set approverId for auto-approved (top-level submitter) approvals
+test: Compare solution approval creation (solutions.ts createHierarchyApprovalChain) with request approval creation
+expecting: Find that approverId is missing in auto-approval logic
+next_action: FIXED - Modified createHierarchyApprovalChain and createApprovalChain to set approverId for auto-approved approvals
+
+## Symptoms
+
+expected: Design&CostApproval approvals should display the actual approver's name (like "Pattawat Wannawong")
+actual: Design&CostApproval approvals display "Level X" (e.g., "Level 4") instead of the approver's name
+errors: No error messages - just incorrect display
+reproduction: View any Design&CostApproval approval status on multiple pages (dashboard, requests page, detail modal)
+started: Never worked correctly for Design&CostApproval - pre-existing bug
+
+## Eliminated
+
+## Evidence
+
+- timestamp: 2026-02-22
+  checked: solutions.ts createHierarchyApprovalChain function (lines 266-329)
+  found: For auto-approved (top-level submitter), approval was created with status='approved' but NO approverId set (lines 289-298)
+  implication: When loaded, approval.approver is null, so badge falls back to "Level X"
+
+- timestamp: 2026-02-22
+  checked: solutions.ts function call to createHierarchyApprovalChain (line 190)
+  found: Only passes solution.id, departmentId, and user.level - does NOT pass submitterId
+  implication: Cannot set approverId because submitterId is not available in the function
+
+- timestamp: 2026-02-22
+  checked: approvals.ts createApprovalChain function (lines 50-120)
+  found: SAME BUG - For auto-approved, creates approval without approverId (lines 62-70)
+  implication: Both solution approvals AND request approvals have this bug for top-level auto-approval
+
+- timestamp: 2026-02-22
+  checked: approval-status-badge.tsx display logic (lines 131-140)
+  found: Uses fallback logic: approval.approver?.name || `Level ${approval.requiredLevel}`
+  implication: When approver is null, displays "Level X"
+
+## Resolution
+
+root_cause: When creating auto-approved approvals for top-level submitters, the approverId was not being set. Both createHierarchyApprovalChain (solutions.ts) and createApprovalChain (approvals.ts) omitted approverId for auto-approved status.
+
+fix: 
+1. Modified createHierarchyApprovalChain in solutions.ts to accept submitterId parameter and set approverId for auto-approved approvals
+2. Modified createApprovalChain in approvals.ts to accept optional submitterId parameter and set approverId for auto-approved approvals  
+3. Updated all call sites to pass userId/submitterId
+
+verification: Code compiles without errors in modified files. The fix ensures that when a top-level user submits a request or solution, their ID is recorded as the approver, which will then be displayed in the badge instead of "Level X".
+
+files_changed:
+- src/server-actions/solutions.ts: Added submitterId parameter to createHierarchyApprovalChain and set approverId for auto-approved
+- src/server-actions/approvals.ts: Added optional submitterId parameter to createApprovalChain and set approverId for auto-approved
+- src/server-actions/requests.ts: Updated two call sites to pass userId to createApprovalChain

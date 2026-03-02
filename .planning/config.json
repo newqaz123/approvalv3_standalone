@@ -1,0 +1,17 @@
+{
+  "mode": "interactive",
+  "depth": "comprehensive",
+  "parallelization": true,
+  "commit_docs": true,
+  "model_profile": "budget",
+  "profiles": {
+    "active_profile": "budget",
+    "presets": {
+      "quality": { "planning": "google/gemini-3-pro-preview", "execution": "zai-coding-plan/glm-4.7", "verification": "zai-coding-plan/glm-4.7" },
+      "balanced": { "planning": "zai-coding-plan/glm-4.7", "execution": "zai-coding-plan/glm-4.7", "verification": "zai-coding-plan/glm-4.7" },
+      "budget": { "planning": "zai-coding-plan/glm-4.7", "execution": "opencode/minimax-m2.5-free", "verification": "zai-coding-plan/glm-4.7" }
+    },
+    "custom_overrides": { "quality": {}, "balanced": {}, "budget": {} }
+  },
+  "workflow": { "research": true, "plan_check": true, "verifier": true }
+}

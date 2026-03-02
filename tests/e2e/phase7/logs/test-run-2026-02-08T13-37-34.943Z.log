@@ -1,0 +1,128 @@
+================================================================================
+
+[2026-02-08T13:37:35.726Z] [INFO] 
+================================================================================
+[2026-02-08T13:37:35.726Z] [INFO] STARTING TEST: Admin Authentication Setup
+[2026-02-08T13:37:35.727Z] [INFO] ================================================================================
+
+[2026-02-08T13:37:35.807Z] [INFO] ACTION: Navigating to login page
+[2026-02-08T13:37:37.400Z] [INFO] ACTION: Waiting for Clerk form to load
+[2026-02-08T13:37:38.717Z] [INFO] ACTION: Filling login credentials
+[2026-02-08T13:37:38.797Z] [INFO] ACTION: Clicking sign in button
+[2026-02-08T13:37:38.849Z] [INFO] ACTION: Waiting for navigation to complete
+[2026-02-08T13:37:40.252Z] [SUCCESS] VERIFY: Login successful - ✓ PASS (Redirected to http://localhost:3000/admin)
+[2026-02-08T13:37:40.253Z] [INFO] 
+================================================================================
+[2026-02-08T13:37:40.253Z] [INFO] STARTING TEST: Navigate to Admin Hierarchy Page
+[2026-02-08T13:37:40.253Z] [INFO] ================================================================================
+
+[2026-02-08T13:37:40.253Z] [INFO] ACTION: Navigating to hierarchy page - http://localhost:3000/admin/hierarchy
+[2026-02-08T13:37:41.258Z] [INFO] ACTION: Waiting for hierarchy to load
+[2026-02-08T13:37:41.282Z] [SUCCESS] VERIFY: Hierarchy page loaded - ✓ PASS (Page loaded successfully)
+[2026-02-08T13:37:41.283Z] [INFO] 
+================================================================================
+[2026-02-08T13:37:41.283Z] [INFO] STARTING TEST: Test 2: Hierarchy Reset
+[2026-02-08T13:37:41.284Z] [INFO] ================================================================================
+
+[2026-02-08T13:37:41.284Z] [INFO] ACTION: Looking for Reset button
+[2026-02-08T13:37:41.303Z] [INFO] ACTION: No unsaved changes - Reset button not visible
+[2026-02-08T13:37:41.304Z] [SUCCESS] VERIFY: Reset check complete - ✓ PASS (No changes to reset)
+[2026-02-08T13:37:41.304Z] [SUCCESS] 
+================================================================================
+[2026-02-08T13:37:41.305Z] [SUCCESS] TEST PASSED: Test 2: Hierarchy Reset
+[2026-02-08T13:37:41.305Z] [INFO] Duration: 21ms
+[2026-02-08T13:37:41.305Z] [SUCCESS] ================================================================================
+
+[2026-02-08T13:37:41.307Z] [SUCCESS] 
+================================================================================
+[2026-02-08T13:37:41.308Z] [SUCCESS] TEST PASSED: Current test
+[2026-02-08T13:37:41.308Z] [INFO] Duration: 1770557861307ms
+[2026-02-08T13:37:41.308Z] [SUCCESS] ================================================================================
+
+[2026-02-08T13:37:41.309Z] [INFO] ACTION: Closing admin browser context
+[2026-02-08T13:37:41.368Z] [INFO] 
+================================================================================
+[2026-02-08T13:37:41.368Z] [INFO] STARTING TEST: Admin Authentication Setup
+[2026-02-08T13:37:41.368Z] [INFO] ================================================================================
+
+[2026-02-08T13:37:41.422Z] [INFO] ACTION: Navigating to login page
+[2026-02-08T13:37:42.991Z] [INFO] ACTION: Waiting for Clerk form to load
+[2026-02-08T13:37:44.805Z] [INFO] ACTION: Filling login credentials
+[2026-02-08T13:37:44.867Z] [INFO] ACTION: Clicking sign in button
+[2026-02-08T13:37:44.915Z] [INFO] ACTION: Waiting for navigation to complete
+[2026-02-08T13:37:46.366Z] [SUCCESS] VERIFY: Login successful - ✓ PASS (Redirected to http://localhost:3000/admin)
+[2026-02-08T13:37:46.367Z] [INFO] 
+================================================================================
+[2026-02-08T13:37:46.367Z] [INFO] STARTING TEST: Navigate to Admin Hierarchy Page
+[2026-02-08T13:37:46.367Z] [INFO] ================================================================================
+
+[2026-02-08T13:37:46.367Z] [INFO] ACTION: Navigating to hierarchy page - http://localhost:3000/admin/hierarchy
+[2026-02-08T13:37:47.248Z] [INFO] ACTION: Waiting for hierarchy to load
+[2026-02-08T13:37:47.318Z] [SUCCESS] VERIFY: Hierarchy page loaded - ✓ PASS (Page loaded successfully)
+[2026-02-08T13:37:47.319Z] [INFO] 
+================================================================================
+[2026-02-08T13:37:47.319Z] [INFO] STARTING TEST: Test 3: Hierarchy Save
+[2026-02-08T13:37:47.319Z] [INFO] ================================================================================
+
+[2026-02-08T13:37:47.319Z] [INFO] ACTION: Checking Save button visibility
+[2026-02-08T13:37:47.326Z] [INFO] ACTION: No unsaved changes - Save button not visible
+[2026-02-08T13:37:47.326Z] [SUCCESS] VERIFY: Save button check complete - ✓ PASS (No changes to save)
+[2026-02-08T13:37:47.326Z] [INFO] ACTION: Checking for unsaved changes indicator
+[2026-02-08T13:37:47.328Z] [SUCCESS] VERIFY: Unsaved changes indicator - ✓ PASS (Indicator correctly absent)
+[2026-02-08T13:37:47.329Z] [SUCCESS] 
+================================================================================
+[2026-02-08T13:37:47.329Z] [SUCCESS] TEST PASSED: Test 3: Hierarchy Save
+[2026-02-08T13:37:47.329Z] [INFO] Duration: 10ms
+[2026-02-08T13:37:47.329Z] [SUCCESS] ================================================================================
+
+[2026-02-08T13:37:47.330Z] [SUCCESS] 
+================================================================================
+[2026-02-08T13:37:47.330Z] [SUCCESS] TEST PASSED: Current test
+[2026-02-08T13:37:47.330Z] [INFO] Duration: 1770557867330ms
+[2026-02-08T13:37:47.330Z] [SUCCESS] ================================================================================
+
+[2026-02-08T13:37:47.330Z] [INFO] ACTION: Closing admin browser context
+[2026-02-08T13:37:47.375Z] [INFO] 
+================================================================================
+[2026-02-08T13:37:47.375Z] [INFO] STARTING TEST: Admin Authentication Setup
+[2026-02-08T13:37:47.375Z] [INFO] ================================================================================
+
+[2026-02-08T13:37:47.423Z] [INFO] ACTION: Navigating to login page
+[2026-02-08T13:37:48.510Z] [INFO] ACTION: Waiting for Clerk form to load
+[2026-02-08T13:37:49.821Z] [INFO] ACTION: Filling login credentials
+[2026-02-08T13:37:49.883Z] [INFO] ACTION: Clicking sign in button
+[2026-02-08T13:37:49.925Z] [INFO] ACTION: Waiting for navigation to complete
+[2026-02-08T13:37:51.641Z] [SUCCESS] VERIFY: Login successful - ✓ PASS (Redirected to http://localhost:3000/admin)
+[2026-02-08T13:37:51.641Z] [INFO] 
+================================================================================
+[2026-02-08T13:37:51.642Z] [INFO] STARTING TEST: Navigate to Admin Hierarchy Page
+[2026-02-08T13:37:51.642Z] [INFO] ================================================================================
+
+[2026-02-08T13:37:51.642Z] [INFO] ACTION: Navigating to hierarchy page - http://localhost:3000/admin/hierarchy
+[2026-02-08T13:37:52.306Z] [INFO] ACTION: Waiting for hierarchy to load
+[2026-02-08T13:37:52.370Z] [SUCCESS] VERIFY: Hierarchy page loaded - ✓ PASS (Page loaded successfully)
+[2026-02-08T13:37:52.371Z] [INFO] 
+================================================================================
+[2026-02-08T13:37:52.371Z] [INFO] STARTING TEST: Test 4: Hierarchy Validation
+[2026-02-08T13:37:52.371Z] [INFO] ================================================================================
+
+[2026-02-08T13:37:52.371Z] [INFO] ACTION: Validating hierarchy structure
+[2026-02-08T13:37:52.376Z] [SUCCESS] VERIFY: Page title visible - ✓ PASS (Hierarchy Management header present)
+[2026-02-08T13:37:52.378Z] [SUCCESS] VERIFY: Instructional text present - ✓ PASS (Drag instructions visible)
+[2026-02-08T13:37:52.380Z] [SUCCESS] VERIFY: Level columns present - ✓ PASS (Hierarchy levels displayed)
+[2026-02-08T13:37:52.383Z] [INFO] ACTION: Hierarchy content check - 3 empty levels, 0 user cards
+[2026-02-08T13:37:52.383Z] [SUCCESS] VERIFY: Empty state displayed - ✓ PASS (3 levels have no users)
+[2026-02-08T13:37:52.383Z] [SUCCESS] VERIFY: Hierarchy has content - ✓ PASS (Either users or empty states displayed)
+[2026-02-08T13:37:52.383Z] [SUCCESS] 
+================================================================================
+[2026-02-08T13:37:52.383Z] [SUCCESS] TEST PASSED: Test 4: Hierarchy Validation
+[2026-02-08T13:37:52.383Z] [INFO] Duration: 12ms
+[2026-02-08T13:37:52.383Z] [SUCCESS] ================================================================================
+
+[2026-02-08T13:37:52.384Z] [SUCCESS] 
+================================================================================
+[2026-02-08T13:37:52.384Z] [SUCCESS] TEST PASSED: Current test
+[2026-02-08T13:37:52.384Z] [INFO] Duration: 1770557872384ms
+[2026-02-08T13:37:52.384Z] [SUCCESS] ================================================================================
+
+[2026-02-08T13:37:52.384Z] [INFO] ACTION: Closing admin browser context
