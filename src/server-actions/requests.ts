@@ -219,6 +219,8 @@ export async function getMyRequests(filters?: GetRequestsFilters) {
       whereClause.OR = [
         { title: { contains: filters.search, mode: 'insensitive' } },
         { description: { contains: filters.search, mode: 'insensitive' } },
+        { id: { contains: filters.search, mode: 'insensitive' } },
+        { requester: { name: { contains: filters.search, mode: 'insensitive' } } },
       ]
     }
   }
@@ -1025,16 +1027,72 @@ export async function permanentlyDeleteRequests(input: {
     }
 
     // Permanent delete (will cascade to fileAttachments, activities, approvals, notifications)
-    const result = await prisma.requests.deleteMany({
-      where: whereClause,
-    })
+    try {
+      // First, get request info for audit logging
+      const requestInfo = input.mode === 'single' && input.requestId 
+        ? await prisma.requests.findUnique({
+            where: { id: input.requestId },
+            select: { title: true, requesterId: true }
+          })
+        : null
 
-    revalidatePath('/admin/deleted-requests')
+      // Use transaction to ensure bypass flag and delete happen in same session
+      const result = await prisma.$transaction(async (tx) => {
+        // Enable audit bypass for admin hard delete
+        await tx.$executeRaw`SET LOCAL app.bypass_audit = 'true'`
+        
+        // Log the permanent delete action before deleting (this will be deleted too, but we try)
+        if (input.mode === 'single' && input.requestId && requestInfo) {
+          try {
+            await tx.request_activities.create({
+              data: {
+                requestId: input.requestId,
+                userId: adminUserId,
+                action: 'permanently_deleted',
+                comments: `Request permanently deleted by admin. Title: "${requestInfo.title}"`,
+                createdAt: new Date(),
+              },
+            })
+          } catch {
+            // Ignore if logging fails - we're about to delete everything anyway
+          }
+        }
+        
+        const deleteResult = await tx.requests.deleteMany({
+          where: whereClause,
+        })
+        
+        return deleteResult
+      })
 
-    return {
-      success: true,
-      message: `Permanently deleted ${result.count} requests`,
-      count: result.count,
+      // Log admin action separately (outside the transaction that deletes everything)
+      await prisma.request_activities.create({
+        data: {
+          action: 'admin_permanent_delete',
+          comments: `Admin permanently deleted ${result.count} request(s). Mode: ${input.mode}${input.requestId ? `, RequestId: ${input.requestId}` : ''}`,
+          userId: adminUserId,
+          createdAt: new Date(),
+        },
+      })
+
+      revalidatePath('/admin/deleted-requests')
+
+      return {
+        success: true,
+        message: `Permanently deleted ${result.count} requests`,
+        count: result.count,
+      }
+    } catch (deleteError: any) {
+      console.error('[permanentlyDeleteRequests] Delete error:', deleteError)
+      // Check if this is the audit trail protection error (should not happen with bypass)
+      if (deleteError.message?.includes('Cannot modify audit trail') || 
+          deleteError.message?.includes('append-only')) {
+        return {
+          success: false,
+          error: 'Permanent delete blocked by audit trail. Migration may not be applied correctly.',
+        }
+      }
+      throw deleteError
     }
   } catch (error) {
     console.error('Error permanently deleting requests:', error)
@@ -1647,6 +1705,8 @@ export async function getRequestsForEngineering(filters?: GetRequestsForEngineer
       whereClause.OR = [
         { title: { contains: filters.search, mode: 'insensitive' } },
         { description: { contains: filters.search, mode: 'insensitive' } },
+        { id: { contains: filters.search, mode: 'insensitive' } },
+        { requester: { name: { contains: filters.search, mode: 'insensitive' } } },
       ]
     }
   }
