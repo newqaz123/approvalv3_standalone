@@ -82,7 +82,6 @@ export function DashboardTabs({ userId }: DashboardTabsProps) {
     }
   }
 
-  // Refresh function for auto-refresh and manual refresh
   const refreshAllData = useCallback(async () => {
     if (isInteracting) return // Skip if user is actively interacting
 
@@ -104,6 +103,32 @@ export function DashboardTabs({ userId }: DashboardTabsProps) {
       setIsRefreshing(false)
     }
   }, [isInteracting])
+
+  // Function to refresh specific tab data immediately
+  const refreshTabData = useCallback(async (tab: string) => {
+    try {
+      setIsRefreshing(true)
+      switch (tab) {
+        case 'pending':
+          const pending = await getPendingMyApprovals()
+          setPendingData(pending)
+          break
+        case 'my-requests':
+          const myRequests = await getMyCreatedRequests()
+          setMyRequestsData(myRequests)
+          break
+        case 'all':
+          const all = await getAllRequests()
+          setAllData(all)
+          break
+      }
+      setLastUpdated(new Date())
+    } catch (error) {
+      console.error('Tab refresh failed:', error)
+    } finally {
+      setIsRefreshing(false)
+    }
+  }, [])
 
   // Set up auto-refresh interval (30 seconds, paused when interacting)
   useInterval({
@@ -192,16 +217,17 @@ export function DashboardTabs({ userId }: DashboardTabsProps) {
             onFilterChange={(filters) => updateTabState('pending', { filters })}
             onModalOpen={() => setIsInteracting(true)}
             onModalClose={() => {
-              // Resume auto-refresh after 2 seconds
+              setIsInteracting(false)
+              // Clear any existing timeout
               if (interactionTimeoutRef.current) {
                 clearTimeout(interactionTimeoutRef.current)
               }
-              setIsInteracting(true)
+              // Resume auto-refresh immediately
               interactionTimeoutRef.current = setTimeout(() => {
                 setIsInteracting(false)
-                refreshAllData() // Refresh immediately after resume
-              }, 2000)
+              }, 5000)
             }}
+            onActionComplete={() => refreshTabData('pending')}
           />
         )}
       </TabsContent>
@@ -220,15 +246,17 @@ export function DashboardTabs({ userId }: DashboardTabsProps) {
             onFilterChange={(filters) => updateTabState('my-requests', { filters })}
             onModalOpen={() => setIsInteracting(true)}
             onModalClose={() => {
+              setIsInteracting(false)
+              // Clear any existing timeout
               if (interactionTimeoutRef.current) {
                 clearTimeout(interactionTimeoutRef.current)
               }
-              setIsInteracting(true)
+              // Resume auto-refresh immediately
               interactionTimeoutRef.current = setTimeout(() => {
                 setIsInteracting(false)
-                refreshAllData()
-              }, 2000)
+              }, 5000)
             }}
+            onActionComplete={() => refreshTabData('my-requests')}
           />
         )}
       </TabsContent>
@@ -247,15 +275,17 @@ export function DashboardTabs({ userId }: DashboardTabsProps) {
             onFilterChange={(filters) => updateTabState('all', { filters })}
             onModalOpen={() => setIsInteracting(true)}
             onModalClose={() => {
+              setIsInteracting(false)
+              // Clear any existing timeout
               if (interactionTimeoutRef.current) {
                 clearTimeout(interactionTimeoutRef.current)
               }
-              setIsInteracting(true)
+              // Resume auto-refresh immediately
               interactionTimeoutRef.current = setTimeout(() => {
                 setIsInteracting(false)
-                refreshAllData()
-              }, 2000)
+              }, 5000)
             }}
+            onActionComplete={() => refreshTabData('all')}
           />
         )}
       </TabsContent>

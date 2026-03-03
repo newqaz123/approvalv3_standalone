@@ -40,6 +40,7 @@ interface DashboardTableProps {
   onFilterChange?: (filters: DashboardFilters) => void
   onModalOpen?: () => void
   onModalClose?: () => void
+  onActionComplete?: () => void
 }
 
 export function DashboardTable({
@@ -50,6 +51,7 @@ export function DashboardTable({
   onFilterChange,
   onModalOpen,
   onModalClose,
+  onActionComplete,
 }: DashboardTableProps) {
   const [data, setData] = useState<RequestListRow[]>(initialData)
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null)
@@ -75,6 +77,10 @@ export function DashboardTable({
   }, [onModalClose])
 
   const handleActionComplete = useCallback(async () => {
+    // Call the parent's onActionComplete callback first
+    onActionComplete?.()
+    
+    // Then refresh the table data
     if (dataFetchingFunction) {
       try {
         const freshData = await dataFetchingFunction()
@@ -83,7 +89,7 @@ export function DashboardTable({
         console.error('Failed to refresh after action:', error)
       }
     }
-  }, [dataFetchingFunction])
+  }, [dataFetchingFunction, onActionComplete])
 
   const [pagination, setPagination] = useState<PaginationState>({
     pageIndex: 0,
@@ -164,6 +170,7 @@ export function DashboardTable({
       cell: ({ row }) => (
         <div className="flex justify-center">
           <ApprovalStatusBadge
+            key={`approvals-${row.original.id}-${row.original.approvals?.map(a => a.status).join('-')}`}
             approvals={row.original.approvals || []}
             requestStatus={row.original.status}
             size="sm"

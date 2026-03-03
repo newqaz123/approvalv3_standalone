@@ -92,6 +92,7 @@ export function RequestTable({ initialData, onDataRefresh }: RequestTableProps) 
       cell: ({ row }) => (
         <div className="flex justify-center">
           <ApprovalStatusBadge
+            key={`approvals-${row.original.id}-${row.original.approvals?.map(a => a.status).join('-')}`}
             approvals={row.original.approvals || []}
             requestStatus={row.original.status}
             size="sm"

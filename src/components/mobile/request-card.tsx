@@ -78,6 +78,7 @@ export function RequestCard({
         {/* Approval status badge */}
         {request.approvals && request.approvals.length > 0 && (
           <ApprovalStatusBadge
+            key={`approvals-${request.id}-${request.approvals?.map(a => a.status).join('-')}`}
             approvals={request.approvals}
             requestStatus={request.status}
             size="sm"
