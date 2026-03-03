@@ -1,7 +1,7 @@
 'use server'
 
 import { cache } from 'react'
-import { auth } from '@clerk/nextjs/server'
+import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
 
 /**
@@ -14,14 +14,14 @@ import prisma from '@/lib/prisma'
  * @returns User with department, or null if not authenticated
  */
 export const getCurrentUser = cache(async () => {
-  const { userId } = await auth()
+  const session = await auth()
 
-  if (!userId) {
+  if (!session?.user?.id) {
     return null
   }
 
   return await prisma.user.findUnique({
-    where: { id: userId },
+    where: { id: session.user.id },
     include: { department: true }
   })
 })

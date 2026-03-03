@@ -1,10 +1,11 @@
-import { auth } from '@clerk/nextjs/server'
+import { auth } from '@/lib/auth-config'
 import { redirect } from 'next/navigation'
 import { AnalyticsPage } from '@/components/analytics/analytics-page'
 import { getAnalyticsData, getAnalyticsFilters } from '@/server-actions/analytics'
 
 export default async function AnalyticsDashboard() {
-  const { userId } = await auth()
+  const session = await auth()
+  const userId = session?.user?.id
 
   if (!userId) {
     redirect('/sign-in')

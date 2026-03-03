@@ -25,7 +25,7 @@ export interface UpdateDepartmentInput {
 export async function getDepartments() {
   await requireAdmin()
 
-  const departments = await prisma.department.findMany({
+  const departments = await prisma.departments.findMany({
     include: {
       _count: {
         select: { users: { where: { isActive: true } } },
@@ -39,9 +39,10 @@ export async function getDepartments() {
     },
   })
 
-  // Include external approvers in user count
+  // Include external approvers in user count and levelNames
   return departments.map(dept => ({
     ...dept,
+    levelNames: dept.levelNames as Record<string, string> | null,
     _count: {
       users: dept._count.users + dept.departmentApprovers.length,
     },
@@ -54,7 +55,7 @@ export async function getDepartments() {
 export async function getDepartment(id: string) {
   await requireAdmin()
 
-  const department = await prisma.department.findUnique({
+  const department = await prisma.departments.findUnique({
     where: { id },
     include: {
       users: {
@@ -73,7 +74,7 @@ export async function createDepartment(input: CreateDepartmentInput) {
   await requireAdmin()
 
   // Check if department ID already exists
-  const existingId = await prisma.department.findUnique({
+  const existingId = await prisma.departments.findUnique({
     where: { id: input.id },
   })
 
@@ -82,7 +83,7 @@ export async function createDepartment(input: CreateDepartmentInput) {
   }
 
   // Check if department name already exists (case-insensitive)
-  const existingName = await prisma.department.findFirst({
+  const existingName = await prisma.departments.findFirst({
     where: {
       name: {
         equals: input.name,
@@ -95,7 +96,7 @@ export async function createDepartment(input: CreateDepartmentInput) {
     throw new Error('Department with this name already exists')
   }
 
-  const department = await prisma.department.create({
+  const department = await prisma.departments.create({
     data: {
       id: input.id,
       name: input.name,
@@ -115,7 +116,7 @@ export async function updateDepartment(input: UpdateDepartmentInput) {
   await requireAdmin()
 
   // Get existing department
-  const existingDepartment = await prisma.department.findUnique({
+  const existingDepartment = await prisma.departments.findUnique({
     where: { id: input.id },
   })
 
@@ -125,7 +126,7 @@ export async function updateDepartment(input: UpdateDepartmentInput) {
 
   // Check name uniqueness (case-insensitive)
   if (input.name && input.name.toLowerCase() !== existingDepartment.name.toLowerCase()) {
-    const conflictingDepartment = await prisma.department.findFirst({
+    const conflictingDepartment = await prisma.departments.findFirst({
       where: {
         name: {
           equals: input.name,
@@ -142,7 +143,7 @@ export async function updateDepartment(input: UpdateDepartmentInput) {
     }
   }
 
-  const department = await prisma.department.update({
+  const department = await prisma.departments.update({
     where: { id: input.id },
     data: {
       name: input.name,
@@ -179,7 +180,7 @@ export async function seedInitialDepartments() {
   ]
 
   for (const dept of departments) {
-    await prisma.department.upsert({
+    await prisma.departments.upsert({
       where: { id: dept.id },
       update: {},
       create: dept,
@@ -204,7 +205,7 @@ export async function deleteDepartment(id: string) {
     throw new Error(`Cannot delete department with ${userCount} assigned users`)
   }
 
-  await prisma.department.delete({
+  await prisma.departments.delete({
     where: { id },
   })
 

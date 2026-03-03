@@ -1,33 +1,33 @@
 'use client'
 
-import { UserButton, useUser } from '@clerk/nextjs'
+import { useSession, signOut } from 'next-auth/react'
 import Link from 'next/link'
-import { FileText, Settings, Bell, Wrench, BarChart3 } from 'lucide-react'
+import { FileText, Settings, Bell, Wrench, BarChart3, LogOut, Lock } from 'lucide-react'
 import { usePathname } from 'next/navigation'
 import { NotificationBell } from '@/components/notifications/notification-bell'
-import { useEffect, useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 
 export function Navbar() {
-  const { user } = useUser()
+  const { data: session } = useSession()
+  const user = session?.user
   const pathname = usePathname()
-  const [userRole, setUserRole] = useState<string | null>(null)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
 
-  // Fetch role from Prisma (source of truth) to avoid Clerk metadata sync issues
-  useEffect(() => {
-    if (user?.id) {
-      fetch('/api/user/role')
-        .then((res) => res.json())
-        .then((data) => {
-          if (data.role) {
-            setUserRole(data.role)
-          }
-        })
-        .catch((err) => console.error('Error fetching user role:', err))
-    }
-  }, [user?.id])
-
+  const userRole = user?.role || null
   const isAdmin = userRole === 'admin'
   const isEngineering = userRole === 'engineering'
+
+  // Close menu when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   return (
     <nav className="border-b bg-white">
@@ -112,21 +112,47 @@ export function Navbar() {
             {user && <NotificationBell userId={user.id} />}
 
             <div className="text-right">
-              <p className="text-sm font-medium text-gray-900">{user?.fullName || user?.firstName || 'User'}</p>
+              <p className="text-sm font-medium text-gray-900">{user?.name || 'User'}</p>
               <p className="text-xs text-gray-500">
-                {userRole ? userRole.charAt(0).toUpperCase() + userRole.slice(1) : 'User'} • {user?.primaryEmailAddress?.emailAddress}
+                {userRole ? userRole.charAt(0).toUpperCase() + userRole.slice(1).replace('_', ' ') : 'User'} • {user?.email}
               </p>
             </div>
 
-            {/* Clerk UserButton with logout */}
-            <UserButton
-              afterSignOutUrl="/sign-in"
-              appearance={{
-                elements: {
-                  avatarBox: 'h-10 w-10',
-                },
-              }}
-            />
+            {/* User avatar with dropdown */}
+            <div className="relative" ref={menuRef}>
+              <button
+                onClick={() => setMenuOpen(!menuOpen)}
+                className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-300 transition-colors"
+                title="User menu"
+              >
+                {user?.name?.charAt(0)?.toUpperCase() || '?'}
+              </button>
+
+              {menuOpen && (
+                <div className="absolute right-0 mt-2 w-48 rounded-md bg-white shadow-lg ring-1 ring-black ring-opacity-5 z-50">
+                  <div className="py-1">
+                    <Link
+                      href="/change-password"
+                      onClick={() => setMenuOpen(false)}
+                      className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    >
+                      <Lock className="h-4 w-4" />
+                      Change Password
+                    </Link>
+                    <button
+                      onClick={() => {
+                        setMenuOpen(false)
+                        signOut({ callbackUrl: '/sign-in' })
+                      }}
+                      className="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left"
+                    >
+                      <LogOut className="h-4 w-4" />
+                      Sign Out
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>

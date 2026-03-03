@@ -11,7 +11,7 @@ export async function getUserAdditionalDepartments(userId: string) {
   const adminId = await requireAdmin()
   if (!adminId) throw new Error('Admin access required')
 
-  const assignments = await prisma.departmentApprover.findMany({
+  const assignments = await prisma.department_approvers.findMany({
     where: { approverId: userId },
     include: {
       department: {
@@ -54,7 +54,7 @@ export async function addUserToDepartment(
   if (!user) throw new Error('User not found')
 
   // Fetch target department to get its type
-  const targetDept = await prisma.department.findUnique({
+  const targetDept = await prisma.departments.findUnique({
     where: { id: departmentId },
     select: { type: true },
   })
@@ -77,7 +77,7 @@ export async function addUserToDepartment(
   }
 
   // Validation: Check for existing assignment to same department (any level)
-  const existing = await prisma.departmentApprover.findFirst({
+  const existing = await prisma.department_approvers.findFirst({
     where: { approverId: userId, departmentId },
   })
 
@@ -86,7 +86,7 @@ export async function addUserToDepartment(
   }
 
   // Create DepartmentApprover record
-  const created = await prisma.departmentApprover.create({
+  const created = await prisma.department_approvers.create({
     data: {
       departmentId,
       approverId: userId,
@@ -110,7 +110,7 @@ export async function removeUserFromDepartment(
   const adminId = await requireAdmin()
   if (!adminId) throw new Error('Admin access required')
 
-  await prisma.departmentApprover.deleteMany({
+  await prisma.department_approvers.deleteMany({
     where: { approverId: userId, departmentId },
   })
 

@@ -1,5 +1,5 @@
 import { Suspense } from 'react'
-import { auth } from '@clerk/nextjs/server'
+import { auth } from '@/lib/auth-config'
 import { redirect } from 'next/navigation'
 import prisma from '@/lib/prisma'
 import { getHierarchyData, getPendingApprovalsCount, getHierarchyChangeHistory } from '@/server-actions/hierarchy'
@@ -30,8 +30,9 @@ async function HierarchyContent({ departmentId }: { departmentId: string }) {
 }
 
 export default async function HierarchyPage({ searchParams }: HierarchyPageProps) {
-  const { userId } = await auth()
-  if (!userId) redirect('/sign-in')
+  const session = await auth()
+  if (!session?.user?.id) redirect('/sign-in')
+  const userId = session.user.id
 
   // Verify admin access
   const user = await prisma.user.findUnique({
@@ -41,7 +42,7 @@ export default async function HierarchyPage({ searchParams }: HierarchyPageProps
   if (!user || user.role !== 'admin') redirect('/dashboard')
 
   // Fetch all departments for the selector
-  const departments = await prisma.department.findMany({
+  const departments = await prisma.departments.findMany({
     orderBy: { name: 'asc' },
     select: { id: true, name: true, type: true },
   })

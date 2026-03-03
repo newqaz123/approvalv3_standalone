@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server'
+import { auth } from '@/lib/auth-config'
 import { redirect, notFound } from 'next/navigation'
 import { format } from 'date-fns'
 import { ArrowLeft, Download, Calendar, User, Building2, FileText, History, CheckCircle2, Wrench } from 'lucide-react'
@@ -15,16 +15,17 @@ interface RequestDetailPageProps {
 }
 
 export default async function RequestDetailPage({ params }: RequestDetailPageProps) {
-  const { userId } = await auth()
+  const session = await auth()
   const { requestId } = await params
 
-  if (!userId) {
+  if (!session?.user?.id) {
     redirect('/sign-in')
   }
+  const userId = session.user.id
 
   // Single comprehensive query with includes - optimal for fetching all related data
   // Prisma handles joins efficiently, avoiding N+1 query problems
-  const request = await prisma.request.findFirst({
+  const request = await prisma.requests.findFirst({
     where: {
       id: requestId,
       isDeleted: false,

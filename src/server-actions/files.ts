@@ -1,6 +1,6 @@
 'use server'
 
-import { auth } from '@clerk/nextjs/server'
+import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
 import { getFileUrl } from '@/lib/files'
 import { z } from 'zod'
@@ -56,7 +56,7 @@ const prepareFileUploadSchema = z.object({
  * Validates file type and size before allowing upload
  */
 export async function prepareFileUpload(input: PrepareFileUploadInput) {
-  const { userId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
 
   if (!userId) {
     throw new Error('Unauthorized')
@@ -82,7 +82,7 @@ export async function prepareFileUpload(input: PrepareFileUploadInput) {
 
   // Verify request exists and user owns it or is an engineering user
   // For engineering solutions: any engineering user can upload files to SentToEngineer requests
-  const request = await prisma.request.findUnique({
+  const request = await prisma.requests.findUnique({
     where: { id: input.requestId },
     select: {
       id: true,
@@ -153,14 +153,14 @@ export async function prepareFileUpload(input: PrepareFileUploadInput) {
  * Call this AFTER successful file upload to /api/upload
  */
 export async function confirmFileUpload(input: ConfirmFileUploadInput) {
-  const { userId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
 
   if (!userId) {
     throw new Error('Unauthorized')
   }
 
   // Save file metadata to database
-  const fileAttachment = await prisma.fileAttachment.create({
+  const fileAttachment = await prisma.file_attachments.create({
     data: {
       id: input.fileId,
       requestId: input.requestId,
@@ -174,7 +174,7 @@ export async function confirmFileUpload(input: ConfirmFileUploadInput) {
   })
 
   // Log file attachment in audit trail
-  await prisma.requestActivity.create({
+  await prisma.request_activities.create({
     data: {
       requestId: input.requestId,
       action: 'file_attached',
@@ -196,14 +196,14 @@ export async function confirmFileUpload(input: ConfirmFileUploadInput) {
  * Sets solutionId instead of requestId (prevents duplication)
  */
 export async function confirmSolutionFileUpload(input: ConfirmSolutionFileUploadInput) {
-  const { userId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
 
   if (!userId) {
     throw new Error('Unauthorized')
   }
 
   // Verify solution exists
-  const solution = await prisma.solution.findUnique({
+  const solution = await prisma.solutions.findUnique({
     where: { id: input.solutionId },
     select: { requestId: true },
   })
@@ -213,7 +213,7 @@ export async function confirmSolutionFileUpload(input: ConfirmSolutionFileUpload
   }
 
   // Save file metadata to database with solutionId (NOT requestId)
-  const fileAttachment = await prisma.fileAttachment.create({
+  const fileAttachment = await prisma.file_attachments.create({
     data: {
       id: input.fileId,
       solutionId: input.solutionId,  // Set solutionId, not requestId
@@ -228,7 +228,7 @@ export async function confirmSolutionFileUpload(input: ConfirmSolutionFileUpload
   })
 
   // Log file attachment in audit trail
-  await prisma.requestActivity.create({
+  await prisma.request_activities.create({
     data: {
       requestId: solution.requestId,
       action: 'file_attached',
@@ -250,14 +250,14 @@ export async function confirmSolutionFileUpload(input: ConfirmSolutionFileUpload
  * Deletes both the database record and the physical file from disk
  */
 export async function deleteFileAttachment({ fileId }: { fileId: string }) {
-  const { userId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
 
   if (!userId) {
     throw new Error('Unauthorized')
   }
 
   // Fetch the file attachment with request info
-  const fileAttachment = await prisma.fileAttachment.findUnique({
+  const fileAttachment = await prisma.file_attachments.findUnique({
     where: { id: fileId },
     include: {
       request: {
@@ -287,7 +287,7 @@ export async function deleteFileAttachment({ fileId }: { fileId: string }) {
     throw new Error('Unable to determine request for this file')
   }
 
-  const request = fileAttachment.request || await prisma.request.findUnique({
+  const request = fileAttachment.request || await prisma.requests.findUnique({
     where: { id: requestId },
     select: {
       id: true,
@@ -317,7 +317,7 @@ export async function deleteFileAttachment({ fileId }: { fileId: string }) {
   }
 
   // Delete the database record
-  await prisma.fileAttachment.delete({
+  await prisma.file_attachments.delete({
     where: { id: fileId },
   })
 
@@ -333,7 +333,7 @@ export async function deleteFileAttachment({ fileId }: { fileId: string }) {
   }
 
   // Log activity
-  await prisma.requestActivity.create({
+  await prisma.request_activities.create({
     data: {
       requestId: request.id,
       action: 'file_removed',

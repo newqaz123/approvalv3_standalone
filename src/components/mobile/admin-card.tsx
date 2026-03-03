@@ -160,7 +160,7 @@ export function AdminCard({
     return (
       <button
         onClick={onTap}
-        className={`w-full text-left bg-white border border-gray-200 rounded-lg p-4 shadow-sm hover:shadow-md active:bg-gray-50 transition-all min-h-[64px] ${className}`}
+        className={`w-full text-left bg-white border border-gray-200 rounded-lg p-4 shadow-sm hover:shadow-md active:bg-gray-50 transition-all min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 dark:bg-gray-900 dark:border-gray-700 dark:active:bg-gray-800 ${className}`}
       >
         {cardContent}
       </button>
@@ -168,7 +168,7 @@ export function AdminCard({
   }
 
   return (
-    <div className={`bg-white border border-gray-200 rounded-lg p-4 shadow-sm ${className}`}>
+    <div className={`bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg p-4 shadow-sm ${className}`}>
       {cardContent}
     </div>
   )

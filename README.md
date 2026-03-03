@@ -1,120 +1,183 @@
-# Approval System
+# Approval System (Standalone)
 
-An internal document approval workflow system for tracking requests with full visibility and accountability. Replace email-based tracking with centralized status management, approval chains, and audit trails.
+A fully self-contained internal document approval workflow system. No external services required — just clone, configure, and run. Replaces email-based tracking with centralized status management, approval chains, and audit trails.
 
 ## Quick Start
 
-```bash
-# 1. Clone repository
-git clone https://github.com/your-org/approval-app-v2.git
-cd approval-app-v2
-
-# 2. Run setup script
-chmod +x scripts/setup.sh
-./scripts/setup.sh
-
-# 3. Configure environment
-nano .env.production
-
-# 4. Deploy
-./scripts/deploy.sh
-```
-
-Access the application at: `http://localhost:3000`
-
-## Documentation
-
-- [Deployment Guide](docs/DEPLOY.md) - Complete Docker deployment instructions
-- [Admin Features](docs/ADMIN-DELETE-FEATURE.md) - Administrative controls and data management
-
-## Features
-
-- **User Management:** Role-based access (Admin, Engineering, General Department)
-- **Department Management:** Create and manage approval hierarchies per department
-- **Request Workflow:** Create requests with file attachments and route through approval chains
-- **Level-Based Approvals:** Configurable approval hierarchies with any-one-per-level logic
-- **Engineering Solutions:** Submit solutions with custom approval chains
-- **Dashboard Views:** My Requests, Pending Approval, All Requests
-- **Search & Filter:** Filter by department, status, and date range
-- **Activity Timeline:** Complete audit trail of all request actions
-- **Drag-and-Drop Builder:** Visual hierarchy configuration
-
-## Tech Stack
-
-- **Frontend:** Next.js 15 with TypeScript
-- **Backend:** Next.js Server Actions with Prisma ORM
-- **Database:** PostgreSQL 15
-- **Authentication:** Clerk
-- **UI:** shadcn/ui components with Tailwind CSS
-- **Deployment:** Docker Compose with multi-stage Dockerfile
-
-## Development
+### Development
 
 ```bash
-# Install dependencies
+# 1. Clone and install
+git clone <your-repo-url>
+cd ApprovalAppV3_Standalone
 npm install
 
-# Copy environment template
+# 2. Configure environment
 cp .env.example .env.local
+# Edit .env.local — set DATABASE_URL and NEXTAUTH_SECRET
 
-# Start development server
+# 3. Set up database
+npx prisma migrate deploy
+npx prisma db seed
+
+# 4. Start dev server
 npm run dev
 ```
 
-## Deployment
+Open `http://localhost:3000` and sign in:
+- **Email:** `admin@example.com`
+- **Password:** `changeme`
 
-For production deployment on Hostinger VPS or VMware/internal VMs, see the [Deployment Guide](docs/DEPLOY.md).
-
-**Quick deployment:**
+### Docker (Production)
 
 ```bash
-# One-command deployment
-./scripts/deploy.sh
+# 1. Configure
+cp .env.example .env.production
+# Edit .env.production with your database credentials and secrets
 
-# Health check
-./scripts/health-check.sh
+# 2. Deploy
+docker compose up -d
 
-# Backup
-./scripts/backup.sh
+# 3. Verify
+curl http://localhost:3000/api/health
 ```
 
-## Scripts
+## Features
 
-| Script | Purpose |
-|---------|---------|
-| `scripts/setup.sh` | First-time environment setup |
-| `scripts/deploy.sh` | Update and deploy application |
-| `scripts/backup.sh` | Backup database and uploads |
-| `scripts/restore.sh` | Restore from backup |
-| `scripts/health-check.sh` | Verify service health |
+- **Request Workflow** — Create requests with file attachments, route through configurable approval chains
+- **Level-Based Approvals** — Any-one-per-level logic with sequential routing through configured levels
+- **Engineering Solutions** — Submit solutions with cost estimates and custom approval chains
+- **Role-Based Access** — Admin, Engineering, and General Department roles
+- **Drag-and-Drop Hierarchy Builder** — Visual approval chain configuration
+- **Dashboard Views** — My Requests, Pending Approval, All Requests with search and filters
+- **Activity Timeline** — Immutable audit trail with day-grouped chronological events
+- **PDF Reports** — Generate A4 approval reports with full history
+- **Analytics Dashboard** — Pipeline charts, approval time metrics, department breakdowns
+- **Request Templates** — Predefined templates for common submissions
+- **Mobile-Responsive** — Touch-friendly UI across all screen sizes
+- **Email Notifications** — Optional SMTP-based notifications (works without configuration)
 
-## Architecture
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| **Framework** | Next.js 15 (App Router) |
+| **Language** | TypeScript |
+| **Authentication** | NextAuth.js v5 (Credentials + JWT) |
+| **Database** | PostgreSQL 15 |
+| **ORM** | Prisma |
+| **UI** | shadcn/ui + Tailwind CSS + Radix UI |
+| **Data Tables** | TanStack Table |
+| **Charts** | Recharts |
+| **PDF** | Puppeteer (headless Chromium) |
+| **Email** | Nodemailer (optional SMTP) |
+| **Deployment** | Docker Compose |
+
+**Zero external service dependencies.** Authentication, database, file storage, and email are all self-hosted.
+
+## Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `DATABASE_URL` | Yes | PostgreSQL connection string |
+| `NEXTAUTH_URL` | Yes | App URL (e.g., `http://localhost:3000`) |
+| `NEXTAUTH_SECRET` | Yes | JWT secret — generate with `openssl rand -base64 32` |
+| `UPLOAD_DIR` | No | File upload directory (default: `public/uploads`) |
+| `CRON_SECRET` | No | Secret for cron job endpoints |
+| `SMTP_HOST` | No | SMTP server for email notifications |
+| `SMTP_PORT` | No | SMTP port (default: `587`) |
+| `SMTP_USER` | No | SMTP username |
+| `SMTP_PASS` | No | SMTP password |
+| `SMTP_FROM` | No | Sender email address |
+
+## User Roles
+
+| Role | Capabilities |
+|------|-------------|
+| **Admin** | System configuration, user/department management, hierarchy builder, audit export |
+| **General Department** | Create requests, approve within hierarchy, view dashboards |
+| **Engineering** | Submit solutions with cost estimates, approve within hierarchy |
+
+All users can view dashboards, search/filter requests, and track status.
+
+## Approval Workflow
 
 ```
-┌─────────────────────────────────────────────────┐
-│          Docker Compose Orchestration        │
-└─────────────────────────────────────────────────┘
-                     │
-        ┌────────────┴────────────┐
-        │                         │
-   ┌────▼────┐         ┌─────▼──────┐
-   │   App    │         │  Database   │
-   │ (Next.js)│◄──────►│ (PostgreSQL) │
-   │ Port 3000│         │   Port 5432  │
-   └───────────┘         └─────────────┘
-        │
-   Persistent Volumes:
-   - uploads_data (file attachments)
-   - db_data (database)
+Request Created → Approval Chain (Level 1 → 2 → 3)
+    → Sent to Engineering → Solution Submitted
+    → Solution Approval Chain → Final Approval
+    → Sent Back to Requester → Completed
+```
+
+- Approval hierarchies are configurable per department via drag-and-drop UI
+- Any one approver per level can approve (any-one-per-level logic)
+- Engineering solutions support custom approval chains
+- Requesters and engineers can cancel at appropriate stages
+
+## Project Structure
+
+```
+├── prisma/
+│   ├── schema.prisma          # Database schema
+│   ├── seed.ts                # Default admin + departments
+│   └── migrations/            # Database migrations
+├── src/
+│   ├── app/                   # Next.js App Router pages
+│   │   ├── (admin)/           # Admin pages
+│   │   ├── (auth)/            # Sign-in/sign-up
+│   │   ├── (dashboard)/       # Dashboard, requests, engineering
+│   │   └── api/               # API routes (auth, upload, health)
+│   ├── components/            # React components (shadcn/ui based)
+│   ├── lib/                   # Auth config, Prisma client, utilities
+│   ├── server-actions/        # Server-side business logic
+│   └── middleware.ts          # Route protection
+├── docker-compose.yml         # Production deployment
+├── Dockerfile                 # Multi-stage build
+└── .env.example               # Environment template
+```
+
+## Development Scripts
+
+```bash
+npm run dev              # Start development server
+npm run build            # Production build
+npm run start            # Start production server
+npm run lint             # Run ESLint
+npx prisma studio        # Visual database browser
+npx prisma migrate dev   # Create new migration
+npx prisma db seed       # Seed database
+```
+
+## Docker Deployment
+
+The Docker setup includes:
+- **PostgreSQL 15** with persistent volume
+- **Next.js** standalone build (~110MB image)
+- **Auto-migrations** via migration service
+- **Health checks** for app and database
+- **Log rotation** and resource limits
+
+```bash
+docker compose up -d          # Start all services
+docker compose logs -f app    # View app logs
+docker compose down           # Stop services
+docker compose down -v        # Stop + remove volumes (⚠️ deletes data)
 ```
 
 ## Security
 
-- Authentication via Clerk with role-based access control
-- JWT session tokens with refresh rotation
-- Immutable audit trail via PostgreSQL triggers
-- Containerized deployment with non-root user
-- Environment variable isolation
+- Password hashing with bcrypt (12 salt rounds)
+- JWT session tokens (7-day expiry)
+- Role-based middleware route protection
+- Database-backed admin verification (defense-in-depth)
+- Immutable audit trail
+- Non-root Docker user
+- CSRF protection via NextAuth.js
+
+## Documentation
+
+- [Deployment Guide](docs/DEPLOY.md) — Docker deployment instructions
+- [Admin Features](docs/ADMIN-DELETE-FEATURE.md) — Administrative controls
 
 ## License
 
@@ -122,5 +185,5 @@ Internal use only.
 
 ---
 
-**Version:** 0.1.0
-**Last Updated:** 2026-02-14
+**Version:** 1.0.0-standalone
+**Last Updated:** 2026-03-02

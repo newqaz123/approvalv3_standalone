@@ -3,7 +3,8 @@ import { getAllRequestsForRetention } from '@/server-actions/requests'
 import { RetentionControls } from '@/components/admin/retention-controls'
 import { Suspense } from 'react'
 import { Badge } from '@/components/ui/badge'
-import { Archive } from 'lucide-react'
+import { Archive, FileText, Calendar, Building, Hash } from 'lucide-react'
+import { AdminCard, AdminCardsEmptyState } from '@/components/mobile/admin-card'
 
 export default async function RetentionPage() {
   await requireAdmin()
@@ -40,18 +41,60 @@ async function RetentionList() {
     <div className="space-y-4">
       {/* Summary stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <p className="text-sm text-blue-600 font-medium">Active Requests</p>
-          <p className="text-2xl font-bold text-blue-700">{activeCount}</p>
+        <div className="bg-card border rounded-lg p-4">
+          <p className="text-sm text-muted-foreground font-medium">Active Requests</p>
+          <p className="text-2xl font-bold text-primary">{activeCount}</p>
         </div>
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-          <p className="text-sm text-amber-600 font-medium">Archived Requests</p>
-          <p className="text-2xl font-bold text-amber-700">{archivedCount}</p>
+        <div className="bg-card border rounded-lg p-4">
+          <p className="text-sm text-muted-foreground font-medium">Archived Requests</p>
+          <p className="text-2xl font-bold text-amber-600 dark:text-amber-400">{archivedCount}</p>
         </div>
       </div>
 
-      {/* Requests table */}
-      <div className="border rounded-lg overflow-hidden">
+      {/* Mobile card view */}
+      <div className="md:hidden space-y-3">
+        {requests.length > 0 ? (
+          requests.map((request) => (
+            <AdminCard
+              key={request.id}
+              title={request.title}
+              status={{
+                label: request.isArchived ? 'Archived' : 'Active',
+                variant: request.isArchived ? 'secondary' : 'default',
+              }}
+              details={[
+                {
+                  label: 'ID',
+                  value: request.id.slice(0, 8) + '...',
+                  icon: <Hash className="h-3.5 w-3.5" />,
+                },
+                {
+                  label: 'Status',
+                  value: request.status,
+                  icon: <FileText className="h-3.5 w-3.5" />,
+                },
+                {
+                  label: 'Updated',
+                  value: new Date(request.updatedAt).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }),
+                  icon: <Calendar className="h-3.5 w-3.5" />,
+                },
+              ]}
+              badges={[]}
+              actions={[
+                {
+                  label: request.isArchived ? 'Unarchive' : 'Archive',
+                  onClick: () => {}, // Handled by RetentionControls
+                },
+              ]}
+            />
+          ))
+        ) : (
+          <AdminCardsEmptyState message="No requests found" />
+        )}
+      </div>
+
+      {/* Desktop table view */}
+      <div className="hidden md:block border rounded-lg overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-muted">
             <tr>
@@ -94,7 +137,7 @@ async function RetentionList() {
                     {request.department?.name ?? '—'}
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">
-                    {new Date(request.updatedAt).toLocaleDateString()}
+                    {new Date(request.updatedAt).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })}
                   </td>
                   <td className="px-4 py-3">
                     <RetentionControls

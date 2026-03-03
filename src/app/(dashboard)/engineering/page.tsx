@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server'
+import { auth } from '@/lib/auth-config'
 import { redirect } from 'next/navigation'
 import prisma from '@/lib/prisma'
 import { getRequestsNeedingEngineeringAction, getEngineeringUsers } from '@/server-actions/requests'
@@ -11,7 +11,8 @@ export const metadata = {
 }
 
 export default async function EngineeringDashboardPage() {
-  const { userId } = await auth()
+  const session = await auth()
+  const userId = session?.user?.id
 
   if (!userId) {
     redirect('/sign-in')
@@ -33,7 +34,7 @@ export default async function EngineeringDashboardPage() {
   }
 
   // Get engineering department for stats
-  const engineeringDept = await prisma.department.findFirst({
+  const engineeringDept = await prisma.departments.findFirst({
     where: { type: 'ENGINEERING' },
     select: { id: true },
   })
@@ -45,7 +46,7 @@ export default async function EngineeringDashboardPage() {
   const engineeringUsers = await getEngineeringUsers()
 
   // Fetch all engineering requests for "All Engineering Requests" tab
-  const allEngineeringRequestsRaw = await prisma.request.findMany({
+  const allEngineeringRequestsRaw = await prisma.requests.findMany({
     where: {
       status: {
         in: ['SentToEngineer', 'DesignCostEstimationApproval', 'SendBackToRequester'],
@@ -88,7 +89,7 @@ export default async function EngineeringDashboardPage() {
   }))
 
   // Calculate quick stats
-  const totalInPipeline = await prisma.request.count({
+  const totalInPipeline = await prisma.requests.count({
     where: {
       status: {
         in: ['SentToEngineer', 'DesignCostEstimationApproval'],
@@ -97,14 +98,14 @@ export default async function EngineeringDashboardPage() {
     },
   })
 
-  const awaitingSolution = await prisma.request.count({
+  const awaitingSolution = await prisma.requests.count({
     where: {
       status: 'SentToEngineer',
       isDeleted: false,
     },
   })
 
-  const inApprovalProcess = await prisma.request.count({
+  const inApprovalProcess = await prisma.requests.count({
     where: {
       status: 'DesignCostEstimationApproval',
       isDeleted: false,

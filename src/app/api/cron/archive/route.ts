@@ -40,7 +40,7 @@ export async function GET(request: NextRequest) {
     // - Last updated more than ARCHIVE_AFTER_DAYS ago
     // - Not already archived
     // - Not deleted
-    const result = await prisma.request.updateMany({
+    const result = await prisma.requests.updateMany({
       where: {
         status: { in: ['Completed', 'Cancelled'] },
         updatedAt: { lt: cutoffDate },

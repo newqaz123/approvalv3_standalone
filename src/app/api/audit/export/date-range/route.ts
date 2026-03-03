@@ -89,7 +89,7 @@ export async function GET(request: NextRequest) {
       const requestIds = [...new Set(activities.map((a) => a.request?.id).filter((id): id is string => id !== undefined))]
 
       // Fetch full snapshots for all requests
-      const requestSnapshots = await prisma.request.findMany({
+      const requestSnapshots = await prisma.requests.findMany({
         where: {
           id: {
             in: requestIds,

@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server'
+import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
 
 /**
@@ -6,32 +6,32 @@ import prisma from '@/lib/prisma'
  * Returns null if not authenticated.
  */
 export async function requireUser() {
-  const { userId } = await auth()
+  const session = await auth()
 
-  if (!userId) {
+  if (!session?.user?.id) {
     return null
   }
 
-  return userId
+  return session.user.id
 }
 
 /**
  * Verifies the current user is an admin using database-backed role check.
  * Returns null if not authenticated or not an admin.
  *
- * This approach bypasses stale JWT metadata by checking Prisma directly,
+ * This approach checks Prisma directly,
  * ensuring role changes take effect immediately.
  */
 export async function requireAdmin() {
-  const { userId } = await auth()
+  const session = await auth()
 
-  if (!userId) {
+  if (!session?.user?.id) {
     return null
   }
 
   // Check Prisma for current role (always reflects latest changes)
   const user = await prisma.user.findUnique({
-    where: { id: userId },
+    where: { id: session.user.id },
     select: { role: true, isActive: true },
   })
 
@@ -40,17 +40,16 @@ export async function requireAdmin() {
     return null
   }
 
-  return userId
+  return session.user.id
 }
 
 /**
- * Gets the current user's role from Clerk metadata.
+ * Gets the current user's role from session.
  * Returns null if not authenticated.
  */
 export async function getUserRole(): Promise<string | null> {
-  const { sessionClaims } = await auth()
-  const metadata = sessionClaims?.metadata as { role?: string } | undefined
-  return metadata?.role || null
+  const session = await auth()
+  return session?.user?.role || null
 }
 
 /**
@@ -60,4 +59,12 @@ export async function getUserRole(): Promise<string | null> {
 export async function hasRole(role: string): Promise<boolean> {
   const userRole = await getUserRole()
   return userRole === role
+}
+
+/**
+ * Gets the current authenticated user's session.
+ * Returns null if not authenticated.
+ */
+export async function getSession() {
+  return await auth()
 }

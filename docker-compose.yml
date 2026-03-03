@@ -3,6 +3,8 @@ services:
   db:
     image: postgres:15-alpine
     container_name: approval-db
+    ports:
+      - "5432:5432"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
@@ -44,6 +46,55 @@ services:
         max-size: "10m"
         max-file: "3"
     restart: "no"
+
+  # Development Application Service
+  dev:
+    build:
+      context: .
+      target: builder
+    container_name: approval-dev
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env.local
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: "postgresql://postgres:changeme@db:5432/app_db?schema=public"
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - uploads_data:/app/uploads
+    command: sh -c "npx prisma generate && npm run dev"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles:
+      - dev
+
+  # Prisma Studio Service
+  studio:
+    build:
+      context: .
+      target: builder
+    container_name: approval-studio
+    ports:
+      - "5555:5555"
+    env_file:
+      - .env.local
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: "postgresql://postgres:changeme@db:5432/app_db?schema=public"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: npx prisma studio --hostname 0.0.0.0
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles:
+      - dev
 
   # Application Service
   app:

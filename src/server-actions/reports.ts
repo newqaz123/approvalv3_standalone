@@ -1,6 +1,6 @@
 'use server'
 
-import { auth } from '@clerk/nextjs/server'
+import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
 import { generateRequestPDF, RequestPDFData } from '@/lib/pdf'
 
@@ -87,7 +87,7 @@ function formatDateAsYYYYMMDD(date: Date): string {
 export async function exportRequestAsPDF(requestId: string) {
   try {
     // a. Get userId from auth - return error if not authenticated
-    const { userId } = await auth()
+    const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
     if (!userId) {
       return {
         success: false,
@@ -104,7 +104,7 @@ export async function exportRequestAsPDF(requestId: string) {
     }
 
     // c. Fetch request with comprehensive Prisma query
-    const request = await prisma.request.findFirst({
+    const request = await prisma.requests.findFirst({
       where: { id: requestId },
       include: {
         requester: {

@@ -1,6 +1,6 @@
 'use server'
 
-import { auth } from '@clerk/nextjs/server'
+import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
 import { requireAdmin } from '@/lib/auth'
 
@@ -29,7 +29,7 @@ export async function getAuditTrailForRequest(requestId: string) {
     throw new Error('Unauthorized - Admin access required')
   }
 
-  const activities = await prisma.requestActivity.findMany({
+  const activities = await prisma.request_activities.findMany({
     where: {
       requestId: requestId,
     },
@@ -80,7 +80,7 @@ export async function getAuditTrailForDateRange(
     throw new Error('Unauthorized - Admin access required')
   }
 
-  const activities = await prisma.requestActivity.findMany({
+  const activities = await prisma.request_activities.findMany({
     where: {
       createdAt: {
         gte: startDate,
@@ -131,7 +131,7 @@ export async function getAuditTrailForUser(
   userId: string,
   options?: AuditQueryOptions
 ) {
-  const { userId: currentUserId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const currentUserId = _authUser?.id
 
   if (!currentUserId) {
     throw new Error('Unauthorized')
@@ -169,7 +169,7 @@ export async function getAuditTrailForUser(
     }
   }
 
-  const activities = await prisma.requestActivity.findMany({
+  const activities = await prisma.request_activities.findMany({
     where: whereClause,
     include: {
       user: {

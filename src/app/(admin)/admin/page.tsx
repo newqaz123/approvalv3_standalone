@@ -5,9 +5,9 @@ import prisma from '@/lib/prisma'
 async function getStats() {
   const [userCount, deptCount, requestCount, deletedCount] = await Promise.all([
     prisma.user.count(),
-    prisma.department.count(),
-    prisma.request.count({ where: { isDeleted: false } }),
-    prisma.request.count({ where: { isDeleted: true } }),
+    prisma.departments.count(),
+    prisma.requests.count({ where: { isDeleted: false } }),
+    prisma.requests.count({ where: { isDeleted: true } }),
   ])
 
   return { userCount, deptCount, requestCount, deletedCount }
@@ -66,7 +66,7 @@ export default async function AdminPage() {
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           <Link
             href="/admin/users"
-            className="rounded-lg border bg-card p-6 hover:bg-accent transition-colors"
+            className="rounded-lg border bg-card p-6 hover:bg-accent transition-colors cursor-pointer"
           >
             <div className="flex items-center gap-4">
               <div className="rounded-full bg-primary/10 p-3">
@@ -83,7 +83,7 @@ export default async function AdminPage() {
 
           <Link
             href="/admin/departments"
-            className="rounded-lg border bg-card p-6 hover:bg-accent transition-colors"
+            className="rounded-lg border bg-card p-6 hover:bg-accent transition-colors cursor-pointer"
           >
             <div className="flex items-center gap-4">
               <div className="rounded-full bg-primary/10 p-3">
@@ -100,7 +100,7 @@ export default async function AdminPage() {
 
           <Link
             href="/admin/deleted-requests"
-            className="rounded-lg border bg-card p-6 hover:bg-accent transition-colors"
+            className="rounded-lg border bg-card p-6 hover:bg-accent transition-colors cursor-pointer"
           >
             <div className="flex items-center gap-4">
               <div className="rounded-full bg-destructive/10 p-3">
@@ -117,7 +117,7 @@ export default async function AdminPage() {
 
           <Link
             href="/admin/audit"
-            className="rounded-lg border bg-card p-6 hover:bg-accent transition-colors"
+            className="rounded-lg border bg-card p-6 hover:bg-accent transition-colors cursor-pointer"
           >
             <div className="flex items-center gap-4">
               <div className="rounded-full bg-primary/10 p-3">
@@ -134,7 +134,7 @@ export default async function AdminPage() {
 
           <Link
             href="/admin/templates"
-            className="rounded-lg border bg-card p-6 hover:bg-accent transition-colors"
+            className="rounded-lg border bg-card p-6 hover:bg-accent transition-colors cursor-pointer"
           >
             <div className="flex items-center gap-4">
               <div className="rounded-full bg-primary/10 p-3">

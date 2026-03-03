@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server'
+import { auth } from '@/lib/auth-config'
 import { redirect } from 'next/navigation'
 import { Navbar } from '@/components/navigation/navbar'
 import { MobileNav } from '@/components/mobile/mobile-nav'
@@ -9,15 +9,15 @@ export default async function AdminLayout({
 }: {
   children: React.ReactNode
 }) {
-  const { userId } = await auth()
+  const session = await auth()
 
-  if (!userId) {
+  if (!session?.user?.id) {
     redirect('/sign-in')
   }
 
   // Check if user is admin (database check for server-side rendering)
   const user = await prisma.user.findUnique({
-    where: { id: userId },
+    where: { id: session.user.id },
     select: { role: true }
   })
 
@@ -36,8 +36,10 @@ export default async function AdminLayout({
       </div>
 
       {/* Main content with top padding on mobile for fixed nav */}
-      <main className="mx-auto px-4 pt-20 md:pt-8 pb-8 md:py-8 sm:px-6 lg:px-8 max-w-full md:max-w-7xl">
-        {children}
+      <main className="mx-auto px-6 pt-20 md:pt-12 pb-12 md:py-12 sm:px-8 lg:px-12 max-w-full md:max-w-7xl">
+        <div className="space-y-8">
+          {children}
+        </div>
       </main>
     </div>
   )

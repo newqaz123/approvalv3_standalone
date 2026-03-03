@@ -1,6 +1,6 @@
 'use server'
 
-import { auth } from '@clerk/nextjs/server'
+import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
@@ -46,7 +46,7 @@ export async function createRequest(input: CreateRequestInput) {
 
   // Create request in a transaction with activity log
   const request = await prisma.$transaction(async (tx) => {
-    const newRequest = await tx.request.create({
+    const newRequest = await tx.requests.create({
       data: {
         title: validatedFields.data.title,
         description: validatedFields.data.description,
@@ -57,7 +57,7 @@ export async function createRequest(input: CreateRequestInput) {
     })
 
     // Log creation in audit trail
-    await tx.requestActivity.create({
+    await tx.request_activities.create({
       data: {
         requestId: newRequest.id,
         action: 'created',
@@ -102,12 +102,12 @@ export async function createRequest(input: CreateRequestInput) {
   // If user is top-level (auto-approved), change status immediately
   const isTopLevel = approvals.length > 0 && approvals[0].status === 'approved'
   if (isTopLevel) {
-    await prisma.request.update({
+    await prisma.requests.update({
       where: { id: request.id },
       data: { status: 'SentToEngineer' },
     })
 
-    await prisma.requestActivity.create({
+    await prisma.request_activities.create({
       data: {
         requestId: request.id,
         userId: user.id,
@@ -223,7 +223,7 @@ export async function getMyRequests(filters?: GetRequestsFilters) {
     }
   }
 
-  const requests = await prisma.request.findMany({
+  const requests = await prisma.requests.findMany({
     where: whereClause,
     select: {
       id: true,
@@ -383,13 +383,13 @@ export async function getMyRequests(filters?: GetRequestsFilters) {
  * Get a single request by ID with all details
  */
 export async function getRequest(id: string) {
-  const { userId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
 
   if (!userId) {
     throw new Error('Unauthorized')
   }
 
-  const request = await prisma.request.findUnique({
+  const request = await prisma.requests.findUnique({
     where: { id },
     include: {
       requester: {
@@ -464,7 +464,7 @@ export async function getRequestFilterOptions() {
   let departments
   if (isAdmin || isEngineering) {
     // Admin and engineering users see all departments
-    departments = await prisma.department.findMany({
+    departments = await prisma.departments.findMany({
       select: {
         id: true,
         name: true,
@@ -476,7 +476,7 @@ export async function getRequestFilterOptions() {
   } else {
     // Non-admin, non-engineering: get departments from visible requests
     // (own dept + cross-department via custom approval chains)
-    const visibleRequests = await prisma.request.findMany({
+    const visibleRequests = await prisma.requests.findMany({
       where: {
         isDeleted: false,
         OR: [
@@ -491,7 +491,7 @@ export async function getRequestFilterOptions() {
 
     const visibleDeptIds = [...new Set(visibleRequests.map(r => r.departmentId))]
 
-    departments = await prisma.department.findMany({
+    departments = await prisma.departments.findMany({
       where: { id: { in: visibleDeptIds } },
       select: {
         id: true,
@@ -519,7 +519,7 @@ export async function getRequestFilterOptions() {
     })
   } else {
     // Non-admin, non-engineering: get requesters from visible requests
-    const visibleRequests = await prisma.request.findMany({
+    const visibleRequests = await prisma.requests.findMany({
       where: {
         isDeleted: false,
         OR: [
@@ -571,7 +571,7 @@ export async function getMyActionItems() {
   }
 
   // Find all pending approvals for user's level OR custom approver ID
-  const pendingApprovals = await prisma.requestApproval.findMany({
+  const pendingApprovals = await prisma.request_approvals.findMany({
     where: {
       OR: orConditions,
       status: 'pending',
@@ -614,7 +614,7 @@ export async function getMyActionItems() {
 
   for (const approval of pendingApprovals) {
     // Check if there are any pending approvals with lower order
-    const blockingApprovals = await prisma.requestApproval.count({
+    const blockingApprovals = await prisma.request_approvals.count({
       where: {
         requestId: approval.requestId,
         order: { lt: approval.order },
@@ -642,7 +642,7 @@ export async function getMyActionItems() {
   }
 
   // Query solution approvals
-  const pendingSolutionApprovals = await prisma.solutionApproval.findMany({
+  const pendingSolutionApprovals = await prisma.solution_approvals.findMany({
     where: {
       OR: orConditions,
       status: 'pending',
@@ -690,7 +690,7 @@ export async function getMyActionItems() {
   // Check actionability for solution approvals
   for (const approval of pendingSolutionApprovals) {
     // Check if there are any pending approvals with lower order
-    const blockingSolutionApprovals = await prisma.solutionApproval.count({
+    const blockingSolutionApprovals = await prisma.solution_approvals.count({
       where: {
         solutionId: approval.solutionId,
         order: { lt: approval.order },
@@ -735,7 +735,7 @@ const cancelRequestSchema = z.object({
  * Cancel a request (only requester can cancel, only before any approvals)
  */
 export async function cancelRequest(input: { requestId: string; reason: string }) {
-  const { userId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
   if (!userId) {
     throw new Error('Unauthorized')
   }
@@ -752,7 +752,7 @@ export async function cancelRequest(input: { requestId: string; reason: string }
   const { requestId, reason } = validatedFields.data
 
   // Get request with approvals
-  const request = await prisma.request.findUnique({
+  const request = await prisma.requests.findUnique({
     where: { id: requestId },
     include: {
       approvals: {
@@ -785,12 +785,12 @@ export async function cancelRequest(input: { requestId: string; reason: string }
   // Perform cancellation in transaction
   await prisma.$transaction([
     // Update request status
-    prisma.request.update({
+    prisma.requests.update({
       where: { id: requestId },
       data: { status: 'Cancelled' },
     }),
     // Mark all pending approvals as rejected (cleanup)
-    prisma.requestApproval.updateMany({
+    prisma.request_approvals.updateMany({
       where: {
         requestId,
         status: 'pending',
@@ -798,7 +798,7 @@ export async function cancelRequest(input: { requestId: string; reason: string }
       data: { status: 'rejected' },
     }),
     // Log activity
-    prisma.requestActivity.create({
+    prisma.request_activities.create({
       data: {
         requestId,
         userId,
@@ -851,7 +851,7 @@ export async function deleteRequest(input: { requestId: string; reason: string }
 
   try {
     // Get request with file attachments before soft delete
-    const request = await prisma.request.findUnique({
+    const request = await prisma.requests.findUnique({
       where: { id: requestId },
       include: {
         fileAttachments: true,
@@ -881,7 +881,7 @@ export async function deleteRequest(input: { requestId: string; reason: string }
     // Perform soft delete and log activity in transaction
     await prisma.$transaction([
       // Soft delete the request
-      prisma.request.update({
+      prisma.requests.update({
         where: { id: requestId },
         data: {
           isDeleted: true,
@@ -890,7 +890,7 @@ export async function deleteRequest(input: { requestId: string; reason: string }
         },
       }),
       // Log deletion in audit trail
-      prisma.requestActivity.create({
+      prisma.request_activities.create({
         data: {
           requestId,
           action: 'deleted',
@@ -938,7 +938,7 @@ export async function getDeletedRequests() {
     throw new Error('Unauthorized - Admin access required')
   }
 
-  const requests = await prisma.request.findMany({
+  const requests = await prisma.requests.findMany({
     where: { isDeleted: true },
     select: {
       id: true,
@@ -1015,7 +1015,7 @@ export async function permanentlyDeleteRequests(input: {
     // 'all' mode uses the base isDeleted: true filter
 
     // Count requests to be deleted
-    const count = await prisma.request.count({ where: whereClause })
+    const count = await prisma.requests.count({ where: whereClause })
 
     if (count === 0) {
       return {
@@ -1025,7 +1025,7 @@ export async function permanentlyDeleteRequests(input: {
     }
 
     // Permanent delete (will cascade to fileAttachments, activities, approvals, notifications)
-    const result = await prisma.request.deleteMany({
+    const result = await prisma.requests.deleteMany({
       where: whereClause,
     })
 
@@ -1061,7 +1061,7 @@ export async function restoreRequest(input: { requestId: string }) {
 
   try {
     // Check if request exists and is deleted
-    const request = await prisma.request.findUnique({
+    const request = await prisma.requests.findUnique({
       where: { id: input.requestId },
     })
 
@@ -1080,7 +1080,7 @@ export async function restoreRequest(input: { requestId: string }) {
     }
 
     // Restore the request
-    await prisma.request.update({
+    await prisma.requests.update({
       where: { id: input.requestId },
       data: {
         isDeleted: false,
@@ -1090,7 +1090,7 @@ export async function restoreRequest(input: { requestId: string }) {
     })
 
     // Log restoration
-    await prisma.requestActivity.create({
+    await prisma.request_activities.create({
       data: {
         requestId: input.requestId,
         action: 'restored',
@@ -1137,7 +1137,7 @@ export async function previewDeleteByDateRange(input: {
     // Include entire end date by setting to end of day
     toDate.setHours(23, 59, 59, 999)
 
-    const requests = await prisma.request.findMany({
+    const requests = await prisma.requests.findMany({
       where: {
         isDeleted: true,
         deletedAt: {
@@ -1200,7 +1200,7 @@ export async function bulkDeleteRequestsByDateRange(input: {
     toDate.setHours(23, 59, 59, 999)
 
     // Find requests created within date range (excluding already deleted ones)
-    const requests = await prisma.request.findMany({
+    const requests = await prisma.requests.findMany({
       where: {
         isDeleted: false,
         createdAt: {
@@ -1239,7 +1239,7 @@ export async function bulkDeleteRequestsByDateRange(input: {
     }
 
     // Delete mode - perform soft delete
-    const result = await prisma.request.updateMany({
+    const result = await prisma.requests.updateMany({
       where: {
         id: { in: requests.map(r => r.id) },
       },
@@ -1251,7 +1251,7 @@ export async function bulkDeleteRequestsByDateRange(input: {
     })
 
     // Log deletion for each request
-    await prisma.requestActivity.createMany({
+    await prisma.request_activities.createMany({
       data: requests.map(r => ({
         requestId: r.id,
         action: 'deleted',
@@ -1309,7 +1309,7 @@ export async function getRequestsNeedingEngineeringAction(userId: string): Promi
   }
 
   // Get engineering department
-  const engineeringDept = await prisma.department.findFirst({
+  const engineeringDept = await prisma.departments.findFirst({
     where: { type: 'ENGINEERING' },
     select: { id: true },
   })
@@ -1320,7 +1320,7 @@ export async function getRequestsNeedingEngineeringAction(userId: string): Promi
 
   // Category 1: Requests needing solution submission
   // Status = SentToEngineer, no solution submitted yet
-  const needsSolution = await prisma.request.findMany({
+  const needsSolution = await prisma.requests.findMany({
     where: {
       status: 'SentToEngineer',
       isDeleted: false,
@@ -1359,7 +1359,7 @@ export async function getRequestsNeedingEngineeringAction(userId: string): Promi
   // Check which requests have solutions (for rejection detection)
   // A request in SentToEngineer with a solution means the solution was rejected
   const requestIdsWithSolution = (
-    await prisma.solution.findMany({
+    await prisma.solutions.findMany({
       where: {
         requestId: { in: needsSolution.map(r => r.id) },
       },
@@ -1381,7 +1381,7 @@ export async function getRequestsNeedingEngineeringAction(userId: string): Promi
   // Category 2: Solutions needing user's approval
   // For custom chains: requiredApproverId === userId AND status === pending AND all previous orders approved
   // For hierarchy: requiredLevel === user.level AND status === pending AND all previous orders approved
-  const needsApproval = await prisma.solution.findMany({
+  const needsApproval = await prisma.solutions.findMany({
     where: {
       request: {
         status: 'DesignCostEstimationApproval',
@@ -1405,7 +1405,7 @@ export async function getRequestsNeedingEngineeringAction(userId: string): Promi
 
   for (const solution of needsApproval) {
     // Get pending approvals for this solution
-    const pendingApprovals = await prisma.solutionApproval.findMany({
+    const pendingApprovals = await prisma.solution_approvals.findMany({
       where: {
         solutionId: solution.id,
         status: 'pending',
@@ -1418,7 +1418,7 @@ export async function getRequestsNeedingEngineeringAction(userId: string): Promi
     // Find the next actionable approval (first in sequence with no pending before it)
     for (const approval of pendingApprovals) {
       // Check if there are any pending approvals before this one
-      const blockingApprovals = await prisma.solutionApproval.count({
+      const blockingApprovals = await prisma.solution_approvals.count({
         where: {
           solutionId: solution.id,
           order: { lt: approval.order },
@@ -1466,7 +1466,7 @@ export async function assignEngineers(requestId: string, engineerIds: string[]) 
   }
 
   // Validate request exists and is in correct status
-  const request = await prisma.request.findUnique({
+  const request = await prisma.requests.findUnique({
     where: { id: requestId },
     select: { status: true, title: true },
   })
@@ -1480,7 +1480,7 @@ export async function assignEngineers(requestId: string, engineerIds: string[]) 
   }
 
   // Validate all engineers exist and are in engineering department
-  const engineeringDept = await prisma.department.findFirst({
+  const engineeringDept = await prisma.departments.findFirst({
     where: { type: 'ENGINEERING' },
     select: { id: true },
   })
@@ -1503,13 +1503,13 @@ export async function assignEngineers(requestId: string, engineerIds: string[]) 
   }
 
   // Delete existing assignments
-  await prisma.requestEngineerAssignment.deleteMany({
+  await prisma.request_engineer_assignments.deleteMany({
     where: { requestId },
   })
 
   // Create new assignments
   if (engineerIds.length > 0) {
-    await prisma.requestEngineerAssignment.createMany({
+    await prisma.request_engineer_assignments.createMany({
       data: engineerIds.map(engineerId => ({
         requestId,
         engineerId,
@@ -1519,7 +1519,7 @@ export async function assignEngineers(requestId: string, engineerIds: string[]) 
   }
 
   // Log activity
-  await prisma.requestActivity.create({
+  await prisma.request_activities.create({
     data: {
       requestId,
       userId: user.id,
@@ -1559,7 +1559,7 @@ export async function getEngineeringUsers() {
     throw new Error('Unauthorized')
   }
 
-  const engineeringDept = await prisma.department.findFirst({
+  const engineeringDept = await prisma.departments.findFirst({
     where: { type: 'ENGINEERING' },
     select: { id: true },
   })
@@ -1651,7 +1651,7 @@ export async function getRequestsForEngineering(filters?: GetRequestsForEngineer
     }
   }
 
-  const requests = await prisma.request.findMany({
+  const requests = await prisma.requests.findMany({
     where: whereClause,
     include: {
       department: {
@@ -1711,14 +1711,14 @@ export async function resubmitRequest(input: {
   title?: string
   description?: string
 }) {
-  const { userId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
 
   if (!userId) {
     throw new Error('Unauthorized')
   }
 
   // Get request with approvals
-  const request = await prisma.request.findUnique({
+  const request = await prisma.requests.findUnique({
     where: { id: input.requestId },
     include: {
       approvals: true,
@@ -1783,20 +1783,20 @@ export async function resubmitRequest(input: {
     if (input.description !== undefined)
       updateData.description = input.description
 
-    const updatedRequest = await tx.request.update({
+    const updatedRequest = await tx.requests.update({
       where: { id: input.requestId },
       data: updateData,
     })
 
     // Delete all existing approvals
-    await tx.requestApproval.deleteMany({
+    await tx.request_approvals.deleteMany({
       where: {
         requestId: input.requestId,
       },
     })
 
     // Log resubmit activity
-    await tx.requestActivity.create({
+    await tx.request_activities.create({
       data: {
         requestId: input.requestId,
         action: 'resubmitted',
@@ -1838,7 +1838,7 @@ export async function archiveRequest(requestId: string) {
   }
 
   try {
-    const request = await prisma.request.findUnique({
+    const request = await prisma.requests.findUnique({
       where: { id: requestId },
       select: { id: true, isArchived: true, isDeleted: true },
     })
@@ -1856,11 +1856,11 @@ export async function archiveRequest(requestId: string) {
     }
 
     await prisma.$transaction([
-      prisma.request.update({
+      prisma.requests.update({
         where: { id: requestId },
         data: { isArchived: true },
       }),
-      prisma.requestActivity.create({
+      prisma.request_activities.create({
         data: {
           requestId,
           action: 'archived',
@@ -1894,7 +1894,7 @@ export async function permanentDeleteRequest(requestId: string) {
   }
 
   try {
-    const request = await prisma.request.findUnique({
+    const request = await prisma.requests.findUnique({
       where: { id: requestId },
       select: { id: true },
     })
@@ -1904,7 +1904,7 @@ export async function permanentDeleteRequest(requestId: string) {
     }
 
     // Soft delete — hard delete is blocked by the append-only audit trail trigger on request_activities
-    await prisma.request.update({
+    await prisma.requests.update({
       where: { id: requestId },
       data: {
         isDeleted: true,
@@ -1938,7 +1938,7 @@ export async function getAllRequestsForRetention(includeArchived: boolean = true
     whereClause.isArchived = false
   }
 
-  const requests = await prisma.request.findMany({
+  const requests = await prisma.requests.findMany({
     where: whereClause,
     select: {
       id: true,

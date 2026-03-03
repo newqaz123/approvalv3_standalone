@@ -43,13 +43,13 @@ async function DeletedRequestsList() {
     <div className="space-y-4">
       {/* Summary stats */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <p className="text-sm text-blue-600 font-medium">Total Deleted</p>
-          <p className="text-2xl font-bold text-blue-700">{deletedRequests.length}</p>
+        <div className="bg-card border rounded-lg p-4">
+          <p className="text-sm text-muted-foreground font-medium">Total Deleted</p>
+          <p className="text-2xl font-bold text-primary">{deletedRequests.length}</p>
         </div>
-        <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
-          <p className="text-sm text-orange-600 font-medium">This Month</p>
-          <p className="text-2xl font-bold text-orange-700">
+        <div className="bg-card border rounded-lg p-4">
+          <p className="text-sm text-muted-foreground font-medium">This Month</p>
+          <p className="text-2xl font-bold text-amber-600 dark:text-amber-400">
             {deletedRequests.filter(r => {
               const deletedAt = new Date(r.deletedAt!)
               const now = new Date()
@@ -58,9 +58,9 @@ async function DeletedRequestsList() {
             }).length}
           </p>
         </div>
-        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-          <p className="text-sm text-green-600 font-medium">This Year</p>
-          <p className="text-2xl font-bold text-green-700">
+        <div className="bg-card border rounded-lg p-4">
+          <p className="text-sm text-muted-foreground font-medium">This Year</p>
+          <p className="text-2xl font-bold text-green-600 dark:text-green-400">
             {deletedRequests.filter(r => {
               const deletedAt = new Date(r.deletedAt!)
               return deletedAt.getFullYear() === new Date().getFullYear()
@@ -70,12 +70,12 @@ async function DeletedRequestsList() {
       </div>
 
       {/* Cleanup actions */}
-      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+      <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
         <div className="flex items-start gap-3">
-          <AlertTriangle className="h-5 w-5 text-yellow-600 mt-0.5" />
+          <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-400 mt-0.5" />
           <div className="flex-1">
-            <h3 className="font-semibold text-yellow-800">Cleanup Options</h3>
-            <p className="text-sm text-yellow-700 mt-1">
+            <h3 className="font-semibold text-amber-800 dark:text-amber-200">Cleanup Options</h3>
+            <p className="text-sm text-amber-700 dark:text-amber-300 mt-1">
               Permanently delete old requests to save database space. This action cannot be undone.
             </p>
             <div className="flex flex-wrap gap-2 mt-3">

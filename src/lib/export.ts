@@ -1,6 +1,6 @@
 import { Parser } from 'json2csv'
 import { format } from 'date-fns'
-import type { RequestActivity, User, Request, RequestApproval, FileAttachment } from '@prisma/client'
+import type { request_activities as RequestActivity, User, requests as Request, request_approvals as RequestApproval, file_attachments as FileAttachment } from '@prisma/client'
 
 /**
  * Activity with related user and request data (from audit query API)

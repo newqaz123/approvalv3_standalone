@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { useUser } from '@clerk/nextjs'
+import { useSession } from 'next-auth/react'
 import { CheckCircle2, XCircle, Users, UserCheck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -47,7 +47,7 @@ export function InitiateFinalApprovalButton({
   departmentUsers,
   onSuccess,
 }: InitiateFinalApprovalButtonProps) {
-  const { user } = useUser()
+  const { data: session } = useSession(); const user = session?.user
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [useCustomChain, setUseCustomChain] = useState(false)

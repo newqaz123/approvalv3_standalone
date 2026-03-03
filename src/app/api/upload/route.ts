@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { auth } from '@clerk/nextjs/server'
+import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
 import { saveFile, generateFilePath } from '@/lib/files'
 
@@ -16,7 +16,7 @@ const ALLOWED_FILE_TYPES = [
 ]
 
 export async function POST(request: NextRequest) {
-  const { userId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
 
   if (!userId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
     // For engineering solutions: any engineering user can upload files to SentToEngineer requests
     // Fetch user role and request in a single query to minimize connection time
     const [dbRequest, user] = await Promise.all([
-      prisma.request.findUnique({
+      prisma.requests.findUnique({
         where: { id: requestId },
         select: {
           id: true,

@@ -1,5 +1,5 @@
 import { Suspense } from 'react'
-import { auth } from '@clerk/nextjs/server'
+import { auth } from '@/lib/auth-config'
 import { redirect } from 'next/navigation'
 import { getHierarchyDataForUser, getDepartmentsForHierarchyView } from '@/server-actions/hierarchy'
 import { HierarchyView } from '@/components/admin/hierarchy-view'
@@ -24,8 +24,8 @@ async function WorkflowContent({ departmentId }: { departmentId: string }) {
 }
 
 export default async function WorkflowPage({ searchParams }: WorkflowPageProps) {
-  const { userId } = await auth()
-  if (!userId) redirect('/sign-in')
+  const session = await auth()
+  if (!session?.user?.id) redirect('/sign-in')
 
   const departments = await getDepartmentsForHierarchyView()
 

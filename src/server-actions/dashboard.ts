@@ -1,6 +1,6 @@
 'use server'
 
-import { auth } from '@clerk/nextjs/server'
+import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/cache/user-cache'
 
@@ -49,7 +49,7 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
   }
 
   // Find all pending approvals for user's level OR custom approver ID
-  const pendingApprovals = await prisma.requestApproval.findMany({
+  const pendingApprovals = await prisma.request_approvals.findMany({
     where: {
       OR: orConditions,
       status: 'pending',
@@ -151,7 +151,7 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
 
   for (const approval of pendingApprovals) {
     // Check if there are any pending approvals with lower order
-    const blockingApprovals = await prisma.requestApproval.count({
+    const blockingApprovals = await prisma.request_approvals.count({
       where: {
         requestId: approval.requestId,
         order: { lt: approval.order },
@@ -162,7 +162,7 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
     // Only include if no blocking approvals
     if (blockingApprovals === 0) {
       // Check if this request has any rejected solution approvals
-      const hasRejection = await prisma.solution.count({
+      const hasRejection = await prisma.solutions.count({
         where: {
           requestId: approval.requestId,
           approvals: {
@@ -210,7 +210,7 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
   }
 
   // Query solution approvals
-  const pendingSolutionApprovals = await prisma.solutionApproval.findMany({
+  const pendingSolutionApprovals = await prisma.solution_approvals.findMany({
     where: {
       OR: orConditions,
       status: 'pending',
@@ -281,7 +281,7 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
   // Check actionability for solution approvals
   for (const approval of pendingSolutionApprovals) {
     // Check if there are any pending approvals with lower order
-    const blockingSolutionApprovals = await prisma.solutionApproval.count({
+    const blockingSolutionApprovals = await prisma.solution_approvals.count({
       where: {
         solutionId: approval.solutionId,
         order: { lt: approval.order },
@@ -292,7 +292,7 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
     // Only include if no blocking approvals
     if (blockingSolutionApprovals === 0) {
       // Check if this solution has any rejected approvals
-      const hasRejection = await prisma.solutionApproval.count({
+      const hasRejection = await prisma.solution_approvals.count({
         where: {
           solutionId: approval.solutionId,
           status: 'rejected',
@@ -345,13 +345,13 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
  * Get requests created by the current user
  */
 export async function getMyCreatedRequests(): Promise<RequestListRow[]> {
-  const { userId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
 
   if (!userId) {
     throw new Error('Unauthorized')
   }
 
-  const requests = await prisma.request.findMany({
+  const requests = await prisma.requests.findMany({
     where: {
       requesterId: userId,
       isDeleted: false,
@@ -565,7 +565,7 @@ export async function getAllRequests(): Promise<RequestListRow[]> {
     }
   }
 
-  const requests = await prisma.request.findMany({
+  const requests = await prisma.requests.findMany({
     where: whereClause,
     select: {
       id: true,

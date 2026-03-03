@@ -1,6 +1,6 @@
 'use server'
 
-import { auth } from '@clerk/nextjs/server'
+import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 
@@ -28,7 +28,7 @@ async function getMaxLevelInDepartment(departmentId: string): Promise<number> {
       orderBy: { level: 'desc' },
       select: { level: true },
     }),
-    prisma.departmentApprover.findFirst({
+    prisma.department_approvers.findFirst({
       where: { departmentId },
       orderBy: { approverLevel: 'desc' },
       select: { approverLevel: true },
@@ -81,7 +81,7 @@ export async function createApprovalChain(
           where: { departmentId, level, isActive: true },
           select: { id: true },
         }),
-        prisma.departmentApprover.findMany({
+        prisma.department_approvers.findMany({
           where: { departmentId, approverLevel: level },
           select: { id: true, approverId: true },
         }),
@@ -118,7 +118,7 @@ export async function createApprovalChain(
   }
 
   if (approvals.length > 0) {
-    await prisma.requestApproval.createMany({ data: approvals })
+    await prisma.request_approvals.createMany({ data: approvals })
   }
 
   return approvals
@@ -137,7 +137,7 @@ export async function getApproversAtLevel(
       where: { departmentId, level, isActive: true },
       select: { id: true, name: true, email: true, level: true },
     }),
-    prisma.departmentApprover.findMany({
+    prisma.department_approvers.findMany({
       where: { departmentId, approverLevel: level },
       include: {
         approver: {
@@ -174,7 +174,7 @@ export async function getApproversAtLevel(
 export async function canUserApprove(
   requestId: string
 ): Promise<{ canApprove: boolean; approval?: any }> {
-  const { userId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
   if (!userId) {
     return { canApprove: false }
   }
@@ -189,7 +189,7 @@ export async function canUserApprove(
   }
 
   // Get the request to check department
-  const request = await prisma.request.findUnique({
+  const request = await prisma.requests.findUnique({
     where: { id: requestId },
     select: { departmentId: true, status: true },
   })
@@ -204,7 +204,7 @@ export async function canUserApprove(
 
   // Also check if user is a cross-department approver (DepartmentApprover)
   if (!effectiveLevel) {
-    const deptApprover = await prisma.departmentApprover.findFirst({
+    const deptApprover = await prisma.department_approvers.findFirst({
       where: { departmentId: request.departmentId, approverId: userId },
       select: { approverLevel: true },
     })
@@ -218,7 +218,7 @@ export async function canUserApprove(
   }
 
   // Find pending approval for this user's effective level
-  const approval = await prisma.requestApproval.findFirst({
+  const approval = await prisma.request_approvals.findFirst({
     where: {
       requestId,
       requiredLevel: effectiveLevel,
@@ -240,7 +240,7 @@ export async function canUserApprove(
   }
 
   // Check if this is the current approval in sequence
-  const previousApprovals = await prisma.requestApproval.findMany({
+  const previousApprovals = await prisma.request_approvals.findMany({
     where: {
       requestId,
       order: { lt: approval.order },
@@ -263,7 +263,7 @@ export async function approveRequest(
   comments?: string,
   expectedUpdatedAt?: string | Date
 ) {
-  const { userId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
   if (!userId) {
     throw new Error('Unauthorized')
   }
@@ -275,7 +275,7 @@ export async function approveRequest(
 
   // Check for stale data if expectedUpdatedAt is provided
   if (expectedUpdatedAt) {
-    const request = await prisma.request.findUnique({
+    const request = await prisma.requests.findUnique({
       where: { id: requestId },
       select: { updatedAt: true },
     })
@@ -286,7 +286,7 @@ export async function approveRequest(
   }
 
   // Update approval
-  await prisma.requestApproval.update({
+  await prisma.request_approvals.update({
     where: { id: approval.id },
     data: {
       approverId: userId,
@@ -297,7 +297,7 @@ export async function approveRequest(
   })
 
   // Log activity
-  await prisma.requestActivity.create({
+  await prisma.request_activities.create({
     data: {
       requestId,
       userId,
@@ -307,7 +307,7 @@ export async function approveRequest(
   })
 
   // Check if this was the last approval
-  const pendingApprovals = await prisma.requestApproval.count({
+  const pendingApprovals = await prisma.request_approvals.count({
     where: {
       requestId,
       status: 'pending',
@@ -334,7 +334,7 @@ export async function rejectRequest(
   comments: string,
   expectedUpdatedAt?: string | Date
 ) {
-  const { userId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
   if (!userId) {
     throw new Error('Unauthorized')
   }
@@ -350,7 +350,7 @@ export async function rejectRequest(
 
   // Check for stale data if expectedUpdatedAt is provided
   if (expectedUpdatedAt) {
-    const request = await prisma.request.findUnique({
+    const request = await prisma.requests.findUnique({
       where: { id: requestId },
       select: { updatedAt: true },
     })
@@ -361,7 +361,7 @@ export async function rejectRequest(
   }
 
   // Update approval
-  await prisma.requestApproval.update({
+  await prisma.request_approvals.update({
     where: { id: approval.id },
     data: {
       approverId: userId,
@@ -372,7 +372,7 @@ export async function rejectRequest(
   })
 
   // Log activity
-  await prisma.requestActivity.create({
+  await prisma.request_activities.create({
     data: {
       requestId,
       userId,
@@ -383,7 +383,7 @@ export async function rejectRequest(
 
   // Notify requester of rejection with reason
   const { createNotification } = await import('./notifications')
-  const rejectedRequest = await prisma.request.findUnique({
+  const rejectedRequest = await prisma.requests.findUnique({
     where: { id: requestId },
     select: { title: true, requesterId: true },
   })
@@ -399,7 +399,7 @@ export async function rejectRequest(
   }
 
   // Mark all remaining approvals as rejected
-  await prisma.requestApproval.updateMany({
+  await prisma.request_approvals.updateMany({
     where: {
       requestId,
       status: 'pending',
@@ -417,7 +417,7 @@ export async function rejectRequest(
  * Change request status based on current status
  */
 async function changeRequestStatus(requestId: string) {
-  const request = await prisma.request.findUnique({
+  const request = await prisma.requests.findUnique({
     where: { id: requestId },
     select: { status: true, requesterId: true, departmentId: true, title: true },
   })
@@ -439,13 +439,13 @@ async function changeRequestStatus(requestId: string) {
   }
 
   if (newStatus) {
-    await prisma.request.update({
+    await prisma.requests.update({
       where: { id: requestId },
       data: { status: newStatus as any },
     })
 
     // Log status change
-    await prisma.requestActivity.create({
+    await prisma.request_activities.create({
       data: {
         requestId,
         userId: request.requesterId,
@@ -459,7 +459,7 @@ async function changeRequestStatus(requestId: string) {
     // Create notification based on new status
     if (newStatus === 'SentToEngineer') {
       // Notify all engineering users
-      const engineeringDept = await prisma.department.findFirst({
+      const engineeringDept = await prisma.departments.findFirst({
         where: { type: 'ENGINEERING' },
         select: { id: true },
       })
@@ -478,7 +478,7 @@ async function changeRequestStatus(requestId: string) {
       }
     } else {
       // Other status changes - notify requester
-      await prisma.notification.create({
+      await prisma.notifications.create({
         data: {
           userId: request.requesterId,
           type: 'status_changed',
@@ -495,7 +495,7 @@ async function changeRequestStatus(requestId: string) {
  * Notify next approver in chain
  */
 async function notifyNextApprover(requestId: string) {
-  const nextApproval = await prisma.requestApproval.findFirst({
+  const nextApproval = await prisma.request_approvals.findFirst({
     where: {
       requestId,
       status: 'pending',
@@ -528,14 +528,14 @@ async function notifyNextApprover(requestId: string) {
     requestId,
   }))
 
-  await prisma.notification.createMany({ data: notifications })
+  await prisma.notifications.createMany({ data: notifications })
 }
 
 /**
  * Get approval status for a request with eligible approvers
  */
 export async function getRequestApprovals(requestId: string) {
-  const request = await prisma.request.findUnique({
+  const request = await prisma.requests.findUnique({
     where: { id: requestId },
     select: { departmentId: true },
   })
@@ -544,7 +544,7 @@ export async function getRequestApprovals(requestId: string) {
     return []
   }
 
-  const approvals = await prisma.requestApproval.findMany({
+  const approvals = await prisma.request_approvals.findMany({
     where: { requestId },
     include: {
       approver: {

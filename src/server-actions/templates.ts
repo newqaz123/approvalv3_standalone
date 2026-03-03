@@ -48,7 +48,7 @@ export async function getTemplates(options: GetTemplatesOptions = {}) {
 
   const { includeInactive = false } = options
 
-  const templates = await prisma.template.findMany({
+  const templates = await prisma.templates.findMany({
     where: {
       isActive: includeInactive ? undefined : true,
     },
@@ -66,7 +66,7 @@ export async function getTemplates(options: GetTemplatesOptions = {}) {
  * Used in new request form to show available templates to users
  */
 export async function getActiveTemplates() {
-  const templates = await prisma.template.findMany({
+  const templates = await prisma.templates.findMany({
     where: {
       isActive: true,
     },
@@ -90,7 +90,7 @@ export async function getActiveTemplates() {
  * Get the default template for public use (no auth required)
  */
 export async function getDefaultTemplatePublic() {
-  const template = await prisma.template.findFirst({
+  const template = await prisma.templates.findFirst({
     where: {
       isDefault: true,
       isActive: true,
@@ -113,7 +113,7 @@ export async function getDefaultTemplatePublic() {
 export async function getTemplate(id: string) {
   await requireAdmin()
 
-  const template = await prisma.template.findUnique({
+  const template = await prisma.templates.findUnique({
     where: { id },
   })
 
@@ -124,7 +124,7 @@ export async function getTemplate(id: string) {
  * Get the default template
  */
 export async function getDefaultTemplate() {
-  const template = await prisma.template.findFirst({
+  const template = await prisma.templates.findFirst({
     where: {
       isDefault: true,
       isActive: true,
@@ -154,14 +154,14 @@ export async function createTemplate(input: CreateTemplateInput) {
   await prisma.$transaction(async (tx) => {
     // If setting as default, unset all other defaults
     if (input.isDefault) {
-      await tx.template.updateMany({
+      await tx.templates.updateMany({
         where: { isDefault: true },
         data: { isDefault: false },
       })
     }
 
     // Create new template
-    await tx.template.create({
+    await tx.templates.create({
       data: {
         name: input.name,
         title: input.title,
@@ -191,7 +191,7 @@ export async function updateTemplate(input: UpdateTemplateInput) {
     throw new Error(errorMessages)
   }
 
-  const template = await prisma.template.update({
+  const template = await prisma.templates.update({
     where: { id: input.id },
     data: {
       name: input.name,
@@ -212,7 +212,7 @@ export async function updateTemplate(input: UpdateTemplateInput) {
 export async function toggleTemplateStatus(id: string) {
   await requireAdmin()
 
-  const template = await prisma.template.findUnique({
+  const template = await prisma.templates.findUnique({
     where: { id },
   })
 
@@ -225,7 +225,7 @@ export async function toggleTemplateStatus(id: string) {
     throw new Error('Cannot deactivate the default template')
   }
 
-  const updated = await prisma.template.update({
+  const updated = await prisma.templates.update({
     where: { id },
     data: {
       isActive: !template.isActive,
@@ -244,7 +244,7 @@ export async function toggleTemplateStatus(id: string) {
 export async function setTemplateDefault(id: string) {
   await requireAdmin()
 
-  const template = await prisma.template.findUnique({
+  const template = await prisma.templates.findUnique({
     where: { id },
   })
 
@@ -259,12 +259,12 @@ export async function setTemplateDefault(id: string) {
   // Use transaction to ensure atomic default status change
   await prisma.$transaction([
     // Set all templates to non-default
-    prisma.template.updateMany({
+    prisma.templates.updateMany({
       where: { isDefault: true },
       data: { isDefault: false },
     }),
     // Set target template as default
-    prisma.template.update({
+    prisma.templates.update({
       where: { id },
       data: { isDefault: true },
     }),
@@ -280,7 +280,7 @@ export async function setTemplateDefault(id: string) {
 export async function deleteTemplate(id: string) {
   await requireAdmin()
 
-  const template = await prisma.template.findUnique({
+  const template = await prisma.templates.findUnique({
     where: { id },
   })
 
@@ -292,7 +292,7 @@ export async function deleteTemplate(id: string) {
     throw new Error('Cannot delete the default template')
   }
 
-  await prisma.template.update({
+  await prisma.templates.update({
     where: { id },
     data: {
       isActive: false,

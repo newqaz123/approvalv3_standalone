@@ -1,23 +1,32 @@
 'use server'
 
-import { auth } from '@clerk/nextjs/server'
+import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
-import { Resend } from 'resend'
+import nodemailer from 'nodemailer'
 
-// Initialize Resend if API key is available
-const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null
+// Initialize SMTP transporter if configured
+const transporter = process.env.SMTP_HOST
+  ? nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: parseInt(process.env.SMTP_PORT || '587'),
+      secure: process.env.SMTP_PORT === '465',
+      auth: process.env.SMTP_USER
+        ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
+        : undefined,
+    })
+  : null
 
 /**
  * Get notifications for a user
  */
 export async function getNotifications(userId: string, limit: number = 20) {
-  const { userId: currentUserId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const currentUserId = _authUser?.id
   if (!currentUserId || currentUserId !== userId) {
     throw new Error('Unauthorized')
   }
 
-  const notifications = await prisma.notification.findMany({
+  const notifications = await prisma.notifications.findMany({
     where: {
       userId,
     },
@@ -41,12 +50,12 @@ export async function getNotifications(userId: string, limit: number = 20) {
  * Get unread count for a user
  */
 export async function getUnreadCount(userId: string) {
-  const { userId: currentUserId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const currentUserId = _authUser?.id
   if (!currentUserId || currentUserId !== userId) {
     throw new Error('Unauthorized')
   }
 
-  const count = await prisma.notification.count({
+  const count = await prisma.notifications.count({
     where: {
       userId,
       isRead: false,
@@ -60,13 +69,13 @@ export async function getUnreadCount(userId: string) {
  * Mark a notification as read
  */
 export async function markAsRead(notificationId: string) {
-  const { userId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
   if (!userId) {
     throw new Error('Unauthorized')
   }
 
   // Verify ownership
-  const notification = await prisma.notification.findUnique({
+  const notification = await prisma.notifications.findUnique({
     where: { id: notificationId },
     select: { userId: true },
   })
@@ -75,7 +84,7 @@ export async function markAsRead(notificationId: string) {
     throw new Error('Notification not found or unauthorized')
   }
 
-  await prisma.notification.update({
+  await prisma.notifications.update({
     where: { id: notificationId },
     data: {
       isRead: true,
@@ -91,12 +100,12 @@ export async function markAsRead(notificationId: string) {
  * Mark all notifications as read for a user
  */
 export async function markAllAsRead(userId: string) {
-  const { userId: currentUserId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const currentUserId = _authUser?.id
   if (!currentUserId || currentUserId !== userId) {
     throw new Error('Unauthorized')
   }
 
-  const result = await prisma.notification.updateMany({
+  const result = await prisma.notifications.updateMany({
     where: {
       userId,
       isRead: false,
@@ -121,7 +130,7 @@ export async function createNotification(data: {
   message: string
   requestId?: string
 }) {
-  const notification = await prisma.notification.create({
+  const notification = await prisma.notifications.create({
     data,
   })
 
@@ -197,16 +206,16 @@ async function sendEmailNotification(
   },
   userEmail: string
 ) {
-  // Skip if Resend is not configured
-  if (!resend) {
-    console.warn('Email notification skipped: RESEND_API_KEY not configured')
+  // Skip if SMTP is not configured
+  if (!transporter) {
+    console.warn('Email notification skipped: SMTP_HOST not configured')
     return { success: false, error: 'Email not configured' }
   }
 
   // Also skip if from email is not configured
-  const fromEmail = process.env.RESEND_FROM_EMAIL
+  const fromEmail = process.env.SMTP_FROM
   if (!fromEmail) {
-    console.warn('Email notification skipped: RESEND_FROM_EMAIL not configured')
+    console.warn('Email notification skipped: SMTP_FROM not configured')
     return { success: false, error: 'From email not configured' }
   }
 
@@ -256,7 +265,7 @@ async function sendEmailNotification(
   }
 
   try {
-    await resend.emails.send({
+    await transporter.sendMail({
       from: fromEmail,
       to: userEmail,
       subject,

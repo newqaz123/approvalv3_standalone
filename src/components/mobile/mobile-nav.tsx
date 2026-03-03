@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { useUser } from '@clerk/nextjs'
+import { useSession } from 'next-auth/react'
 import { LayoutDashboard, FileText, Bell, BarChart3 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useScrollDirection } from '@/hooks/use-scroll-direction'
@@ -29,7 +29,7 @@ const tabs: Tab[] = [
  */
 export function MobileNav() {
   const pathname = usePathname()
-  const { user } = useUser()
+  const { data: session } = useSession(); const user = session?.user
   const isVisible = useScrollDirection()
   const [pendingCount, setPendingCount] = useState(0)
 
@@ -55,7 +55,7 @@ export function MobileNav() {
   }, [])
 
   // Get user first initial for profile icon
-  const userInitial = user?.firstName?.[0] || user?.fullName?.[0] || user?.primaryEmailAddress?.emailAddress?.[0] || 'U'
+  const userInitial = user?.name?.[0] || user?.email?.[0] || 'U'
 
   return (
     <nav

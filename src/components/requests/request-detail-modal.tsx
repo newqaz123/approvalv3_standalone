@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { format } from 'date-fns'
 import { X, FileText, Download, User, CheckCircle2, Trash2, Wrench } from 'lucide-react'
-import { useUser } from '@clerk/nextjs'
+import { useSession } from 'next-auth/react'
 import dynamic from 'next/dynamic'
 import {
   Dialog,
@@ -69,7 +69,7 @@ export function RequestDetailModal({
   onOpenChange,
   onActionComplete,
 }: RequestDetailModalProps) {
-  const { user } = useUser()
+  const { data: session } = useSession(); const user = session?.user
   const isMobile = useIsMobile()
   const [request, setRequest] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -111,18 +111,13 @@ export function RequestDetailModal({
     (finalApprovals.length === 0 || finalApprovals.every(a => a.status === 'approved'))
 
   useEffect(() => {
-    // Update userRole when user or metadata changes
-    // Check if user is loaded and has publicMetadata
-    if (user?.publicMetadata?.role) {
-      const role = user.publicMetadata.role as string
-      console.log('[RequestDetailModal] userRole updated:', role, 'for user:', user.id)
-      setUserRole(role)
+    // Update userRole from session
+    if (user?.role) {
+      setUserRole(user.role)
     } else if (user?.id) {
-      // User exists but no metadata yet
-      console.log('[RequestDetailModal] User loaded but no role metadata yet:', user.id)
       setUserRole(undefined)
     }
-  }, [user?.id, user?.publicMetadata?.role, user])
+  }, [user?.id, user?.role])
 
   useEffect(() => {
     if (open && requestId) {
@@ -188,8 +183,8 @@ export function RequestDetailModal({
         } catch (error) {
           console.error('[RequestDetailModal] Failed to fetch user role:', error)
           // Fall back to Clerk metadata
-          if (user?.publicMetadata?.role) {
-            setUserRole(user.publicMetadata.role as string)
+          if (user?.role) {
+            setUserRole(user.role as string)
           }
         }
       }
@@ -500,7 +495,7 @@ export function RequestDetailModal({
 
             {/* Delete Request (Admin only) */}
             {currentUserId &&
-             user?.publicMetadata?.role === 'admin' &&
+             user?.role === 'admin' &&
              !request.isDeleted && (
               <>
                 <Separator />
@@ -1067,7 +1062,7 @@ export function RequestDetailModal({
 
             {/* Delete Request (Admin only) */}
             {currentUserId &&
-             user?.publicMetadata?.role === 'admin' &&
+             user?.role === 'admin' &&
              !request.isDeleted && (
               <>
                 <Separator />

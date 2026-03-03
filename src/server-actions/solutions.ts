@@ -1,6 +1,6 @@
 'use server'
 
-import { auth } from '@clerk/nextjs/server'
+import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 import { RequestStatus, UserRole } from '@prisma/client'
@@ -21,7 +21,7 @@ function isStaleData(currentUpdatedAt: Date, expectedUpdatedAt?: string | Date):
  * Creates the solution record and approval chain in a transaction
  */
 export async function submitSolution(input: SubmitSolutionInput) {
-  const { userId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
   if (!userId) {
     throw new Error('Unauthorized')
   }
@@ -36,6 +36,10 @@ export async function submitSolution(input: SubmitSolutionInput) {
     throw new Error('User not found')
   }
 
+  if (!user.departmentId) {
+    throw new Error('User must be assigned to a department to submit solutions. Please contact an administrator.')
+  }
+
   if (user.role !== UserRole.engineering) {
     throw new Error('Only engineering users can submit solutions')
   }
@@ -44,7 +48,7 @@ export async function submitSolution(input: SubmitSolutionInput) {
   const validated = submitSolutionSchema.parse(input)
 
   // Validate request exists and is in correct status
-  const request = await prisma.request.findUnique({
+  const request = await prisma.requests.findUnique({
     where: { id: validated.requestId },
     select: {
       id: true,
@@ -64,7 +68,7 @@ export async function submitSolution(input: SubmitSolutionInput) {
   }
 
   // Get engineering department ID for hierarchy-based approvals
-  const engineeringDept = await prisma.department.findFirst({
+  const engineeringDept = await prisma.departments.findFirst({
     where: { type: 'ENGINEERING' },
     select: { id: true },
   })
@@ -76,7 +80,7 @@ export async function submitSolution(input: SubmitSolutionInput) {
   // Transaction: Create solution, approval chain, and update request status
   const result = await prisma.$transaction(async (tx) => {
     // Find when status first changed to SentToEngineer (from activity log)
-    const statusChangeActivity = await tx.requestActivity.findFirst({
+    const statusChangeActivity = await tx.request_activities.findFirst({
       where: {
         requestId: validated.requestId,
         action: 'status_changed',
@@ -93,7 +97,7 @@ export async function submitSolution(input: SubmitSolutionInput) {
     const sentToEngineerAt = statusChangeActivity?.createdAt
 
     // Create solution record
-    const solution = await tx.solution.create({
+    const solution = await tx.solutions.create({
       data: {
         requestId: validated.requestId,
         title: validated.title,
@@ -109,7 +113,7 @@ export async function submitSolution(input: SubmitSolutionInput) {
     // Link specific files uploaded during solution submission to solution
     // Only transfer files that were explicitly uploaded as part of this solution (via fileIds)
     if (validated.fileIds && validated.fileIds.length > 0) {
-      await tx.fileAttachment.updateMany({
+      await tx.file_attachments.updateMany({
         where: {
           id: { in: validated.fileIds },
           requestId: validated.requestId,
@@ -141,7 +145,7 @@ export async function submitSolution(input: SubmitSolutionInput) {
       // Custom approval chain (never auto-approved)
       await createCustomApprovalChain(tx, solution.id, validated.customApproverIds, user.id)
       // Update request status to DesignCostEstimationApproval
-      await tx.request.update({
+      await tx.requests.update({
         where: { id: validated.requestId },
         data: { status: RequestStatus.DesignCostEstimationApproval },
       })
@@ -159,7 +163,7 @@ export async function submitSolution(input: SubmitSolutionInput) {
       }
     } else if (isTopLevelSubmitter) {
       // Top-level submitter with hierarchy - auto-approve and go directly to SendBackToRequester
-      await tx.solutionApproval.create({
+      await tx.solution_approvals.create({
         data: {
           solutionId: solution.id,
           requiredLevel: maxLevel,
@@ -172,12 +176,12 @@ export async function submitSolution(input: SubmitSolutionInput) {
         },
       })
       // Skip approval phase, go directly to SendBackToRequester
-      await tx.request.update({
+      await tx.requests.update({
         where: { id: validated.requestId },
         data: { status: RequestStatus.SendBackToRequester },
       })
       // Log status change
-      await tx.requestActivity.create({
+      await tx.request_activities.create({
         data: {
           requestId: validated.requestId,
           userId: request.requesterId,
@@ -188,7 +192,7 @@ export async function submitSolution(input: SubmitSolutionInput) {
         },
       })
       // Create notification for requester
-      await tx.notification.create({
+      await tx.notifications.create({
         data: {
           userId: request.requesterId,
           type: 'solution_ready',
@@ -201,7 +205,7 @@ export async function submitSolution(input: SubmitSolutionInput) {
       // Default hierarchy-based approval chain
       await createHierarchyApprovalChain(tx, solution.id, engineeringDept.id, user.level || 1, user.id)
       // Update request status to DesignCostEstimationApproval
-      await tx.request.update({
+      await tx.requests.update({
         where: { id: validated.requestId },
         data: { status: RequestStatus.DesignCostEstimationApproval },
       })
@@ -226,7 +230,7 @@ export async function submitSolution(input: SubmitSolutionInput) {
     }
 
     // Log activity
-    await tx.requestActivity.create({
+    await tx.request_activities.create({
       data: {
         requestId: validated.requestId,
         userId: user.id,
@@ -283,7 +287,7 @@ async function createCustomApprovalChain(
     isCustomChain: true,
   }))
 
-  await tx.solutionApproval.createMany({ data: approvals })
+  await tx.solution_approvals.createMany({ data: approvals })
 
   return approvals
 }
@@ -354,7 +358,7 @@ async function createHierarchyApprovalChain(
   }
 
   if (approvals.length > 0) {
-    await tx.solutionApproval.createMany({ data: approvals })
+    await tx.solution_approvals.createMany({ data: approvals })
   }
 
   return approvals
@@ -364,12 +368,12 @@ async function createHierarchyApprovalChain(
  * Get solution by ID with related data
  */
 export async function getSolutionBySolutionId(solutionId: string) {
-  const { userId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
   if (!userId) {
     throw new Error('Unauthorized')
   }
 
-  const solution = await prisma.solution.findUnique({
+  const solution = await prisma.solutions.findUnique({
     where: { id: solutionId },
     include: {
       submittedBy: {
@@ -412,12 +416,12 @@ export async function getSolutionBySolutionId(solutionId: string) {
  * Returns the solution if one exists for the request
  */
 export async function getSolutionByRequestId(requestId: string) {
-  const { userId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
   if (!userId) {
     throw new Error('Unauthorized')
   }
 
-  const solution = await prisma.solution.findFirst({
+  const solution = await prisma.solutions.findFirst({
     where: { requestId },
     include: {
       submittedBy: {
@@ -454,7 +458,7 @@ export async function getSolutionByRequestId(requestId: string) {
  * For hierarchy chains, returns all eligible users at each level
  */
 export async function getSolutionApprovals(solutionId: string) {
-  const solution = await prisma.solution.findUnique({
+  const solution = await prisma.solutions.findUnique({
     where: { id: solutionId },
     include: {
       request: {
@@ -468,7 +472,7 @@ export async function getSolutionApprovals(solutionId: string) {
   }
 
   // Get engineering department ID
-  const engineeringDept = await prisma.department.findFirst({
+  const engineeringDept = await prisma.departments.findFirst({
     where: { type: 'ENGINEERING' },
     select: { id: true },
   })
@@ -477,7 +481,7 @@ export async function getSolutionApprovals(solutionId: string) {
     return []
   }
 
-  const approvals = await prisma.solutionApproval.findMany({
+  const approvals = await prisma.solution_approvals.findMany({
     where: { solutionId },
     include: {
       approver: {
@@ -542,7 +546,7 @@ export async function canUserApproveSolution(solutionId: string): Promise<{
   approval?: any
   solution?: any
 }> {
-  const { userId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
   if (!userId) {
     return { canApprove: false }
   }
@@ -557,7 +561,7 @@ export async function canUserApproveSolution(solutionId: string): Promise<{
   }
 
   // Get solution with request status
-  const solution = await prisma.solution.findUnique({
+  const solution = await prisma.solutions.findUnique({
     where: { id: solutionId },
     include: {
       request: {
@@ -586,7 +590,7 @@ export async function canUserApproveSolution(solutionId: string): Promise<{
   }
 
   // Get engineering department ID
-  const engineeringDept = await prisma.department.findFirst({
+  const engineeringDept = await prisma.departments.findFirst({
     where: { type: 'ENGINEERING' },
     select: { id: true },
   })
@@ -599,7 +603,7 @@ export async function canUserApproveSolution(solutionId: string): Promise<{
   let approval: any = null
 
   // Check for custom chain approval (any role can be in custom chain)
-  approval = await prisma.solutionApproval.findFirst({
+  approval = await prisma.solution_approvals.findFirst({
     where: {
       solutionId,
       status: 'pending',
@@ -611,7 +615,7 @@ export async function canUserApproveSolution(solutionId: string): Promise<{
 
   // If no custom chain approval, check hierarchy approval (engineering only)
   if (!approval && user.level && user.role === UserRole.engineering) {
-    approval = await prisma.solutionApproval.findFirst({
+    approval = await prisma.solution_approvals.findFirst({
       where: {
         solutionId,
         status: 'pending',
@@ -634,7 +638,7 @@ export async function canUserApproveSolution(solutionId: string): Promise<{
   }
 
   // Check if all previous approvals are completed
-  const previousApprovals = await prisma.solutionApproval.findMany({
+  const previousApprovals = await prisma.solution_approvals.findMany({
     where: {
       solutionId,
       order: { lt: approval.order },
@@ -657,7 +661,7 @@ export async function canUserApproveSolution(solutionId: string): Promise<{
  * Approve a solution
  */
 export async function approveSolution(solutionId: string, comments?: string, expectedUpdatedAt?: string | Date) {
-  const { userId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
   if (!userId) {
     throw new Error('Unauthorized')
   }
@@ -669,7 +673,7 @@ export async function approveSolution(solutionId: string, comments?: string, exp
 
   // Check for stale data if expectedUpdatedAt is provided (check request's updatedAt)
   if (expectedUpdatedAt && solution) {
-    const request = await prisma.request.findUnique({
+    const request = await prisma.requests.findUnique({
       where: { id: solution.requestId },
       select: { updatedAt: true },
     })
@@ -682,7 +686,7 @@ export async function approveSolution(solutionId: string, comments?: string, exp
   // Use transaction for atomicity
   await prisma.$transaction(async (tx) => {
     // Update approval
-    await tx.solutionApproval.update({
+    await tx.solution_approvals.update({
       where: { id: approval.id },
       data: {
         approverId: userId,
@@ -693,7 +697,7 @@ export async function approveSolution(solutionId: string, comments?: string, exp
     })
 
     // Get solution details for logging
-    const solutionData = await tx.solution.findUnique({
+    const solutionData = await tx.solutions.findUnique({
       where: { id: solutionId },
       select: { requestId: true, title: true },
     })
@@ -703,7 +707,7 @@ export async function approveSolution(solutionId: string, comments?: string, exp
     }
 
     // Log activity
-    await tx.requestActivity.create({
+    await tx.request_activities.create({
       data: {
         requestId: solutionData.requestId,
         userId,
@@ -713,7 +717,7 @@ export async function approveSolution(solutionId: string, comments?: string, exp
     })
 
     // Check if this was the last approval
-    const pendingApprovals = await tx.solutionApproval.count({
+    const pendingApprovals = await tx.solution_approvals.count({
       where: {
         solutionId,
         status: 'pending',
@@ -723,20 +727,20 @@ export async function approveSolution(solutionId: string, comments?: string, exp
     // If no more pending approvals, transition request status
     if (pendingApprovals === 0) {
       // Update request status to SendBackToRequester
-      await tx.request.update({
+      await tx.requests.update({
         where: { id: solutionData.requestId },
         data: { status: RequestStatus.SendBackToRequester },
       })
 
       // Get request for notification (include departmentId for department-wide notification)
-      const request = await tx.request.findUnique({
+      const request = await tx.requests.findUnique({
         where: { id: solutionData.requestId },
         select: { requesterId: true, title: true, departmentId: true },
       })
 
       if (request) {
         // Log status change
-        await tx.requestActivity.create({
+        await tx.request_activities.create({
           data: {
             requestId: solutionData.requestId,
             userId: request.requesterId,
@@ -775,7 +779,7 @@ export async function approveSolution(solutionId: string, comments?: string, exp
  * Reject a solution
  */
 export async function rejectSolution(solutionId: string, comments: string, expectedUpdatedAt?: string | Date) {
-  const { userId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
   if (!userId) {
     throw new Error('Unauthorized')
   }
@@ -791,7 +795,7 @@ export async function rejectSolution(solutionId: string, comments: string, expec
 
   // Check for stale data if expectedUpdatedAt is provided (check request's updatedAt)
   if (expectedUpdatedAt) {
-    const request = await prisma.request.findUnique({
+    const request = await prisma.requests.findUnique({
       where: { id: solution.requestId },
       select: { updatedAt: true },
     })
@@ -804,7 +808,7 @@ export async function rejectSolution(solutionId: string, comments: string, expec
   // Use transaction for atomicity
   await prisma.$transaction(async (tx) => {
     // Update approval to rejected
-    await tx.solutionApproval.update({
+    await tx.solution_approvals.update({
       where: { id: approval.id },
       data: {
         approverId: userId,
@@ -815,7 +819,7 @@ export async function rejectSolution(solutionId: string, comments: string, expec
     })
 
     // Mark all remaining pending approvals as rejected
-    await tx.solutionApproval.updateMany({
+    await tx.solution_approvals.updateMany({
       where: {
         solutionId,
         status: 'pending',
@@ -826,7 +830,7 @@ export async function rejectSolution(solutionId: string, comments: string, expec
     })
 
     // Log activity
-    await tx.requestActivity.create({
+    await tx.request_activities.create({
       data: {
         requestId: solution.requestId,
         userId,
@@ -836,20 +840,20 @@ export async function rejectSolution(solutionId: string, comments: string, expec
     })
 
     // Return request to SentToEngineer status for resubmission
-    await tx.request.update({
+    await tx.requests.update({
       where: { id: solution.requestId },
       data: { status: RequestStatus.SentToEngineer },
     })
 
     // Get solution details for notification
-    const solutionData = await tx.solution.findUnique({
+    const solutionData = await tx.solutions.findUnique({
       where: { id: solutionId },
       select: { submittedById: true, title: true },
     })
 
     if (solutionData) {
       // Create notification for solution submitter
-      await tx.notification.create({
+      await tx.notifications.create({
         data: {
           userId: solutionData.submittedById,
           type: 'approval_rejected',
@@ -872,7 +876,7 @@ export async function rejectSolution(solutionId: string, comments: string, expec
  * Allows engineering to track completion without formal final approval
  */
 export async function markRequestComplete(requestId: string, completionNote?: string) {
-  const { userId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
   if (!userId) {
     throw new Error('Unauthorized')
   }
@@ -892,7 +896,7 @@ export async function markRequestComplete(requestId: string, completionNote?: st
   }
 
   // Validate request exists and is in correct status
-  const request = await prisma.request.findUnique({
+  const request = await prisma.requests.findUnique({
     where: { id: requestId },
     select: {
       id: true,
@@ -913,13 +917,13 @@ export async function markRequestComplete(requestId: string, completionNote?: st
   // Use transaction for atomicity
   await prisma.$transaction(async (tx) => {
     // Update request status to Completed
-    await tx.request.update({
+    await tx.requests.update({
       where: { id: requestId },
       data: { status: RequestStatus.Completed },
     })
 
     // Log activity
-    await tx.requestActivity.create({
+    await tx.request_activities.create({
       data: {
         requestId,
         userId: user.id,
@@ -931,7 +935,7 @@ export async function markRequestComplete(requestId: string, completionNote?: st
     })
 
     // Create notification for requester
-    await tx.notification.create({
+    await tx.notifications.create({
       data: {
         userId: request.requesterId,
         type: 'status_changed',
@@ -955,7 +959,7 @@ export async function canMarkComplete(requestId: string): Promise<{
   canMark: boolean
   reason?: string
 }> {
-  const { userId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
   if (!userId) {
     return { canMark: false, reason: 'Not authenticated' }
   }
@@ -973,7 +977,7 @@ export async function canMarkComplete(requestId: string): Promise<{
     return { canMark: false, reason: 'Only engineering users can mark requests complete' }
   }
 
-  const request = await prisma.request.findUnique({
+  const request = await prisma.requests.findUnique({
     where: { id: requestId },
     select: { status: true },
   })
@@ -993,7 +997,7 @@ export async function canMarkComplete(requestId: string): Promise<{
  * Notify next approver in solution approval chain
  */
 async function notifyNextSolutionApprover(tx: any, solutionId: string) {
-  const nextApproval = await tx.solutionApproval.findFirst({
+  const nextApproval = await tx.solution_approvals.findFirst({
     where: {
       solutionId,
       status: 'pending',
@@ -1013,7 +1017,7 @@ async function notifyNextSolutionApprover(tx: any, solutionId: string) {
 
   // For custom chain: notify specific requiredApproverId
   if (nextApproval.isCustomChain && nextApproval.requiredApproverId) {
-    await tx.notification.create({
+    await tx.notifications.create({
       data: {
         userId: nextApproval.requiredApproverId,
         type: 'approval_needed',
@@ -1027,7 +1031,7 @@ async function notifyNextSolutionApprover(tx: any, solutionId: string) {
 
   // For hierarchy chain: notify all users at requiredLevel in engineering dept
   if (nextApproval.requiredLevel) {
-    const engineeringDept = await tx.department.findFirst({
+    const engineeringDept = await tx.departments.findFirst({
       where: { type: 'ENGINEERING' },
       select: { id: true },
     })
@@ -1052,7 +1056,7 @@ async function notifyNextSolutionApprover(tx: any, solutionId: string) {
       }))
 
       if (notifications.length > 0) {
-        await tx.notification.createMany({ data: notifications })
+        await tx.notifications.createMany({ data: notifications })
       }
     }
   }
@@ -1071,7 +1075,7 @@ export async function initiateFinalApproval(
   useCustomChain: boolean,
   customApproverIds?: string[]
 ) {
-  const { userId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
   if (!userId) {
     throw new Error('Unauthorized')
   }
@@ -1087,7 +1091,7 @@ export async function initiateFinalApproval(
   }
 
   // Validate request exists and is in correct status
-  const request = await prisma.request.findUnique({
+  const request = await prisma.requests.findUnique({
     where: { id: requestId },
     select: {
       id: true,
@@ -1132,13 +1136,13 @@ export async function initiateFinalApproval(
       // Custom approval chain (never auto-approved)
       await createCustomFinalApprovalChain(tx, requestId, customApproverIds, userId)
       // Update request status to FinalApproval
-      await tx.request.update({
+      await tx.requests.update({
         where: { id: requestId },
         data: { status: RequestStatus.FinalApproval },
       })
     } else if (isTopLevelInitiator) {
       // Top-level initiator with hierarchy - auto-approve and go directly to Completed
-      await tx.requestApproval.create({
+      await tx.request_approvals.create({
         data: {
           requestId,
           requiredLevel: maxLevel,
@@ -1152,12 +1156,12 @@ export async function initiateFinalApproval(
         },
       })
       // Skip approval phase, go directly to Completed
-      await tx.request.update({
+      await tx.requests.update({
         where: { id: requestId },
         data: { status: RequestStatus.Completed },
       })
       // Log status change
-      await tx.requestActivity.create({
+      await tx.request_activities.create({
         data: {
           requestId,
           userId: request.requesterId,
@@ -1168,7 +1172,7 @@ export async function initiateFinalApproval(
         },
       })
       // Create notification for requester
-      await tx.notification.create({
+      await tx.notifications.create({
         data: {
           userId: request.requesterId,
           type: 'status_changed',
@@ -1181,14 +1185,14 @@ export async function initiateFinalApproval(
       // Use department hierarchy
       await createHierarchyFinalApprovalChain(tx, requestId, request.departmentId, userId)
       // Update request status to FinalApproval
-      await tx.request.update({
+      await tx.requests.update({
         where: { id: requestId },
         data: { status: RequestStatus.FinalApproval },
       })
     }
 
     // Log activity
-    await tx.requestActivity.create({
+    await tx.request_activities.create({
       data: {
         requestId,
         userId,
@@ -1256,7 +1260,7 @@ async function createCustomFinalApprovalChain(
     isFinalApproval: true,
   }))
 
-  await tx.requestApproval.createMany({ data: approvals })
+  await tx.request_approvals.createMany({ data: approvals })
 
   return approvals
 }
@@ -1334,7 +1338,7 @@ async function createHierarchyFinalApprovalChain(
   }
 
   if (approvals.length > 0) {
-    await tx.requestApproval.createMany({ data: approvals })
+    await tx.request_approvals.createMany({ data: approvals })
   }
 
   return approvals
@@ -1344,7 +1348,7 @@ async function createHierarchyFinalApprovalChain(
  * Notify next final approver in chain
  */
 async function notifyNextFinalApprover(tx: any, requestId: string) {
-  const nextApproval = await tx.requestApproval.findFirst({
+  const nextApproval = await tx.request_approvals.findFirst({
     where: {
       requestId,
       status: 'pending',
@@ -1365,7 +1369,7 @@ async function notifyNextFinalApprover(tx: any, requestId: string) {
 
   // For custom chain: notify specific requiredApproverId
   if (nextApproval.isCustomChain && nextApproval.requiredApproverId) {
-    await tx.notification.create({
+    await tx.notifications.create({
       data: {
         userId: nextApproval.requiredApproverId,
         type: 'final_approval_needed',
@@ -1397,7 +1401,7 @@ async function notifyNextFinalApprover(tx: any, requestId: string) {
     }))
 
     if (notifications.length > 0) {
-      await tx.notification.createMany({ data: notifications })
+      await tx.notifications.createMany({ data: notifications })
     }
   }
 }
@@ -1409,7 +1413,7 @@ export async function canUserApproveFinalApproval(requestId: string): Promise<{
   canApprove: boolean
   approval?: any
 }> {
-  const { userId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
   if (!userId) {
     return { canApprove: false }
   }
@@ -1424,7 +1428,7 @@ export async function canUserApproveFinalApproval(requestId: string): Promise<{
   }
 
   // Check request status
-  const request = await prisma.request.findUnique({
+  const request = await prisma.requests.findUnique({
     where: { id: requestId },
     select: { status: true },
   })
@@ -1437,7 +1441,7 @@ export async function canUserApproveFinalApproval(requestId: string): Promise<{
   let approval: any = null
 
   // Check for custom chain approval
-  approval = await prisma.requestApproval.findFirst({
+  approval = await prisma.request_approvals.findFirst({
     where: {
       requestId,
       status: 'pending',
@@ -1450,7 +1454,7 @@ export async function canUserApproveFinalApproval(requestId: string): Promise<{
 
   // If no custom chain approval, check hierarchy approval
   if (!approval && user.level) {
-    approval = await prisma.requestApproval.findFirst({
+    approval = await prisma.request_approvals.findFirst({
       where: {
         requestId,
         status: 'pending',
@@ -1467,7 +1471,7 @@ export async function canUserApproveFinalApproval(requestId: string): Promise<{
   }
 
   // Check if all previous approvals are completed
-  const previousApprovals = await prisma.requestApproval.findMany({
+  const previousApprovals = await prisma.request_approvals.findMany({
     where: {
       requestId,
       isFinalApproval: true,
@@ -1485,7 +1489,7 @@ export async function canUserApproveFinalApproval(requestId: string): Promise<{
  * Approve final approval
  */
 export async function approveFinalApproval(requestId: string, comments?: string, expectedUpdatedAt?: string | Date) {
-  const { userId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
   if (!userId) {
     throw new Error('Unauthorized')
   }
@@ -1497,7 +1501,7 @@ export async function approveFinalApproval(requestId: string, comments?: string,
 
   // Check for stale data if expectedUpdatedAt is provided
   if (expectedUpdatedAt) {
-    const request = await prisma.request.findUnique({
+    const request = await prisma.requests.findUnique({
       where: { id: requestId },
       select: { updatedAt: true },
     })
@@ -1510,7 +1514,7 @@ export async function approveFinalApproval(requestId: string, comments?: string,
   // Use transaction for atomicity
   await prisma.$transaction(async (tx) => {
     // Update approval
-    await tx.requestApproval.update({
+    await tx.request_approvals.update({
       where: { id: approval.id },
       data: {
         approverId: userId,
@@ -1521,7 +1525,7 @@ export async function approveFinalApproval(requestId: string, comments?: string,
     })
 
     // Get request details for logging
-    const request = await tx.request.findUnique({
+    const request = await tx.requests.findUnique({
       where: { id: requestId },
       select: { requesterId: true, title: true, departmentId: true },
     })
@@ -1531,7 +1535,7 @@ export async function approveFinalApproval(requestId: string, comments?: string,
     }
 
     // Log activity
-    await tx.requestActivity.create({
+    await tx.request_activities.create({
       data: {
         requestId,
         userId,
@@ -1541,7 +1545,7 @@ export async function approveFinalApproval(requestId: string, comments?: string,
     })
 
     // Check if this was the last approval
-    const pendingApprovals = await tx.requestApproval.count({
+    const pendingApprovals = await tx.request_approvals.count({
       where: {
         requestId,
         isFinalApproval: true,
@@ -1551,13 +1555,13 @@ export async function approveFinalApproval(requestId: string, comments?: string,
 
     // If no more pending approvals, mark as completed
     if (pendingApprovals === 0) {
-      await tx.request.update({
+      await tx.requests.update({
         where: { id: requestId },
         data: { status: RequestStatus.Completed },
       })
 
       // Log completion
-      await tx.requestActivity.create({
+      await tx.request_activities.create({
         data: {
           requestId,
           userId: request.requesterId,
@@ -1569,7 +1573,7 @@ export async function approveFinalApproval(requestId: string, comments?: string,
       })
 
       // Get engineering department to exclude engineers from requester dept notification
-      const engineeringDept = await tx.department.findFirst({
+      const engineeringDept = await tx.departments.findFirst({
         where: { type: 'ENGINEERING' },
         select: { id: true },
       })
@@ -1613,7 +1617,7 @@ export async function approveFinalApproval(requestId: string, comments?: string,
  * Returns request to engineering for revision
  */
 export async function rejectFinalApproval(requestId: string, comments: string, expectedUpdatedAt?: string | Date) {
-  const { userId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
   if (!userId) {
     throw new Error('Unauthorized')
   }
@@ -1629,7 +1633,7 @@ export async function rejectFinalApproval(requestId: string, comments: string, e
 
   // Check for stale data if expectedUpdatedAt is provided
   if (expectedUpdatedAt) {
-    const request = await prisma.request.findUnique({
+    const request = await prisma.requests.findUnique({
       where: { id: requestId },
       select: { updatedAt: true },
     })
@@ -1642,7 +1646,7 @@ export async function rejectFinalApproval(requestId: string, comments: string, e
   // Use transaction for atomicity
   await prisma.$transaction(async (tx) => {
     // Update approval to rejected
-    await tx.requestApproval.update({
+    await tx.request_approvals.update({
       where: { id: approval.id },
       data: {
         approverId: userId,
@@ -1653,7 +1657,7 @@ export async function rejectFinalApproval(requestId: string, comments: string, e
     })
 
     // Mark all remaining final approvals as rejected
-    await tx.requestApproval.updateMany({
+    await tx.request_approvals.updateMany({
       where: {
         requestId,
         isFinalApproval: true,
@@ -1665,7 +1669,7 @@ export async function rejectFinalApproval(requestId: string, comments: string, e
     })
 
     // Get request details
-    const request = await tx.request.findUnique({
+    const request = await tx.requests.findUnique({
       where: { id: requestId },
       select: { title: true, departmentId: true },
     })
@@ -1675,7 +1679,7 @@ export async function rejectFinalApproval(requestId: string, comments: string, e
     }
 
     // Log activity
-    await tx.requestActivity.create({
+    await tx.request_activities.create({
       data: {
         requestId,
         userId,
@@ -1685,13 +1689,13 @@ export async function rejectFinalApproval(requestId: string, comments: string, e
     })
 
     // Return request to SentToEngineer status for engineering revision
-    await tx.request.update({
+    await tx.requests.update({
       where: { id: requestId },
       data: { status: RequestStatus.SentToEngineer },
     })
 
     // Get engineering department to notify all engineers
-    const engineeringDept = await tx.department.findFirst({
+    const engineeringDept = await tx.departments.findFirst({
       where: { type: 'ENGINEERING' },
       select: { id: true },
     })

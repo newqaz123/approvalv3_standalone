@@ -1,6 +1,6 @@
 'use server'
 
-import { auth } from '@clerk/nextjs/server'
+import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 
@@ -30,7 +30,7 @@ export async function getDepartmentHierarchy(departmentId: string): Promise<{
   members: HierarchyMember[]
   maxLevel: number
 }> {
-  const { userId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
   if (!userId) throw new Error('Unauthorized')
 
   const admin = await prisma.user.findUnique({
@@ -39,7 +39,7 @@ export async function getDepartmentHierarchy(departmentId: string): Promise<{
   })
   if (admin?.role !== 'admin') throw new Error('Admin access required')
 
-  const department = await prisma.department.findUnique({
+  const department = await prisma.departments.findUnique({
     where: { id: departmentId },
     include: {
       users: {
@@ -150,7 +150,7 @@ export async function updateHierarchy(
   departmentId: string,
   updates: Array<{ userId: string; level: number | null; isExternal?: boolean }>
 ): Promise<{ success: boolean; error?: string }> {
-  const { userId: adminId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const adminId = _authUser?.id
   if (!adminId) throw new Error('Unauthorized')
 
   const admin = await prisma.user.findUnique({
@@ -185,7 +185,7 @@ export async function updateHierarchy(
       // The unique constraint is [departmentId, approverId, approverLevel], so an upsert
       // keyed on the NEW level would fail to find the OLD-level record and create a duplicate.
       operations.push(
-        prisma.departmentApprover.deleteMany({
+        prisma.department_approvers.deleteMany({
           where: { departmentId, approverId: update.userId },
         })
       )
@@ -193,7 +193,7 @@ export async function updateHierarchy(
       if (update.level !== null) {
         // Re-create at the new level
         operations.push(
-          prisma.departmentApprover.create({
+          prisma.department_approvers.create({
             data: {
               departmentId,
               approverId: update.userId,
@@ -214,7 +214,7 @@ export async function updateHierarchy(
       // Log the change
       if (currentMember && currentMember.level !== update.level) {
         operations.push(
-          prisma.hierarchyChangeLog.create({
+          prisma.hierarchy_change_logs.create({
             data: {
               departmentId,
               adminUserId: adminId,
@@ -254,7 +254,7 @@ export interface HierarchyUser {
  * Returns users grouped by level, including external DepartmentApprovers
  */
 export async function getHierarchyData(departmentId: string) {
-  const { userId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
   if (!userId) {
     throw new Error('Unauthorized')
   }
@@ -270,7 +270,7 @@ export async function getHierarchyData(departmentId: string) {
   }
 
   // Get department with users and external approvers
-  const department = await prisma.department.findUnique({
+  const department = await prisma.departments.findUnique({
     where: { id: departmentId },
     include: {
       users: {
@@ -359,13 +359,13 @@ export async function validateHierarchyChange(departmentId: string): Promise<{
   pendingCount: number
   error?: string
 }> {
-  const { userId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
   if (!userId) {
     throw new Error('Unauthorized')
   }
 
   // Count pending approvals in this department
-  const pendingApprovals = await prisma.requestApproval.count({
+  const pendingApprovals = await prisma.request_approvals.count({
     where: {
       status: 'pending',
       request: {
@@ -393,7 +393,7 @@ export async function validateHierarchyChange(departmentId: string): Promise<{
  * Get pending approval count for a department (for display)
  */
 export async function getPendingApprovalsCount(departmentId: string): Promise<number> {
-  return await prisma.requestApproval.count({
+  return await prisma.request_approvals.count({
     where: {
       status: 'pending',
       request: {
@@ -413,7 +413,7 @@ export async function updateUserLevel(
   newLevel: number,
   expectedUpdatedAt?: Date
 ): Promise<{ success: boolean; error?: string }> {
-  const { userId: adminId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const adminId = _authUser?.id
   if (!adminId) {
     throw new Error('Unauthorized')
   }
@@ -477,7 +477,7 @@ export async function updateUserLevel(
       data: { level: newLevel },
     }),
     // Log the hierarchy change
-    prisma.hierarchyChangeLog.create({
+    prisma.hierarchy_change_logs.create({
       data: {
         departmentId: user.departmentId!,
         adminUserId: adminId,
@@ -499,13 +499,13 @@ export async function updateUserLevel(
  * Get hierarchy change history for a department
  */
 export async function getHierarchyChangeHistory(departmentId: string, limit = 10) {
-  const { userId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
   if (!userId) {
     throw new Error('Unauthorized')
   }
 
   // Get recent hierarchy changes for this department
-  const changes = await prisma.hierarchyChangeLog.findMany({
+  const changes = await prisma.hierarchy_change_logs.findMany({
     where: {
       departmentId,
     },
@@ -543,13 +543,13 @@ export async function getHierarchyChangeHistory(departmentId: string, limit = 10
  * Used for the workflow view available to all users
  */
 export async function getHierarchyDataForUser(departmentId: string) {
-  const { userId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
   if (!userId) {
     throw new Error('Unauthorized')
   }
 
   // Get department with users
-  const department = await prisma.department.findUnique({
+  const department = await prisma.departments.findUnique({
     where: { id: departmentId },
     include: {
       users: {
@@ -607,7 +607,7 @@ export async function getHierarchyDataForUser(departmentId: string) {
  * Get all departments accessible to a user for viewing hierarchy
  */
 export async function getDepartmentsForHierarchyView() {
-  const { userId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
   if (!userId) {
     throw new Error('Unauthorized')
   }
@@ -624,7 +624,7 @@ export async function getDepartmentsForHierarchyView() {
 
   // Admins and engineering can see all departments
   if (user.role === 'admin' || user.role === 'engineering') {
-    return prisma.department.findMany({
+    return prisma.departments.findMany({
       orderBy: { name: 'asc' },
       select: { id: true, name: true, type: true },
     })
@@ -632,7 +632,7 @@ export async function getDepartmentsForHierarchyView() {
 
   // General users see their own department
   if (user.departmentId) {
-    return prisma.department.findMany({
+    return prisma.departments.findMany({
       where: { id: user.departmentId },
       select: { id: true, name: true, type: true },
     })

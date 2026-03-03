@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { auth } from '@clerk/nextjs/server'
+import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
 
 /**
@@ -8,7 +8,7 @@ import prisma from '@/lib/prisma'
  */
 export async function GET() {
   try {
-    const { userId } = await auth()
+    const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
 
     if (!userId) {
       return NextResponse.json({ count: 0 }, { status: 401 })
@@ -32,7 +32,7 @@ export async function GET() {
     const [departmentApprovals, crossDepartmentApprovals] = await Promise.all([
       // Approvals in user's own department at their level (only if user has a department)
       user.departmentId
-        ? prisma.requestApproval.count({
+        ? prisma.request_approvals.count({
             where: {
               status: 'pending',
               requiredLevel: user.level,
@@ -43,7 +43,7 @@ export async function GET() {
           })
         : 0,
       // Cross-department approvals where user is listed as approver
-      prisma.requestApproval.count({
+      prisma.request_approvals.count({
         where: {
           status: 'pending',
           requiredApproverId: userId,

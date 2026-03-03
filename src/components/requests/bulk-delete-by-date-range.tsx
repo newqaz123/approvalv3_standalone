@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useUser } from '@clerk/nextjs'
+import { useSession } from 'next-auth/react'
 import { Trash2, AlertTriangle, Calendar, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -18,7 +18,7 @@ import { bulkDeleteRequestsByDateRange } from '@/server-actions/requests'
 import { useRouter } from 'next/navigation'
 
 export function BulkDeleteByDateRange() {
-  const { user } = useUser()
+  const { data: session } = useSession(); const user = session?.user
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -31,7 +31,7 @@ export function BulkDeleteByDateRange() {
   const [showConfirm, setShowConfirm] = useState(false)
 
   // Check if user is admin
-  const isAdmin = user?.publicMetadata?.role === 'admin'
+  const isAdmin = user?.role === 'admin'
 
   // Reset state when dialog closes (must be before early return)
   useEffect(() => {

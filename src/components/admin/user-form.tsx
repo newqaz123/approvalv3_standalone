@@ -22,7 +22,12 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { createUser, updateUser, type UserRole } from '@/server-actions/users'
-import { Department } from '@prisma/client'
+import type { departments as Department } from '@prisma/client'
+
+// Extended Department type with levelNames
+type DepartmentWithLevelNames = Department & {
+  levelNames: Record<string, string> | null
+}
 
 const userFormSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters'),
@@ -30,12 +35,13 @@ const userFormSchema = z.object({
   departmentId: z.string().min(1, 'Department is required'),
   role: z.enum(['admin', 'general_dept', 'engineering'] as const).optional(),
   level: z.number().int().min(1).max(10).optional().nullable(),
+  password: z.union([z.string().min(8, 'Password must be at least 8 characters'), z.literal('')]).optional(),
 })
 
 export type UserFormValues = z.infer<typeof userFormSchema>
 
 interface UserFormProps {
-  departments: Department[]
+  departments: DepartmentWithLevelNames[]
   initialData?: UserFormValues & { id?: string }
   onSuccess?: () => void
   onCancel?: () => void
@@ -53,6 +59,7 @@ export function UserForm({ departments, initialData, onSuccess, onCancel }: User
       departmentId: '',
       role: 'general_dept',
       level: null,
+      password: '',
     },
   })
 
@@ -78,7 +85,10 @@ export function UserForm({ departments, initialData, onSuccess, onCancel }: User
           id: initialData.id,
         })
       } else {
-        await createUser(submitData)
+        await createUser({
+          ...submitData,
+          password: data.password || undefined,
+        })
       }
       onSuccess?.()
     } catch (err) {
@@ -179,25 +189,78 @@ export function UserForm({ departments, initialData, onSuccess, onCancel }: User
           <FormField
             control={form.control}
             name="level"
+            render={({ field }) => {
+              const selectedDept = departments.find(d => d.id === selectedDepartmentId)
+              const levelNames = selectedDept?.levelNames
+              const hasLevelNames = levelNames && Object.keys(levelNames).length > 0
+
+              return (
+                <FormItem>
+                  <FormLabel>Approval Level</FormLabel>
+                  <FormControl>
+                    {hasLevelNames ? (
+                      <Select
+                        onValueChange={(val) => field.onChange(val === 'none' ? null : Number(val))}
+                        value={field.value?.toString() || 'none'}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select approval level" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">None</SelectItem>
+                          {Object.entries(levelNames)
+                            .sort(([a], [b]) => Number(a) - Number(b))
+                            .map(([key, value]) => (
+                              <SelectItem key={key} value={key}>
+                                Level {key} - {String(value)}
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <Input
+                        type="number"
+                        min={1}
+                        max={10}
+                        placeholder="e.g., 1"
+                        {...field}
+                        value={field.value ?? ''}
+                        onChange={(e) => {
+                          const val = e.target.value
+                          field.onChange(val === '' ? null : Number(val))
+                        }}
+                      />
+                    )}
+                  </FormControl>
+                  <p className="text-xs text-muted-foreground">
+                    {hasLevelNames
+                      ? 'Select the approval hierarchy level for this user'
+                      : 'Approval hierarchy level (1 = lowest, higher = more authority). Leave blank if not applicable.'}
+                  </p>
+                  <FormMessage />
+                </FormItem>
+              )
+            }}
+          />
+        )}
+
+        {/* Password - only for new users */}
+        {!initialData?.id && (
+          <FormField
+            control={form.control}
+            name="password"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>Approval Level</FormLabel>
+                <FormLabel>Initial Password</FormLabel>
                 <FormControl>
                   <Input
-                    type="number"
-                    min={1}
-                    max={10}
-                    placeholder="e.g., 1"
+                    type="password"
+                    placeholder="Min 8 characters (default: changeme)"
                     {...field}
-                    value={field.value ?? ''}
-                    onChange={(e) => {
-                      const val = e.target.value
-                      field.onChange(val === '' ? null : Number(val))
-                    }}
                   />
                 </FormControl>
                 <p className="text-xs text-muted-foreground">
-                  Approval hierarchy level (1 = lowest, higher = more authority). Leave blank if not applicable.
+                  User must change password on first login. Leave blank to use default &quot;changeme&quot;.
                 </p>
                 <FormMessage />
               </FormItem>

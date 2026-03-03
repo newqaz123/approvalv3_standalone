@@ -25,7 +25,7 @@ import {
 } from '@/components/ui/table'
 import { setTemplateDefault, toggleTemplateStatus, deleteTemplate } from '@/server-actions/templates'
 import { AdminCard, AdminCardsEmptyState } from '@/components/mobile/admin-card'
-import { FileText, CheckCircle2, XCircle, Power, Calendar } from 'lucide-react'
+import { FileText, CheckCircle2, XCircle, Power, Calendar, MoreVertical } from 'lucide-react'
 
 interface Template {
   id: string
@@ -163,7 +163,7 @@ export function TemplatesTable({ data }: TemplatesTableProps) {
       header: 'Created',
       cell: ({ row }) => {
         const date = new Date(row.getValue('createdAt') as string)
-        return date.toLocaleDateString()
+        return date.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })
       },
     },
     {
@@ -172,9 +172,9 @@ export function TemplatesTable({ data }: TemplatesTableProps) {
       cell: ({ row }) => (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" className="h-8 w-8 p-0">
+            <Button variant="ghost" className="h-11 w-11 p-0">
               <span className="sr-only">Open menu</span>
-              <span className="h-4 w-4">···</span>
+              <MoreVertical className="h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
@@ -230,7 +230,7 @@ export function TemplatesTable({ data }: TemplatesTableProps) {
                   },
                   {
                     label: 'Created',
-                    value: new Date(template.createdAt).toLocaleDateString(),
+                    value: new Date(template.createdAt).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }),
                     icon: <Calendar className="h-3.5 w-3.5" />,
                   },
                 ].filter(Boolean)}

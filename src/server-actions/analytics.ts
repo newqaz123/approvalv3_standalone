@@ -1,6 +1,6 @@
 'use server'
 
-import { auth } from '@clerk/nextjs/server'
+import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
 import { subDays, startOfDay, endOfDay, differenceInMinutes } from 'date-fns'
 import type {
@@ -16,7 +16,7 @@ import type {
  * Returns complete analytics data structure for dashboard
  */
 export async function getAnalyticsData(filters: AnalyticsFilters): Promise<AnalyticsData> {
-  const { userId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
 
   if (!userId) {
     throw new Error('Unauthorized')
@@ -59,14 +59,14 @@ export async function getAnalyticsFilters(): Promise<{
   departments: Array<{ id: string; name: string }>
   users: Array<{ id: string; name: string }>
 }> {
-  const { userId } = await auth()
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
 
   if (!userId) {
     throw new Error('Unauthorized')
   }
 
   // Fetch all departments
-  const departments = await prisma.department.findMany({
+  const departments = await prisma.departments.findMany({
     select: {
       id: true,
       name: true,
@@ -126,7 +126,7 @@ async function fetchPipelineData(
   whereClause: any
 ): Promise<WorkflowPipelineSegment[]> {
   // Get all requests matching the filter
-  const requests = await prisma.request.findMany({
+  const requests = await prisma.requests.findMany({
     where: whereClause,
     select: {
       status: true,
@@ -174,7 +174,7 @@ async function fetchPipelineData(
 async function fetchDepartmentData(
   whereClause: any
 ): Promise<Array<{ name: string; value: number }>> {
-  const requests = await prisma.request.findMany({
+  const requests = await prisma.requests.findMany({
     where: whereClause,
     select: {
       department: {
@@ -202,7 +202,7 @@ async function fetchDepartmentData(
  */
 async function fetchTimeMetrics(whereClause: any): Promise<TimeMetrics> {
   // Fetch completed requests with their approval dates
-  const requests = await prisma.request.findMany({
+  const requests = await prisma.requests.findMany({
     where: {
       ...whereClause,
       status: 'Completed',
@@ -292,7 +292,7 @@ async function fetchTimeMetrics(whereClause: any): Promise<TimeMetrics> {
  */
 async function fetchSummaryMetrics(whereClause: any): Promise<SummaryMetrics> {
   // Fetch all matching requests
-  const requests = await prisma.request.findMany({
+  const requests = await prisma.requests.findMany({
     where: whereClause,
     select: {
       status: true,

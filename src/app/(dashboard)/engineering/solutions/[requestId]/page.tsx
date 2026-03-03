@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server'
+import { auth } from '@/lib/auth-config'
 import { redirect, notFound } from 'next/navigation'
 import prisma from '@/lib/prisma'
 import { SolutionForm } from '@/components/solutions/solution-form'
@@ -13,12 +13,13 @@ interface SolutionSubmissionPageProps {
 export default async function SolutionSubmissionPage({
   params,
 }: SolutionSubmissionPageProps) {
-  const { userId } = await auth()
+  const session = await auth()
   const { requestId } = await params
 
-  if (!userId) {
+  if (!session?.user?.id) {
     redirect('/sign-in')
   }
+  const userId = session.user.id
 
   // Get current user with role and department
   const user = await prisma.user.findUnique({
@@ -36,7 +37,7 @@ export default async function SolutionSubmissionPage({
   }
 
   // Fetch request with validation
-  const request = await prisma.request.findFirst({
+  const request = await prisma.requests.findFirst({
     where: {
       id: requestId,
       status: RequestStatus.SentToEngineer,
@@ -76,7 +77,7 @@ export default async function SolutionSubmissionPage({
       },
       orderBy: { name: 'asc' },
     }),
-    prisma.solution.findFirst({
+    prisma.solutions.findFirst({
       where: { requestId },
       orderBy: { createdAt: 'desc' },
       select: {

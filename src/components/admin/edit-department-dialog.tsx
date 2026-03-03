@@ -35,7 +35,12 @@ export function EditDepartmentDialog({ department }: EditDepartmentDialogProps) 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="ghost" size="sm">
+        <Button 
+          variant="ghost" 
+          size="sm" 
+          className="h-8 w-8 p-0 hover:bg-muted/50 transition-colors"
+        >
+          <span className="sr-only">Edit department</span>
           <Pencil className="h-4 w-4" />
         </Button>
       </DialogTrigger>

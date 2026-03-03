@@ -54,7 +54,7 @@ export async function GET(
 
     // For JSON export, get full request snapshot with all related data
     if (format === 'json') {
-      const requestSnapshot = await prisma.request.findUnique({
+      const requestSnapshot = await prisma.requests.findUnique({
         where: { id: requestId },
         include: {
           requester: true,

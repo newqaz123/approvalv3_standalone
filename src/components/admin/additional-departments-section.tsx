@@ -12,7 +12,12 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Trash2 } from 'lucide-react'
-import { Department } from '@prisma/client'
+import type { departments as Department } from '@prisma/client'
+
+// Extended Department type with levelNames
+type DepartmentWithLevelNames = Department & {
+  levelNames: Record<string, string> | null
+}
 import {
   getUserAdditionalDepartments,
   addUserToDepartment,
@@ -23,7 +28,7 @@ interface AdditionalDepartmentsSectionProps {
   userId: string
   userRole: 'admin' | 'general_dept' | 'engineering'
   userHomeDepartmentId: string
-  departments: Department[]
+  departments: DepartmentWithLevelNames[]
 }
 
 interface DepartmentAssignment {
@@ -75,6 +80,11 @@ export function AdditionalDepartmentsSection({
     if (userRole === 'general_dept' && dept.type === 'ENGINEERING') return false
     return true
   })
+
+  // Get selected department's level names
+  const selectedDept = departments.find(d => d.id === selectedDeptId)
+  const levelNames = selectedDept?.levelNames
+  const hasLevelNames = levelNames && Object.keys(levelNames).length > 0
 
   const handleAdd = () => {
     if (!selectedDeptId || !selectedLevel) return
@@ -172,16 +182,33 @@ export function AdditionalDepartmentsSection({
               </SelectContent>
             </Select>
           </div>
-          <div className="w-20">
+          <div className="w-32">
             <label className="text-xs text-muted-foreground mb-1 block">Level</label>
-            <Input
-              type="number"
-              min={1}
-              max={10}
-              value={selectedLevel}
-              onChange={(e) => setSelectedLevel(e.target.value)}
-              className="h-9"
-            />
+            {selectedDeptId && hasLevelNames ? (
+              <Select value={selectedLevel} onValueChange={setSelectedLevel}>
+                <SelectTrigger className="h-9">
+                  <SelectValue placeholder="Select level" />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(levelNames)
+                    .sort(([a], [b]) => Number(a) - Number(b))
+                    .map(([key, value]) => (
+                      <SelectItem key={key} value={key}>
+                        {key} - {String(value)}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Input
+                type="number"
+                min={1}
+                max={10}
+                value={selectedLevel}
+                onChange={(e) => setSelectedLevel(e.target.value)}
+                className="h-9"
+              />
+            )}
           </div>
           <Button
             size="sm"

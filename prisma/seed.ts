@@ -1,4 +1,5 @@
 import { PrismaClient } from "@prisma/client";
+import { hashSync } from "bcryptjs";
 
 const prisma = new PrismaClient();
 
@@ -18,96 +19,49 @@ const engineeringLevelNames = {
 async function main() {
   console.log("Seeding database...");
 
-  // Update departments with levelNames for configurable approval hierarchy
-  console.log("Updating departments with levelNames...");
+  // ── Departments ──────────────────────────────────────────────────
+  console.log("Creating departments...");
 
-  await prisma.department.upsert({
-    where: { id: "ENG" },
-    update: { levelNames: engineeringLevelNames },
-    create: {
-      id: "ENG",
-      name: "Engineering",
-      type: "ENGINEERING",
-      levelNames: engineeringLevelNames,
-    },
-  });
+  const now = new Date();
+  const departments = [
+    { id: "ENG", name: "Engineering", type: "ENGINEERING" as const, levelNames: engineeringLevelNames, updatedAt: now },
+    { id: "QC", name: "Quality Control", type: "GENERAL" as const, levelNames: defaultLevelNames, updatedAt: now },
+    { id: "PD1", name: "Production Department 1", type: "GENERAL" as const, levelNames: defaultLevelNames, updatedAt: now },
+    { id: "PD2", name: "Production 2", type: "GENERAL" as const, levelNames: defaultLevelNames, updatedAt: now },
+    { id: "ADMIN", name: "Administration", type: "GENERAL" as const, levelNames: defaultLevelNames, updatedAt: now },
+  ];
 
-  await prisma.department.upsert({
-    where: { id: "QC" },
-    update: { levelNames: defaultLevelNames },
-    create: {
-      id: "QC",
-      name: "Quality Control",
-      type: "GENERAL",
-      levelNames: defaultLevelNames,
-    },
-  });
-
-  await prisma.department.upsert({
-    where: { id: "PD1" },
-    update: { levelNames: defaultLevelNames },
-    create: {
-      id: "PD1",
-      name: "Production Department 1",
-      type: "GENERAL",
-      levelNames: defaultLevelNames,
-    },
-  });
-
-  await prisma.department.upsert({
-    where: { id: "PD2" },
-    update: { levelNames: defaultLevelNames },
-    create: {
-      id: "PD2",
-      name: "Production 2",
-      type: "GENERAL",
-      levelNames: defaultLevelNames,
-    },
-  });
-
-  await prisma.department.upsert({
-    where: { id: "ADMIN" },
-    update: { levelNames: defaultLevelNames },
-    create: {
-      id: "ADMIN",
-      name: "Administration",
-      type: "GENERAL",
-      levelNames: defaultLevelNames,
-    },
-  });
-
-  console.log("Departments updated with levelNames.");
-
-  // Create a DepartmentApprover example:
-  // Engineering Manager (level 3) as cross-department approver for PD1 at level 3
-  // This demonstrates how an engineering user can approve for a general department
-  const engineeringManager = await prisma.user.findFirst({
-    where: { departmentId: "ENG", level: 3 },
-  });
-
-  if (engineeringManager) {
-    console.log(
-      `Creating DepartmentApprover: ${engineeringManager.name} approves for PD1 at level 3`
-    );
-    await prisma.departmentApprover.upsert({
-      where: {
-        departmentId_approverId_approverLevel: {
-          departmentId: "PD1",
-          approverId: engineeringManager.id,
-          approverLevel: 3,
-        },
-      },
-      update: {},
-      create: {
-        departmentId: "PD1",
-        approverId: engineeringManager.id,
-        approverLevel: 3,
-      },
+  for (const dept of departments) {
+    await prisma.departments.upsert({
+      where: { id: dept.id },
+      update: { levelNames: dept.levelNames, updatedAt: now },
+      create: dept,
     });
-    console.log("DepartmentApprover created.");
-  } else {
-    console.log("No Engineering level 3 user found, skipping DepartmentApprover seed.");
   }
+  console.log(`${departments.length} departments created/updated.`);
+
+  // ── Default Admin User ───────────────────────────────────────────
+  console.log("Creating default admin user...");
+
+  const adminPasswordHash = hashSync("changeme", 12);
+
+  await prisma.user.upsert({
+    where: { email: "admin@example.com" },
+    update: {},
+    create: {
+      email: "admin@example.com",
+      name: "System Admin",
+      passwordHash: adminPasswordHash,
+      role: "admin",
+      departmentId: null,
+      isActive: true,
+      forcePasswordChange: true,
+      updatedAt: now,
+    },
+  });
+
+  console.log("Default admin created: admin@example.com / changeme");
+  console.log("⚠️  Change the admin password after first login!");
 
   console.log("Seeding finished.");
 }

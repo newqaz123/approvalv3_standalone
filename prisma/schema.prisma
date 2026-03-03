@@ -8,14 +8,14 @@ datasource db {
 }
 
 model department_approvers {
-  id            String      @id
+  id            String      @id @default(uuid())
   departmentId  String
   approverId    String
   approverLevel Int
   createdAt     DateTime    @default(now())
-  updatedAt     DateTime
-  users         User       @relation(fields: [approverId], references: [id], onDelete: Cascade)
-  departments   departments @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  updatedAt     DateTime    @updatedAt
+  approver      User       @relation(fields: [approverId], references: [id], onDelete: Cascade)
+  department    departments @relation(fields: [departmentId], references: [id], onDelete: Cascade)
 
   @@unique([departmentId, approverId, approverLevel])
   @@index([approverId])
@@ -23,20 +23,20 @@ model department_approvers {
 }
 
 model departments {
-  id                    String                  @id
+  id                    String                  @id @default(uuid())
   name                  String                  @unique
   type                  DepartmentType
   createdAt             DateTime                @default(now())
-  updatedAt             DateTime
+  updatedAt             DateTime                @updatedAt
   levelNames            Json?
-  department_approvers  department_approvers[]
-  hierarchy_change_logs hierarchy_change_logs[]
+  departmentApprovers   department_approvers[]
+  hierarchyChangeLogs   hierarchy_change_logs[]
   requests              requests[]
   users                 User[]
 }
 
 model file_attachments {
-  id           String     @id
+  id           String     @id @default(uuid())
   requestId    String?
   fileName     String
   fileType     String
@@ -46,9 +46,9 @@ model file_attachments {
   createdAt    DateTime   @default(now())
   filePath     String
   solutionId   String?
-  requests     requests?  @relation(fields: [requestId], references: [id], onDelete: Cascade)
-  solutions    solutions? @relation(fields: [solutionId], references: [id], onDelete: Cascade)
-  users        User      @relation(fields: [uploadedById], references: [id])
+  request      requests?  @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  solution     solutions? @relation(fields: [solutionId], references: [id], onDelete: Cascade)
+  uploadedBy   User      @relation(fields: [uploadedById], references: [id])
 
   @@index([requestId])
   @@index([solutionId])
@@ -56,7 +56,7 @@ model file_attachments {
 }
 
 model hierarchy_change_logs {
-  id                                              String      @id
+  id                                              String      @id @default(uuid())
   departmentId                                    String
   adminUserId                                     String
   targetUserId                                    String
@@ -64,9 +64,9 @@ model hierarchy_change_logs {
   newLevel                                        Int
   reason                                          String?
   createdAt                                       DateTime    @default(now())
-  users_hierarchy_change_logs_adminUserIdTousers  User       @relation("hierarchy_change_logs_adminUserIdTousers", fields: [adminUserId], references: [id])
-  departments                                     departments @relation(fields: [departmentId], references: [id])
-  users_hierarchy_change_logs_targetUserIdTousers User       @relation("hierarchy_change_logs_targetUserIdTousers", fields: [targetUserId], references: [id])
+  adminUser                                       User       @relation("hierarchy_change_logs_adminUserIdTousers", fields: [adminUserId], references: [id])
+  department                                      departments @relation(fields: [departmentId], references: [id])
+  targetUser                                      User       @relation("hierarchy_change_logs_targetUserIdTousers", fields: [targetUserId], references: [id])
 
   @@index([adminUserId])
   @@index([createdAt])
@@ -75,7 +75,7 @@ model hierarchy_change_logs {
 }
 
 model notifications {
-  id        String           @id
+  id        String           @id @default(uuid())
   userId    String
   type      NotificationType
   title     String
@@ -84,8 +84,8 @@ model notifications {
   isRead    Boolean          @default(false)
   readAt    DateTime?
   createdAt DateTime         @default(now())
-  requests  requests?        @relation(fields: [requestId], references: [id], onDelete: Cascade)
-  users     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  request   requests?        @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([createdAt])
   @@index([isRead])
@@ -93,7 +93,7 @@ model notifications {
 }
 
 model request_activities {
-  id         String         @id
+  id         String         @id @default(uuid())
   requestId  String?
   action     String
   fromStatus RequestStatus?
@@ -101,8 +101,8 @@ model request_activities {
   comments   String?
   userId     String
   createdAt  DateTime       @default(now())
-  requests   requests?      @relation(fields: [requestId], references: [id], onDelete: Cascade)
-  users      User          @relation(fields: [userId], references: [id])
+  request    requests?      @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  user       User          @relation(fields: [userId], references: [id])
 
   @@index([createdAt])
   @@index([requestId])
@@ -110,7 +110,7 @@ model request_activities {
 }
 
 model request_approvals {
-  id                                                String         @id
+  id                                                String         @id @default(uuid())
   requestId                                         String
   approverId                                        String?
   requiredLevel                                     Int
@@ -122,9 +122,9 @@ model request_approvals {
   isCustomChain                                     Boolean        @default(false)
   isFinalApproval                                   Boolean        @default(false)
   requiredApproverId                                String?
-  users_request_approvals_approverIdTousers         User?         @relation("request_approvals_approverIdTousers", fields: [approverId], references: [id])
-  requests                                          requests       @relation(fields: [requestId], references: [id], onDelete: Cascade)
-  users_request_approvals_requiredApproverIdTousers User?         @relation("request_approvals_requiredApproverIdTousers", fields: [requiredApproverId], references: [id])
+  approver                                          User?         @relation("request_approvals_approverIdTousers", fields: [approverId], references: [id])
+  request                                           requests       @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  requiredApprover                                  User?         @relation("request_approvals_requiredApproverIdTousers", fields: [requiredApproverId], references: [id])
 
   @@index([approverId])
   @@index([requestId])
@@ -134,41 +134,41 @@ model request_approvals {
 }
 
 model request_engineer_assignments {
-  id           String   @id
+  id           String   @id @default(uuid())
   requestId    String
   engineerId   String
   assignedAt   DateTime @default(now())
   assignedById String?
-  users        User    @relation(fields: [engineerId], references: [id])
-  requests     requests @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  engineer     User    @relation(fields: [engineerId], references: [id])
+  request      requests @relation(fields: [requestId], references: [id], onDelete: Cascade)
 
   @@index([engineerId])
   @@index([requestId])
 }
 
 model requests {
-  id                                String                         @id
+  id                                String                         @id @default(uuid())
   title                             String
   description                       String
   status                            RequestStatus                  @default(ImprovementRequest)
   requesterId                       String
   departmentId                      String
   createdAt                         DateTime                       @default(now())
-  updatedAt                         DateTime
+  updatedAt                         DateTime                       @updatedAt
   engineeringCostEstimate           Decimal?                       @db.Decimal(15, 2)
   engineeringSolution               String?
   deletedAt                         DateTime?
   deletedBy                         String?
   isDeleted                         Boolean                        @default(false)
   isArchived                        Boolean                        @default(false)
-  file_attachments                  file_attachments[]
+  fileAttachments                   file_attachments[]
   notifications                     notifications[]
-  request_activities                request_activities[]
-  request_approvals                 request_approvals[]
-  request_engineer_assignments      request_engineer_assignments[]
-  users_requests_deletedByTousers   User?                         @relation("requests_deletedByTousers", fields: [deletedBy], references: [id])
-  departments                       departments                    @relation(fields: [departmentId], references: [id])
-  users_requests_requesterIdTousers User                          @relation("requests_requesterIdTousers", fields: [requesterId], references: [id])
+  activities                        request_activities[]
+  approvals                         request_approvals[]
+  engineerAssignments               request_engineer_assignments[]
+  deletedByUser                     User?                         @relation("requests_deletedByTousers", fields: [deletedBy], references: [id])
+  department                        departments                    @relation(fields: [departmentId], references: [id])
+  requester                         User                          @relation("requests_requesterIdTousers", fields: [requesterId], references: [id])
   solutions                         solutions[]
 
   @@index([createdAt])
@@ -179,7 +179,7 @@ model requests {
 }
 
 model solution_approvals {
-  id                                                 String         @id
+  id                                                 String         @id @default(uuid())
   solutionId                                         String
   requiredLevel                                      Int?
   requiredApproverId                                 String?
@@ -190,9 +190,9 @@ model solution_approvals {
   isCustomChain                                      Boolean        @default(false)
   approvedAt                                         DateTime?
   createdAt                                          DateTime       @default(now())
-  users_solution_approvals_approverIdTousers         User?         @relation("solution_approvals_approverIdTousers", fields: [approverId], references: [id])
-  users_solution_approvals_requiredApproverIdTousers User?         @relation("solution_approvals_requiredApproverIdTousers", fields: [requiredApproverId], references: [id])
-  solutions                                          solutions      @relation(fields: [solutionId], references: [id], onDelete: Cascade)
+  approver                                           User?         @relation("solution_approvals_approverIdTousers", fields: [approverId], references: [id])
+  requiredApprover                                   User?         @relation("solution_approvals_requiredApproverIdTousers", fields: [requiredApproverId], references: [id])
+  solution                                           solutions      @relation(fields: [solutionId], references: [id], onDelete: Cascade)
 
   @@index([approverId])
   @@index([order])
@@ -202,7 +202,7 @@ model solution_approvals {
 }
 
 model solutions {
-  id                 String               @id
+  id                 String               @id @default(uuid())
   requestId          String
   title              String
   description        String
@@ -213,11 +213,11 @@ model solutions {
   submittedById      String
   submittedAt        DateTime             @default(now())
   createdAt          DateTime             @default(now())
-  updatedAt          DateTime
-  file_attachments   file_attachments[]
-  solution_approvals solution_approvals[]
-  requests           requests             @relation(fields: [requestId], references: [id], onDelete: Cascade)
-  users              User                @relation(fields: [submittedById], references: [id])
+  updatedAt          DateTime             @updatedAt
+  fileAttachments    file_attachments[]
+  approvals          solution_approvals[]
+  request            requests             @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  submittedBy        User                @relation(fields: [submittedById], references: [id])
 
   @@index([createdAt])
   @@index([requestId])
@@ -225,42 +225,44 @@ model solutions {
 }
 
 model templates {
-  id          String   @id
+  id          String   @id @default(uuid())
   name        String
   title       String
   description String
   isDefault   Boolean  @default(false)
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
-  updatedAt   DateTime
+  updatedAt   DateTime @updatedAt
 
   @@index([isActive])
   @@index([isDefault])
 }
 
 model User {
-  id                                                              String                         @id
+  id                                                              String                         @id @default(uuid())
   email                                                           String                         @unique
   name                                                            String
+  passwordHash                                                    String?
   departmentId                                                    String?
   role                                                            UserRole                       @default(general_dept)
   level                                                           Int?
   isActive                                                        Boolean                        @default(true)
+  forcePasswordChange                                             Boolean                        @default(false)
   createdAt                                                       DateTime                       @default(now())
-  updatedAt                                                       DateTime
-  department_approvers                                            department_approvers[]
-  file_attachments                                                file_attachments[]
-  hierarchy_change_logs_hierarchy_change_logs_adminUserIdTousers  hierarchy_change_logs[]        @relation("hierarchy_change_logs_adminUserIdTousers")
-  hierarchy_change_logs_hierarchy_change_logs_targetUserIdTousers hierarchy_change_logs[]        @relation("hierarchy_change_logs_targetUserIdTousers")
+  updatedAt                                                       DateTime                       @updatedAt
+  departmentApproverRoles                                        department_approvers[]
+  fileAttachments                                                file_attachments[]
+  adminHierarchyChanges                                          hierarchy_change_logs[]        @relation("hierarchy_change_logs_adminUserIdTousers")
+  targetHierarchyChanges                                         hierarchy_change_logs[]        @relation("hierarchy_change_logs_targetUserIdTousers")
   notifications                                                   notifications[]
-  request_activities                                              request_activities[]
-  request_approvals_request_approvals_approverIdTousers           request_approvals[]            @relation("request_approvals_approverIdTousers")
-  request_approvals_request_approvals_requiredApproverIdTousers   request_approvals[]            @relation("request_approvals_requiredApproverIdTousers")
-  request_engineer_assignments                                    request_engineer_assignments[]
-  requests_requests_deletedByTousers                              requests[]                     @relation("requests_deletedByTousers")
-  requests_requests_requesterIdTousers                            requests[]                     @relation("requests_requesterIdTousers")
-  solution_approvals_solution_approvals_approverIdTousers         solution_approvals[]           @relation("solution_approvals_approverIdTousers")
-  solution_approvals_solution_approvals_requiredApproverIdTousers solution_approvals[]           @relation("solution_approvals_requiredApproverIdTousers")
+  requestActivities                                              request_activities[]
+  approvedRequests                                               request_approvals[]            @relation("request_approvals_approverIdTousers")
+  requiredApprovalRequests                                       request_approvals[]            @relation("request_approvals_requiredApproverIdTousers")
+  engineerAssignments                                            request_engineer_assignments[]
+  deletedRequests                                                requests[]                     @relation("requests_deletedByTousers")
+  createdRequests                                                requests[]                     @relation("requests_requesterIdTousers")
+  approvedSolutions                                              solution_approvals[]           @relation("solution_approvals_approverIdTousers")
+  requiredApprovalSolutions                                      solution_approvals[]           @relation("solution_approvals_requiredApproverIdTousers")
   solutions                                                       solutions[]
   department                                                     departments?                   @relation(fields: [departmentId], references: [id])
 

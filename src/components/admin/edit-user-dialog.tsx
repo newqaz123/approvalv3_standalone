@@ -14,7 +14,7 @@ import { UserForm } from '@/components/admin/user-form'
 import { AdditionalDepartmentsSection } from '@/components/admin/additional-departments-section'
 import { Pencil } from 'lucide-react'
 import { useRouter } from 'next/navigation'
-import { Department } from '@prisma/client'
+import type { departments as Department } from '@prisma/client'
 
 interface EditUserDialogProps {
   user: {
@@ -26,10 +26,14 @@ interface EditUserDialogProps {
     level: number | null
   }
   departments: Department[]
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }
 
-export function EditUserDialog({ user, departments }: EditUserDialogProps) {
-  const [open, setOpen] = useState(false)
+export function EditUserDialog({ user, departments, open: externalOpen, onOpenChange: externalOnOpenChange }: EditUserDialogProps) {
+  const [internalOpen, setInternalOpen] = useState(false)
+  const open = externalOpen !== undefined ? externalOpen : internalOpen
+  const setOpen = externalOnOpenChange || setInternalOpen
   const router = useRouter()
 
   const handleSuccess = () => {
@@ -39,11 +43,13 @@ export function EditUserDialog({ user, departments }: EditUserDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button variant="ghost" size="sm">
-          <Pencil className="h-4 w-4" />
-        </Button>
-      </DialogTrigger>
+      {externalOpen === undefined && (
+        <DialogTrigger asChild>
+          <Button variant="ghost" size="sm">
+            <Pencil className="h-4 w-4" />
+          </Button>
+        </DialogTrigger>
+      )}
       <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Edit User</DialogTitle>

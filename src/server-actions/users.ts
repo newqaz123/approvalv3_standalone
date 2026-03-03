@@ -1,11 +1,10 @@
 'use server'
 
-import { auth } from '@clerk/nextjs/server'
-import { clerkClient } from '@clerk/nextjs/server'
+import { hash, compare } from 'bcryptjs'
 import prisma from '@/lib/prisma'
 import { requireAdmin } from '@/lib/auth'
 import { revalidatePath } from 'next/cache'
-import type { Prisma } from '@prisma/client'
+import { auth } from '@/lib/auth-config'
 
 export type UserRole = 'admin' | 'general_dept' | 'engineering'
 
@@ -14,6 +13,8 @@ export interface CreateUserInput {
   email: string
   departmentId: string
   role: UserRole
+  password?: string
+  level?: number | null
 }
 
 export interface UpdateUserInput {
@@ -34,7 +35,7 @@ export type UserWithDepartment = {
   level: number | null
   isActive: boolean
   createdAt: Date
-  _count?: { departmentApproverRoles: number }
+  departmentApproverRoles?: { id: string; department: { id: string; name: string } }[]
 }
 
 /**
@@ -46,9 +47,16 @@ export async function getUsers() {
   const users = await prisma.user.findMany({
     include: {
       department: true,
-      _count: {
-        select: { departmentApproverRoles: true },
-      },
+      departmentApproverRoles: {
+        include: {
+          department: {
+            select: {
+              id: true,
+              name: true
+            }
+          }
+        }
+      }
     },
     orderBy: {
       name: 'asc',
@@ -75,13 +83,13 @@ export async function getUser(id: string) {
 }
 
 /**
- * Create a new user (creates both Clerk user and Prisma record)
+ * Create a new user (Prisma only — no external service)
  */
 export async function createUser(input: CreateUserInput) {
   const adminUserId = await requireAdmin()
 
   // Check if department exists
-  const department = await prisma.department.findUnique({
+  const department = await prisma.departments.findUnique({
     where: { id: input.departmentId },
   })
 
@@ -89,70 +97,43 @@ export async function createUser(input: CreateUserInput) {
     throw new Error('Department not found')
   }
 
+  // Check if email already exists
+  const existing = await prisma.user.findUnique({
+    where: { email: input.email },
+  })
+  if (existing) {
+    throw new Error('A user with this email already exists')
+  }
+
   // Automatically determine role based on department
   const autoRole: UserRole = input.departmentId === 'ENG' ? 'engineering' : 'general_dept'
 
-  let clerkUser: any
+  // Hash default password (admin sets it, or use default)
+  const password = input.password || 'changeme'
+  const passwordHash = await hash(password, 12)
 
-  try {
-    // Step 1: Create Clerk user with random password (user will reset via email)
-    const clerk = await clerkClient()
+  const user = await prisma.user.create({
+    data: {
+      email: input.email,
+      name: input.name,
+      passwordHash,
+      departmentId: input.departmentId,
+      role: autoRole,
+      level: input.level ?? null,
+      isActive: true,
+      forcePasswordChange: true,
+      updatedAt: new Date(),
+    },
+  })
 
-    // Generate a secure random password (user won't use this - they'll reset it)
-    const tempPassword = Math.random().toString(36).slice(-12) + Math.random().toString(36).slice(-12) + 'A1!'
+  console.log(`User created: ${input.email} (password must be changed on first login)`)
 
-    // Generate username from email (before @)
-    const username = input.email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '')
-
-    clerkUser = await clerk.users.createUser({
-      emailAddress: [input.email],
-      password: tempPassword,
-      username: username,
-      firstName: input.name.split(' ')[0],
-      lastName: input.name.split(' ').slice(1).join(' '),
-      skipPasswordChecks: true, // Skip password requirements since it's temporary
-      publicMetadata: {
-        role: autoRole,
-        departmentId: input.departmentId,
-      },
-    })
-
-    // Step 1.5: User receives Clerk welcome email automatically
-    console.log(`✅ User created: ${input.email}`)
-    console.log(`   They can sign in at your app and will be prompted to verify email`)
-
-  } catch (error) {
-    console.error('❌ Failed to create Clerk user:', error)
-    throw new Error(`Failed to create Clerk user: ${error}`)
-  }
-
-  try {
-    // Step 2: Create Prisma record
-    const user = await prisma.user.create({
-      data: {
-        id: clerkUser.id,
-        email: input.email,
-        name: input.name,
-        departmentId: input.departmentId,
-        role: autoRole,
-        isActive: true,
-      },
-    })
-
-    revalidatePath('/admin/users')
-    return user
-
-  } catch (error) {
-    // Step 3: Rollback Clerk user if Prisma fails
-    console.error('❌ Prisma create failed, rolling back Clerk user:', clerkUser.id, error)
-    const clerk = await clerkClient()
-    await clerk.users.deleteUser(clerkUser.id)
-    throw new Error(`Failed to create user record: ${error}`)
-  }
+  revalidatePath('/admin/users')
+  return user
 }
 
 /**
- * Update an existing user (updates both Clerk and Prisma)
+ * Update an existing user (Prisma only — no external service)
  */
 export async function updateUser(input: UpdateUserInput) {
   const adminUserId = await requireAdmin()
@@ -174,9 +155,7 @@ export async function updateUser(input: UpdateUserInput) {
   const autoRole: UserRole = input.departmentId === 'ENG' ? 'engineering' : 'general_dept'
   const finalRole: UserRole = input.role || autoRole
 
-  const clerk = await clerkClient()
-
-  // Track original values for rollback and audit logging
+  // Track original values for audit logging
   const originalName = existingUser.name
   const originalEmail = existingUser.email
   const originalRole = existingUser.role
@@ -186,7 +165,7 @@ export async function updateUser(input: UpdateUserInput) {
   // Check for pending approvals before changing department
   if (input.departmentId && input.departmentId !== originalDepartmentId) {
     // Check for pending request approvals
-    const pendingRequestApprovals = await prisma.requestApproval.findMany({
+    const pendingRequestApprovals = await prisma.request_approvals.findMany({
       where: {
         requiredApproverId: input.id,
         status: 'pending',
@@ -194,7 +173,7 @@ export async function updateUser(input: UpdateUserInput) {
     })
 
     // Check for pending solution approvals
-    const pendingSolutionApprovals = await prisma.solutionApproval.findMany({
+    const pendingSolutionApprovals = await prisma.solution_approvals.findMany({
       where: {
         requiredApproverId: input.id,
         status: 'pending',
@@ -210,152 +189,69 @@ export async function updateUser(input: UpdateUserInput) {
     }
   }
 
-  // Email synchronization: Check if email changed
-  let emailWasChanged = false
-  let oldEmailAddressId: string | undefined = undefined
-  if (input.email && input.email !== originalEmail) {
-    emailWasChanged = true
-
-    // Add new email address as verified and primary
-    await clerk.emailAddresses.createEmailAddress({
-      userId: input.id,
-      emailAddress: input.email,
-      verified: true,
-      primary: true,
+  // Check if email is being changed to one that already exists
+  if (input.email !== originalEmail) {
+    const emailExists = await prisma.user.findUnique({
+      where: { email: input.email },
     })
-
-    // Get old email ID for potential rollback
-    try {
-      const oldEmailObj = await clerk.emailAddresses.getEmailAddress(originalEmail)
-      if (oldEmailObj) {
-        oldEmailAddressId = oldEmailObj.id
-      }
-    } catch {
-      // Old email might not exist
+    if (emailExists) {
+      throw new Error('A user with this email already exists')
     }
   }
 
-  // Name & Metadata synchronization
-  await clerk.users.updateUser(input.id, {
-    firstName: input.name.split(' ')[0],
-    lastName: input.name.split(' ').slice(1).join(' '),
-    publicMetadata: {
-      role: finalRole,
+  const user = await prisma.user.update({
+    where: { id: input.id },
+    data: {
+      name: input.name,
+      email: input.email,
       departmentId: input.departmentId,
+      role: finalRole,
+      level: input.level ?? null,
+      updatedAt: new Date(),
     },
   })
 
-  // Update Prisma record with rollback protection
-  try {
-    const user = await prisma.user.update({
-      where: { id: input.id },
+  // Audit logging: Track all admin changes
+  const changes: string[] = []
+  if (input.name !== originalName) changes.push(`name: "${originalName}" → "${input.name}"`)
+  if (input.email !== originalEmail) changes.push(`email: "${originalEmail}" → "${input.email}"`)
+  if (finalRole !== originalRole) changes.push(`role: "${originalRole}" → "${finalRole}"`)
+  if (input.departmentId !== originalDepartmentId) changes.push(`departmentId: "${originalDepartmentId}" → "${input.departmentId}"`)
+  if ((input.level ?? null) !== originalLevel) changes.push(`level: "${String(originalLevel ?? 'null')}" → "${String(input.level ?? 'null')}"`)
+
+  if (changes.length > 0) {
+    await prisma.request_activities.create({
       data: {
-        name: input.name,
-        email: input.email,
-        departmentId: input.departmentId,
-        role: finalRole,
-        level: input.level ?? null,
+        action: 'user_admin_changed',
+        comments: `Updated user ${input.id}: ${changes.join(', ')}`,
+        userId: adminUserId,
+        createdAt: new Date(),
       },
     })
-
-    // Audit logging: Track all admin changes
-    const changes: string[] = []
-    if (input.name !== originalName) changes.push(`name: "${originalName}" → "${input.name}"`)
-    if (input.email !== originalEmail) changes.push(`email: "${originalEmail}" → "${input.email}"`)
-    if (finalRole !== originalRole) changes.push(`role: "${originalRole}" → "${finalRole}"`)
-    if (input.departmentId !== originalDepartmentId) changes.push(`departmentId: "${originalDepartmentId}" → "${input.departmentId}"`)
-    if ((input.level ?? null) !== originalLevel) changes.push(`level: "${String(originalLevel ?? 'null')}" → "${String(input.level ?? 'null')}"`)
-
-    if (changes.length > 0) {
-      await prisma.requestActivity.create({
-        data: {
-          requestId: undefined, // System-level activity (no associated request)
-          action: 'user_admin_changed',
-          comments: `Updated user ${input.id}: ${changes.join(', ')}`,
-          userId: adminUserId,
-        },
-      })
-    }
-
-    revalidatePath('/admin/users')
-
-    // Return warning if role changed
-    if (finalRole !== originalRole) {
-      // Note: Return user object with warning embedded in return value
-      // The UI will check if user has a warning property
-      return {
-        ...user,
-        _warning: 'User must re-login for role change to take effect.',
-      } as any
-    }
-
-    return user
-  } catch (prismaError) {
-    console.error('Prisma update failed, rolling back Clerk changes:', prismaError)
-
-    // Rollback Clerk name and metadata
-    try {
-      await clerk.users.updateUser(input.id, {
-        firstName: originalName.split(' ')[0],
-        lastName: originalName.split(' ').slice(1).join(' '),
-        publicMetadata: {
-          role: originalRole,
-          departmentId: originalDepartmentId,
-        },
-      })
-    } catch (rollbackError) {
-      console.error('Rollback failed for name/metadata:', rollbackError)
-    }
-
-    // Rollback email if it was changed
-    if (emailWasChanged && oldEmailAddressId) {
-      try {
-        // Delete the new email
-        try {
-          const newEmailObj = await clerk.emailAddresses.getEmailAddress(input.email)
-          if (newEmailObj) {
-            await clerk.emailAddresses.deleteEmailAddress(newEmailObj.id)
-          }
-        } catch {
-          // Continue if new email doesn't exist
-        }
-
-        // Recreate old email as primary/verified
-        await clerk.emailAddresses.createEmailAddress({
-          userId: input.id,
-          emailAddress: originalEmail,
-          verified: true,
-          primary: true,
-        })
-      } catch (rollbackEmailError) {
-        console.error('Rollback failed for email:', rollbackEmailError)
-      }
-    }
-
-    throw new Error(
-      `Failed to update user record: ${prismaError instanceof Error ? prismaError.message : String(prismaError)}`
-    )
   }
+
+  revalidatePath('/admin/users')
+
+  // Return warning if role changed
+  if (finalRole !== originalRole) {
+    return {
+      ...user,
+      _warning: 'User must re-login for role change to take effect.',
+    } as any
+  }
+
+  return user
 }
 
 /**
- * Deactivate a user (soft delete - updates both Clerk and Prisma)
+ * Deactivate a user (soft delete — Prisma only)
  */
 export async function deactivateUser(userId: string) {
   await requireAdmin()
 
-  // Update Prisma
   await prisma.user.update({
     where: { id: userId },
-    data: { isActive: false },
-  })
-
-  // Update Clerk metadata
-  const clerk = await clerkClient()
-  await clerk.users.updateUser(userId, {
-    publicMetadata: {
-      isActive: false,
-    },
+    data: { isActive: false, updatedAt: new Date() },
   })
 
   revalidatePath('/admin/users')
@@ -368,20 +264,67 @@ export async function deactivateUser(userId: string) {
 export async function activateUser(userId: string) {
   await requireAdmin()
 
-  // Update Prisma
   await prisma.user.update({
     where: { id: userId },
-    data: { isActive: true },
+    data: { isActive: true, updatedAt: new Date() },
   })
 
-  // Update Clerk metadata
-  const clerk = await clerkClient()
-  await clerk.users.updateUser(userId, {
-    publicMetadata: {
-      isActive: true,
+  revalidatePath('/admin/users')
+  return { success: true }
+}
+
+/**
+ * Reset a user's password (admin action)
+ */
+export async function resetUserPassword(userId: string, newPassword: string) {
+  await requireAdmin()
+
+  const passwordHash = await hash(newPassword, 12)
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      passwordHash,
+      forcePasswordChange: true,
+      updatedAt: new Date(),
     },
   })
 
   revalidatePath('/admin/users')
+  return { success: true }
+}
+
+/**
+ * Change own password (authenticated user action)
+ */
+export async function changePassword(currentPassword: string, newPassword: string) {
+  const session = await auth()
+  if (!session?.user?.id) {
+    throw new Error('Not authenticated')
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: session.user.id },
+    select: { passwordHash: true },
+  })
+
+  if (!user?.passwordHash) {
+    throw new Error('User not found')
+  }
+
+  const isValid = await compare(currentPassword, user.passwordHash)
+  if (!isValid) {
+    throw new Error('Current password is incorrect')
+  }
+
+  const passwordHash = await hash(newPassword, 12)
+  await prisma.user.update({
+    where: { id: session.user.id },
+    data: {
+      passwordHash,
+      forcePasswordChange: false,
+      updatedAt: new Date(),
+    },
+  })
+
   return { success: true }
 }
