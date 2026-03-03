@@ -2,7 +2,7 @@
 
 import { useSession, signOut } from 'next-auth/react'
 import Link from 'next/link'
-import { FileText, Settings, Bell, Wrench, BarChart3, LogOut, Lock } from 'lucide-react'
+import { FileText, Settings, Bell, Wrench, BarChart3, LogOut, Lock, LayoutDashboard } from 'lucide-react'
 import { usePathname } from 'next/navigation'
 import { NotificationBell } from '@/components/notifications/notification-bell'
 import { useState, useRef, useEffect } from 'react'
@@ -74,6 +74,18 @@ export function Navbar() {
               >
                 <BarChart3 className="h-4 w-4" />
                 Analytics
+              </Link>
+
+              <Link
+                href="/dashboard"
+                className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium ${
+                  pathname === '/dashboard'
+                    ? 'bg-gray-100 text-gray-900'
+                    : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900'
+                }`}
+              >
+                <LayoutDashboard className="h-4 w-4" />
+                Dashboard
               </Link>
 
               {isEngineering && (

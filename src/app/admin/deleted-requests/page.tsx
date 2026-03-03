@@ -5,13 +5,16 @@ import { Trash2, RotateCcw, AlertTriangle, Filter } from 'lucide-react'
 import { DeleteRequestModal } from '@/components/admin/delete-request-modal'
 import { RestoreRequestModal } from '@/components/admin/restore-request-modal'
 import { DeleteByDateRangeModal } from '@/components/admin/delete-by-date-range-modal'
+import { BackButton } from '@/components/admin/back-button'
 
 export default async function DeletedRequestsPage() {
   await requireAdmin()
 
   return (
-    <div className="container mx-auto py-8">
-      <div className="mb-6">
+    <div>
+      <BackButton />
+      <div className="container mx-auto py-8">
+        <div className="mb-6">
         <h1 className="text-3xl font-bold flex items-center gap-2">
           <Trash2 className="h-8 w-8 text-destructive" />
           Deleted Requests
@@ -24,6 +27,7 @@ export default async function DeletedRequestsPage() {
       <Suspense fallback={<div>Loading deleted requests...</div>}>
         <DeletedRequestsList />
       </Suspense>
+      </div>
     </div>
   )
 }
