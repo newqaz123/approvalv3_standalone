@@ -1,6 +1,6 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
+import { useState } from 'react'
 import { formatDistanceToNow } from 'date-fns'
 import {
   Bell,
@@ -13,6 +13,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
+import { RequestDetailModal } from '@/components/requests/request-detail-modal'
 import type { NotificationType } from '@prisma/client'
 
 interface NotificationListProps {
@@ -35,7 +36,8 @@ export function NotificationList({
   onMarkAsRead,
   onMarkAllAsRead,
 }: NotificationListProps) {
-  const router = useRouter()
+  const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null)
+  const [isModalOpen, setIsModalOpen] = useState(false)
 
   const getNotificationIcon = (type: NotificationType) => {
     const iconClass = 'h-5 w-5'
@@ -63,7 +65,15 @@ export function NotificationList({
     onMarkAsRead(notification.id)
 
     if (notification.requestId) {
-      router.push(`/requests/${notification.requestId}`)
+      setSelectedRequestId(notification.requestId)
+      setIsModalOpen(true)
+    }
+  }
+
+  const handleModalChange = (open: boolean) => {
+    setIsModalOpen(open)
+    if (!open) {
+      setSelectedRequestId(null)
     }
   }
 
@@ -138,6 +148,15 @@ export function NotificationList({
           </div>
         )}
       </ScrollArea>
+
+      {/* Request Detail Modal */}
+      {selectedRequestId && (
+        <RequestDetailModal
+          requestId={selectedRequestId}
+          open={isModalOpen}
+          onOpenChange={handleModalChange}
+        />
+      )}
     </div>
   )
 }
