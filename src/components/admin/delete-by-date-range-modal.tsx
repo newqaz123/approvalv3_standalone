@@ -119,12 +119,12 @@ export function DeleteByDateRangeModal({ count }: DeleteByDateRangeModalProps) {
             Delete by Date Range
           </DialogTitle>
           <DialogDescription className="space-y-2">
-            <p>
+            <span className="block">
               Permanently delete requests that were deleted within a specific date range.
-            </p>
-            <p className="font-semibold text-destructive">
+            </span>
+            <span className="block font-semibold text-destructive">
               ⚠️ This action CANNOT be undone!
-            </p>
+            </span>
           </DialogDescription>
         </DialogHeader>
 

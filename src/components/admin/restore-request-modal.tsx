@@ -66,15 +66,15 @@ export function RestoreRequestModal({
             Restore Request
           </DialogTitle>
           <DialogDescription className="space-y-2">
-            <p>
+            <span className="block">
               Are you sure you want to restore this request?
-            </p>
-            <p className="font-semibold">
+            </span>
+            <span className="block font-semibold">
               {requestTitle}
-            </p>
-            <p className="text-sm text-muted-foreground">
+            </span>
+            <span className="block text-sm text-muted-foreground">
               The request will be visible again in the main requests list.
-            </p>
+            </span>
           </DialogDescription>
         </DialogHeader>
 

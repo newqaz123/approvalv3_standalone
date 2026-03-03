@@ -69,6 +69,7 @@ export function DeleteRequestModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    console.log('[DeleteRequestModal] handleSubmit called', { mode, requestId })
     setError(null)
 
     // For bulk operations, require confirmation text
@@ -80,18 +81,23 @@ export function DeleteRequestModal({
     setIsSubmitting(true)
 
     try {
+      console.log('[DeleteRequestModal] Calling permanentlyDeleteRequests...')
       const result = await permanentlyDeleteRequests({
         mode,
         requestId,
       })
+      console.log('[DeleteRequestModal] Result:', result)
 
       if (result.success) {
+        console.log('[DeleteRequestModal] Success, closing modal')
         setOpen(false)
         router.refresh()
       } else {
+        console.log('[DeleteRequestModal] Error:', result.error)
         setError(result.error || 'Failed to delete requests')
       }
     } catch (err) {
+      console.error('[DeleteRequestModal] Exception:', err)
       setError('An error occurred while deleting requests')
     } finally {
       setIsSubmitting(false)
@@ -117,10 +123,10 @@ export function DeleteRequestModal({
             {getTitle()}
           </DialogTitle>
           <DialogDescription className="space-y-2">
-            <p>{getDescription()}</p>
-            <p className="font-semibold text-destructive">
+            <span className="block">{getDescription()}</span>
+            <span className="block font-semibold text-destructive">
               ⚠️ This action CANNOT be undone!
-            </p>
+            </span>
           </DialogDescription>
         </DialogHeader>
 

@@ -82,18 +82,20 @@ export function DeleteRequestDialog({
             <AlertTriangle className="h-5 w-5" />
             Delete Request
           </DialogTitle>
-          <DialogDescription className="space-y-2">
-            <p>
-              Are you sure you want to delete this request? This action will:
-            </p>
-            <ul className="list-disc list-inside text-sm space-y-1">
-              <li>Mark the request as deleted (soft delete)</li>
-              <li>Delete all attached files from disk</li>
-              <li>Preserve audit trail and activity logs</li>
-            </ul>
-            <p className="font-semibold pt-2">
-              {requestTitle}
-            </p>
+          <DialogDescription asChild>
+            <div className="space-y-2">
+              <p>
+                Are you sure you want to delete this request? This action will:
+              </p>
+              <ul className="list-disc list-inside text-sm space-y-1">
+                <li>Mark the request as deleted (soft delete)</li>
+                <li>Delete all attached files from disk</li>
+                <li>Preserve audit trail and activity logs</li>
+              </ul>
+              <p className="font-semibold pt-2">
+                {requestTitle}
+              </p>
+            </div>
           </DialogDescription>
         </DialogHeader>
 

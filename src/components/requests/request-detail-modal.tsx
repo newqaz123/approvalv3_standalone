@@ -37,6 +37,7 @@ import { ActivityTimeline } from '@/components/dashboard/activity-timeline'
 import { RequestDrawer } from '@/components/mobile/request-drawer'
 import { MobileApprovalActions } from '@/components/mobile/mobile-approval-actions'
 import { useIsMobile } from '@/hooks/use-media-query'
+import { RejectSolutionDialog } from '@/components/solutions/reject-solution-dialog'
 import Link from 'next/link'
 
 // Dynamic import for heavy PDF export component
@@ -93,6 +94,10 @@ export function RequestDetailModal({
   const [isUserInteracting, setIsUserInteracting] = useState(false)
   const [interactionTimer, setInteractionTimer] = useState<NodeJS.Timeout | null>(null)
   const [contentVisible, setContentVisible] = useState(false)
+
+  // Reject solution dialog state
+  const [showRejectDialog, setShowRejectDialog] = useState(false)
+  const [isRejecting, setIsRejecting] = useState(false)
 
   // Check for both request approvals and solution approvals rejections
   const hasRequestRejection = approvals.some(a => a.status === 'rejected')
@@ -291,6 +296,7 @@ export function RequestDetailModal({
   const handleRejectSolution = async (comments: string) => {
     if (!solution?.id || !request) return
 
+    setIsRejecting(true)
     try {
       const result = await rejectSolution(solution.id, comments, request.updatedAt)
 
@@ -299,10 +305,13 @@ export function RequestDetailModal({
       } else {
         await loadRequest()
         actionPerformedRef.current = true
+        setShowRejectDialog(false)
       }
     } catch (error) {
       console.error('Failed to reject solution:', error)
       alert('Failed to reject solution')
+    } finally {
+      setIsRejecting(false)
     }
   }
 
@@ -414,16 +423,19 @@ export function RequestDetailModal({
       )}
 
       <div className={isMobile ? "" : ""}>
-          <div className={`space-y-6 ${contentVisible ? 'content-fade-in' : ''}`}>
+          <div className={`space-y-6 py-4 ${contentVisible ? 'content-fade-in' : ''}`}>
             {/* Description */}
-            <div>
-              <h3 className="text-sm font-medium text-gray-700 mb-2">Description</h3>
-              <p className="text-sm text-gray-600 whitespace-pre-wrap">
+            <div className="bg-slate-50/50 rounded-xl p-4 border border-slate-100">
+              <h3 className="text-sm font-semibold text-slate-900 mb-3 flex items-center gap-2">
+                <FileText className="h-4 w-4 text-indigo-500" />
+                Description
+              </h3>
+              <p className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">
                 {request.description}
               </p>
             </div>
 
-            <Separator />
+            <Separator className="bg-slate-200" />
 
             {/* Requester Info */}
             <div>
@@ -596,12 +608,7 @@ export function RequestDetailModal({
                           Approve Solution
                         </Button>
                         <Button
-                          onClick={() => {
-                            const comments = prompt('Please enter rejection reason:')
-                            if (comments) {
-                              handleRejectSolution(comments)
-                            }
-                          }}
+                          onClick={() => setShowRejectDialog(true)}
                           variant="destructive"
                           size="sm"
                         >
@@ -945,6 +952,14 @@ export function RequestDetailModal({
             )}
           </div>
         </div>
+
+        {/* Reject Solution Dialog */}
+        <RejectSolutionDialog
+          open={showRejectDialog}
+          onOpenChange={setShowRejectDialog}
+          onConfirm={handleRejectSolution}
+          isLoading={isRejecting}
+        />
     </>
   )
 
@@ -960,15 +975,18 @@ export function RequestDetailModal({
   // Desktop: Render Dialog
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
-        <DialogHeader className="flex-shrink-0 px-6 pt-6">
-          <DialogTitle className="text-xl pr-8">
+      <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col bg-white/95 backdrop-blur-xl border border-slate-200/60 shadow-2xl shadow-slate-200/50 rounded-2xl">
+        <DialogHeader className="flex-shrink-0 px-6 pt-6 pb-4 border-b border-slate-100">
+          <DialogTitle className="text-xl font-bold text-slate-900 pr-8 leading-tight">
             {request.title}
           </DialogTitle>
-          <div className="flex items-center gap-3 text-sm flex-wrap mt-2">
+          <div className="flex items-center gap-3 text-sm flex-wrap mt-3">
             <StatusBadge status={request.status} hasRejection={hasRejection} />
             {hasRejection && <RejectedBadge size="sm" />}
-            <span className="text-gray-500">
+            <span className="text-slate-500 flex items-center gap-1.5">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
               Created {format(new Date(request.createdAt), 'MMM d, yyyy')}
             </span>
           </div>
@@ -983,25 +1001,28 @@ export function RequestDetailModal({
             )}
 
             {/* Description */}
-            <div>
-              <h3 className="text-sm font-medium text-gray-700 mb-2">Description</h3>
-              <p className="text-sm text-gray-600 whitespace-pre-wrap">
+            <div className="bg-slate-50/50 rounded-xl p-4 border border-slate-100">
+              <h3 className="text-sm font-semibold text-slate-900 mb-3 flex items-center gap-2">
+                <FileText className="h-4 w-4 text-indigo-500" />
+                Description
+              </h3>
+              <p className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">
                 {request.description}
               </p>
             </div>
 
-            <Separator />
+            <Separator className="bg-slate-200" />
 
             {/* Requester Info */}
-            <div>
-              <h3 className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
+            <div className="bg-slate-50/50 rounded-xl p-4 border border-slate-100">
+              <h3 className="text-sm font-semibold text-slate-900 mb-3 flex items-center gap-2">
                 {USER_ICON}
                 Requester
               </h3>
-              <div className="text-sm">
-                <p className="font-medium">{request.requester.name}</p>
-                <p className="text-gray-500">{request.requester.email}</p>
-                <p className="text-gray-500">{request.department?.name}</p>
+              <div className="text-sm space-y-1">
+                <p className="font-medium text-slate-900">{request.requester.name}</p>
+                <p className="text-slate-500">{request.requester.email}</p>
+                <p className="text-slate-500">{request.department?.name}</p>
               </div>
             </div>
 
@@ -1163,12 +1184,7 @@ export function RequestDetailModal({
                           Approve Solution
                         </Button>
                         <Button
-                          onClick={() => {
-                            const comments = prompt('Please enter rejection reason:')
-                            if (comments) {
-                              handleRejectSolution(comments)
-                            }
-                          }}
+                          onClick={() => setShowRejectDialog(true)}
                           variant="destructive"
                           size="sm"
                         >
@@ -1512,6 +1528,14 @@ export function RequestDetailModal({
             )}
           </div>
         </div>
+
+        {/* Reject Solution Dialog */}
+        <RejectSolutionDialog
+          open={showRejectDialog}
+          onOpenChange={setShowRejectDialog}
+          onConfirm={handleRejectSolution}
+          isLoading={isRejecting}
+        />
       </DialogContent>
     </Dialog>
   )

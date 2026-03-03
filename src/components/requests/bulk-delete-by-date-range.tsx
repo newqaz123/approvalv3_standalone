@@ -128,12 +128,12 @@ export function BulkDeleteByDateRange() {
             Bulk Delete Requests by Date
           </DialogTitle>
           <DialogDescription className="space-y-2">
-            <p>
+            <span className="block">
               Soft delete multiple requests that were created within a specific date range.
-            </p>
-            <p className="font-semibold text-destructive">
+            </span>
+            <span className="block font-semibold text-destructive">
               ⚠️ This will mark requests as deleted!
-            </p>
+            </span>
           </DialogDescription>
         </DialogHeader>
 
