@@ -14,3 +14,11 @@
 
 
 add filter PIC engineer
+
+
+![alt text](image.png)
+
+-resubmit should remember the previous data filled(work) and custom hierarchy setting(if any)
+-/requests and /dashboard_pending my approval sector reject solution badge(x) stuggle even after approved.
+-design /analytics page i think it's not beauty and useless. use skill
+navbar of engineer

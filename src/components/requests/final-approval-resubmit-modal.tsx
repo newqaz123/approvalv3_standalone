@@ -1,0 +1,744 @@
+'use client'
+
+import { useState } from 'react'
+import { format } from 'date-fns'
+import {
+  X,
+  Download,
+  Info,
+  Paperclip,
+  TrendingUp,
+  Lock,
+  History,
+  FileImage,
+  FileSpreadsheet,
+  File,
+  FileText,
+  Check,
+  Activity,
+  ChevronDown,
+  ChevronUp,
+  CheckCircle2,
+  Shield,
+  Settings2,
+  Plus,
+  ArrowUp,
+  ArrowDown,
+  Trash2,
+  RotateCcw,
+  AlertTriangle,
+  Play,
+  DollarSign,
+  Clock3,
+} from 'lucide-react'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { Separator } from '@/components/ui/separator'
+import { cn } from '@/lib/utils'
+
+// Types
+interface ApprovalStep {
+  id: string
+  name: string
+  role: string
+  status: 'submitted' | 'approved' | 'pending' | 'rejected'
+  comment: string
+  timestamp: string
+  avatar?: string
+}
+
+interface ApprovalStage {
+  stageNumber: number
+  stageName: string
+  steps: ApprovalStep[]
+}
+
+interface FileAttachment {
+  id: string
+  fileName: string
+  fileType: 'pdf' | 'image' | 'docx' | 'xlsx' | string
+  description?: string
+}
+
+interface ActivityItem {
+  id: string
+  action: string
+  user: string
+  timestamp: string
+  details?: string
+}
+
+interface User {
+  id: string
+  name: string
+  email: string
+  role: string
+  level?: number
+}
+
+interface FinalApprovalResubmitModalProps {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  data: {
+    id: string
+    referenceId: string
+    title: string
+    submitter: {
+      name: string
+      role: string
+      email: string
+      initials: string
+    }
+    requestDescription: string
+    solution: {
+      title: string
+      description: string
+      cost: number
+      currency: string
+      timeline?: string
+      submittedBy: string
+      submittedAt: string
+      files: FileAttachment[]
+    }
+    requestFiles: FileAttachment[]
+    stages: ApprovalStage[]
+    activities: ActivityItem[]
+    lastModified: string
+    rejection: {
+      reason: string
+      rejectedBy: string
+      rejectedAt: string
+      rejectedAtLevel: number
+    }
+  }
+  availableUsers: User[]
+  onRestart: (data: {
+    useCustomHierarchy: boolean
+    customApprovers: string[]
+  }) => void
+  onDownloadRequestFile?: (fileId: string) => void
+  onDownloadSolutionFile?: (fileId: string) => void
+}
+
+// File icon helper
+function getFileIcon(fileType: string) {
+  switch (fileType) {
+    case 'pdf':
+      return <FileText className="w-5 h-5 text-red-500" />
+    case 'image':
+      return <FileImage className="w-5 h-5 text-purple-500" />
+    case 'xlsx':
+      return <FileSpreadsheet className="w-5 h-5 text-emerald-500" />
+    case 'docx':
+      return <FileText className="w-5 h-5 text-blue-500" />
+    default:
+      return <File className="w-5 h-5 text-slate-400" />
+  }
+}
+
+// Step status configs
+const stepStatusConfig = {
+  submitted: { label: 'Submitted', className: 'bg-slate-100 text-slate-700' },
+  approved: { label: 'Approved', className: 'bg-emerald-100 text-emerald-700' },
+  pending: { label: 'Pending', className: 'bg-amber-100 text-amber-700' },
+  rejected: { label: 'Rejected', className: 'bg-red-100 text-red-700' },
+}
+
+// Avatar components
+function ApprovedAvatar() {
+  return (
+    <div className="shrink-0 size-8 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
+      <Check className="w-4 h-4 text-emerald-600" />
+    </div>
+  )
+}
+
+function RejectedAvatar() {
+  return (
+    <div className="shrink-0 size-8 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
+      <AlertTriangle className="w-4 h-4 text-red-600" />
+    </div>
+  )
+}
+
+function SubmittedAvatar({ initials }: { initials: string }) {
+  return (
+    <div className="shrink-0 size-8 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-600 dark:text-slate-400">
+      {initials}
+    </div>
+  )
+}
+
+// Retractable Activity Timeline
+function RetractableActivityTimeline({ activities }: { activities: ActivityItem[] }) {
+  const [expanded, setExpanded] = useState(false)
+
+  return (
+    <div className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between px-4 py-3 bg-slate-50 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <Activity className="w-4 h-4 text-slate-500" />
+          <span className="text-sm font-bold text-slate-700 dark:text-slate-300">Activity Timeline</span>
+          <span className="text-xs text-slate-400">({activities.length})</span>
+        </div>
+        {expanded ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+      </button>
+
+      {expanded && (
+        <div className="p-4 space-y-3">
+          {activities.map((activity, index) => (
+            <div key={activity.id} className="flex gap-3">
+              <div className="flex flex-col items-center">
+                <div className="size-2 rounded-full bg-slate-300 dark:bg-slate-700" />
+                {index !== activities.length - 1 && (
+                  <div className="w-px flex-1 bg-slate-200 dark:bg-slate-700 my-1" />
+                )}
+              </div>
+              <div className="flex-1 pb-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                      {activity.action}
+                    </p>
+                    {activity.details && (
+                      <p className="text-xs text-slate-500 mt-0.5">{activity.details}</p>
+                    )}
+                  </div>
+                  <span className="text-xs text-slate-400 shrink-0">
+                    {format(new Date(activity.timestamp), 'MMM d, h:mm a')}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 mt-1">by {activity.user}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Custom Approval Hierarchy Picker
+function CustomApprovalPicker({
+  availableUsers,
+  selectedApprovers,
+  onChange,
+}: {
+  availableUsers: User[]
+  selectedApprovers: string[]
+  onChange: (approvers: string[]) => void
+}) {
+  const [isOpen, setIsOpen] = useState(false)
+
+  const addApprover = (userId: string) => {
+    if (!selectedApprovers.includes(userId)) {
+      onChange([...selectedApprovers, userId])
+    }
+  }
+
+  const removeApprover = (index: number) => {
+    const newApprovers = [...selectedApprovers]
+    newApprovers.splice(index, 1)
+    onChange(newApprovers)
+  }
+
+  const moveUp = (index: number) => {
+    if (index === 0) return
+    const newApprovers = [...selectedApprovers]
+    ;[newApprovers[index], newApprovers[index - 1]] = [newApprovers[index - 1], newApprovers[index]]
+    onChange(newApprovers)
+  }
+
+  const moveDown = (index: number) => {
+    if (index === selectedApprovers.length - 1) return
+    const newApprovers = [...selectedApprovers]
+    ;[newApprovers[index], newApprovers[index + 1]] = [newApprovers[index + 1], newApprovers[index]]
+    onChange(newApprovers)
+  }
+
+  const getUserById = (id: string) => availableUsers.find((u) => u.id === id)
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-2">
+        {selectedApprovers.length === 0 && (
+          <p className="text-sm text-slate-400 italic">No custom approvers selected</p>
+        )}
+        {selectedApprovers.map((userId, index) => {
+          const user = getUserById(userId)
+          if (!user) return null
+          return (
+            <div
+              key={`${userId}-${index}`}
+              className="flex items-center gap-2 p-3 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800"
+            >
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">
+                  Level {index + 1}: {user.name}
+                </p>
+                <p className="text-xs text-slate-400 truncate">
+                  {user.role} • {user.email}
+                </p>
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => moveUp(index)}
+                  disabled={index === 0}
+                  className="p-1.5 text-slate-400 hover:text-slate-600 disabled:opacity-30 rounded"
+                >
+                  <ArrowUp className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => moveDown(index)}
+                  disabled={index === selectedApprovers.length - 1}
+                  className="p-1.5 text-slate-400 hover:text-slate-600 disabled:opacity-30 rounded"
+                >
+                  <ArrowDown className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => removeApprover(index)}
+                  className="p-1.5 text-slate-400 hover:text-red-500 rounded"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      <div className="relative">
+        <button
+          onClick={() => setIsOpen(!isOpen)}
+          className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-dashed border-slate-300 dark:border-slate-700 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+        >
+          <Plus className="w-4 h-4" />
+          Add Approver
+        </button>
+
+        {isOpen && (
+          <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-lg z-50 max-h-48 overflow-y-auto">
+            {availableUsers
+              .filter((u) => !selectedApprovers.includes(u.id))
+              .map((user) => (
+                <button
+                  key={user.id}
+                  onClick={() => {
+                    addApprover(user.id)
+                    setIsOpen(false)
+                  }}
+                  className="w-full text-left px-3 py-2 hover:bg-slate-100 dark:hover:bg-slate-800 text-sm"
+                >
+                  <p className="font-medium text-slate-900 dark:text-slate-100">
+                    {user.name}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {user.role} • {user.email}
+                  </p>
+                </button>
+              ))}
+            {availableUsers.filter((u) => !selectedApprovers.includes(u.id)).length === 0 && (
+              <p className="px-3 py-2 text-sm text-slate-400 italic">No more users available</p>
+            )}
+          </div>
+        )}
+      </div>
+
+      {isOpen && (
+        <div
+          className="fixed inset-0 z-40"
+          onClick={() => setIsOpen(false)}
+        />
+      )}
+    </div>
+  )
+}
+
+export function FinalApprovalResubmitModal({
+  open,
+  onOpenChange,
+  data,
+  availableUsers,
+  onRestart,
+  onDownloadRequestFile,
+  onDownloadSolutionFile,
+}: FinalApprovalResubmitModalProps) {
+  const [useCustomHierarchy, setUseCustomHierarchy] = useState(false)
+  const [customApprovers, setCustomApprovers] = useState<string[]>([])
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-5xl w-full max-h-[90vh] p-0 gap-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl rounded-xl overflow-hidden">
+        {/* Header */}
+        <DialogHeader className="flex-shrink-0 px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 sticky top-0 z-20">
+          <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center gap-3">
+                <DialogTitle className="text-lg font-bold text-slate-900 dark:text-slate-100 tracking-tight m-0">
+                  {data.title}
+                </DialogTitle>
+                <span className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-bold uppercase tracking-wider bg-red-100 text-red-700">
+                  <span className="size-2 rounded-full mr-1.5 bg-red-500" />
+                  Final Approval Rejected
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 pr-4 border-r border-slate-100 dark:border-slate-800 mr-2">
+                <div className="size-8 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-slate-500 dark:text-slate-400 font-bold text-xs">
+                  {data.submitter.initials}
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-sm font-bold text-slate-900 dark:text-slate-100 leading-tight">
+                    {data.submitter.name}
+                  </span>
+                  <span className="text-xs text-slate-500 dark:text-slate-400 leading-tight">
+                    {data.submitter.role} • {data.submitter.email}
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={() => onOpenChange(false)}
+                className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+        </DialogHeader>
+
+        {/* Scrollable Content */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-6" style={{ maxHeight: 'calc(90vh - 180px)' }}>
+          {/* Rejection Banner */}
+          <div className="bg-red-50 dark:bg-red-900/10 rounded-xl p-4 border border-red-200 dark:border-red-800/30">
+            <div className="flex items-start gap-3">
+              <div className="shrink-0 size-8 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
+                <AlertTriangle className="w-4 h-4 text-red-600" />
+              </div>
+              <div className="flex-1">
+                <h4 className="text-sm font-bold text-red-900 dark:text-red-400">
+                  Final Approval Rejected at Level {data.rejection.rejectedAtLevel}
+                </h4>
+                <p className="text-xs text-red-600 dark:text-red-300 mt-1">
+                  Rejected by {data.rejection.rejectedBy} on {format(new Date(data.rejection.rejectedAt), 'MMM d, yyyy')}
+                </p>
+                <div className="mt-2 p-2 bg-white dark:bg-slate-900 rounded border border-red-100 dark:border-red-800/30">
+                  <p className="text-xs text-slate-700 dark:text-slate-300 italic">
+                    &ldquo;{data.rejection.reason}&rdquo;
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Solution Section */}
+          <section className="bg-amber-50/60 dark:bg-amber-900/10 rounded-xl p-5 border border-amber-200/60 dark:border-amber-800/30">
+            <div className="flex justify-between items-start mb-3">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                <CheckCircle2 className="w-5 h-5 text-amber-600" />
+                Engineering Solution
+              </h3>
+              <div className="text-right">
+                <p className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Cost</p>
+                <p className="text-lg font-black text-slate-900 dark:text-slate-100">
+                  {new Intl.NumberFormat('en-US', {
+                    style: 'currency',
+                    currency: data.solution.currency || 'USD',
+                  }).format(data.solution.cost)}
+                </p>
+              </div>
+            </div>
+            <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed mb-3">
+              {data.solution.description}
+            </p>
+            {/* Timeline Display */}
+            {data.solution.timeline && (
+              <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400 mb-3">
+                <Clock3 className="w-4 h-4 text-slate-400" />
+                <span className="font-medium">Timeline:</span>
+                <span>{data.solution.timeline}</span>
+              </div>
+            )}
+            <div className="flex items-center justify-between text-xs text-slate-500">
+              <span>Submitted by {data.solution.submittedBy}</span>
+              <span>{format(new Date(data.solution.submittedAt), 'MMM d, yyyy')}</span>
+            </div>
+          </section>
+
+          {/* Request Description */}
+          <section>
+            <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-3 flex items-center gap-2">
+              <Info className="w-4 h-4 text-slate-400" />
+              Original Request Description
+            </h3>
+            <div className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed bg-slate-50/70 dark:bg-slate-800/30 rounded-xl p-4 border border-slate-100 dark:border-slate-800">
+              <p>{data.requestDescription}</p>
+            </div>
+          </section>
+
+          {/* Attachments */}
+          <section>
+            <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-3 flex items-center gap-2">
+              <Paperclip className="w-4 h-4 text-slate-400" />
+              Attached Documentation
+            </h3>
+
+            {data.requestFiles.length > 0 && (
+              <div className="mb-4">
+                <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+                  Request Attachments ({data.requestFiles.length})
+                </h4>
+                <div className="grid grid-cols-1 gap-2">
+                  {data.requestFiles.map((file) => (
+                    <div
+                      key={file.id}
+                      className="flex items-center p-3 border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900 hover:border-slate-400 dark:hover:border-slate-600 transition-colors group relative gap-3"
+                    >
+                      {getFileIcon(file.fileType)}
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate">
+                          {file.fileName}
+                        </p>
+                        {file.description && (
+                          <p className="text-[10px] text-slate-400 truncate">
+                            &ldquo;{file.description}&rdquo;
+                          </p>
+                        )}
+                      </div>
+                      {onDownloadRequestFile && (
+                        <button
+                          onClick={() => onDownloadRequestFile(file.id)}
+                          className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition-colors"
+                          title="Download"
+                        >
+                          <Download className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {data.solution.files.length > 0 && (
+              <div>
+                <h4 className="text-xs font-bold text-amber-600 uppercase tracking-wider mb-2">
+                  Solution Attachments ({data.solution.files.length})
+                </h4>
+                <div className="grid grid-cols-1 gap-2">
+                  {data.solution.files.map((file) => (
+                    <div
+                      key={file.id}
+                      className="flex items-center p-3 border border-amber-200 dark:border-amber-800/30 rounded-lg bg-amber-50/30 dark:bg-amber-900/10 hover:border-amber-400 dark:hover:border-amber-600 transition-colors group relative gap-3"
+                    >
+                      {getFileIcon(file.fileType)}
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate">
+                          {file.fileName}
+                        </p>
+                        {file.description && (
+                          <p className="text-[10px] text-slate-400 truncate">
+                            &ldquo;{file.description}&rdquo;
+                          </p>
+                        )}
+                      </div>
+                      {onDownloadSolutionFile && (
+                        <button
+                          onClick={() => onDownloadSolutionFile(file.id)}
+                          className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition-colors"
+                          title="Download"
+                        >
+                          <Download className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </section>
+
+          <Separator className="bg-slate-200 dark:bg-slate-700" />
+
+          {/* Previous Approval Chain */}
+          <section>
+            <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-4 flex items-center gap-2">
+              <TrendingUp className="w-5 h-5 text-slate-400" />
+              Previous Approval Attempts
+            </h3>
+            <div className="flex flex-col gap-4">
+              {data.stages.map((stage) => (
+                <div
+                  key={stage.stageNumber}
+                  className="flex flex-col sm:flex-row items-start gap-4 p-4 rounded-xl bg-slate-50/80 dark:bg-slate-800/30 border border-slate-100 dark:border-slate-800/60"
+                >
+                  <div className="w-full sm:w-28 shrink-0 pt-1 flex flex-row sm:flex-col justify-between sm:justify-start items-center sm:items-start border-b sm:border-b-0 border-slate-200 dark:border-slate-700 pb-2 sm:pb-0 mb-2 sm:mb-0">
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                        Stage {stage.stageNumber}
+                      </h4>
+                      <p className="text-xs text-slate-400 leading-tight mt-0.5">{stage.stageName}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex-1 w-full grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {stage.steps.map((step) => {
+                      const stepStatus = stepStatusConfig[step.status]
+                      const isApproved = step.status === 'approved'
+                      const isRejected = step.status === 'rejected'
+
+                      return (
+                        <div
+                          key={step.id}
+                          className={cn(
+                            "flex gap-3 items-start p-3 rounded-lg border shadow-sm",
+                            isRejected
+                              ? "bg-red-50 dark:bg-red-900/10 border-red-100 dark:border-red-800/30"
+                              : "bg-white dark:bg-slate-900/60 border-slate-100 dark:border-slate-800/80"
+                          )}
+                        >
+                          {isApproved ? (
+                            <ApprovedAvatar />
+                          ) : isRejected ? (
+                            <RejectedAvatar />
+                          ) : (
+                            <SubmittedAvatar initials={step.avatar || step.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()} />
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">
+                                {step.name}
+                              </span>
+                              <span className={cn(
+                                "text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0",
+                                stepStatus.className
+                              )}>
+                                {stepStatus.label}
+                              </span>
+                            </div>
+                            <span className="text-xs text-slate-400 block">{step.role}</span>
+                            <p className="mt-2 text-xs text-slate-600 dark:text-slate-400 italic leading-relaxed">
+                              &ldquo;{step.comment}&rdquo;
+                            </p>
+                            <div className="mt-2 text-[11px] text-slate-400 text-right">
+                              {step.timestamp !== '-' ? format(new Date(step.timestamp), 'MMM d, h:mm a') : '-'}
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <Separator className="bg-slate-200 dark:bg-slate-700" />
+
+          {/* Restart Final Approval Configuration */}
+          <section className="bg-amber-50 dark:bg-amber-900/10 rounded-xl p-5 border border-amber-200 dark:border-amber-800/30">
+            <div className="flex items-center gap-2 mb-4">
+              <RotateCcw className="w-5 h-5 text-amber-600" />
+              <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                Restart Final Approval
+              </h3>
+            </div>
+            <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
+              The final approval was rejected. You can restart the process with the same or modified approval chain.
+            </p>
+
+            <div className="bg-white dark:bg-slate-900 rounded-lg p-4 border border-slate-200 dark:border-slate-800">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <Settings2 className="w-4 h-4 text-slate-500" />
+                  <span className="text-sm font-bold">Custom Approval Hierarchy</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-500">{useCustomHierarchy ? 'On' : 'Off'}</span>
+                  <button
+                    onClick={() => setUseCustomHierarchy(!useCustomHierarchy)}
+                    className={cn(
+                      "relative inline-flex h-5 w-9 items-center rounded-full transition-colors",
+                      useCustomHierarchy ? "bg-amber-600" : "bg-slate-200 dark:bg-slate-700"
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "inline-block h-3 w-3 transform rounded-full bg-white transition-transform",
+                        useCustomHierarchy ? "translate-x-5" : "translate-x-1"
+                      )}
+                    />
+                  </button>
+                </div>
+              </div>
+              <p className="text-xs text-slate-500 mb-3">
+                {useCustomHierarchy
+                  ? 'Define a custom approval chain for this restart.'
+                  : 'Use the default department hierarchy for final approval.'}
+              </p>
+
+              {useCustomHierarchy && (
+                <div className="border-t border-slate-200 dark:border-slate-700 pt-3">
+                  <CustomApprovalPicker
+                    availableUsers={availableUsers}
+                    selectedApprovers={customApprovers}
+                    onChange={setCustomApprovers}
+                  />
+                </div>
+              )}
+            </div>
+          </section>
+
+          <Separator className="bg-slate-200 dark:bg-slate-700" />
+
+          {/* Retractable Activity Timeline */}
+          <RetractableActivityTimeline activities={data.activities} />
+        </div>
+
+        {/* Footer Actions */}
+        <div className="px-6 py-4 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-4 text-xs text-slate-400 font-medium">
+            <span className="flex items-center gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5 text-red-500" />
+              Rejected at Level {data.rejection.rejectedAtLevel}
+            </span>
+            <span className="flex items-center gap-1.5">
+              <History className="w-3.5 h-3.5" />
+              Last Modified: {format(new Date(data.lastModified), 'MMM d, yyyy')}
+            </span>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                onRestart({
+                  useCustomHierarchy,
+                  customApprovers,
+                })
+                onOpenChange(false)
+              }}
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+            >
+              <RotateCcw className="w-4 h-4 mr-1.5" />
+              Restart Final Approval
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
