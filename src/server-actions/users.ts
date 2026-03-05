@@ -328,3 +328,37 @@ export async function changePassword(currentPassword: string, newPassword: strin
 
   return { success: true }
 }
+
+/**
+ * Get users from a specific department for custom approval hierarchy
+ * Returns users with level >= specified minimum level
+ */
+export async function getUsersForCustomHierarchy(departmentId: string, minLevel: number = 1) {
+  const session = await auth()
+  if (!session?.user?.id) {
+    throw new Error('Not authenticated')
+  }
+
+  const users = await prisma.user.findMany({
+    where: {
+      departmentId,
+      isActive: true,
+      level: {
+        gte: minLevel,
+      },
+    },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      level: true,
+    },
+    orderBy: [
+      { level: 'desc' },
+      { name: 'asc' },
+    ],
+  })
+
+  return users
+}
+

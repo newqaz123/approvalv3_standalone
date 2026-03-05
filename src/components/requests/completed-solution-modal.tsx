@@ -23,6 +23,7 @@ import {
   UserCheck,
   Package,
   Clock3,
+  Shield,
 } from 'lucide-react'
 import {
   Dialog,
@@ -98,6 +99,9 @@ interface CompletedSolutionModalProps {
     sentToRequesterAt: string
     requesterName?: string
   }
+  userDepartment?: string
+  userId?: string
+  onSubmitFinalApproval?: () => void
   onDownloadRequestFile?: (fileId: string) => void
   onDownloadSolutionFile?: (fileId: string) => void
 }
@@ -199,9 +203,14 @@ export function CompletedSolutionModal({
   open,
   onOpenChange,
   data,
+  userDepartment,
+  userId,
+  onSubmitFinalApproval,
   onDownloadRequestFile,
   onDownloadSolutionFile,
 }: CompletedSolutionModalProps) {
+  // Check if user is from requester department - they can see the Submit Final Approval button
+  const isRequesterDept = userDepartment === 'Requester' || userDepartment === 'Production 1' || userDepartment === 'Production 2'
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-5xl w-full max-h-[90vh] p-0 gap-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl rounded-xl overflow-hidden">
@@ -481,6 +490,15 @@ export function CompletedSolutionModal({
               Last Modified: {format(new Date(data.lastModified), 'MMM d, yyyy')}
             </span>
           </div>
+          {isRequesterDept && onSubmitFinalApproval && (
+            <button
+              onClick={onSubmitFinalApproval}
+              className="flex items-center gap-2 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold rounded-lg transition-colors"
+            >
+              <Shield className="w-4 h-4" />
+              Submit Final Approval
+            </button>
+          )}
         </div>
       </DialogContent>
     </Dialog>

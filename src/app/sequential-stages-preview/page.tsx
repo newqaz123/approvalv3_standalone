@@ -109,6 +109,7 @@ const sampleSolutionFiles = [
 
 export default function SequentialStagesPreview() {
   const [activeModal, setActiveModal] = useState<string | null>(null)
+  const [userDepartment, setUserDepartment] = useState<string>('Engineering')
 
   // ============ REQUEST FLOW DATA ============
   const requestFlowData = {
@@ -420,11 +421,11 @@ export default function SequentialStagesPreview() {
           modalId: 'request-completed',
           title: '1.3 Completed Request',
           subtitle: 'Sent to Engineer',
-          description: 'Read-only view after approval',
+          description: 'Engineering sees Submit Solution button',
           icon: <Check className="w-5 h-5 text-emerald-600" />,
           badge: 'Completed',
           badgeColor: 'bg-emerald-100 text-emerald-700',
-          features: ['Sent to engineer', 'No actions'],
+          features: ['Sent to engineer', 'Engineering: Submit Solution button'],
         },
       ],
     },
@@ -471,11 +472,11 @@ export default function SequentialStagesPreview() {
           modalId: 'solution-completed',
           title: '2.3 Completed Solution',
           subtitle: 'Sent to Requester',
-          description: 'Read-only after D&C approval',
+          description: 'Requester sees Submit Final Approval button',
           icon: <Package className="w-5 h-5 text-purple-600" />,
           badge: 'Completed',
           badgeColor: 'bg-purple-100 text-purple-700',
-          features: ['Sent to requester', 'No actions'],
+          features: ['Sent to requester', 'Requester: Submit Final Approval button'],
         },
       ],
     },
@@ -543,6 +544,36 @@ export default function SequentialStagesPreview() {
           <p className="text-slate-600 dark:text-slate-400 max-w-3xl">
             Complete workflow visualization showing all stages across three flows. 
             Each flow has submit, review, resubmit (if rejected), and completed stages.
+          </p>
+        </div>
+
+        {/* Department Selector */}
+        <div className="mb-8 bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700">
+          <label className="block text-sm font-bold text-slate-900 dark:text-slate-100 mb-2">
+            Simulate User Department (for conditional button display):
+          </label>
+          <div className="flex flex-wrap gap-2">
+            {['Engineering', 'Production 1', 'Production 2', 'Admin'].map((dept) => (
+              <button
+                key={dept}
+                onClick={() => setUserDepartment(dept)}
+                className={cn(
+                  "px-4 py-2 rounded-lg text-sm font-bold transition-colors",
+                  userDepartment === dept
+                    ? "bg-emerald-600 text-white"
+                    : "bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600"
+                )}
+              >
+                {dept}
+              </button>
+            ))}
+          </div>
+          <p className="mt-2 text-xs text-slate-500">
+            Current: <span className="font-bold text-emerald-600">{userDepartment}</span> — 
+            {userDepartment === 'Engineering' 
+              ? ' Will see "Submit Solution" button in Completed Request modal'
+              : ' Will see "Submit Final Approval" button in Completed Solution modal (if Production dept)'
+            }
           </p>
         </div>
 
@@ -674,6 +705,10 @@ export default function SequentialStagesPreview() {
         open={activeModal === 'request-completed'}
         onOpenChange={() => setActiveModal(null)}
         data={completedRequestData}
+        userDepartment={userDepartment}
+        onSubmitSolution={() => {
+          alert(`Submit Solution button clicked!\\nUser department: ${userDepartment}\\nThis would open the solution submission modal.`)
+        }}
       />
 
       {/* 2.1 Submit Solution */}
@@ -727,6 +762,10 @@ export default function SequentialStagesPreview() {
         open={activeModal === 'solution-completed'}
         onOpenChange={() => setActiveModal(null)}
         data={completedSolutionData}
+        userDepartment={userDepartment}
+        onSubmitFinalApproval={() => {
+          alert(`Submit Final Approval button clicked!\\nUser department: ${userDepartment}\\nThis would open the final approval submission modal.`)
+        }}
       />
 
       {/* 3.1 Submit Final Approval */}

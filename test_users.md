@@ -1,26 +1,25 @@
-# User Passwords
-
-All users have the password: **changeme**
-
 ## User Credentials (Sorted by Department, then Level)
 
 ### Admin
 - admin@example.com: changeme (Admin, Level 5)
 
 ### Engineering
-- eng1@example.com: changeme (Engineering, Level 4)
-- eng2@example.com: changeme (Engineering, Level 3)
-- eng4@example.com: changeme (Engineering, Level 2)
+- eng1@example.com: changeme (Engineering, Level 1)
+- eng2@example.com: changeme (Engineering, Level 2)
+- eng4@example.com: changeme (Engineering, Level 4)
 
-### Finance
-- fm@example.com: changeme (Finance, Level 4)
+### Production 1
+- pd1@example.com: changeme (General Dept, Level 4)
+- pd13@example.com: changeme (General Dept, Level 3)
+- pddep@example.com: changeme (General Dept, Level 4)
 
-### Production
-- pd1@example.com: changeme (Production, Level 4)
-- pd13@example.com: changeme (Production, Level 3)
-- pd21@example.com: changeme (Production, Level 2)
-- pd22@example.com: changeme (Production, Level 2)
-- pddep@example.com: changeme (Production, Level 1)
+### Production 2
+- pd21@example.com: changeme (General Dept, Level 1)
+- pd22@example.com: changeme (General Dept, Level 2)
+- pddep@example.com: changeme (General Dept, Level 4)
 
-### Design
-- dm@example.com: changeme (Design, Level 3)
+### Division manager
+- dm@example.com: changeme (General Dept, Level x)
+
+### Factory manager
+- fm@example.com: changeme (General Dept, Level x)

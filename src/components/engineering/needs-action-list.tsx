@@ -15,7 +15,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { StatusBadge } from '@/components/requests/status-badge'
-import { RequestDetailModal } from '@/components/requests/request-detail-modal'
+import { RequestModalRouter } from '@/components/requests/request-modal-router'
 import { RejectedBadge } from '@/components/requests/rejected-badge'
 import { EngineerPicPicker } from './engineer-pic-picker'
 
@@ -239,12 +239,16 @@ export function NeedsActionList({
         )}
       </div>
 
-      {/* Request Detail Modal */}
+      {/* Request Modal Router */}
       {selectedRequestId && (
-        <RequestDetailModal
+        <RequestModalRouter
           requestId={selectedRequestId}
           open={isModalOpen}
           onOpenChange={setIsModalOpen}
+          onActionComplete={() => {
+            // Refresh the page to update the lists
+            window.location.reload()
+          }}
         />
       )}
     </div>

@@ -25,7 +25,7 @@ import {
 } from '@/components/ui/table'
 import { StatusBadge } from '@/components/requests/status-badge'
 import { RejectedBadge } from '@/components/requests/rejected-badge'
-import { RequestDetailModal } from '@/components/requests/request-detail-modal'
+import { RequestModalRouter } from '@/components/requests/request-modal-router'
 import { ApprovalStatusBadge } from '@/components/requests/approval-status-badge'
 import { TablePagination } from './table-pagination'
 import { TableFilters, type DashboardFilters } from './table-filters'
@@ -325,7 +325,7 @@ export function DashboardTable({
       <TablePagination table={table} />
 
       {selectedRequestId && (
-        <RequestDetailModal
+        <RequestModalRouter
           requestId={selectedRequestId}
           open={isModalOpen}
           onOpenChange={handleModalChange}

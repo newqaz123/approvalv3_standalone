@@ -86,6 +86,8 @@ interface CompletedRequestModalProps {
     sentToEngineerAt: string
     engineerAssigned?: string
   }
+  userDepartment?: string
+  onSubmitSolution?: () => void
   onDownloadFile?: (fileId: string) => void
 }
 
@@ -186,8 +188,11 @@ export function CompletedRequestModal({
   open,
   onOpenChange,
   data,
+  userDepartment,
+  onSubmitSolution,
   onDownloadFile,
 }: CompletedRequestModalProps) {
+  const isEngineering = userDepartment === 'Engineering'
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-5xl w-full max-h-[90vh] p-0 gap-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl rounded-xl overflow-hidden">
@@ -387,6 +392,15 @@ export function CompletedRequestModal({
               Last Modified: {format(new Date(data.lastModified), 'MMM d, yyyy')}
             </span>
           </div>
+          {isEngineering && onSubmitSolution && (
+            <button
+              onClick={onSubmitSolution}
+              className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-bold rounded-lg transition-colors"
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              Submit Solution
+            </button>
+          )}
         </div>
       </DialogContent>
     </Dialog>
