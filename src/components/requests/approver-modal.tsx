@@ -435,6 +435,17 @@ export function ApproverModal({
 }: ApproverModalProps) {
   const status = statusConfig[data.status] || statusConfig.request
 
+  // Debug: Log stage data to verify submitter information
+  if (open && data.stages) {
+    console.log('ApproverModal stages:', data.stages.map(s => ({
+      stageNumber: s.stageNumber,
+      stageName: s.stageName,
+      submittedBy: s.submittedBy,
+      submittedAt: s.submittedAt,
+      stepsCount: s.steps.length
+    })))
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-5xl w-full max-h-[90vh] p-0 gap-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl rounded-xl overflow-hidden">
