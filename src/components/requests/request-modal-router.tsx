@@ -803,7 +803,8 @@ export function RequestModalRouter({
           requestDescription: requestData?.description,
         }}
         availableUsers={availableUsers}
-        onSubmitSolution={async (data) => {
+        onResubmit={async (data) => {
+          console.log('🟢 onResubmit called with data:', data)
           setIsSubmitting(true)
           try {
             const result = await resubmitSolution({
@@ -811,7 +812,7 @@ export function RequestModalRouter({
               title: data.title || modalData.solution?.title || '',
               description: data.description,
               cost: data.cost,
-              currency: data.currency as 'THB' | 'USD' | 'EUR',
+              currency: data.currency,
               timeline: data.timeline,
               files: data.files || [],
               deletedFileIds: data.deletedFileIds || [],
