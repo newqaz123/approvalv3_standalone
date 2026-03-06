@@ -20,13 +20,15 @@ navbar of engineer
     ```
 - click need approve notification and it open old new approval page instead of new one.
 - Approval Flow show Pending Assignment instead of approver's name.
+- Final approve got rejected.status change to SendToEngineer.Engineering open the modal.click 'Resubmit solution' .It should show Present Approval Flow not stage 3 Final approval Rejected by .... 
+- Submit Final approval modal should have Reject botton.After reject it should go to SendtoEngineer status then engineer can resubmit solution.
 
 ## Achitecture
 ### submitter-modal.tsx 
  - mode: 'request', 'solution', 'resubmit' 
 
 ### solution-modal.tsx 
-- used for DesignCostEstimationApproval and SolutionApproved status
+- used for DesignCostEstimationApproval(under approval) and SolutionApproved status
 
 ### completed-solution-modal.tsx
 - used for SendBackToRequester status.
