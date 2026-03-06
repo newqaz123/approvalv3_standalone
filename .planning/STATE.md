@@ -139,7 +139,7 @@ None - v1.2 milestone complete.
 | 026 | Improve UI/UX in detail modal - approval display | 2026-02-22 | 7708402 | [026-improve-ui-ux-in-detail-modal-approval-d](./quick/026-improve-ui-ux-in-detail-modal-approval-d/) |
 | 027 | Implement stage-based notification system | 2026-02-22 | dd40bbd | [027-implement-stage-based-notification-syste](./quick/027-implement-stage-based-notification-syste/) |
 | 028 | Notification system UAT document | 2026-02-22 | 6e9a258 | [028-notification-system-uat](./quick/028-notification-system-uat/) |
-| 029 | Engineer can't resubmit rejected solution | 2026-03-06 | COMMIT | [029-engineer-can-t-resubmit-solution-which-g](./quick/029-engineer-can-t-resubmit-solution-which-g/) |
+| 029 | Engineer can't resubmit rejected solution | 2026-03-06 | fe542d4 | [029-engineer-can-t-resubmit-solution-which-g](./quick/029-engineer-can-t-resubmit-solution-which-g/) |
 
 ### Roadmap Evolution
 
