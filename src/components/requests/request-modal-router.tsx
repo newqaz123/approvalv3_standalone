@@ -67,8 +67,18 @@ export function RequestModalRouter({
       // Fetch request with all related data
       const request = await getRequest(requestId)
       
-      // Check if user can approve
-      const approvalCheck = await canUserApprove(requestId)
+      // Check if user can approve - use appropriate check based on status
+      let approvalCheck = { canApprove: false }
+      
+      if (request.solutions?.[0] && request.status === 'DesignCostEstimationApproval') {
+        // Check solution approval permissions
+        const { canUserApproveSolution } = await import('@/server-actions/solutions')
+        approvalCheck = await canUserApproveSolution(request.solutions[0].id)
+      } else {
+        // Check request approval permissions
+        approvalCheck = await canUserApprove(requestId)
+      }
+      
       setCanApprove(approvalCheck.canApprove)
 
       // Get user department info

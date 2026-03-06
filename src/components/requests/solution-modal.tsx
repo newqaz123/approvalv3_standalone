@@ -397,21 +397,17 @@ function CustomApprovalPicker({
   )
 }
 
-// Solution Approval Actions with Custom Hierarchy
+// Solution Approval Actions
 function SolutionApprovalActions({ 
   onApprove, 
   onReject,
-  availableUsers = []
 }: { 
   onApprove?: () => void
   onReject?: (reason: string) => void
-  availableUsers?: User[]
 }) {
   const [showRejectForm, setShowRejectForm] = useState(false)
   const [rejectReason, setRejectReason] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [customApprovers, setCustomApprovers] = useState<string[]>([])
-  const [useCustom, setUseCustom] = useState(false)
 
   if (showRejectForm) {
     return (
@@ -477,17 +473,8 @@ function SolutionApprovalActions({
           </h4>
         </div>
         <p className="text-xs text-purple-700 dark:text-purple-300 mb-3">
-          This solution requires your approval. You can use the default hierarchy or set a custom approval chain.
+          This solution requires your approval.
         </p>
-
-        {/* Custom Hierarchy Toggle */}
-        <div className="mb-3">
-          <CustomApprovalPicker 
-            users={availableUsers}
-            selectedIds={customApprovers}
-            onChange={setCustomApprovers}
-          />
-        </div>
 
         <div className="flex gap-2">
           <Button
@@ -813,12 +800,11 @@ export function SolutionModal({
             </div>
           </section>
 
-          {/* Solution Approval Actions with Custom Hierarchy */}
+          {/* Solution Approval Actions */}
           {data.status === 'solution' && onApprove && (
             <SolutionApprovalActions
               onApprove={onApprove}
               onReject={onReject}
-              availableUsers={availableUsers}
             />
           )}
 
