@@ -48,6 +48,11 @@ export function RequestModalRouter({
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [showSolutionModal, setShowSolutionModal] = useState(false)
   const [showResubmitSolutionModal, setShowResubmitSolutionModal] = useState(false)
+
+  // Debug: Log when resubmit modal state changes
+  useEffect(() => {
+    console.log('🔵 showResubmitSolutionModal changed to:', showResubmitSolutionModal)
+  }, [showResubmitSolutionModal])
   const [availableUsers, setAvailableUsers] = useState<Array<{ id: string; name: string; email: string; level: number | undefined; role: string }>>([])
 
   useEffect(() => {
@@ -457,7 +462,11 @@ export function RequestModalRouter({
           }}
           onApprove={canApprove ? () => handleApprove('') : undefined}
           onReject={canApprove ? (reason: string) => handleReject(reason) : undefined}
-          onResubmit={hasSolutionRejection ? () => setShowResubmitSolutionModal(true) : undefined}
+          onResubmit={hasSolutionRejection ? () => {
+            console.log('🔴 Resubmit button clicked!')
+            console.log('Setting showResubmitSolutionModal to true')
+            setShowResubmitSolutionModal(true)
+          } : undefined}
           onDownloadFile={handleDownloadFile}
           onDownloadSolutionFile={handleDownloadSolutionFile}
           availableUsers={availableUsers}
@@ -679,9 +688,11 @@ export function RequestModalRouter({
   }
 
   // Solution submission modal
+  // Only render main modal content if resubmit modal is not open
+  // This prevents modal stacking issues
   return (
     <>
-      {modalContent}
+      {!showResubmitSolutionModal && modalContent}
       <SubmitterModal
         mode="solution"
         open={showSolutionModal}
@@ -779,7 +790,10 @@ export function RequestModalRouter({
       <SubmitterModal
         mode="resubmit"
         open={showResubmitSolutionModal}
-        onOpenChange={setShowResubmitSolutionModal}
+        onOpenChange={(open) => {
+          console.log('🟢 Resubmit modal onOpenChange called with:', open)
+          setShowResubmitSolutionModal(open)
+        }}
         initialData={{
           solution: modalData.solution,
           existingFiles: modalData.solution?.files,
