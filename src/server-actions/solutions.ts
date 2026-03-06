@@ -1954,11 +1954,18 @@ export async function resubmitSolution(input: {
       data: approvalData,
     })
 
-    // Update request status back to DesignCostEstimationApproval
+    // Check if solution was auto-approved (top-level submitter with hierarchy)
+    const isAutoApproved = approvalData.some(a => a.status === 'approved')
+
+    // Update request status
+    const newStatus = isAutoApproved 
+      ? RequestStatus.SendBackToRequester 
+      : RequestStatus.DesignCostEstimationApproval
+
     await tx.requests.update({
       where: { id: input.requestId },
       data: {
-        status: RequestStatus.DesignCostEstimationApproval,
+        status: newStatus,
         updatedAt: new Date(),
       },
     })
@@ -1969,49 +1976,86 @@ export async function resubmitSolution(input: {
         requestId: input.requestId,
         userId,
         action: 'solution_resubmitted',
-        comments: `Solution resubmitted: "${input.title}"`,
+        comments: isAutoApproved 
+          ? `Solution resubmitted and auto-approved (top-level submitter): "${input.title}"`
+          : `Solution resubmitted: "${input.title}"`,
       },
     })
+
+    // If auto-approved, notify requester's department
+    if (isAutoApproved) {
+      await tx.request_activities.create({
+        data: {
+          requestId: input.requestId,
+          userId: request.requesterId,
+          action: 'status_changed',
+          fromStatus: RequestStatus.SentToEngineer,
+          toStatus: RequestStatus.SendBackToRequester,
+          comments: `Solution "${input.title}" resubmitted and auto-approved (top-level submitter). Request sent back to requester for final review.`,
+        },
+      })
+
+      // Notify requester's department
+      const { notifyUsersInDepartment } = await import('./notifications')
+      await notifyUsersInDepartment(
+        request.department.id,
+        {
+          type: 'solution_ready',
+          title: 'Solution Ready for Review',
+          message: `📤 Ready for Review: "${request.title}" solution has been updated and is ready for your department's final review.`,
+          requestId: input.requestId,
+        }
+      )
+    }
 
     return updatedSolution
   })
 
-  // Send notifications to approvers based on approval chain type
-  const { createNotification } = await import('./notifications')
-  
-  if (input.useCustomHierarchy && input.customApprovers.length > 0) {
-    // Notify custom approvers
-    for (const approverId of input.customApprovers) {
-      await createNotification({
-        userId: approverId,
-        type: 'approval_needed',
-        title: 'Solution Resubmitted',
-        message: `📤 Solution resubmitted for "${request.title}". Please review the updated solution.`,
-        requestId: input.requestId,
-      })
-    }
-  } else {
-    // Notify engineering department approvers at the first pending level
-    const engineeringDept = await prisma.departments.findFirst({
-      where: { type: 'ENGINEERING' },
-      select: { id: true },
-    })
+  // Send notifications to approvers only if NOT auto-approved
+  const isAutoApproved = result && await prisma.solution_approvals.findFirst({
+    where: {
+      solutionId: solution.id,
+      status: 'approved',
+    },
+  })
 
-    if (engineeringDept) {
-      const { getApproversAtLevel } = await import('./approvals')
-      // Get the first level of approvers that have pending approvals (submitter's level + 1)
-      const firstPendingLevel = (user.level || 1) + 1
-      const firstLevelApprovers = await getApproversAtLevel(engineeringDept.id, firstPendingLevel)
-      
-      // Notify each approver
-      for (const approver of firstLevelApprovers) {
+  if (!isAutoApproved) {
+    const { createNotification } = await import('./notifications')
+    
+    if (input.useCustomHierarchy && input.customApprovers.length > 0) {
+      // Notify custom approvers
+      for (const approverId of input.customApprovers) {
         await createNotification({
-          userId: approver.id,
+          userId: approverId,
           type: 'approval_needed',
           title: 'Solution Resubmitted',
           message: `📤 Solution resubmitted for "${request.title}". Please review the updated solution.`,
-          requestId: request.id,
+          requestId: input.requestId,
         })
+      }
+    } else {
+      // Notify engineering department approvers at the first pending level
+      const engineeringDept = await prisma.departments.findFirst({
+        where: { type: 'ENGINEERING' },
+        select: { id: true },
+      })
+
+      if (engineeringDept) {
+        const { getApproversAtLevel } = await import('./approvals')
+        // Get the first level of approvers that have pending approvals (submitter's level + 1)
+        const firstPendingLevel = (user.level || 1) + 1
+        const firstLevelApprovers = await getApproversAtLevel(engineeringDept.id, firstPendingLevel)
+        
+        // Notify each approver
+        for (const approver of firstLevelApprovers) {
+          await createNotification({
+            userId: approver.id,
+            type: 'approval_needed',
+            title: 'Solution Resubmitted',
+            message: `📤 Solution resubmitted for "${request.title}". Please review the updated solution.`,
+            requestId: request.id,
+          })
+        }
       }
     }
   }
