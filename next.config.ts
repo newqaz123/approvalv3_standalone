@@ -7,6 +7,15 @@ const nextConfig: NextConfig = {
     // This reduces bundle size from 1,583 modules to only used icons (25%+ build time improvement)
     optimizePackageImports: ['lucide-react'],
   },
+  // Fix HMR and CORS issues during development
+  async rewrites() {
+    return [
+      {
+        source: '/requests',
+        destination: '/requests',
+      },
+    ]
+  },
 };
 
 export default nextConfig;
