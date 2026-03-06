@@ -1131,6 +1131,14 @@ export async function initiateFinalApproval(
 
   // Use transaction for atomicity
   await prisma.$transaction(async (tx) => {
+    // Delete old final approval records (in case of resubmission after rejection)
+    await tx.request_approvals.deleteMany({
+      where: {
+        requestId,
+        isFinalApproval: true,
+      },
+    })
+
     // Create final approval chain
     if (useCustomChain && customApproverIds && customApproverIds.length > 0) {
       // Custom approval chain (never auto-approved)
