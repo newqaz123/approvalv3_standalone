@@ -31,6 +31,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -321,6 +322,17 @@ export function SubmitterModal({
     }
   }, [mode, open])
 
+  // Populate fields when template is selected
+  useEffect(() => {
+    if (selectedTemplate && templates.length > 0) {
+      const template = templates.find(t => t.id === selectedTemplate)
+      if (template) {
+        setTitle(template.title)
+        setDescription(template.description)
+      }
+    }
+  }, [selectedTemplate, templates])
+
   // Existing files state (for resubmit mode)
   const [existingFiles, setExistingFiles] = useState<FileAttachment[]>(initialData?.existingFiles || [])
   const [deletedFileIds, setDeletedFileIds] = useState<string[]>([])
@@ -350,7 +362,9 @@ export function SubmitterModal({
 
   // Handle submission
   const handleSubmit = () => {
+    console.log('handleSubmit called', { mode, title, description, hasCallback: !!onSubmitRequest })
     if (mode === 'request' && onSubmitRequest) {
+      console.log('Submitting request with data:', { title, description, templateId: selectedTemplate, filesCount: files.length })
       onSubmitRequest({
         title,
         description,
@@ -411,6 +425,11 @@ export function SubmitterModal({
                 {mode === 'resubmit' && 'Resubmit Solution'}
               </DialogTitle>
             </div>
+            <DialogDescription className="sr-only">
+              {mode === 'request' && 'Fill out the form to submit a new improvement request'}
+              {mode === 'solution' && 'Provide engineering solution details and cost estimate'}
+              {mode === 'resubmit' && 'Update and resubmit your solution'}
+            </DialogDescription>
             <button
               onClick={() => onOpenChange(false)}
               className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors text-slate-400 hover:text-slate-600"
