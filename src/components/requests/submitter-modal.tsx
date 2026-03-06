@@ -362,9 +362,7 @@ export function SubmitterModal({
 
   // Handle submission
   const handleSubmit = () => {
-    console.log('handleSubmit called', { mode, title, description, hasCallback: !!onSubmitRequest })
     if (mode === 'request' && onSubmitRequest) {
-      console.log('Submitting request with data:', { title, description, templateId: selectedTemplate, filesCount: files.length })
       onSubmitRequest({
         title,
         description,
@@ -403,21 +401,10 @@ export function SubmitterModal({
   }
 
   const isSubmitDisabled = () => {
-    const isDisabled = mode === 'request' 
-      ? !title.trim() || !description.trim()
-      : !solutionTitle.trim() || !solutionDescription.trim() || !cost || !timeline.trim()
-    
-    console.log('isSubmitDisabled check:', {
-      mode,
-      title: title.trim(),
-      description: description.trim(),
-      isDisabled,
-      reason: mode === 'request' 
-        ? `title empty: ${!title.trim()}, description empty: ${!description.trim()}`
-        : `solutionTitle empty: ${!solutionTitle.trim()}, solutionDescription empty: ${!solutionDescription.trim()}, cost empty: ${!cost}, timeline empty: ${!timeline.trim()}`
-    })
-    
-    return isDisabled
+    if (mode === 'request') {
+      return !title.trim() || !description.trim()
+    }
+    return !solutionTitle.trim() || !solutionDescription.trim() || !cost || !timeline.trim()
   }
 
   return (
@@ -762,10 +749,7 @@ export function SubmitterModal({
             Cancel
           </Button>
           <Button
-            onClick={() => {
-              console.log('Submit button clicked!')
-              handleSubmit()
-            }}
+            onClick={handleSubmit}
             disabled={isSubmitDisabled()}
             className={cn(
               "text-white",

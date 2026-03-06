@@ -6,6 +6,9 @@ import { Button } from '@/components/ui/button'
 import { RequestsListWithFilters } from '@/components/requests/requests-list-with-filters'
 import { BulkDeleteByDateRange } from '@/components/requests/bulk-delete-by-date-range'
 import { SubmitterModal } from '@/components/requests/submitter-modal'
+import { createRequest } from '@/server-actions/requests'
+import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
 
 interface RequestsListClientProps {
   initialRequests: any[]
@@ -19,6 +22,33 @@ export function RequestsListClient({
   requesters,
 }: RequestsListClientProps) {
   const [showNewRequestModal, setShowNewRequestModal] = useState(false)
+  const router = useRouter()
+
+  const handleSubmitRequest = async (data: {
+    title: string
+    description: string
+    templateId?: string
+    files: File[]
+  }) => {
+    try {
+      const result = await createRequest({
+        title: data.title,
+        description: data.description,
+        fileIds: [],
+      })
+      
+      if (result.success) {
+        toast.success('Request created successfully')
+        setShowNewRequestModal(false)
+        router.refresh()
+      } else {
+        toast.error(result.error || 'Failed to create request')
+      }
+    } catch (error) {
+      console.error('Failed to create request:', error)
+      toast.error('An error occurred while creating the request')
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -51,6 +81,7 @@ export function RequestsListClient({
         mode="request"
         open={showNewRequestModal}
         onOpenChange={setShowNewRequestModal}
+        onSubmitRequest={handleSubmitRequest}
       />
     </div>
   )
