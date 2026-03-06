@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { format } from 'date-fns'
 import {
   X,
@@ -297,6 +297,29 @@ export function SubmitterModal({
 
   // Template selection state (for request mode)
   const [selectedTemplate, setSelectedTemplate] = useState(initialData?.templateId || '')
+  const [templates, setTemplates] = useState<Array<{ id: string; name: string; title: string; description: string }>>([])  
+  const [loadingTemplates, setLoadingTemplates] = useState(false)
+
+  // Fetch templates from database
+  useEffect(() => {
+    if (mode === 'request' && open) {
+      const fetchTemplates = async () => {
+        setLoadingTemplates(true)
+        try {
+          const response = await fetch('/api/templates')
+          if (response.ok) {
+            const data = await response.json()
+            setTemplates(data)
+          }
+        } catch (error) {
+          console.error('Failed to fetch templates:', error)
+        } finally {
+          setLoadingTemplates(false)
+        }
+      }
+      fetchTemplates()
+    }
+  }, [mode, open])
 
   // Existing files state (for resubmit mode)
   const [existingFiles, setExistingFiles] = useState<FileAttachment[]>(initialData?.existingFiles || [])
@@ -430,15 +453,19 @@ export function SubmitterModal({
                 <Label htmlFor="template" className="text-sm font-bold">
                   Template
                 </Label>
-                <Select value={selectedTemplate} onValueChange={setSelectedTemplate}>
+                <Select value={selectedTemplate} onValueChange={setSelectedTemplate} disabled={loadingTemplates}>
                   <SelectTrigger className="mt-1.5">
-                    <SelectValue placeholder="Select a template (optional)" />
+                    <SelectValue placeholder={loadingTemplates ? "Loading templates..." : "Select a template (optional)"} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="template-1">Structural Assessment</SelectItem>
-                    <SelectItem value="template-2">Equipment Upgrade</SelectItem>
-                    <SelectItem value="template-3">Process Improvement</SelectItem>
-                    <SelectItem value="template-4">Safety Enhancement</SelectItem>
+                    {templates.length === 0 && !loadingTemplates && (
+                      <SelectItem value="none" disabled>No templates available</SelectItem>
+                    )}
+                    {templates.map((template) => (
+                      <SelectItem key={template.id} value={template.id}>
+                        {template.name}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-slate-500 mt-1">

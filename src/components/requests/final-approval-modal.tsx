@@ -60,6 +60,8 @@ interface ApprovalStep {
 interface ApprovalStage {
   stageNumber: string | number
   stageName: string
+  submittedBy?: string
+  submittedAt?: string
   steps: ApprovalStep[]
 }
 
