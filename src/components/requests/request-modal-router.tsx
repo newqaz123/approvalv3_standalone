@@ -263,9 +263,10 @@ export function RequestModalRouter({
       const hasFinalApproval = requestData.approvals?.some((a: any) => a.isFinalApproval)
       
       let result
-      if (hasFinalApproval) {
+      if (requestData.status === 'FinalApproval') {
         // Final approval rejection
-        result = await rejectRequest(requestId, reason)
+        const { rejectFinalApproval } = await import('@/server-actions/solutions')
+        result = await rejectFinalApproval(requestId, reason)
       } else if (hasSolution && requestData.status === 'DesignCostEstimationApproval') {
         // Solution rejection
         const solutionId = requestData.solutions[0].id
