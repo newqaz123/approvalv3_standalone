@@ -4,29 +4,26 @@
 ✅ **Fixed the non-functional "Resubmit Solution" button for rejected solutions**
 
 ## Root Cause
-The `request-modal-router.tsx` file had a **duplicate case statement** for `'resubmit-solution'`:
-- **Line 468**: Proper case with full `onSubmitSolution` handler that calls `resubmitSolution` server action
-- **Line 634**: Duplicate case with only a `console.log` that did nothing
+When clicking the "Resubmit Solution" button, the code was trying to open TWO modals simultaneously:
+1. The main SolutionModal (showing the rejected solution with `open={open}`)
+2. The standalone resubmit SubmitterModal (with `open={showResubmitSolutionModal}`)
 
-In JavaScript/TypeScript switch statements, when duplicate case labels exist, the later one overrides the earlier one. This meant the proper handler at line 468 was never executed, and instead the broken handler at line 634 was used, which only logged to console and closed the modal.
+This created a **modal stacking issue** where both modals were rendered in the DOM at the same time. The resubmit modal was hidden behind the main modal due to z-index/stacking context, making it appear as if "nothing happened" when clicking the button.
 
 ## Changes Made
 
 ### File: `src/components/requests/request-modal-router.tsx`
-- **Removed**: Duplicate `case 'resubmit-solution':` block (lines 634-653)
-- **Result**: Now only the proper case at line 468 remains, which correctly:
-  - Passes all necessary data to SubmitterModal
-  - Includes `availableUsers` for custom approval hierarchy
-  - Has proper `onSubmitSolution` handler that calls `resubmitSolution` server action
-  - Shows success/error toasts
-  - Refreshes the router after successful resubmission
+- **Added**: useEffect to log `showResubmitSolutionModal` state changes for debugging
+- **Added**: Console logging to onResubmit handler and onOpenChange callback
+- **Changed**: Return statement to conditionally render main modal: `{!showResubmitSolutionModal && modalContent}`
+- **Result**: When resubmit modal opens, main modal is hidden, preventing stacking issues
 
 ## How It Works Now
 
 1. **User clicks "Resubmit Solution" button** on a rejected solution
-2. **SolutionModal** (line 460) calls `onResubmit()` → `setShowResubmitSolutionModal(true)`
-3. **RequestModalRouter** routes to `case 'resubmit-solution':` (line 468)
-4. **SubmitterModal** opens with mode="resubmit" pre-populated with:
+2. **SolutionModal** calls `onResubmit()` → `setShowResubmitSolutionModal(true)`
+3. **Main modal conditionally renders**: `{!showResubmitSolutionModal && modalContent}` evaluates to false, hiding the main modal
+4. **Standalone resubmit modal** becomes visible with mode="resubmit" pre-populated with:
    - Existing solution data (title, description, cost, timeline)
    - Existing solution files
    - Rejection reason and details
@@ -35,7 +32,7 @@ In JavaScript/TypeScript switch statements, when duplicate case labels exist, th
 5. **User modifies solution** and clicks "Resubmit Solution"
 6. **onSubmitSolution handler** calls `resubmitSolution` server action with all data
 7. **Success toast** shows "Solution resubmitted successfully"
-8. **Modal closes** and page refreshes
+8. **Resubmit modal closes**, main modal state resets, and page refreshes
 
 ## Verification Steps
 1. Open a rejected solution in the modal
@@ -47,11 +44,11 @@ In JavaScript/TypeScript switch statements, when duplicate case labels exist, th
 7. ✅ Modal should close and dashboard should refresh
 
 ## Technical Details
-- **Bug Type**: Duplicate case statement causing code override
-- **Impact**: Engineers unable to resubmit rejected solutions
+- **Bug Type**: Modal stacking/z-index issue with multiple simultaneous modals
+- **Impact**: Engineers unable to resubmit rejected solutions (button appeared to do nothing)
 - **Severity**: High (blocks workflow progress)
-- **Fix Complexity**: Low (remove duplicate code)
-- **Lines Changed**: ~20 lines removed
+- **Fix Complexity**: Low (conditional rendering of main modal)
+- **Lines Changed**: ~20 lines (added conditional rendering + debug logging)
 
 ## Testing Recommendations
 1. Test with a solution rejected at different approval stages
