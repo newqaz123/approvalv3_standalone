@@ -68,7 +68,7 @@ export function getModalTypeForStatus(
     if (status === 'DesignCostEstimationApproval' || status === 'SolutionRejected') {
       return { modalType: 'resubmit-solution', mode: 'resubmit' }
     }
-    if (status === 'FinalApprovalInProgress' || status === 'FinalRejected') {
+    if (status === 'FinalApproval' || status === 'FinalRejected') {
       return { modalType: 'resubmit-final' }
     }
   }
@@ -79,7 +79,7 @@ export function getModalTypeForStatus(
   }
 
   // Handle final approval in progress
-  if (status === 'FinalApprovalInProgress') {
+  if (status === 'FinalApproval') {
     if (canApprove) {
       return { modalType: 'approver', mode: 'final' }
     }
@@ -165,7 +165,7 @@ export function getAvailableActions(
     canReviewRequest: isAdmin || (canApprove && status === 'ImprovementRequest'),
     canReviewSolution: isAdmin || (canApprove && status === 'DesignCostEstimationApproval'),
     canSubmitFinalApproval: isAdmin || (isRequesterDept && status === 'SendBackToRequester'),
-    canReviewFinalApproval: isAdmin || (canApprove && status === 'FinalApprovalInProgress'),
+    canReviewFinalApproval: isAdmin || (canApprove && status === 'FinalApproval'),
     canExportPDF: status === 'Completed',
   }
 }

@@ -75,6 +75,10 @@ export function RequestModalRouter({
         // Check solution approval permissions
         const { canUserApproveSolution } = await import('@/server-actions/solutions')
         approvalCheck = await canUserApproveSolution(request.solutions[0].id)
+      } else if (request.status === 'FinalApproval') {
+        // Check final approval permissions
+        const { canUserApproveFinalApproval } = await import('@/server-actions/solutions')
+        approvalCheck = await canUserApproveFinalApproval(requestId)
       } else {
         // Check request approval permissions
         approvalCheck = await canUserApprove(requestId)

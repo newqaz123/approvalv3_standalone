@@ -479,9 +479,26 @@ export function transformRequestToModalData(request: {
     })
   }
 
+  // Add final approval metadata for status display
+  const finalApprovalData = finalApprovals.length > 0 ? {
+    finalApproval: {
+      initiatedBy: request.activities.find(a => a.action === 'final_approval_initiated')?.user.name || 
+                   request.activities.find(a => a.action === 'final_approval_initiated')?.user.email || 
+                   'Department Head',
+      initiatedAt: request.activities.find(a => a.action === 'final_approval_initiated')?.createdAt.toISOString() || 
+                   finalApprovals[0].createdAt.toISOString(),
+      currentLevel: finalApprovals.filter(a => a.status === 'approved').length + 1,
+      totalLevels: finalApprovals.length,
+      nextApprover: finalApprovals.find(a => a.status === 'pending')?.requiredApprover?.name || 
+                    finalApprovals.find(a => a.status === 'pending')?.approver?.name ||
+                    undefined,
+    }
+  } : {}
+
   return {
     ...baseData,
     ...solutionData,
+    ...finalApprovalData,
     stages,
   }
 }
