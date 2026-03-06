@@ -467,12 +467,12 @@ export function RequestModalRouter({
           onOpenChange={onOpenChange}
           data={{
             ...modalData,
-            status: hasSolutionRejection ? 'solution_rejected' : 'solution',
+            status: (hasSolutionRejection || hasFinalRejection) ? 'solution_rejected' : 'solution',
             solution: {
               ...modalData.solution,
               files: modalData.solution?.files || [],
             },
-            rejection: hasSolutionRejection ? {
+            rejection: (hasSolutionRejection || hasFinalRejection) ? {
               reason: modalData.rejection?.reason || '',
               rejectedBy: modalData.rejection?.rejectedBy || '',
               rejectedAt: modalData.rejection?.rejectedAt || '',
@@ -480,7 +480,7 @@ export function RequestModalRouter({
           }}
           onApprove={canApprove ? () => handleApprove('') : undefined}
           onReject={canApprove ? (reason: string) => handleReject(reason) : undefined}
-          onResubmit={hasSolutionRejection ? () => {
+          onResubmit={(hasSolutionRejection || (hasFinalRejection && isEngineering)) ? () => {
             console.log('🔴 Resubmit button clicked!')
             console.log('Setting showResubmitSolutionModal to true')
             setShowResubmitSolutionModal(true)

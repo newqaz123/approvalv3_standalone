@@ -1781,12 +1781,16 @@ export async function resubmitSolution(input: {
     include: {
       solutions: {
         include: {
-          approvals: {
-            where: { status: 'rejected' },
-            orderBy: { createdAt: 'desc' },
-            take: 1,
-          },
+          approvals: true,
           fileAttachments: true,
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 1,
+      },
+      approvals: {
+        where: { 
+          status: 'rejected',
+          isFinalApproval: true 
         },
         orderBy: { createdAt: 'desc' },
         take: 1,
@@ -1804,7 +1808,11 @@ export async function resubmitSolution(input: {
     throw new Error('No solution found for this request')
   }
 
-  if (!solution.approvals.some(a => a.status === 'rejected')) {
+  // Check if solution has rejected approvals OR if request has rejected final approval
+  const hasSolutionRejection = solution.approvals.some(a => a.status === 'rejected')
+  const hasFinalApprovalRejection = request.approvals.some(a => a.status === 'rejected' && a.isFinalApproval)
+  
+  if (!hasSolutionRejection && !hasFinalApprovalRejection) {
     throw new Error('Can only resubmit rejected solutions')
   }
 

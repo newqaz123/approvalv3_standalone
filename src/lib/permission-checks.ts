@@ -71,6 +71,11 @@ export function getModalTypeForStatus(
     if (status === 'FinalApproval' || status === 'FinalRejected') {
       return { modalType: 'resubmit-final' }
     }
+    // Handle final approval rejection that returns to SentToEngineer
+    // Show solution modal with resubmit option for engineering users
+    if (status === 'SentToEngineer' && hasSolution && isEngineering) {
+      return { modalType: 'solution', mode: 'resubmit' }
+    }
   }
 
   // Handle completed/final state
