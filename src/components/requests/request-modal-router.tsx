@@ -11,7 +11,7 @@ import { CompletedFinalModal } from './completed-final-modal'
 import { RequestResubmitModal } from './request-resubmit-modal'
 import { FinalApprovalResubmitModal } from './final-approval-resubmit-modal'
 import { SubmitFinalApprovalModal } from './submit-final-approval-modal'
-import { getRequest, resubmitRequest } from '@/server-actions/requests'
+import { getRequest, resubmitRequest, createRequest } from '@/server-actions/requests'
 import { canUserApprove, approveRequest, rejectRequest } from '@/server-actions/approvals'
 import { approveSolution, rejectSolution, submitSolution, resubmitSolution, initiateFinalApproval } from '@/server-actions/solutions'
 import { getDownloadUrl } from '@/server-actions/files'
@@ -417,6 +417,29 @@ export function RequestModalRouter({
   }
 
   // Render appropriate modal based on config
+  // Handle request submission
+  const handleSubmitRequest = async (data: { title: string; description: string; templateId?: string; files: File[] }) => {
+    try {
+      console.log('Creating request with data:', data)
+      const result = await createRequest({
+        title: data.title,
+        description: data.description,
+      })
+      
+      if (result.success) {
+        toast.success('Request submitted successfully')
+        onOpenChange(false)
+        onActionComplete?.()
+        router.refresh()
+      } else {
+        toast.error(result.error || 'Failed to submit request')
+      }
+    } catch (error) {
+      console.error('Submit request error:', error)
+      toast.error('An error occurred while submitting the request')
+    }
+  }
+
   let modalContent: React.ReactNode = null
   
   switch (modalConfig.modalType) {
@@ -430,6 +453,7 @@ export function RequestModalRouter({
             title: requestData.title,
             description: requestData.description,
           }}
+          onSubmitRequest={handleSubmitRequest}
         />
       )
       break

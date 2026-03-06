@@ -403,10 +403,21 @@ export function SubmitterModal({
   }
 
   const isSubmitDisabled = () => {
-    if (mode === 'request') {
-      return !title.trim() || !description.trim()
-    }
-    return !solutionTitle.trim() || !solutionDescription.trim() || !cost || !timeline.trim()
+    const isDisabled = mode === 'request' 
+      ? !title.trim() || !description.trim()
+      : !solutionTitle.trim() || !solutionDescription.trim() || !cost || !timeline.trim()
+    
+    console.log('isSubmitDisabled check:', {
+      mode,
+      title: title.trim(),
+      description: description.trim(),
+      isDisabled,
+      reason: mode === 'request' 
+        ? `title empty: ${!title.trim()}, description empty: ${!description.trim()}`
+        : `solutionTitle empty: ${!solutionTitle.trim()}, solutionDescription empty: ${!solutionDescription.trim()}, cost empty: ${!cost}, timeline empty: ${!timeline.trim()}`
+    })
+    
+    return isDisabled
   }
 
   return (
@@ -751,7 +762,10 @@ export function SubmitterModal({
             Cancel
           </Button>
           <Button
-            onClick={handleSubmit}
+            onClick={() => {
+              console.log('Submit button clicked!')
+              handleSubmit()
+            }}
             disabled={isSubmitDisabled()}
             className={cn(
               "text-white",
