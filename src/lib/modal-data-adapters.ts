@@ -24,7 +24,7 @@ export interface ModalApprovalStep {
 }
 
 export interface ModalApprovalStage {
-  stageNumber: number
+  stageNumber: string | number
   stageName: string
   steps: ModalApprovalStep[]
 }
@@ -337,8 +337,8 @@ export function transformRequestToModalData(request: {
   }>
 }) {
   const solution = request.solutions?.[0]
-  const requestApprovals = request.approvals.filter(a => !a.isFinalApproval)
-  const finalApprovals = request.approvals.filter(a => a.isFinalApproval)
+  const requestApprovals = (request.approvals || []).filter(a => !a.isFinalApproval)
+  const finalApprovals = (request.approvals || []).filter(a => a.isFinalApproval)
   const solutionApprovals = solution?.approvals || []
 
   // Determine rejection info
@@ -375,19 +375,25 @@ export function transformRequestToModalData(request: {
   let stages: ModalApprovalStage[] = []
   
   if (finalApprovals.length > 0) {
-    // Final approval stage - combine all previous stages
+    // Final approval stage - combine all previous stages with unique keys
     const requestStages = transformApprovalsToStages(requestApprovals, false)
+      .map(s => ({ ...s, stageNumber: `request-${s.stageNumber}` }))
     const solutionStages = transformApprovalsToStages(solutionApprovals, false)
+      .map(s => ({ ...s, stageNumber: `solution-${s.stageNumber}` }))
     const finalStages = transformApprovalsToStages(finalApprovals, true)
+      .map(s => ({ ...s, stageNumber: `final-${s.stageNumber}` }))
     stages = [...requestStages, ...solutionStages, ...finalStages]
   } else if (solutionApprovals.length > 0) {
     // Solution approval stage
     const requestStages = transformApprovalsToStages(requestApprovals, false)
+      .map(s => ({ ...s, stageNumber: `request-${s.stageNumber}` }))
     const solutionStages = transformApprovalsToStages(solutionApprovals, false)
+      .map(s => ({ ...s, stageNumber: `solution-${s.stageNumber}` }))
     stages = [...requestStages, ...solutionStages]
   } else {
     // Request approval stage only
     stages = transformApprovalsToStages(requestApprovals, false)
+      .map(s => ({ ...s, stageNumber: `request-${s.stageNumber}` }))
   }
 
   return {

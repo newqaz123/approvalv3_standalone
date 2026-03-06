@@ -6,13 +6,14 @@ import { SubmitterModal } from './submitter-modal'
 import { ApproverModal } from './approver-modal'
 import { CompletedRequestModal } from './completed-request-modal'
 import { CompletedSolutionModal } from './completed-solution-modal'
+import { SolutionModal } from './solution-modal'
 import { CompletedFinalModal } from './completed-final-modal'
 import { RequestResubmitModal } from './request-resubmit-modal'
 import { FinalApprovalResubmitModal } from './final-approval-resubmit-modal'
 import { SubmitFinalApprovalModal } from './submit-final-approval-modal'
 import { getRequest, resubmitRequest } from '@/server-actions/requests'
 import { canUserApprove, approveRequest, rejectRequest } from '@/server-actions/approvals'
-import { approveSolution, rejectSolution, submitSolution, initiateFinalApproval } from '@/server-actions/solutions'
+import { approveSolution, rejectSolution, submitSolution, resubmitSolution, initiateFinalApproval } from '@/server-actions/solutions'
 import { transformRequestToModalData } from '@/lib/modal-data-adapters'
 import { getModalTypeForStatus, canUserSubmitSolution, canUserSubmitFinalApproval } from '@/lib/permission-checks'
 import { useRouter } from 'next/navigation'
@@ -44,6 +45,9 @@ export function RequestModalRouter({
   const [userDepartmentType, setUserDepartmentType] = useState<string | null>(null)
   const [userDepartmentId, setUserDepartmentId] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [showSolutionModal, setShowSolutionModal] = useState(false)
+  const [showResubmitSolutionModal, setShowResubmitSolutionModal] = useState(false)
+  const [availableUsers, setAvailableUsers] = useState<Array<{ id: string; name: string; email: string; level: number | undefined; role: string }>>([])
 
   useEffect(() => {
     if (open && requestId) {
@@ -69,6 +73,20 @@ export function RequestModalRouter({
           setUserDepartmentType(deptData.type)
           setUserDepartmentId(deptData.id)
         }
+      }
+
+      // Fetch available users for custom approval hierarchy
+      const usersResponse = await fetch('/api/users?active=true')
+      if (usersResponse.ok) {
+        const usersData = await usersResponse.json()
+        // Filter out current user and transform null to undefined
+        const filteredUsers = usersData
+          .filter((u: any) => u.id !== user?.id)
+          .map((u: any) => ({
+            ...u,
+            level: u.level ?? undefined,
+          }))
+        setAvailableUsers(filteredUsers)
       }
 
       setRequestData(request)
@@ -330,9 +348,25 @@ export function RequestModalRouter({
   }
 
   // Render appropriate modal based on config
+  let modalContent: React.ReactNode = null
+  
   switch (modalConfig.modalType) {
+    case 'submitter':
+      modalContent = (
+        <SubmitterModal
+          mode={modalConfig.mode as 'request' | 'solution' | 'resubmit'}
+          open={open}
+          onOpenChange={onOpenChange}
+          initialData={{
+            title: requestData.title,
+            description: requestData.description,
+          }}
+        />
+      )
+      break
+
     case 'approver':
-      return (
+      modalContent = (
         <ApproverModal
           mode={modalConfig.mode as 'request' | 'solution' | 'final'}
           open={open}
@@ -346,9 +380,88 @@ export function RequestModalRouter({
           onReject={handleReject}
         />
       )
+      break
+
+    case 'solution':
+      if (!modalData.solution) return null
+      modalContent = (
+        <SolutionModal
+          open={open}
+          onOpenChange={onOpenChange}
+          data={{
+            ...modalData,
+            status: hasSolutionRejection ? 'solution_rejected' : 'solution',
+            solution: {
+              ...modalData.solution,
+              files: modalData.solution?.files || [],
+            },
+            rejection: hasSolutionRejection ? {
+              reason: modalData.rejection?.reason || '',
+              rejectedBy: modalData.rejection?.rejectedBy || '',
+              rejectedAt: modalData.rejection?.rejectedAt || '',
+            } : undefined,
+          }}
+          onApprove={canApprove ? () => handleApprove('') : undefined}
+          onReject={canApprove ? (reason: string) => handleReject(reason) : undefined}
+          onResubmit={hasSolutionRejection ? () => setShowResubmitSolutionModal(true) : undefined}
+          availableUsers={availableUsers}
+        />
+      )
+      break
+
+    case 'resubmit-solution':
+      if (!modalData.solution) return null
+      modalContent = (
+        <SubmitterModal
+          mode="resubmit"
+          open={open}
+          onOpenChange={onOpenChange}
+          initialData={{
+            solution: modalData.solution,
+            existingFiles: modalData.solution?.files,
+            rejectionReason: modalData.rejection?.reason,
+            rejectedBy: modalData.rejection?.rejectedBy,
+            rejectedAt: modalData.rejection?.rejectedAt,
+            requestId: requestData?.id,
+            requestTitle: requestData?.title,
+            requestDescription: requestData?.description,
+          }}
+          availableUsers={availableUsers}
+          onSubmitSolution={async (data) => {
+            setIsSubmitting(true)
+            try {
+              const result = await resubmitSolution({
+                requestId: requestData.id,
+                title: data.title || modalData.solution?.title || '',
+                description: data.description,
+                cost: data.cost,
+                currency: data.currency,
+                timeline: data.timeline,
+                files: data.files || [],
+                deletedFileIds: data.deletedFileIds || [],
+                useCustomHierarchy: data.useCustomHierarchy || false,
+                customApprovers: data.customApprovers || [],
+              })
+              
+              if (result.success) {
+                toast.success('Solution resubmitted successfully')
+                onOpenChange(false)
+                onActionComplete?.()
+                router.refresh()
+              }
+            } catch (error) {
+              console.error('Failed to resubmit solution:', error)
+              toast.error(error instanceof Error ? error.message : 'Failed to resubmit solution')
+            } finally {
+              setIsSubmitting(false)
+            }
+          }}
+        />
+      )
+      break
 
     case 'completed-request':
-      return (
+      modalContent = (
         <CompletedRequestModal
           open={open}
           onOpenChange={onOpenChange}
@@ -359,17 +472,14 @@ export function RequestModalRouter({
             engineerAssigned: 'Engineering Team',
           }}
           userDepartment={userDepartmentType || undefined}
-          onSubmitSolution={() => {
-            // TODO: Open SubmitterModal for solution submission
-            // For now, this will be handled by a separate modal state
-            console.log('Open solution submission modal')
-          }}
+          onSubmitSolution={() => setShowSolutionModal(true)}
         />
       )
+      break
 
     case 'completed-solution':
       if (!modalData.solution) return null
-      return (
+      modalContent = (
         <CompletedSolutionModal
           open={open}
           onOpenChange={onOpenChange}
@@ -388,10 +498,11 @@ export function RequestModalRouter({
           }}
         />
       )
+      break
 
     case 'completed-final':
       if (!modalData.solution) return null
-      return (
+      modalContent = (
         <CompletedFinalModal
           open={open}
           onOpenChange={onOpenChange}
@@ -404,14 +515,50 @@ export function RequestModalRouter({
               ?.filter((a: any) => a.isFinalApproval && a.status === 'approved')
               .map((a: any) => a.approver?.name || 'Unknown'),
           }}
-          onExport={() => {
-            console.log('Export PDF')
+          onExport={async () => {
+            try {
+              const { exportRequestAsPDF } = await import('@/server-actions/reports')
+              const result = await exportRequestAsPDF(requestId)
+              
+              if (!result.success) {
+                toast.error(result.error || 'Failed to generate PDF')
+                return
+              }
+
+              // Trigger download in browser
+              if (result.data) {
+                // Decode base64 to binary
+                const byteCharacters = atob(result.data)
+                const byteNumbers = new Array(byteCharacters.length)
+                for (let i = 0; i < byteCharacters.length; i++) {
+                  byteNumbers[i] = byteCharacters.charCodeAt(i)
+                }
+                const byteArray = new Uint8Array(byteNumbers)
+
+                // Create blob and trigger download
+                const blob = new Blob([byteArray], { type: result.contentType || 'application/pdf' })
+                const url = URL.createObjectURL(blob)
+                const a = document.createElement('a')
+                a.href = url
+                a.download = result.filename || `request-${requestId}.pdf`
+                document.body.appendChild(a)
+                a.click()
+                document.body.removeChild(a)
+                URL.revokeObjectURL(url)
+                
+                toast.success('PDF exported successfully')
+              }
+            } catch (error) {
+              console.error('PDF export error:', error)
+              toast.error('Failed to export PDF')
+            }
           }}
         />
       )
+      break
 
     case 'resubmit-request':
-      return (
+      modalContent = (
         <RequestResubmitModal
           open={open}
           onOpenChange={onOpenChange}
@@ -426,9 +573,10 @@ export function RequestModalRouter({
           onResubmit={handleResubmitRequest}
         />
       )
+      break
 
     case 'resubmit-solution':
-      return (
+      modalContent = (
         <SubmitterModal
           mode="resubmit"
           open={open}
@@ -446,10 +594,11 @@ export function RequestModalRouter({
           }}
         />
       )
+      break
 
     case 'resubmit-final':
       if (!modalData.solution) return null
-      return (
+      modalContent = (
         <FinalApprovalResubmitModal
           open={open}
           onOpenChange={onOpenChange}
@@ -470,10 +619,11 @@ export function RequestModalRouter({
           })}
         />
       )
+      break
 
     case 'submit-final':
       if (!modalData.solution) return null
-      return (
+      modalContent = (
         <SubmitFinalApprovalModal
           open={open}
           onOpenChange={onOpenChange}
@@ -492,4 +642,151 @@ export function RequestModalRouter({
     default:
       return null
   }
+
+  // Solution submission modal
+  return (
+    <>
+      {modalContent}
+      <SubmitterModal
+        mode="solution"
+        open={showSolutionModal}
+        onOpenChange={setShowSolutionModal}
+        initialData={{
+          requestId: requestData?.id,
+          requestTitle: requestData?.title,
+          requestDescription: requestData?.description,
+        }}
+        availableUsers={availableUsers}
+        onSubmitSolution={async (data) => {
+          console.log('Modal received data:', data)
+          setIsSubmitting(true)
+          try {
+            // Upload files first if any
+            let fileIds: string[] = []
+            if (data.files && data.files.length > 0) {
+              const { prepareFileUpload, confirmFileUpload } = await import('@/server-actions/files')
+              
+              for (const file of data.files) {
+                // Prepare file upload
+                const prepareResult = await prepareFileUpload({
+                  fileName: file.name,
+                  fileType: file.type,
+                  fileSize: file.size,
+                  requestId: requestData.id,
+                })
+                
+                if (!prepareResult.success || !prepareResult.fileId) {
+                  throw new Error(`Failed to prepare upload for ${file.name}`)
+                }
+                
+                // Upload file to S3
+                const uploadResponse = await fetch(prepareResult.uploadUrl!, {
+                  method: 'PUT',
+                  body: file,
+                  headers: {
+                    'Content-Type': file.type,
+                  },
+                })
+                
+                if (!uploadResponse.ok) {
+                  throw new Error(`Failed to upload ${file.name}`)
+                }
+                
+                // Confirm file upload
+                const filePath = `/uploads/requests/${requestData.id}/${file.name}`
+                const confirmResult = await confirmFileUpload({
+                  requestId: requestData.id,
+                  fileId: prepareResult.fileId,
+                  fileName: file.name,
+                  fileType: file.type,
+                  fileSize: file.size,
+                  filePath,
+                })
+                
+                if (confirmResult.success) {
+                  fileIds.push(prepareResult.fileId)
+                }
+              }
+            }
+            
+            console.log('Submitting to server with:', {
+              useCustomApprovals: data.useCustomHierarchy,
+              customApproverIds: data.customApprovers,
+            })
+            
+            const result = await submitSolution({
+              requestId: requestData.id,
+              title: data.title,
+              description: data.description,
+              costEstimate: data.cost,
+              currency: data.currency as 'THB' | 'USD' | 'EUR',
+              timeline: data.timeline,
+              fileIds,
+              useCustomApprovals: data.useCustomHierarchy,
+              customApproverIds: data.customApprovers,
+            })
+            
+            if (result.success) {
+              toast.success('Solution submitted successfully')
+              setShowSolutionModal(false)
+              onOpenChange(false)
+              onActionComplete?.()
+              router.refresh()
+            }
+          } catch (error) {
+            console.error('Failed to submit solution:', error)
+            toast.error(error instanceof Error ? error.message : 'Failed to submit solution')
+          } finally {
+            setIsSubmitting(false)
+          }
+        }}
+      />
+      <SubmitterModal
+        mode="resubmit"
+        open={showResubmitSolutionModal}
+        onOpenChange={setShowResubmitSolutionModal}
+        initialData={{
+          solution: modalData.solution,
+          existingFiles: modalData.solution?.files,
+          rejectionReason: modalData.rejection?.reason,
+          rejectedBy: modalData.rejection?.rejectedBy,
+          rejectedAt: modalData.rejection?.rejectedAt,
+          requestId: requestData?.id,
+          requestTitle: requestData?.title,
+          requestDescription: requestData?.description,
+        }}
+        availableUsers={availableUsers}
+        onSubmitSolution={async (data) => {
+          setIsSubmitting(true)
+          try {
+            const result = await resubmitSolution({
+              requestId: requestData.id,
+              title: data.title || modalData.solution?.title || '',
+              description: data.description,
+              cost: data.cost,
+              currency: data.currency as 'THB' | 'USD' | 'EUR',
+              timeline: data.timeline,
+              files: data.files || [],
+              deletedFileIds: data.deletedFileIds || [],
+              useCustomHierarchy: data.useCustomHierarchy || false,
+              customApprovers: data.customApprovers || [],
+            })
+            
+            if (result.success) {
+              toast.success('Solution resubmitted successfully')
+              setShowResubmitSolutionModal(false)
+              onOpenChange(false)
+              onActionComplete?.()
+              router.refresh()
+            }
+          } catch (error) {
+            console.error('Failed to resubmit solution:', error)
+            toast.error(error instanceof Error ? error.message : 'Failed to resubmit solution')
+          } finally {
+            setIsSubmitting(false)
+          }
+        }}
+      />
+    </>
+  )
 }

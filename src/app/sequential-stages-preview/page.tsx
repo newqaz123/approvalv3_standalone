@@ -570,7 +570,7 @@ export default function SequentialStagesPreview() {
           </div>
           <p className="mt-2 text-xs text-slate-500">
             Current: <span className="font-bold text-emerald-600">{userDepartment}</span> — 
-            {userDepartment === 'Engineering' 
+            {userDepartment === 'ENGINEERING' 
               ? ' Will see "Submit Solution" button in Completed Request modal'
               : ' Will see "Submit Final Approval" button in Completed Solution modal (if Production dept)'
             }

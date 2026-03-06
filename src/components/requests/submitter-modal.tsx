@@ -100,6 +100,7 @@ interface SubmitterModalProps {
     currency: string
     timeline: string
     files: File[]
+    deletedFileIds?: string[]
     useCustomHierarchy: boolean
     customApprovers: string[]
   }) => void
@@ -334,6 +335,7 @@ export function SubmitterModal({
         files,
       })
     } else if (mode === 'solution' && onSubmitSolution) {
+      console.log('Submitting solution with custom hierarchy:', { useCustomHierarchy, customApprovers })
       onSubmitSolution({
         title: solutionTitle,
         description: solutionDescription,
@@ -341,6 +343,7 @@ export function SubmitterModal({
         currency,
         timeline,
         files,
+        deletedFileIds,
         useCustomHierarchy,
         customApprovers,
       })
@@ -560,32 +563,34 @@ export function SubmitterModal({
                 </div>
               </div>
 
-              {/* Custom Approval Hierarchy Toggle */}
-              <div className="bg-slate-50 dark:bg-slate-800/50 rounded-xl p-4 border border-slate-200 dark:border-slate-700">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <Settings2 className="w-4 h-4 text-slate-500" />
-                    <span className="text-sm font-bold">Custom Approval Hierarchy</span>
-                  </div>
-                  <Switch
-                    checked={useCustomHierarchy}
-                    onCheckedChange={setUseCustomHierarchy}
-                  />
-                </div>
-                <p className="text-xs text-slate-500 mb-3">
-                  Enable to define a custom approval chain instead of using the default hierarchy.
-                </p>
-
-                {useCustomHierarchy && (
-                  <div className="border-t border-slate-200 dark:border-slate-700 pt-3">
-                    <CustomApprovalPicker
-                      availableUsers={availableUsers}
-                      selectedApprovers={customApprovers}
-                      onChange={setCustomApprovers}
+              {/* Custom Approval Hierarchy Toggle - only for new solutions, not resubmit */}
+              {mode === 'solution' && (
+                <div className="bg-slate-50 dark:bg-slate-800/50 rounded-xl p-4 border border-slate-200 dark:border-slate-700">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <Settings2 className="w-4 h-4 text-slate-500" />
+                      <span className="text-sm font-bold">Custom Approval Hierarchy</span>
+                    </div>
+                    <Switch
+                      checked={useCustomHierarchy}
+                      onCheckedChange={setUseCustomHierarchy}
                     />
                   </div>
-                )}
-              </div>
+                  <p className="text-xs text-slate-500 mb-3">
+                    Enable to define a custom approval chain instead of using the default hierarchy.
+                  </p>
+
+                  {useCustomHierarchy && (
+                    <div className="border-t border-slate-200 dark:border-slate-700 pt-3">
+                      <CustomApprovalPicker
+                        availableUsers={availableUsers}
+                        selectedApprovers={customApprovers}
+                        onChange={setCustomApprovers}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 

@@ -443,8 +443,99 @@ export async function getRequest(id: string) {
           createdAt: 'desc',
         },
       },
+      approvals: {
+        select: {
+          id: true,
+          status: true,
+          comments: true,
+          isFinalApproval: true,
+          requiredLevel: true,
+          order: true,
+          createdAt: true,
+          approvedAt: true,
+          approver: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+        },
+        orderBy: {
+          createdAt: 'asc',
+        },
+      },
+      solutions: {
+        select: {
+          id: true,
+          title: true,
+          description: true,
+          costEstimate: true,
+          currency: true,
+          timeline: true,
+          submittedAt: true,
+          createdAt: true,
+          updatedAt: true,
+          submittedBy: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+          approvals: {
+            select: {
+              id: true,
+              status: true,
+              comments: true,
+              requiredLevel: true,
+              order: true,
+              createdAt: true,
+              approvedAt: true,
+              approver: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                },
+              },
+            },
+            orderBy: {
+              createdAt: 'asc',
+            },
+          },
+          fileAttachments: {
+            select: {
+              id: true,
+              fileName: true,
+              fileType: true,
+              fileSize: true,
+              filePath: true,
+              description: true,
+              createdAt: true,
+              uploadedBy: {
+                select: {
+                  name: true,
+                },
+              },
+            },
+            orderBy: {
+              createdAt: 'asc',
+            },
+          },
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+        take: 1,
+      },
     },
   })
+
+  // Convert Decimal to number for client components
+  if (request?.solutions?.[0]) {
+    request.solutions[0].costEstimate = Number(request.solutions[0].costEstimate)
+  }
 
   return request
 }

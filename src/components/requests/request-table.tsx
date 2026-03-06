@@ -18,7 +18,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { StatusBadge } from './status-badge'
-import { RequestDetailModal } from './request-detail-modal'
+import { RequestModalRouter } from './request-modal-router'
 import { RejectedBadge } from './rejected-badge'
 import { RequestCard, RequestCardsEmptyState } from '@/components/mobile/request-card'
 import { ApprovalStatusBadge } from './approval-status-badge'
@@ -206,7 +206,7 @@ export function RequestTable({ initialData, onDataRefresh }: RequestTableProps) 
       </div>
 
       {selectedRequestId && (
-        <RequestDetailModal
+        <RequestModalRouter
           requestId={selectedRequestId}
           open={isModalOpen}
           onOpenChange={setIsModalOpen}

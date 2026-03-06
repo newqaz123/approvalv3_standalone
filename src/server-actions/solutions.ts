@@ -1735,3 +1735,214 @@ export async function rejectFinalApproval(requestId: string, comments: string, e
 
   return { success: true }
 }
+
+/**
+ * Resubmit an engineering solution after rejection
+ * Updates the existing solution with new details and resets the approval chain
+ */
+export async function resubmitSolution(input: {
+  requestId: string
+  title: string
+  description: string
+  cost: number
+  currency: string
+  timeline: string
+  files: File[]
+  deletedFileIds?: string[]
+  useCustomHierarchy: boolean
+  customApprovers: string[]
+}) {
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
+  if (!userId) {
+    throw new Error('Unauthorized')
+  }
+
+  // Get current user with role and level
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, role: true, departmentId: true, level: true },
+  })
+
+  if (!user) {
+    throw new Error('User not found')
+  }
+
+  if (!user.departmentId) {
+    throw new Error('User must be assigned to a department to submit solutions')
+  }
+
+  if (user.role !== UserRole.engineering) {
+    throw new Error('Only engineering users can resubmit solutions')
+  }
+
+  // Validate request exists and has a rejected solution
+  const request = await prisma.requests.findUnique({
+    where: { id: input.requestId },
+    include: {
+      solutions: {
+        include: {
+          approvals: {
+            where: { status: 'rejected' },
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+          },
+          fileAttachments: true,
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 1,
+      },
+      department: true,
+    },
+  })
+
+  if (!request) {
+    throw new Error('Request not found')
+  }
+
+  const solution = request.solutions[0]
+  if (!solution) {
+    throw new Error('No solution found for this request')
+  }
+
+  if (!solution.approvals.some(a => a.status === 'rejected')) {
+    throw new Error('Can only resubmit rejected solutions')
+  }
+
+  // Start transaction
+  const result = await prisma.$transaction(async (tx) => {
+    // Update solution details
+    const updatedSolution = await tx.solution.update({
+      where: { id: solution.id },
+      data: {
+        title: input.title,
+        description: input.description,
+        costEstimate: input.cost,
+        currency: input.currency,
+        timeline: input.timeline,
+        updatedAt: new Date(),
+      },
+    })
+
+    // Handle file attachments
+    if (input.deletedFileIds && input.deletedFileIds.length > 0) {
+      await tx.solutionFileAttachment.deleteMany({
+        where: {
+          id: { in: input.deletedFileIds },
+          solutionId: solution.id,
+        },
+      })
+    }
+
+    // Add new files
+    if (input.files.length > 0) {
+      const fileData = input.files.map(file => ({
+        solutionId: solution.id,
+        fileName: file.name,
+        fileType: file.type,
+        fileSize: file.size,
+        filePath: `/uploads/solutions/${solution.id}/${file.name}`,
+        uploadedById: userId,
+      }))
+
+      await tx.solutionFileAttachment.createMany({
+        data: fileData,
+      })
+    }
+
+    // Delete old rejected approvals
+    await tx.solutionApproval.deleteMany({
+      where: {
+        solutionId: solution.id,
+      },
+    })
+
+    // Create new approval chain
+    const approvalData = []
+    
+    if (input.useCustomHierarchy && input.customApprovers.length > 0) {
+      // Custom approval chain
+      input.customApprovers.forEach((approverId, index) => {
+        approvalData.push({
+          solutionId: solution.id,
+          approverId,
+          requiredLevel: 1,
+          order: index + 1,
+          status: 'pending',
+          isCustomChain: true,
+        })
+      })
+    } else {
+      // Default engineering department approval chain
+      const engineeringApprovers = await tx.departmentApprover.findMany({
+        where: { departmentId: user.departmentId },
+        include: { approver: true },
+        orderBy: [
+          { approverLevel: 'asc' },
+          { createdAt: 'asc' },
+        ],
+      })
+
+      if (engineeringApprovers.length === 0) {
+        throw new Error('No approvers found in engineering department')
+      }
+
+      engineeringApprovers.forEach((deptApprover, index) => {
+        approvalData.push({
+          solutionId: solution.id,
+          approverId: deptApprover.approverId,
+          requiredApproverId: deptApprover.approverId,
+          requiredLevel: deptApprover.approverLevel,
+          order: index + 1,
+          status: 'pending',
+          isCustomChain: false,
+        })
+      })
+    }
+
+    await tx.solutionApproval.createMany({
+      data: approvalData,
+    })
+
+    // Update request status back to DesignCostEstimationApproval
+    await tx.requests.update({
+      where: { id: input.requestId },
+      data: {
+        status: RequestStatus.DesignCostEstimationApproval,
+        updatedAt: new Date(),
+      },
+    })
+
+    // Add activity log
+    await tx.activity.create({
+      data: {
+        requestId: input.requestId,
+        userId,
+        action: 'solution_resubmitted',
+        comments: `Solution resubmitted: "${input.title}"`,
+      },
+    })
+
+    return updatedSolution
+  })
+
+  // Send notifications to approvers
+  const { notifyUsersInDepartment } = await import('./notifications')
+  if (request.department) {
+    await notifyUsersInDepartment(
+      request.department.id,
+      {
+        type: 'solution_submitted',
+        title: 'Solution Resubmitted',
+        message: `📤 Solution resubmitted for "${request.title}". Please review the updated solution.`,
+        requestId: input.requestId,
+      },
+      [userId] // Exclude submitter
+    )
+  }
+
+  revalidatePath('/requests')
+  revalidatePath('/engineering')
+  revalidatePath('/dashboard')
+
+  return { success: true, solutionId: result.id }
+}

@@ -56,7 +56,7 @@ interface ApprovalStep {
 }
 
 interface ApprovalStage {
-  stageNumber: number
+  stageNumber: string | number
   stageName: string
   steps: ApprovalStep[]
 }
@@ -814,7 +814,7 @@ export function SolutionModal({
           </section>
 
           {/* Solution Approval Actions with Custom Hierarchy */}
-          {data.status === 'solution' && (
+          {data.status === 'solution' && onApprove && (
             <SolutionApprovalActions
               onApprove={onApprove}
               onReject={onReject}

@@ -53,7 +53,7 @@ interface ApprovalStep {
 }
 
 interface ApprovalStage {
-  stageNumber: number
+  stageNumber: string | number
   stageName: string
   steps: ApprovalStep[]
 }
@@ -431,7 +431,7 @@ export function ApproverModal({
   onDownloadRequestFile,
   onDownloadSolutionFile,
 }: ApproverModalProps) {
-  const status = statusConfig[data.status]
+  const status = statusConfig[data.status] || statusConfig.request
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

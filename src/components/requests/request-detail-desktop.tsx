@@ -42,7 +42,7 @@ interface ApprovalStep {
 }
 
 interface ApprovalStage {
-  stageNumber: number
+  stageNumber: string | number
   stageName: string
   steps: ApprovalStep[]
 }

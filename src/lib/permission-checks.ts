@@ -49,12 +49,18 @@ export function getModalTypeForStatus(
   isRequesterDepartment: boolean,
   isEngineering: boolean
 ): {
-  modalType: 'submitter' | 'approver' | 'completed-request' | 'completed-solution' | 'completed-final' | 'resubmit-request' | 'resubmit-solution' | 'resubmit-final' | 'submit-final'
+  modalType: 'submitter' | 'approver' | 'solution' | 'completed-request' | 'completed-solution' | 'completed-final' | 'resubmit-request' | 'resubmit-solution' | 'resubmit-final' | 'submit-final'
   mode?: 'request' | 'solution' | 'final' | 'resubmit'
   showSubmitSolutionButton?: boolean
   showSubmitFinalApprovalButton?: boolean
 } {
-  // Handle rejection states first
+  // Handle solution rejection - show read-only view first with resubmit option
+  // This gives engineers a chance to review before resubmitting
+  if (hasSolution && hasRejection) {
+    return { modalType: 'solution', mode: 'resubmit' }
+  }
+
+  // Handle other rejection states
   if (hasRejection) {
     if (status === 'ImprovementRequest' || status === 'RequestRejected') {
       return { modalType: 'resubmit-request' }
@@ -93,10 +99,10 @@ export function getModalTypeForStatus(
 
   // Handle solution approval stage
   if (status === 'DesignCostEstimationApproval') {
-    if (canApprove) {
-      return { modalType: 'approver', mode: 'solution' }
+    if (hasRejection) {
+      return { modalType: 'resubmit-solution', mode: 'resubmit' }
     }
-    return { modalType: 'approver', mode: 'solution' } // Read-only for non-approvers
+    return { modalType: 'solution' }
   }
 
   // Handle sent to engineer (request completed, awaiting solution)

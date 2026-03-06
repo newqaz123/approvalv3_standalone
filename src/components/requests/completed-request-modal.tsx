@@ -44,7 +44,7 @@ interface ApprovalStep {
 }
 
 interface ApprovalStage {
-  stageNumber: number
+  stageNumber: string | number
   stageName: string
   steps: ApprovalStep[]
 }
@@ -192,7 +192,7 @@ export function CompletedRequestModal({
   onSubmitSolution,
   onDownloadFile,
 }: CompletedRequestModalProps) {
-  const isEngineering = userDepartment === 'Engineering'
+  const isEngineering = userDepartment === 'ENGINEERING'
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-5xl w-full max-h-[90vh] p-0 gap-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl rounded-xl overflow-hidden">
