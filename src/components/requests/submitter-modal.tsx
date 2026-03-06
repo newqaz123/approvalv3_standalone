@@ -334,6 +334,7 @@ export function SubmitterModal({
         templateId: selectedTemplate || undefined,
         files,
       })
+      onOpenChange(false)
     } else if (mode === 'solution' && onSubmitSolution) {
       console.log('Submitting solution with custom hierarchy:', { useCustomHierarchy, customApprovers })
       onSubmitSolution({
@@ -347,6 +348,7 @@ export function SubmitterModal({
         useCustomHierarchy,
         customApprovers,
       })
+      // Don't close modal here - let parent handler close it after async work completes
     } else if (mode === 'resubmit' && onResubmit) {
       onResubmit({
         title: mode === 'resubmit' ? undefined : title,
@@ -359,8 +361,8 @@ export function SubmitterModal({
         useCustomHierarchy,
         customApprovers,
       })
+      // Don't close modal here - let parent handler close it after async work completes
     }
-    onOpenChange(false)
   }
 
   const isSubmitDisabled = () => {

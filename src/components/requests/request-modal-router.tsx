@@ -14,6 +14,7 @@ import { SubmitFinalApprovalModal } from './submit-final-approval-modal'
 import { getRequest, resubmitRequest } from '@/server-actions/requests'
 import { canUserApprove, approveRequest, rejectRequest } from '@/server-actions/approvals'
 import { approveSolution, rejectSolution, submitSolution, resubmitSolution, initiateFinalApproval } from '@/server-actions/solutions'
+import { getDownloadUrl } from '@/server-actions/files'
 import { transformRequestToModalData } from '@/lib/modal-data-adapters'
 import { getModalTypeForStatus, canUserSubmitSolution, canUserSubmitFinalApproval } from '@/lib/permission-checks'
 import { useRouter } from 'next/navigation'
@@ -140,6 +141,59 @@ export function RequestModalRouter({
   const handleClose = () => {
     onOpenChange(false)
     onActionComplete?.()
+  }
+
+  const handleDownloadFile = async (fileId: string) => {
+    try {
+      // Get file data from request fileAttachments
+      const file = requestData.fileAttachments?.find((f: any) => f.id === fileId)
+
+      if (!file) {
+        toast.error('File not found')
+        return
+      }
+
+      // Get download URL
+      const downloadUrl = await getDownloadUrl(file.filePath)
+
+      // Trigger download
+      const a = document.createElement('a')
+      a.href = downloadUrl
+      a.download = file.fileName
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+    } catch (error) {
+      console.error('Download error:', error)
+      toast.error('Failed to download file')
+    }
+  }
+
+  const handleDownloadSolutionFile = async (fileId: string) => {
+    try {
+      // Get file data from solution fileAttachments
+      const file = requestData.solutions?.[0]?.fileAttachments
+        ?.find((f: any) => f.id === fileId)
+
+      if (!file) {
+        toast.error('File not found')
+        return
+      }
+
+      // Get download URL
+      const downloadUrl = await getDownloadUrl(file.filePath)
+
+      // Trigger download
+      const a = document.createElement('a')
+      a.href = downloadUrl
+      a.download = file.fileName
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+    } catch (error) {
+      console.error('Download error:', error)
+      toast.error('Failed to download file')
+    }
   }
 
   const handleApprove = async (comment: string) => {
@@ -404,6 +458,8 @@ export function RequestModalRouter({
           onApprove={canApprove ? () => handleApprove('') : undefined}
           onReject={canApprove ? (reason: string) => handleReject(reason) : undefined}
           onResubmit={hasSolutionRejection ? () => setShowResubmitSolutionModal(true) : undefined}
+          onDownloadFile={handleDownloadFile}
+          onDownloadSolutionFile={handleDownloadSolutionFile}
           availableUsers={availableUsers}
         />
       )
