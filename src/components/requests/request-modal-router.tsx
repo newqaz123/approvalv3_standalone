@@ -134,17 +134,21 @@ export function RequestModalRouter({
     requestData.departmentId
   )
 
-  // Check for rejections
-  const hasRequestRejection = requestData.approvals?.some((a: any) => 
-    a.status === 'rejected' && !a.isFinalApproval
-  )
-  const hasSolutionRejection = requestData.solutions?.[0]?.approvals?.some((a: any) => 
-    a.status === 'rejected'
-  )
-  const hasFinalRejection = requestData.approvals?.some((a: any) => 
-    a.status === 'rejected' && a.isFinalApproval
-  )
-  const hasRejection = hasRequestRejection || hasSolutionRejection || hasFinalRejection
+  // Check for rejections - only consider rejections relevant to current workflow stage
+  const hasRequestRejection = (requestData.status === 'ImprovementRequest' || requestData.status === 'RequestRejected') &&
+    requestData.approvals?.some((a: any) => a.status === 'rejected' && !a.isFinalApproval)
+  
+  const hasSolutionRejection = (requestData.status === 'SentToEngineer' || requestData.status === 'DesignCostEstimationApproval') &&
+    requestData.solutions?.[0]?.approvals?.some((a: any) => a.status === 'rejected')
+  
+  const hasFinalRejection = (requestData.status === 'FinalApproval' || requestData.status === 'FinalRejected') &&
+    requestData.approvals?.some((a: any) => a.status === 'rejected' && a.isFinalApproval)
+  
+  // Special case: Final approval rejection that sent request back to engineering
+  const hasFinalRejectionInEngineering = requestData.status === 'SentToEngineer' &&
+    requestData.approvals?.some((a: any) => a.status === 'rejected' && a.isFinalApproval)
+  
+  const hasRejection = hasRequestRejection || hasSolutionRejection || hasFinalRejection || hasFinalRejectionInEngineering
 
   // Determine modal type
   const modalConfig = getModalTypeForStatus(

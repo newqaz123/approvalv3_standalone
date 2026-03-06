@@ -343,17 +343,45 @@ export function transformRequestToModalData(request: {
   const finalApprovals = (request.approvals || []).filter(a => a.isFinalApproval)
   const solutionApprovals = solution?.approvals || []
 
-  // Determine rejection info
-  const rejectedRequestApproval = requestApprovals.find(a => a.status === 'rejected')
-  const rejectedSolutionApproval = solutionApprovals.find(a => a.status === 'rejected')
-  const rejectedFinalApproval = finalApprovals.find(a => a.status === 'rejected')
-
-  const rejection = rejectedRequestApproval || rejectedSolutionApproval || rejectedFinalApproval
-  const rejectionInfo = rejection ? {
-    reason: rejection.comments || 'No reason provided',
-    rejectedBy: rejection.approver?.name || 'Unknown',
-    rejectedAt: rejection.approvedAt?.toISOString() || rejection.createdAt.toISOString(),
-  } : undefined
+  // Determine rejection info based on current status
+  // Only show rejection if it's relevant to the current workflow stage
+  let rejectionInfo = undefined
+  
+  if (request.status === 'ImprovementRequest' || request.status === 'RequestRejected') {
+    // Show request rejection
+    const rejectedRequestApproval = requestApprovals.find(a => a.status === 'rejected')
+    if (rejectedRequestApproval) {
+      rejectionInfo = {
+        reason: rejectedRequestApproval.comments || 'No reason provided',
+        rejectedBy: rejectedRequestApproval.approver?.name || 'Unknown',
+        rejectedAt: rejectedRequestApproval.approvedAt?.toISOString() || rejectedRequestApproval.createdAt.toISOString(),
+      }
+    }
+  } else if (request.status === 'SentToEngineer' || request.status === 'DesignCostEstimationApproval') {
+    // Show solution rejection only if solution approvals are rejected
+    const rejectedSolutionApproval = solutionApprovals.find(a => a.status === 'rejected')
+    // Also check for final approval rejection that sent it back to engineering
+    const rejectedFinalApproval = finalApprovals.find(a => a.status === 'rejected')
+    const rejection = rejectedSolutionApproval || rejectedFinalApproval
+    if (rejection) {
+      rejectionInfo = {
+        reason: rejection.comments || 'No reason provided',
+        rejectedBy: rejection.approver?.name || 'Unknown',
+        rejectedAt: rejection.approvedAt?.toISOString() || rejection.createdAt.toISOString(),
+      }
+    }
+  } else if (request.status === 'FinalApproval' || request.status === 'FinalRejected') {
+    // Show final approval rejection
+    const rejectedFinalApproval = finalApprovals.find(a => a.status === 'rejected')
+    if (rejectedFinalApproval) {
+      rejectionInfo = {
+        reason: rejectedFinalApproval.comments || 'No reason provided',
+        rejectedBy: rejectedFinalApproval.approver?.name || 'Unknown',
+        rejectedAt: rejectedFinalApproval.approvedAt?.toISOString() || rejectedFinalApproval.createdAt.toISOString(),
+      }
+    }
+  }
+  // For SendBackToRequester and Completed, don't show any rejection info
 
   // Build base data
   const baseData = {
