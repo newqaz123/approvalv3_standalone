@@ -445,7 +445,7 @@ export function RequestModalRouter({
       if (!modalData.solution) return null
       modalContent = (
         <SolutionModal
-          open={open}
+          open={open && !showResubmitSolutionModal}
           onOpenChange={onOpenChange}
           data={{
             ...modalData,
@@ -688,11 +688,9 @@ export function RequestModalRouter({
   }
 
   // Solution submission modal
-  // Only render main modal content if resubmit modal is not open
-  // This prevents modal stacking issues
   return (
     <>
-      {!showResubmitSolutionModal && modalContent}
+      {modalContent}
       <SubmitterModal
         mode="solution"
         open={showSolutionModal}
