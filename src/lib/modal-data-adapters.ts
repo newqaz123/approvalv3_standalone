@@ -403,7 +403,7 @@ export function transformRequestToModalData(request: {
     
     stages.push({
       stageNumber: stageCounter++,
-      stageName: 'Design Review',
+      stageName: 'Improvement Request',
       submittedBy: request.requester.name || request.requester.email,
       submittedAt: request.createdAt.toISOString(),
       steps,
@@ -436,7 +436,7 @@ export function transformRequestToModalData(request: {
     
     stages.push({
       stageNumber: stageCounter++,
-      stageName: 'Cost Approval',
+      stageName: 'Design & Cost Approval',
       submittedBy: solution?.submittedBy?.name || solution?.submittedBy?.email || 'Engineering Team',
       submittedAt: solution?.submittedAt.toISOString(),
       steps,

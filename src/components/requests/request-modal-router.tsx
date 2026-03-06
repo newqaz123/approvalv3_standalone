@@ -447,6 +447,8 @@ export function RequestModalRouter({
           canApprove={canApprove}
           onApprove={handleApprove}
           onReject={handleReject}
+          onDownloadRequestFile={handleDownloadFile}
+          onDownloadSolutionFile={handleDownloadSolutionFile}
         />
       )
       break
@@ -590,6 +592,8 @@ export function RequestModalRouter({
               ?.filter((a: any) => a.isFinalApproval && a.status === 'approved')
               .map((a: any) => a.approver?.name || 'Unknown'),
           }}
+          onDownloadRequestFile={handleDownloadFile}
+          onDownloadSolutionFile={handleDownloadSolutionFile}
           onExport={async () => {
             try {
               const { exportRequestAsPDF } = await import('@/server-actions/reports')
@@ -690,6 +694,8 @@ export function RequestModalRouter({
             useCustomChain: data.useCustomHierarchy,
             customApproverIds: data.customApprovers,
           })}
+          onDownloadRequestFile={handleDownloadFile}
+          onDownloadSolutionFile={handleDownloadSolutionFile}
         />
       )
 
