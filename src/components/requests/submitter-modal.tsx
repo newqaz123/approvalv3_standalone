@@ -629,8 +629,8 @@ export function SubmitterModal({
                 </div>
               </div>
 
-              {/* Custom Approval Hierarchy Toggle - only for new solutions, not resubmit */}
-              {mode === 'solution' && (
+              {/* Custom Approval Hierarchy Toggle - for solution and resubmit modes */}
+              {(mode === 'solution' || mode === 'resubmit') && (
                 <div className="bg-slate-50 dark:bg-slate-800/50 rounded-xl p-4 border border-slate-200 dark:border-slate-700">
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2">
