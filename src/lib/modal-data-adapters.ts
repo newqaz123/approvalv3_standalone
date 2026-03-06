@@ -26,6 +26,8 @@ export interface ModalApprovalStep {
 export interface ModalApprovalStage {
   stageNumber: string | number
   stageName: string
+  submittedBy?: string
+  submittedAt?: string
   steps: ModalApprovalStep[]
 }
 
@@ -402,6 +404,8 @@ export function transformRequestToModalData(request: {
     stages.push({
       stageNumber: stageCounter++,
       stageName: 'Design Review',
+      submittedBy: request.requester.name || request.requester.email,
+      submittedAt: request.createdAt.toISOString(),
       steps,
     })
   }
@@ -433,6 +437,8 @@ export function transformRequestToModalData(request: {
     stages.push({
       stageNumber: stageCounter++,
       stageName: 'Cost Approval',
+      submittedBy: solution?.submittedBy?.name || solution?.submittedBy?.email || 'Engineering Team',
+      submittedAt: solution?.submittedAt.toISOString(),
       steps,
     })
   }
@@ -461,9 +467,14 @@ export function transformRequestToModalData(request: {
         }
       })
     
+    // Find who initiated final approval from activities
+    const finalApprovalActivity = request.activities.find(a => a.action === 'final_approval_initiated')
+    
     stages.push({
       stageNumber: stageCounter++,
       stageName: 'Final Approval',
+      submittedBy: finalApprovalActivity?.user.name || finalApprovalActivity?.user.email || 'Department Head',
+      submittedAt: finalApprovalActivity?.createdAt.toISOString() || finalApprovals[0].createdAt.toISOString(),
       steps,
     })
   }

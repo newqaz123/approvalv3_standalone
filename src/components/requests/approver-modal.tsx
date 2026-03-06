@@ -698,6 +698,16 @@ export function ApproverModal({
                         Stage {stage.stageNumber}
                       </h4>
                       <p className="text-xs text-slate-400 leading-tight mt-0.5">{stage.stageName}</p>
+                      {stage.submittedBy && (
+                        <p className="text-[10px] text-slate-400 leading-tight mt-1.5">
+                          by {stage.submittedBy}
+                        </p>
+                      )}
+                      {stage.submittedAt && (
+                        <p className="text-[10px] text-slate-400 leading-tight">
+                          {format(new Date(stage.submittedAt), 'MMM d, h:mm a')}
+                        </p>
+                      )}
                     </div>
                   </div>
 
