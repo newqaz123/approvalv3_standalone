@@ -371,29 +371,101 @@ export function transformRequestToModalData(request: {
     solution: transformSolutionToModal(solution),
   } : {}
 
-  // Add stages based on what's available
+  // Add stages based on what's available - group by workflow stage, not by level
   let stages: ModalApprovalStage[] = []
+  let stageCounter = 1
   
+  // Stage 1: Request Approval (if exists)
+  if (requestApprovals.length > 0) {
+    const steps: ModalApprovalStep[] = requestApprovals
+      .sort((a, b) => a.requiredLevel - b.requiredLevel || a.order - b.order)
+      .map(approval => {
+        const approverName = approval.approver?.name || 
+                            approval.requiredApprover?.name || 
+                            'Pending Assignment'
+        
+        return {
+          id: approval.id,
+          name: approverName,
+          role: approval.isCustomChain 
+            ? `Custom Level ${approval.order}` 
+            : `Level ${approval.requiredLevel}`,
+          status: approval.status as 'submitted' | 'approved' | 'pending' | 'rejected',
+          comment: approval.comments || 
+                  (approval.status === 'pending' ? 'Awaiting review' : 'No comment'),
+          timestamp: approval.approvedAt 
+            ? approval.approvedAt.toISOString() 
+            : approval.createdAt.toISOString(),
+        }
+      })
+    
+    stages.push({
+      stageNumber: stageCounter++,
+      stageName: 'Design Review',
+      steps,
+    })
+  }
+  
+  // Stage 2: Solution Approval (if exists)
+  if (solutionApprovals.length > 0) {
+    const steps: ModalApprovalStep[] = solutionApprovals
+      .sort((a, b) => a.requiredLevel - b.requiredLevel || a.order - b.order)
+      .map(approval => {
+        const approverName = approval.approver?.name || 
+                            approval.requiredApprover?.name || 
+                            'Pending Assignment'
+        
+        return {
+          id: approval.id,
+          name: approverName,
+          role: approval.isCustomChain 
+            ? `Custom Level ${approval.order}` 
+            : `Level ${approval.requiredLevel}`,
+          status: approval.status as 'submitted' | 'approved' | 'pending' | 'rejected',
+          comment: approval.comments || 
+                  (approval.status === 'pending' ? 'Awaiting review' : 'No comment'),
+          timestamp: approval.approvedAt 
+            ? approval.approvedAt.toISOString() 
+            : approval.createdAt.toISOString(),
+        }
+      })
+    
+    stages.push({
+      stageNumber: stageCounter++,
+      stageName: 'Cost Approval',
+      steps,
+    })
+  }
+  
+  // Stage 3: Final Approval (if exists)
   if (finalApprovals.length > 0) {
-    // Final approval stage - combine all previous stages with unique keys
-    const requestStages = transformApprovalsToStages(requestApprovals, false)
-      .map(s => ({ ...s, stageNumber: `request-${s.stageNumber}` }))
-    const solutionStages = transformApprovalsToStages(solutionApprovals, false)
-      .map(s => ({ ...s, stageNumber: `solution-${s.stageNumber}` }))
-    const finalStages = transformApprovalsToStages(finalApprovals, true)
-      .map(s => ({ ...s, stageNumber: `final-${s.stageNumber}` }))
-    stages = [...requestStages, ...solutionStages, ...finalStages]
-  } else if (solutionApprovals.length > 0) {
-    // Solution approval stage
-    const requestStages = transformApprovalsToStages(requestApprovals, false)
-      .map(s => ({ ...s, stageNumber: `request-${s.stageNumber}` }))
-    const solutionStages = transformApprovalsToStages(solutionApprovals, false)
-      .map(s => ({ ...s, stageNumber: `solution-${s.stageNumber}` }))
-    stages = [...requestStages, ...solutionStages]
-  } else {
-    // Request approval stage only
-    stages = transformApprovalsToStages(requestApprovals, false)
-      .map(s => ({ ...s, stageNumber: `request-${s.stageNumber}` }))
+    const steps: ModalApprovalStep[] = finalApprovals
+      .sort((a, b) => a.requiredLevel - b.requiredLevel || a.order - b.order)
+      .map(approval => {
+        const approverName = approval.approver?.name || 
+                            approval.requiredApprover?.name || 
+                            'Pending Assignment'
+        
+        return {
+          id: approval.id,
+          name: approverName,
+          role: approval.isCustomChain 
+            ? `Custom Level ${approval.order}` 
+            : `Level ${approval.requiredLevel}`,
+          status: approval.status as 'submitted' | 'approved' | 'pending' | 'rejected',
+          comment: approval.comments || 
+                  (approval.status === 'pending' ? 'Awaiting review' : 'No comment'),
+          timestamp: approval.approvedAt 
+            ? approval.approvedAt.toISOString() 
+            : approval.createdAt.toISOString(),
+        }
+      })
+    
+    stages.push({
+      stageNumber: stageCounter++,
+      stageName: 'Final Approval',
+      steps,
+    })
   }
 
   return {
