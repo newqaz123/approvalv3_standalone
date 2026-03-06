@@ -631,27 +631,6 @@ export function RequestModalRouter({
       )
       break
 
-    case 'resubmit-solution':
-      modalContent = (
-        <SubmitterModal
-          mode="resubmit"
-          open={open}
-          onOpenChange={onOpenChange}
-          initialData={{
-            solution: modalData.solution,
-            existingFiles: modalData.solution?.files,
-            rejectionReason: modalData.rejection?.reason,
-            rejectedBy: modalData.rejection?.rejectedBy,
-            rejectedAt: modalData.rejection?.rejectedAt,
-          }}
-          onResubmit={(data) => {
-            console.log('Resubmit solution:', data)
-            handleClose()
-          }}
-        />
-      )
-      break
-
     case 'resubmit-final':
       if (!modalData.solution) return null
       modalContent = (
