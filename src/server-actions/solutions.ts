@@ -1960,19 +1960,44 @@ export async function resubmitSolution(input: {
     return updatedSolution
   })
 
-  // Send notifications to approvers
-  const { notifyUsersInDepartment } = await import('./notifications')
-  if (request.department) {
-    await notifyUsersInDepartment(
-      request.department.id,
-      {
+  // Send notifications to approvers based on approval chain type
+  const { createNotification } = await import('./notifications')
+  
+  if (input.useCustomHierarchy && input.customApprovers.length > 0) {
+    // Notify custom approvers
+    for (const approverId of input.customApprovers) {
+      await createNotification({
+        userId: approverId,
         type: 'approval_needed',
         title: 'Solution Resubmitted',
         message: `📤 Solution resubmitted for "${request.title}". Please review the updated solution.`,
         requestId: input.requestId,
-      },
-      [userId] // Exclude submitter
-    )
+      })
+    }
+  } else {
+    // Notify engineering department approvers at the first pending level
+    const engineeringDept = await prisma.departments.findFirst({
+      where: { type: 'ENGINEERING' },
+      select: { id: true },
+    })
+
+    if (engineeringDept) {
+      const { getApproversAtLevel } = await import('./approvals')
+      // Get the first level of approvers that have pending approvals (submitter's level + 1)
+      const firstPendingLevel = (user.level || 1) + 1
+      const firstLevelApprovers = await getApproversAtLevel(engineeringDept.id, firstPendingLevel)
+      
+      // Notify each approver
+      for (const approver of firstLevelApprovers) {
+        await createNotification({
+          userId: approver.id,
+          type: 'approval_needed',
+          title: 'Solution Resubmitted',
+          message: `📤 Solution resubmitted for "${request.title}". Please review the updated solution.`,
+          requestId: request.id,
+        })
+      }
+    }
   }
 
   revalidatePath('/requests')
