@@ -471,12 +471,12 @@ export function RequestModalRouter({
           onOpenChange={onOpenChange}
           data={{
             ...modalData,
-            status: ((hasSolutionRejection || hasFinalRejection) && !canApprove) ? 'solution_rejected' : 'solution',
+            status: ((hasSolutionRejection || hasFinalRejection || hasFinalRejectionInEngineering) && !canApprove) ? 'solution_rejected' : 'solution',
             solution: {
               ...modalData.solution,
               files: modalData.solution?.files || [],
             },
-            rejection: (hasSolutionRejection || hasFinalRejection) ? {
+            rejection: (hasSolutionRejection || hasFinalRejection || hasFinalRejectionInEngineering) ? {
               reason: modalData.rejection?.reason || '',
               rejectedBy: modalData.rejection?.rejectedBy || '',
               rejectedAt: modalData.rejection?.rejectedAt || '',
@@ -484,7 +484,7 @@ export function RequestModalRouter({
           }}
           onApprove={canApprove ? () => handleApprove('') : undefined}
           onReject={canApprove ? (reason: string) => handleReject(reason) : undefined}
-          onResubmit={(!canApprove && requestData.status === 'SentToEngineer' && isEngineering && (hasSolutionRejection || hasFinalRejection)) ? () => {
+          onResubmit={(!canApprove && requestData.status === 'SentToEngineer' && isEngineering && (hasSolutionRejection || hasFinalRejection || hasFinalRejectionInEngineering)) ? () => {
             console.log('🔴 Resubmit button clicked!')
             console.log('Setting showResubmitSolutionModal to true')
             setShowResubmitSolutionModal(true)
