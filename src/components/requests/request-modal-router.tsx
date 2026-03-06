@@ -48,6 +48,7 @@ export function RequestModalRouter({
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [showSolutionModal, setShowSolutionModal] = useState(false)
   const [showResubmitSolutionModal, setShowResubmitSolutionModal] = useState(false)
+  const [showSubmitFinalApprovalModal, setShowSubmitFinalApprovalModal] = useState(false)
 
   // Debug: Log when resubmit modal state changes
   useEffect(() => {
@@ -479,6 +480,8 @@ export function RequestModalRouter({
             console.log('Setting showResubmitSolutionModal to true')
             setShowResubmitSolutionModal(true)
           } : undefined}
+          onSubmitFinalApproval={!canApprove && isRequesterDepartment ? () => setShowSubmitFinalApprovalModal(true) : undefined}
+          userDepartment={userDepartmentType || undefined}
           onDownloadFile={handleDownloadFile}
           onDownloadSolutionFile={handleDownloadSolutionFile}
           availableUsers={availableUsers}
@@ -568,11 +571,10 @@ export function RequestModalRouter({
             requesterName: requestData.requester.name,
           }}
           userDepartment={userDepartmentType || undefined}
-          onSubmitFinalApproval={() => {
-            // TODO: Open SubmitFinalApprovalModal
-            // For now, this will be handled by a separate modal state
-            console.log('Open final approval submission modal')
-          }}
+          isRequesterDepartment={isRequesterDepartment}
+          onSubmitFinalApproval={() => setShowSubmitFinalApprovalModal(true)}
+          onDownloadRequestFile={handleDownloadFile}
+          onDownloadSolutionFile={handleDownloadSolutionFile}
         />
       )
       break
@@ -801,56 +803,96 @@ export function RequestModalRouter({
           }
         }}
       />
-      <SubmitterModal
-        mode="resubmit"
-        open={showResubmitSolutionModal}
-        onOpenChange={(open) => {
-          console.log('🟢 Resubmit modal onOpenChange called with:', open)
-          setShowResubmitSolutionModal(open)
-        }}
-        initialData={{
-          solution: modalData.solution,
-          existingFiles: modalData.solution?.files,
-          rejectionReason: modalData.rejection?.reason,
-          rejectedBy: modalData.rejection?.rejectedBy,
-          rejectedAt: modalData.rejection?.rejectedAt,
-          requestId: requestData?.id,
-          requestTitle: requestData?.title,
-          requestDescription: requestData?.description,
-        }}
-        availableUsers={availableUsers}
-        onResubmit={async (data) => {
-          console.log('🟢 onResubmit called with data:', data)
-          setIsSubmitting(true)
-          try {
-            const result = await resubmitSolution({
-              requestId: requestData.id,
-              title: data.title || modalData.solution?.title || '',
-              description: data.description,
-              cost: typeof data.cost === 'string' ? parseFloat(data.cost) : (data.cost || 0),
-              currency: data.currency || 'THB',
-              timeline: data.timeline,
-              files: data.files || [],
-              deletedFileIds: data.deletedFileIds || [],
-              useCustomHierarchy: data.useCustomHierarchy || false,
-              customApprovers: data.customApprovers || [],
-            })
-            
-            if (result.success) {
-              toast.success('Solution resubmitted successfully')
-              setShowResubmitSolutionModal(false)
-              onOpenChange(false)
-              onActionComplete?.()
-              router.refresh()
+      {modalData.solution && (
+        <SubmitterModal
+          mode="resubmit"
+          open={showResubmitSolutionModal}
+          onOpenChange={(open) => {
+            console.log('🟢 Resubmit modal onOpenChange called with:', open)
+            setShowResubmitSolutionModal(open)
+          }}
+          initialData={{
+            solution: modalData.solution,
+            existingFiles: modalData.solution?.files,
+            rejectionReason: modalData.rejection?.reason,
+            rejectedBy: modalData.rejection?.rejectedBy,
+            rejectedAt: modalData.rejection?.rejectedAt,
+            requestId: requestData?.id,
+            requestTitle: requestData?.title,
+            requestDescription: requestData?.description,
+          }}
+          availableUsers={availableUsers}
+          onResubmit={async (data) => {
+            console.log('🟢 onResubmit called with data:', data)
+            setIsSubmitting(true)
+            try {
+              const result = await resubmitSolution({
+                requestId: requestData.id,
+                title: data.title || modalData.solution?.title || '',
+                description: data.description,
+                cost: typeof data.cost === 'string' ? parseFloat(data.cost) : (data.cost || 0),
+                currency: data.currency || 'THB',
+                timeline: data.timeline,
+                files: data.files || [],
+                deletedFileIds: data.deletedFileIds || [],
+                useCustomHierarchy: data.useCustomHierarchy || false,
+                customApprovers: data.customApprovers || [],
+              })
+              
+              if (result.success) {
+                toast.success('Solution resubmitted successfully')
+                setShowResubmitSolutionModal(false)
+                onOpenChange(false)
+                onActionComplete?.()
+                router.refresh()
+              }
+            } catch (error) {
+              console.error('Failed to resubmit solution:', error)
+              toast.error(error instanceof Error ? error.message : 'Failed to resubmit solution')
+            } finally {
+              setIsSubmitting(false)
             }
-          } catch (error) {
-            console.error('Failed to resubmit solution:', error)
-            toast.error(error instanceof Error ? error.message : 'Failed to resubmit solution')
-          } finally {
-            setIsSubmitting(false)
-          }
-        }}
-      />
+          }}
+        />
+      )}
+      {modalData.solution && (
+        <SubmitFinalApprovalModal
+          open={showSubmitFinalApprovalModal}
+          onOpenChange={setShowSubmitFinalApprovalModal}
+          data={{
+            ...modalData,
+            solution: modalData.solution,
+          }}
+          availableUsers={availableUsers}
+          onSubmit={async (data) => {
+            setIsSubmitting(true)
+            try {
+              const result = await initiateFinalApproval(
+                requestId,
+                data.useCustomHierarchy,
+                data.customApprovers
+              )
+              
+              if (result.success) {
+                toast.success('Final approval initiated successfully')
+                setShowSubmitFinalApprovalModal(false)
+                onOpenChange(false)
+                onActionComplete?.()
+                router.refresh()
+              } else {
+                toast.error('Failed to initiate final approval')
+              }
+            } catch (error) {
+              console.error('Final approval error:', error)
+              toast.error('An error occurred while initiating final approval')
+            } finally {
+              setIsSubmitting(false)
+            }
+          }}
+          onDownloadRequestFile={handleDownloadFile}
+          onDownloadSolutionFile={handleDownloadSolutionFile}
+        />
+      )}
     </>
   )
 }

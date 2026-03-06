@@ -339,11 +339,31 @@ export function SubmitterModal({
   const [useCustomHierarchy, setUseCustomHierarchy] = useState(false)
   const [customApprovers, setCustomApprovers] = useState<string[]>([])
 
+  // Update solution data when initialData changes (for resubmit mode)
+  useEffect(() => {
+    if (mode === 'resubmit' && initialData?.solution) {
+      setSolutionTitle(initialData.solution.title || '')
+      setSolutionDescription(initialData.solution.description || '')
+      setCost(initialData.solution.cost?.toString() || '')
+      setCurrency(initialData.solution.currency || 'USD')
+      setTimeline(initialData.solution.timeline || '')
+      
+      // Debug: Log existing files
+      console.log('🔍 Resubmit modal - existingFiles:', initialData?.existingFiles?.map(f => ({ id: f.id, name: f.fileName })))
+    }
+  }, [mode, initialData?.solution, initialData?.existingFiles])
+
   // Handle file upload
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       const newFiles = Array.from(e.target.files)
-      setFiles((prev: File[]) => [...prev, ...newFiles])
+      console.log('🔍 Adding new files:', newFiles.map(f => ({ name: f.name, size: f.size })))
+      setFiles((prev: File[]) => {
+        console.log('🔍 Previous files:', prev.map(f => ({ name: f.name, size: f.size })))
+        const updated = [...prev, ...newFiles]
+        console.log('🔍 Updated files:', updated.map(f => ({ name: f.name, size: f.size })))
+        return updated
+      })
     }
   }
 
@@ -656,7 +676,9 @@ export function SubmitterModal({
                   Existing Attachments ({existingFiles.length})
                 </h4>
                 <div className="space-y-2">
-                  {existingFiles.map((file) => (
+                  {existingFiles.map((file) => {
+                    console.log('🔍 Rendering existing file:', { id: file.id, name: file.fileName })
+                    return (
                     <div
                       key={file.id}
                       className="flex items-start gap-3 p-3 border border-slate-200 dark:border-slate-800 rounded-lg bg-slate-50 dark:bg-slate-800/50"
@@ -680,7 +702,8 @@ export function SubmitterModal({
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
-                  ))}
+                    )
+                  })}
                 </div>
                 <p className="text-xs text-slate-400 mt-2 italic">
                   Removed files will be deleted when you resubmit
@@ -707,9 +730,11 @@ export function SubmitterModal({
             {/* File List */}
             {files.length > 0 && (
               <div className="space-y-2">
-                {files.map((file: File, index: number) => (
+                {files.map((file: File, index: number) => {
+                  console.log('🔍 Rendering new file:', { name: file.name, index, key: `new-${file.name}-${index}-${file.lastModified || Date.now()}` })
+                  return (
                   <div
-                    key={`${file.name}-${index}`}
+                    key={`new-${file.name}-${index}-${file.lastModified || Date.now()}`}
                     className="flex items-start gap-3 p-3 border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900"
                   >
                     {getFileIcon(file.name.split('.').pop()?.toLowerCase() || '')}
@@ -734,7 +759,8 @@ export function SubmitterModal({
                       />
                     </div>
                   </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </section>

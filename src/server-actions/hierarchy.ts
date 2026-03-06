@@ -61,6 +61,9 @@ export async function getDepartmentHierarchy(departmentId: string): Promise<{
 
   const members: HierarchyMember[] = []
 
+  // Track all user IDs to avoid duplicates
+  const processedUserIds = new Set<string>()
+
   // Add internal department users with levels
   for (const user of department.users) {
     members.push({
@@ -70,10 +73,16 @@ export async function getDepartmentHierarchy(departmentId: string): Promise<{
       level: user.level!,
       isExternal: false,
     })
+    processedUserIds.add(user.id)
   }
 
-  // Add external DepartmentApprover users
+  // Add external DepartmentApprover users (only if not already added as internal user)
   for (const da of department.departmentApprovers) {
+    // Skip if this user is already processed as an internal user
+    if (processedUserIds.has(da.approver.id)) {
+      continue
+    }
+    
     members.push({
       userId: da.approver.id,
       name: da.approver.name,
@@ -301,6 +310,9 @@ export async function getHierarchyData(departmentId: string) {
   const usersByLevel: Record<number, HierarchyUser[]> = {}
   let maxLevel = 0
 
+  // Track all user IDs to avoid duplicates
+  const processedUserIds = new Set<string>()
+
   // Internal department users
   for (const user of department.users) {
     const level = user.level || 1
@@ -308,13 +320,19 @@ export async function getHierarchyData(departmentId: string) {
       usersByLevel[level] = []
     }
     usersByLevel[level].push({ ...user, isExternal: false })
+    processedUserIds.add(user.id)
     if (level > maxLevel) {
       maxLevel = level
     }
   }
 
-  // External DepartmentApprover users
+  // External DepartmentApprover users (only add if not already added as internal user)
   for (const da of department.departmentApprovers) {
+    // Skip if this user is already processed as an internal user
+    if (processedUserIds.has(da.approver.id)) {
+      continue
+    }
+    
     const level = da.approverLevel
     if (!usersByLevel[level]) {
       usersByLevel[level] = []

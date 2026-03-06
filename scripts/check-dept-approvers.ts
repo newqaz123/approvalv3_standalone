@@ -4,7 +4,7 @@ const prisma = new PrismaClient()
 
 async function main() {
   // Get all DepartmentApprover records
-  const allApprovers = await prisma.departmentApprover.findMany({
+  const allApprovers = await prisma.department_approvers.findMany({
     include: {
       department: { select: { id: true, name: true } },
       approver: { select: { id: true, name: true, email: true, departmentId: true } }
@@ -21,7 +21,7 @@ async function main() {
   })))
 
   // Check specifically for userpd1
-  const userpd1Approvers = await prisma.departmentApprover.findMany({
+  const userpd1Approvers = await prisma.department_approvers.findMany({
     where: {
       approver: {
         OR: [

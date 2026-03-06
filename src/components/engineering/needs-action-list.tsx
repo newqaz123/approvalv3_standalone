@@ -46,6 +46,8 @@ export function NeedsActionList({
 }: NeedsActionListProps) {
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [selectedSolutionRequestId, setSelectedSolutionRequestId] = useState<string | null>(null)
+  const [isSolutionModalOpen, setIsSolutionModalOpen] = useState(false)
 
   const formatCurrency = (amount: number, currency: string) => {
     return new Intl.NumberFormat('th-TH', {
@@ -57,6 +59,11 @@ export function NeedsActionList({
   const handleReviewApprove = (requestId: string) => {
     setSelectedRequestId(requestId)
     setIsModalOpen(true)
+  }
+
+  const handleSubmitSolution = (requestId: string) => {
+    setSelectedSolutionRequestId(requestId)
+    setIsSolutionModalOpen(true)
   }
 
   return (
@@ -163,11 +170,13 @@ export function NeedsActionList({
                         />
                       </TableCell>
                       <TableCell className="text-right">
-                        <Link href={`/engineering/solutions/${request.id}`}>
-                          <Button size="sm" variant="default">
-                            {request.hasRejection ? 'Resubmit Solution' : 'Submit Solution'}
-                          </Button>
-                        </Link>
+                        <Button 
+                          size="sm" 
+                          variant="default"
+                          onClick={() => handleSubmitSolution(request.id)}
+                        >
+                          {request.hasRejection ? 'Resubmit Solution' : 'Submit Solution'}
+                        </Button>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -239,12 +248,25 @@ export function NeedsActionList({
         )}
       </div>
 
-      {/* Request Modal Router */}
+      {/* Request Modal Router for Approvals */}
       {selectedRequestId && (
         <RequestModalRouter
           requestId={selectedRequestId}
           open={isModalOpen}
           onOpenChange={setIsModalOpen}
+          onActionComplete={() => {
+            // Refresh the page to update the lists
+            window.location.reload()
+          }}
+        />
+      )}
+
+      {/* Request Modal Router for Solution Submission */}
+      {selectedSolutionRequestId && (
+        <RequestModalRouter
+          requestId={selectedSolutionRequestId}
+          open={isSolutionModalOpen}
+          onOpenChange={setIsSolutionModalOpen}
           onActionComplete={() => {
             // Refresh the page to update the lists
             window.location.reload()

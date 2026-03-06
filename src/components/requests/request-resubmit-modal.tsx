@@ -28,14 +28,6 @@ import { Separator } from '@/components/ui/separator'
 import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 
 // Types
@@ -52,7 +44,6 @@ interface RequestResubmitModalProps {
   initialData: {
     title: string
     description: string
-    templateId?: string
     rejectionReason: string
     rejectedBy: string
     rejectedAt: string
@@ -61,7 +52,6 @@ interface RequestResubmitModalProps {
   onResubmit: (data: {
     title: string
     description: string
-    templateId?: string
     files: File[]
     deletedFileIds?: string[]
   }) => void
@@ -91,33 +81,9 @@ export function RequestResubmitModal({
 }: RequestResubmitModalProps) {
   const [title, setTitle] = useState(initialData.title)
   const [description, setDescription] = useState(initialData.description)
-  const [selectedTemplate, setSelectedTemplate] = useState(initialData.templateId || '')
-  const [templates, setTemplates] = useState<Array<{ id: string; name: string; title: string; description: string }>>([])  
-  const [loadingTemplates, setLoadingTemplates] = useState(false)
   const [existingFiles, setExistingFiles] = useState<FileAttachment[]>(initialData.files)
   const [deletedFileIds, setDeletedFileIds] = useState<string[]>([])
   const [newFiles, setNewFiles] = useState<File[]>([])
-
-  // Fetch templates from database
-  useEffect(() => {
-    if (open) {
-      const fetchTemplates = async () => {
-        setLoadingTemplates(true)
-        try {
-          const response = await fetch('/api/templates')
-          if (response.ok) {
-            const data = await response.json()
-            setTemplates(data)
-          }
-        } catch (error) {
-          console.error('Failed to fetch templates:', error)
-        } finally {
-          setLoadingTemplates(false)
-        }
-      }
-      fetchTemplates()
-    }
-  }, [open])
   const [fileDescriptions, setFileDescriptions] = useState<Record<string, string>>({})
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -144,7 +110,6 @@ export function RequestResubmitModal({
     onResubmit({
       title,
       description,
-      templateId: selectedTemplate || undefined,
       files: newFiles,
       deletedFileIds,
     })
@@ -197,30 +162,6 @@ export function RequestResubmitModal({
 
           {/* Form Fields */}
           <div className="space-y-4">
-            {/* Template Selection */}
-            <div>
-              <Label htmlFor="template" className="text-sm font-bold">
-                Template
-              </Label>
-              <Select value={selectedTemplate} onValueChange={setSelectedTemplate} disabled={loadingTemplates}>
-                <SelectTrigger className="mt-1.5">
-                  <SelectValue placeholder={loadingTemplates ? "Loading templates..." : "Select a template (optional)"} />
-                </SelectTrigger>
-                <SelectContent>
-                  {templates.length === 0 && !loadingTemplates && (
-                    <SelectItem value="none" disabled>No templates available</SelectItem>
-                  )}
-                  {templates.map((template) => (
-                    <SelectItem key={template.id} value={template.id}>
-                      {template.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-slate-500 mt-1">
-                Select a template to pre-fill common fields (optional)
-              </p>
-            </div>
             <div>
               <Label htmlFor="title" className="text-sm font-bold">
                 Request Title <span className="text-red-500">*</span>

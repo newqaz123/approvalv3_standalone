@@ -124,6 +124,8 @@ interface SolutionModalProps {
   onApprove?: () => void
   onReject?: (reason: string) => void
   onResubmit?: () => void
+  onSubmitFinalApproval?: () => void
+  userDepartment?: string
   availableUsers?: User[]
 }
 
@@ -512,6 +514,8 @@ export function SolutionModal({
   onApprove,
   onReject,
   onResubmit,
+  onSubmitFinalApproval,
+  userDepartment,
   availableUsers = [],
 }: SolutionModalProps) {
   const status = statusConfig[data.status]
@@ -838,6 +842,15 @@ export function SolutionModal({
               Last Modified: {format(new Date(data.lastModified), 'MMM d, yyyy')}
             </span>
           </div>
+          {data.status === 'solution' && !onApprove && onSubmitFinalApproval && (userDepartment === 'Requester' || userDepartment === 'Production 1' || userDepartment === 'Production 2') && (
+            <Button
+              onClick={onSubmitFinalApproval}
+              className="flex items-center gap-2 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold rounded-lg transition-colors"
+            >
+              <Shield className="w-4 h-4" />
+              Send Final Approval
+            </Button>
+          )}
         </div>
       </DialogContent>
     </Dialog>

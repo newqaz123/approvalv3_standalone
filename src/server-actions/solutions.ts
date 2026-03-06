@@ -1811,7 +1811,7 @@ export async function resubmitSolution(input: {
   // Start transaction
   const result = await prisma.$transaction(async (tx) => {
     // Update solution details
-    const updatedSolution = await tx.solution.update({
+    const updatedSolution = await tx.solutions.update({
       where: { id: solution.id },
       data: {
         title: input.title,
@@ -1825,7 +1825,7 @@ export async function resubmitSolution(input: {
 
     // Handle file attachments
     if (input.deletedFileIds && input.deletedFileIds.length > 0) {
-      await tx.solutionFileAttachment.deleteMany({
+      await tx.file_attachments.deleteMany({
         where: {
           id: { in: input.deletedFileIds },
           solutionId: solution.id,
@@ -1844,13 +1844,13 @@ export async function resubmitSolution(input: {
         uploadedById: userId,
       }))
 
-      await tx.solutionFileAttachment.createMany({
+      await tx.file_attachments.createMany({
         data: fileData,
       })
     }
 
     // Delete old rejected approvals
-    await tx.solutionApproval.deleteMany({
+    await tx.solution_approvals.deleteMany({
       where: {
         solutionId: solution.id,
       },
@@ -1864,42 +1864,77 @@ export async function resubmitSolution(input: {
       input.customApprovers.forEach((approverId, index) => {
         approvalData.push({
           solutionId: solution.id,
-          approverId,
-          requiredLevel: 1,
+          requiredApproverId: approverId,
           order: index + 1,
           status: 'pending',
           isCustomChain: true,
         })
       })
     } else {
-      // Default engineering department approval chain
-      const engineeringApprovers = await tx.departmentApprover.findMany({
-        where: { departmentId: user.departmentId },
-        include: { approver: true },
-        orderBy: [
-          { approverLevel: 'asc' },
-          { createdAt: 'asc' },
-        ],
+      // Get engineering department ID for hierarchy-based approvals
+      const engineeringDept = await tx.departments.findFirst({
+        where: { type: 'ENGINEERING' },
+        select: { id: true },
       })
 
-      if (engineeringApprovers.length === 0) {
-        throw new Error('No approvers found in engineering department')
+      if (!engineeringDept) {
+        throw new Error('Engineering department not found')
       }
 
-      engineeringApprovers.forEach((deptApprover, index) => {
+      // Create hierarchy-based approval chain directly (not using createHierarchyApprovalChain to avoid double creation)
+      const maxUser = await tx.user.findFirst({
+        where: {
+          departmentId: engineeringDept.id,
+          isActive: true,
+          level: { not: null },
+        },
+        orderBy: { level: 'desc' },
+        select: { level: true },
+      })
+
+      const maxLevel = maxUser?.level || 1
+      const submitterLevel = user.level || 1
+
+      // If submitter is top-level, create auto-approved record
+      if (submitterLevel >= maxLevel) {
         approvalData.push({
           solutionId: solution.id,
-          approverId: deptApprover.approverId,
-          requiredApproverId: deptApprover.approverId,
-          requiredLevel: deptApprover.approverLevel,
-          order: index + 1,
-          status: 'pending',
+          requiredLevel: maxLevel,
+          order: 1,
+          status: 'approved' as const,
+          approverId: userId,
+          approvedAt: new Date(),
+          comments: 'Auto-approved (top-level submitter)',
           isCustomChain: false,
         })
-      })
+      } else {
+        // Create approvals for all levels between submitter and max level
+        let order = 1
+        for (let level = submitterLevel + 1; level <= maxLevel; level++) {
+          // Check if there are active users at this level
+          const hasUsersAtLevel = await tx.user.findFirst({
+            where: {
+              departmentId: engineeringDept.id,
+              level,
+              isActive: true,
+            },
+            select: { id: true },
+          })
+
+          if (hasUsersAtLevel) {
+            approvalData.push({
+              solutionId: solution.id,
+              requiredLevel: level,
+              order: order++,
+              status: 'pending' as const,
+              isCustomChain: false,
+            })
+          }
+        }
+      }
     }
 
-    await tx.solutionApproval.createMany({
+    await tx.solution_approvals.createMany({
       data: approvalData,
     })
 
@@ -1913,7 +1948,7 @@ export async function resubmitSolution(input: {
     })
 
     // Add activity log
-    await tx.activity.create({
+    await tx.request_activities.create({
       data: {
         requestId: input.requestId,
         userId,
@@ -1931,7 +1966,7 @@ export async function resubmitSolution(input: {
     await notifyUsersInDepartment(
       request.department.id,
       {
-        type: 'solution_submitted',
+        type: 'approval_needed',
         title: 'Solution Resubmitted',
         message: `📤 Solution resubmitted for "${request.title}". Please review the updated solution.`,
         requestId: input.requestId,
