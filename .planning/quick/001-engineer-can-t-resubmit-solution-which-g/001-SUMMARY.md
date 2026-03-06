@@ -4,35 +4,39 @@
 ✅ **Fixed the non-functional "Resubmit Solution" button for rejected solutions**
 
 ## Root Cause
-When clicking the "Resubmit Solution" button, the code was trying to open TWO modals simultaneously:
-1. The main SolutionModal (showing the rejected solution with `open={open}`)
-2. The standalone resubmit SubmitterModal (with `open={showResubmitSolutionModal}`)
+The resubmit modal WAS opening correctly, but when the engineer clicked the orange "Resubmit" button to submit the form, **nothing happened**.
 
-This created a **modal stacking issue** where both modals were rendered in the DOM at the same time. The resubmit modal was hidden behind the main modal due to z-index/stacking context, making it appear as if "nothing happened" when clicking the button.
+The issue was a **handler mismatch**:
+- The standalone resubmit SubmitterModal was passed `onSubmitSolution` as a prop
+- But when `mode="resubmit"`, the SubmitterModal internally looks for an `onResubmit` handler (line 352 of submitter-modal.tsx)
+- When clicking submit, the modal checked `if (mode === 'resubmit' && onResubmit)` - but `onResubmit` was undefined
+- So nothing executed when the button was clicked
 
 ## Changes Made
 
 ### File: `src/components/requests/request-modal-router.tsx`
 - **Added**: useEffect to log `showResubmitSolutionModal` state changes for debugging
 - **Added**: Console logging to onResubmit handler and onOpenChange callback
-- **Changed**: Return statement to conditionally render main modal: `{!showResubmitSolutionModal && modalContent}`
-- **Result**: When resubmit modal opens, main modal is hidden, preventing stacking issues
+- **Changed**: SolutionModal to close when resubmit modal is open: `open={open && !showResubmitSolutionModal}`
+- **Fixed**: Changed standalone resubmit modal from `onSubmitSolution` to `onResubmit` handler
+- **Result**: Clicking "Resubmit" button now properly calls the resubmitSolution server action
 
 ## How It Works Now
 
 1. **User clicks "Resubmit Solution" button** on a rejected solution
 2. **SolutionModal** calls `onResubmit()` → `setShowResubmitSolutionModal(true)`
-3. **Main modal conditionally renders**: `{!showResubmitSolutionModal && modalContent}` evaluates to false, hiding the main modal
-4. **Standalone resubmit modal** becomes visible with mode="resubmit" pre-populated with:
+3. **Main modal closes** because `open={open && !showResubmitSolutionModal}` becomes false
+4. **Standalone resubmit modal** opens with mode="resubmit" pre-populated with:
    - Existing solution data (title, description, cost, timeline)
    - Existing solution files
    - Rejection reason and details
    - Request context
    - Available users for custom approval hierarchy
-5. **User modifies solution** and clicks "Resubmit Solution"
-6. **onSubmitSolution handler** calls `resubmitSolution` server action with all data
-7. **Success toast** shows "Solution resubmitted successfully"
-8. **Resubmit modal closes**, main modal state resets, and page refreshes
+5. **User modifies solution** and clicks the orange "Resubmit Solution" button
+6. **SubmitterModal** calls the `onResubmit` handler (not onSubmitSolution)
+7. **onResubmit handler** calls `resubmitSolution` server action with all data
+8. **Success toast** shows "Solution resubmitted successfully"
+9. **Resubmit modal closes**, page refreshes, and new approval flow starts
 
 ## Verification Steps
 1. Open a rejected solution in the modal
@@ -44,11 +48,11 @@ This created a **modal stacking issue** where both modals were rendered in the D
 7. ✅ Modal should close and dashboard should refresh
 
 ## Technical Details
-- **Bug Type**: Modal stacking/z-index issue with multiple simultaneous modals
-- **Impact**: Engineers unable to resubmit rejected solutions (button appeared to do nothing)
+- **Bug Type**: Handler mismatch - wrong prop name passed to SubmitterModal
+- **Impact**: Engineers unable to submit resubmitted solutions (click did nothing)
 - **Severity**: High (blocks workflow progress)
-- **Fix Complexity**: Low (conditional rendering of main modal)
-- **Lines Changed**: ~20 lines (added conditional rendering + debug logging)
+- **Fix Complexity**: Low (changed prop name from onSubmitSolution to onResubmit)
+- **Lines Changed**: ~10 lines (fixed handler name + modal open control)
 
 ## Testing Recommendations
 1. Test with a solution rejected at different approval stages
