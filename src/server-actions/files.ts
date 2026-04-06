@@ -325,7 +325,7 @@ export async function deleteFileAttachment({ fileId }: { fileId: string }) {
   try {
     const fs = await import('fs/promises')
     const path = await import('path')
-    const filePath = path.join(process.cwd(), 'public', fileAttachment.filePath)
+    const filePath = path.join(process.cwd(), 'public', fileAttachment.filePath.replace(/^\//, ''))
     await fs.unlink(filePath)
   } catch (err) {
     // Log warning but don't fail - file may already be gone

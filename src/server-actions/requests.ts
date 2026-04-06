@@ -968,7 +968,7 @@ export async function deleteRequest(input: { requestId: string; reason: string }
 
     // Get file paths for cleanup
     const filePaths = request.fileAttachments.map(f =>
-      path.join(process.cwd(), 'public', f.filePath)
+      path.join(process.cwd(), 'public', f.filePath.replace(/^\//, ''))
     )
 
     // Perform soft delete and log activity in transaction

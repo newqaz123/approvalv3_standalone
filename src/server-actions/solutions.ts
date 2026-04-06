@@ -5,6 +5,7 @@ import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 import { RequestStatus, UserRole } from '@prisma/client'
 import { submitSolutionSchema, SubmitSolutionInput } from '@/lib/schemas/solution-schemas'
+import { saveFile, generateFilePath } from '@/lib/files'
 
 /**
  * Check if data is stale based on updatedAt timestamp
@@ -1824,6 +1825,15 @@ export async function resubmitSolution(input: {
     throw new Error('Can only resubmit rejected solutions')
   }
 
+  // Save new files to disk before transaction (avoid holding DB connection during I/O)
+  const savedFileData: Array<{ fileName: string; fileType: string; fileSize: number; filePath: string }> = []
+  for (const file of input.files) {
+    const filePath = generateFilePath(solution.id, file.name)
+    const bytes = await file.arrayBuffer()
+    await saveFile(filePath, Buffer.from(bytes))
+    savedFileData.push({ fileName: file.name, fileType: file.type, fileSize: file.size, filePath })
+  }
+
   // Start transaction
   const result = await prisma.$transaction(async (tx) => {
     // Update solution details
@@ -1849,19 +1859,17 @@ export async function resubmitSolution(input: {
       })
     }
 
-    // Add new files
-    if (input.files.length > 0) {
-      const fileData = input.files.map(file => ({
-        solutionId: solution.id,
-        fileName: file.name,
-        fileType: file.type,
-        fileSize: file.size,
-        filePath: `/uploads/solutions/${solution.id}/${file.name}`,
-        uploadedById: userId,
-      }))
-
+    // Add new files using disk-saved paths
+    if (savedFileData.length > 0) {
       await tx.file_attachments.createMany({
-        data: fileData,
+        data: savedFileData.map(f => ({
+          solutionId: solution.id,
+          fileName: f.fileName,
+          fileType: f.fileType,
+          fileSize: f.fileSize,
+          filePath: f.filePath,
+          uploadedById: userId,
+        })),
       })
     }
 

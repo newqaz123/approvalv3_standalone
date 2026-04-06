@@ -44,6 +44,7 @@ export async function saveFile(
  * Files are served directly by Next.js static file serving
  */
 export function getFileUrl(filePath: string): string {
-  // Remove 'public/' prefix and convert to URL path
-  return `/${filePath.replace(/^public\//, '')}`
+  // Remove 'public/' prefix, strip any leading slash, then add exactly one
+  const normalized = filePath.replace(/^public\//, '').replace(/^\//, '')
+  return `/${normalized}`
 }

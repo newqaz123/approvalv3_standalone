@@ -14,7 +14,6 @@ import { SubmitFinalApprovalModal } from './submit-final-approval-modal'
 import { getRequest, resubmitRequest } from '@/server-actions/requests'
 import { canUserApprove, approveRequest, rejectRequest } from '@/server-actions/approvals'
 import { approveSolution, rejectSolution, submitSolution, resubmitSolution, initiateFinalApproval } from '@/server-actions/solutions'
-import { getDownloadUrl } from '@/server-actions/files'
 import { transformRequestToModalData } from '@/lib/modal-data-adapters'
 import { getModalTypeForStatus, canUserSubmitSolution, canUserSubmitFinalApproval } from '@/lib/permission-checks'
 import { useRouter } from 'next/navigation'
@@ -169,7 +168,6 @@ export function RequestModalRouter({
 
   const handleDownloadFile = async (fileId: string) => {
     try {
-      // Get file data from request fileAttachments
       const file = requestData.fileAttachments?.find((f: any) => f.id === fileId)
 
       if (!file) {
@@ -177,16 +175,24 @@ export function RequestModalRouter({
         return
       }
 
-      // Get download URL
-      const downloadUrl = await getDownloadUrl(file.filePath)
+      const normalizedPath = file.filePath.replace(/^\/+/, '')
+      const res = await fetch(`/api/files/download?path=${encodeURIComponent(normalizedPath)}`)
 
-      // Trigger download
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        toast.error(data.error || 'File is no longer available')
+        return
+      }
+
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
-      a.href = downloadUrl
+      a.href = url
       a.download = file.fileName
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
+      URL.revokeObjectURL(url)
     } catch (error) {
       console.error('Download error:', error)
       toast.error('Failed to download file')
@@ -195,7 +201,6 @@ export function RequestModalRouter({
 
   const handleDownloadSolutionFile = async (fileId: string) => {
     try {
-      // Get file data from solution fileAttachments
       const file = requestData.solutions?.[0]?.fileAttachments
         ?.find((f: any) => f.id === fileId)
 
@@ -204,16 +209,24 @@ export function RequestModalRouter({
         return
       }
 
-      // Get download URL
-      const downloadUrl = await getDownloadUrl(file.filePath)
+      const normalizedPath = file.filePath.replace(/^\/+/, '')
+      const res = await fetch(`/api/files/download?path=${encodeURIComponent(normalizedPath)}`)
 
-      // Trigger download
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        toast.error(data.error || 'File is no longer available')
+        return
+      }
+
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
-      a.href = downloadUrl
+      a.href = url
       a.download = file.fileName
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
+      URL.revokeObjectURL(url)
     } catch (error) {
       console.error('Download error:', error)
       toast.error('Failed to download file')
