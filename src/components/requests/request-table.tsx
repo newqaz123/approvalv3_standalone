@@ -8,7 +8,7 @@ import {
   useReactTable,
 } from '@tanstack/react-table'
 import { format } from 'date-fns'
-import { FileText, Clock } from 'lucide-react'
+import { FileText, Clock, UserCircle } from 'lucide-react'
 import {
   Table,
   TableBody,
@@ -33,6 +33,9 @@ export type RequestListRow = {
   requester: { id: string; name: string } | null
   _count: { fileAttachments: number }
   hasRejection?: boolean
+  engineerAssignments?: Array<{
+    engineer: { id: string; name: string }
+  }>
   approvals?: Array<{
     id: string
     status: 'pending' | 'approved' | 'rejected'
@@ -99,6 +102,22 @@ export function RequestTable({ initialData, onDataRefresh }: RequestTableProps) 
           />
         </div>
       ),
+    },
+    {
+      id: 'pic',
+      header: 'PIC',
+      cell: ({ row }) => {
+        const assignments = row.original.engineerAssignments
+        if (!assignments || assignments.length === 0) return <span className="text-gray-400">—</span>
+        return (
+          <div className="flex items-center gap-1.5">
+            <UserCircle className="h-3.5 w-3.5 text-blue-500 flex-shrink-0" />
+            <span className="text-sm text-gray-700 truncate max-w-[150px]" title={assignments.map(a => a.engineer.name).join(', ')}>
+              {assignments.map(a => a.engineer.name.split(' ')[0]).join(', ')}
+            </span>
+          </div>
+        )
+      },
     },
     {
       accessorKey: 'department',

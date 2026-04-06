@@ -1,6 +1,6 @@
 'use client'
 
-import { FileText, ChevronRight, Clock } from 'lucide-react'
+import { FileText, ChevronRight, Clock, UserCircle } from 'lucide-react'
 import { format } from 'date-fns'
 import { StatusBadge } from '@/components/requests/status-badge'
 import { RejectedBadge } from '@/components/requests/rejected-badge'
@@ -17,6 +17,9 @@ export type RequestListRow = {
   requester: { id: string; name: string } | null
   _count: { fileAttachments: number }
   hasRejection?: boolean
+  engineerAssignments?: Array<{
+    engineer: { id: string; name: string }
+  }>
   approvals?: Array<{
     id: string
     status: 'pending' | 'approved' | 'rejected'
@@ -100,8 +103,8 @@ export function RequestCard({
         )}
       </div>
 
-      {/* Bottom row: Additional context (requester, department, approval progress) */}
-      {(showRequester || showDepartment || showApprovalProgress) && (
+      {/* Bottom row: Additional context (requester, department, PIC, approval progress) */}
+      {(showRequester || showDepartment || showApprovalProgress || (request.engineerAssignments && request.engineerAssignments.length > 0)) && (
         <div className="flex flex-wrap items-center gap-3 text-xs text-gray-600 border-t border-gray-100 pt-2 mt-1">
           {showRequester && request.requester?.name && (
             <div className="flex items-center gap-1">
@@ -114,6 +117,14 @@ export function RequestCard({
             <div className="flex items-center gap-1">
               <span className="font-medium">Dept:</span>
               <span>{request.department.name}</span>
+            </div>
+          )}
+
+          {request.engineerAssignments && request.engineerAssignments.length > 0 && (
+            <div className="flex items-center gap-1">
+              <UserCircle className="h-3 w-3 text-blue-500" />
+              <span className="font-medium">PIC:</span>
+              <span>{request.engineerAssignments.map(a => a.engineer.name.split(' ')[0]).join(', ')}</span>
             </div>
           )}
 

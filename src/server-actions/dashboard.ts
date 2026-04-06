@@ -14,6 +14,9 @@ export type RequestListRow = {
   requester: { id: string; name: string } | null
   _count: { fileAttachments: number }
   hasRejection?: boolean
+  engineerAssignments?: Array<{
+    engineer: { id: string; name: string }
+  }>
   approvals: Array<{
     id: string
     status: 'pending' | 'approved' | 'rejected'
@@ -133,6 +136,16 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
         where: { action: 'solution_rejected' },
         take: 1,
       },
+      engineerAssignments: {
+        select: {
+          engineer: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+      },
       approvals: {
         orderBy: {
           order: 'asc',
@@ -227,6 +240,7 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
           requester: approval.request.requester,
           _count: approval.request._count,
           hasRejection,
+          engineerAssignments: approval.request.engineerAssignments,
           approvals,
         })
       }
@@ -263,6 +277,16 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
               _count: {
                 select: {
                   fileAttachments: true,
+                },
+              },
+              engineerAssignments: {
+                select: {
+                  engineer: {
+                    select: {
+                      id: true,
+                      name: true,
+                    },
+                  },
                 },
               },
               approvals: {
@@ -356,6 +380,7 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
           requester: request.requester,
           _count: request._count,
           hasRejection,
+          engineerAssignments: request.engineerAssignments,
           approvals,
         })
       }
@@ -435,6 +460,16 @@ export async function getMyCreatedRequests(): Promise<RequestListRow[]> {
       activities: {
         where: { action: 'solution_rejected' },
         take: 1,
+      },
+      engineerAssignments: {
+        select: {
+          engineer: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
       },
       approvals: {
         orderBy: {
@@ -526,6 +561,7 @@ export async function getMyCreatedRequests(): Promise<RequestListRow[]> {
       hasRejection: req.solutions.some(s =>
         s.approvals && Array.isArray(s.approvals) && s.approvals.some((a: any) => a.status === 'rejected')
       ) || req.approvals.some((a: any) => a.status === 'rejected'),
+      engineerAssignments: req.engineerAssignments,
       approvals,
     }
   }))
@@ -647,6 +683,16 @@ export async function getAllRequests(): Promise<RequestListRow[]> {
         where: { action: 'solution_rejected' },
         take: 1,
       },
+      engineerAssignments: {
+        select: {
+          engineer: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+      },
       approvals: {
         orderBy: {
           order: 'asc',
@@ -737,6 +783,7 @@ export async function getAllRequests(): Promise<RequestListRow[]> {
       hasRejection: req.solutions.some(s =>
         s.approvals && Array.isArray(s.approvals) && s.approvals.some((a: any) => a.status === 'rejected')
       ) || req.approvals.some((a: any) => a.status === 'rejected'),
+      engineerAssignments: req.engineerAssignments,
       approvals,
     }
   }))

@@ -284,6 +284,16 @@ export async function getMyRequests(filters?: GetRequestsFilters) {
         where: { action: 'solution_rejected' },
         take: 1,
       },
+      engineerAssignments: {
+        select: {
+          engineer: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+      },
       approvals: {
         orderBy: {
           order: 'asc',
@@ -374,6 +384,7 @@ export async function getMyRequests(filters?: GetRequestsFilters) {
       hasRejection: req.solutions.some(s =>
         s.approvals && Array.isArray(s.approvals) && s.approvals.some((a: any) => a.status === 'rejected')
       ) || req.approvals.some((a: any) => a.status === 'rejected') || req.activities.length > 0,
+      engineerAssignments: req.engineerAssignments,
       approvals,
     }
   }))
