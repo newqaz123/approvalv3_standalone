@@ -149,6 +149,14 @@ export function RequestModalRouter({
   
   const hasRejection = hasRequestRejection || hasSolutionRejection || hasFinalRejection || hasFinalRejectionInEngineering
 
+  // Check if current user can cancel (requester only, before any approvals)
+  const isRequester = user?.id === requestData.requesterId
+  const hasApprovedApprovals = requestData.approvals?.some((a: any) => a.status === 'approved' && !a.isFinalApproval)
+  const canCancel = isRequester &&
+    !hasApprovedApprovals &&
+    requestData.status !== 'Completed' &&
+    requestData.status !== 'Cancelled'
+
   // Determine modal type
   const modalConfig = getModalTypeForStatus(
     requestData.status,
@@ -472,6 +480,10 @@ export function RequestModalRouter({
           onReject={handleReject}
           onDownloadRequestFile={handleDownloadFile}
           onDownloadSolutionFile={handleDownloadSolutionFile}
+          showCancel={canCancel}
+          requestId={requestData.id}
+          requestTitle={requestData.title}
+          onCancelled={handleClose}
         />
       )
       break
@@ -674,6 +686,10 @@ export function RequestModalRouter({
             files: modalData.requestFiles,
           }}
           onResubmit={handleResubmitRequest}
+          showCancel={canCancel}
+          requestId={requestData.id}
+          requestTitle={requestData.title}
+          onCancelled={handleClose}
         />
       )
       break

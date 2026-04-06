@@ -40,6 +40,7 @@ import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
+import { CancelRequestDialog } from './cancel-request-dialog'
 
 // Types
 interface ApprovalStep {
@@ -123,6 +124,10 @@ interface ApproverModalProps {
   onReject?: (reason: string) => void
   onDownloadRequestFile?: (fileId: string) => void
   onDownloadSolutionFile?: (fileId: string) => void
+  showCancel?: boolean
+  requestId?: string
+  requestTitle?: string
+  onCancelled?: () => void
 }
 
 // File icon helper
@@ -432,6 +437,10 @@ export function ApproverModal({
   onReject,
   onDownloadRequestFile,
   onDownloadSolutionFile,
+  showCancel,
+  requestId,
+  requestTitle,
+  onCancelled,
 }: ApproverModalProps) {
   const status = statusConfig[data.status] || statusConfig.request
 
@@ -788,6 +797,20 @@ export function ApproverModal({
               onApprove={onApprove}
               onReject={onReject}
             />
+          )}
+
+          {/* Cancel Request (for requester before any approvals) */}
+          {showCancel && requestId && requestTitle && (
+            <>
+              <Separator className="bg-slate-200 dark:bg-slate-700" />
+              <div className="flex justify-start">
+                <CancelRequestDialog
+                  requestId={requestId}
+                  requestTitle={requestTitle}
+                  onCancelled={onCancelled}
+                />
+              </div>
+            </>
           )}
 
           <Separator className="bg-slate-200 dark:bg-slate-700" />

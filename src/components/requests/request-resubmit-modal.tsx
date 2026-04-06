@@ -29,6 +29,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
+import { CancelRequestDialog } from './cancel-request-dialog'
 
 // Types
 interface FileAttachment {
@@ -55,6 +56,10 @@ interface RequestResubmitModalProps {
     files: File[]
     deletedFileIds?: string[]
   }) => void
+  showCancel?: boolean
+  requestId?: string
+  requestTitle?: string
+  onCancelled?: () => void
 }
 
 // File icon helper
@@ -78,6 +83,10 @@ export function RequestResubmitModal({
   onOpenChange,
   initialData,
   onResubmit,
+  showCancel,
+  requestId,
+  requestTitle,
+  onCancelled,
 }: RequestResubmitModalProps) {
   const [title, setTitle] = useState(initialData.title)
   const [description, setDescription] = useState(initialData.description)
@@ -290,12 +299,21 @@ export function RequestResubmitModal({
 
         {/* Footer Actions */}
         <div className="px-6 py-4 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0">
-          <Button
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-          >
-            Cancel
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+            >
+              Cancel
+            </Button>
+            {showCancel && requestId && requestTitle && (
+              <CancelRequestDialog
+                requestId={requestId}
+                requestTitle={requestTitle}
+                onCancelled={onCancelled}
+              />
+            )}
+          </div>
           <Button
             onClick={handleSubmit}
             disabled={!title.trim() || !description.trim()}
