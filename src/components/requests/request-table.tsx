@@ -67,7 +67,7 @@ export function RequestTable({ initialData, onDataRefresh }: RequestTableProps) 
       cell: ({ row }) => (
         <div className="flex items-center gap-2">
           <span className="font-medium">{row.getValue('title')}</span>
-          {row.original.hasRejection && <RejectedBadge size="sm" showText={false} />}
+          {row.original.hasRejection && (row.original.status === 'ImprovementRequest' || row.original.status === 'SentToEngineer') && <RejectedBadge size="sm" showText={false} />}
         </div>
       ),
     },
@@ -82,7 +82,7 @@ export function RequestTable({ initialData, onDataRefresh }: RequestTableProps) 
       cell: ({ row }) => (
         <StatusBadge
           status={row.getValue('status') as any}
-          hasRejection={row.original.hasRejection}
+          hasRejection={row.original.hasRejection && (row.original.status === 'ImprovementRequest' || row.original.status === 'SentToEngineer')}
         />
       ),
     },

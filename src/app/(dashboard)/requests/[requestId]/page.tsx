@@ -147,7 +147,7 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
             <h1 className="text-3xl font-bold">{request.title}</h1>
             <div className="flex items-center gap-3 mt-2 flex-wrap">
               <StatusBadge status={request.status} />
-              {hasRejection && (
+              {hasRejection && (request.status === 'ImprovementRequest' || request.status === 'SentToEngineer') && (
                 <span className="text-sm text-red-600 font-medium">Rejected</span>
               )}
               <span className="text-sm text-gray-500">

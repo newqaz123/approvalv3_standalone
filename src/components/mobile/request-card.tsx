@@ -59,7 +59,7 @@ export function RequestCard({
       <div className="flex items-start justify-between gap-3 mb-2">
         <h3 className="font-medium text-gray-900 flex-1 line-clamp-2">
           {request.title}
-          {request.hasRejection && (
+          {request.hasRejection && (request.status === 'ImprovementRequest' || request.status === 'SentToEngineer') && (
             <span className="ml-2 inline-flex items-center">
               <RejectedBadge size="sm" showText={false} />
             </span>
@@ -72,7 +72,7 @@ export function RequestCard({
       <div className="flex flex-wrap items-center gap-2 mb-2">
         <StatusBadge
           status={request.status as any}
-          hasRejection={request.hasRejection}
+          hasRejection={request.hasRejection && (request.status === 'ImprovementRequest' || request.status === 'SentToEngineer')}
         />
 
         {/* Approval status badge */}
