@@ -14,44 +14,64 @@ export async function GET() {
       return NextResponse.json({ count: 0 }, { status: 401 })
     }
 
-    // Get user's level and department
+    // Get user's level, department, and role
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { level: true, departmentId: true },
+      select: { level: true, departmentId: true, role: true },
     })
 
     if (!user || user.level === null) {
       return NextResponse.json({ count: 0 })
     }
 
-    // Count pending approvals where user can approve
-    // User can approve if:
-    // 1. The approval is for their level in their department (if they have one)
-    // 2. OR they're a cross-department approver at that level
+    // Build request_approvals OR conditions (department-aware)
+    const requestOrConditions: any[] = [
+      { requiredApproverId: userId },
+    ]
+    if (user.level && user.departmentId) {
+      requestOrConditions.push({
+        requiredLevel: user.level,
+        request: { departmentId: user.departmentId },
+      })
+    }
+    // Add cross-department approver assignments
+    const crossDeptApprovals = await prisma.department_approvers.findMany({
+      where: { approverId: userId },
+      select: { departmentId: true, approverLevel: true },
+    })
+    for (const cda of crossDeptApprovals) {
+      requestOrConditions.push({
+        requiredLevel: cda.approverLevel,
+        request: { departmentId: cda.departmentId },
+      })
+    }
 
-    const [departmentApprovals, crossDepartmentApprovals] = await Promise.all([
-      // Approvals in user's own department at their level (only if user has a department)
-      user.departmentId
-        ? prisma.request_approvals.count({
-            where: {
-              status: 'pending',
-              requiredLevel: user.level,
-              request: {
-                departmentId: user.departmentId,
-              },
-            },
-          })
-        : 0,
-      // Cross-department approvals where user is listed as approver
+    // Build solution_approvals OR conditions (engineering-role-aware)
+    const solutionOrConditions: any[] = [
+      { requiredApproverId: userId },
+    ]
+    if (user.level && user.role === 'engineering') {
+      solutionOrConditions.push({ requiredLevel: user.level })
+    }
+
+    const [requestApprovalCount, solutionApprovalCount] = await Promise.all([
       prisma.request_approvals.count({
         where: {
+          OR: requestOrConditions,
           status: 'pending',
-          requiredApproverId: userId,
+          request: { isDeleted: false },
+        },
+      }),
+      prisma.solution_approvals.count({
+        where: {
+          OR: solutionOrConditions,
+          status: 'pending',
+          solution: { request: { isDeleted: false } },
         },
       }),
     ])
 
-    const count = departmentApprovals + crossDepartmentApprovals
+    const count = requestApprovalCount + solutionApprovalCount
 
     return NextResponse.json({ count })
   } catch (error) {

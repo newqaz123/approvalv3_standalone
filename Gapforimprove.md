@@ -18,12 +18,9 @@ navbar of engineer
   const userpd1Approvers = await prisma.department_approvers.findMany({
     ```
 - click need approve notification and it open old new approval page instead of new one.
-- Final approve got rejected.status change to SendToEngineer.Engineering open the modal.click 'Resubmit solution' .It should show Present Approval Flow not stage 3 Final approval Rejected by .... 
-- Submit Final approval modal should have Reject botton.After reject it should go to SendtoEngineer status then engineer can resubmit solution.
-- add solution reject notification
-- add new improvement request completed notification to engineering
-- add solution need approve notification to approver (in case of final approval reject and engineering resubmit it)
--test top level submitter improvement request,final approve, solution(tested:pass).
+
+
+
 
 ## Achitecture
 ### submitter-modal.tsx 

@@ -37,21 +37,45 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
     return []
   }
 
-  // Build OR conditions for approval query
-  const orConditions: any[] = [
+  // Build OR conditions for request_approvals (department-aware)
+  const requestOrConditions: any[] = [
     // Custom chain approvals (always include)
     { requiredApproverId: user.id },
   ]
 
-  // Add hierarchy-based approvals if user has a level
-  if (user.level) {
-    orConditions.push({ requiredLevel: user.level })
+  // Add hierarchy-based approvals scoped to user's own department
+  if (user.level && user.departmentId) {
+    requestOrConditions.push({
+      requiredLevel: user.level,
+      request: { departmentId: user.departmentId },
+    })
+  }
+
+  // Add cross-department approver assignments
+  const crossDeptApprovals = await prisma.department_approvers.findMany({
+    where: { approverId: user.id },
+    select: { departmentId: true, approverLevel: true },
+  })
+  for (const cda of crossDeptApprovals) {
+    requestOrConditions.push({
+      requiredLevel: cda.approverLevel,
+      request: { departmentId: cda.departmentId },
+    })
+  }
+
+  // Build OR conditions for solution_approvals (engineering-role-aware)
+  const solutionOrConditions: any[] = [
+    { requiredApproverId: user.id },
+  ]
+  // Only match by level for engineering users (matches canUserApproveSolution logic)
+  if (user.level && user.role === 'engineering') {
+    solutionOrConditions.push({ requiredLevel: user.level })
   }
 
   // Find all pending approvals for user's level OR custom approver ID
   const pendingApprovals = await prisma.request_approvals.findMany({
     where: {
-      OR: orConditions,
+      OR: requestOrConditions,
       status: 'pending',
       request: {
         isDeleted: false,
@@ -212,7 +236,7 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
   // Query solution approvals
   const pendingSolutionApprovals = await prisma.solution_approvals.findMany({
     where: {
-      OR: orConditions,
+      OR: solutionOrConditions,
       status: 'pending',
       solution: {
         request: {
