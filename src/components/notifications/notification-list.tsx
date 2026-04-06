@@ -13,7 +13,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
-import { RequestDetailModal } from '@/components/requests/request-detail-modal'
+import { RequestModalRouter } from '@/components/requests/request-modal-router'
 import type { NotificationType } from '@prisma/client'
 
 interface NotificationListProps {
@@ -151,7 +151,7 @@ export function NotificationList({
 
       {/* Request Detail Modal */}
       {selectedRequestId && (
-        <RequestDetailModal
+        <RequestModalRouter
           requestId={selectedRequestId}
           open={isModalOpen}
           onOpenChange={handleModalChange}
