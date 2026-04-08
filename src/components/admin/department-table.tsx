@@ -285,7 +285,7 @@ export function DepartmentTable({ data }: DepartmentTableProps) {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Department</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete "{deptToDelete?.name}"? This action cannot be undone.
+              Are you sure you want to delete &ldquo;{deptToDelete?.name}&rdquo;? This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

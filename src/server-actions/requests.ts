@@ -545,7 +545,7 @@ export async function getRequest(id: string) {
 
   // Convert Decimal to number for client components
   if (request?.solutions?.[0]) {
-    request.solutions[0].costEstimate = Number(request.solutions[0].costEstimate)
+    request.solutions[0].costEstimate = Number(request.solutions[0].costEstimate) as any
   }
 
   return request

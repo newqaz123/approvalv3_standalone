@@ -34,7 +34,6 @@ export function RequestsListClient({
       const result = await createRequest({
         title: data.title,
         description: data.description,
-        fileIds: [],
       })
       
       if (result.success) {

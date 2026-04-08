@@ -66,7 +66,12 @@ export function RequestModalRouter({
     try {
       // Fetch request with all related data
       const request = await getRequest(requestId)
-      
+
+      if (!request) {
+        setLoading(false)
+        return
+      }
+
       // Check if user can approve - use appropriate check based on status
       let approvalCheck = { canApprove: false }
       

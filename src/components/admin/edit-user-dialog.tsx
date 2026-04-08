@@ -58,7 +58,7 @@ export function EditUserDialog({ user, departments, open: externalOpen, onOpenCh
           </DialogDescription>
         </DialogHeader>
         <UserForm
-          departments={departments}
+          departments={departments as (Department & { levelNames: Record<string, string> | null })[]}
           initialData={{
             id: user.id,
             name: user.name,
@@ -74,7 +74,7 @@ export function EditUserDialog({ user, departments, open: externalOpen, onOpenCh
           userId={user.id}
           userRole={user.role}
           userHomeDepartmentId={user.departmentId || ''}
-          departments={departments}
+          departments={departments as (Department & { levelNames: Record<string, string> | null })[]}
         />
       </DialogContent>
     </Dialog>
