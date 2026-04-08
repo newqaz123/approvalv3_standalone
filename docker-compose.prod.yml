@@ -8,6 +8,8 @@ services:
     container_name: approval-db
     ports:
       - "5432:5432"
+    env_file:
+      - .env.production
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
@@ -32,14 +34,30 @@ services:
     restart: unless-stopped
 
   migrate:
-    image: approval-app:latest
+    image: approval-migrate:latest
     container_name: approval-migrate
     command: npx prisma migrate deploy
-    environment:
-      DATABASE_URL: ${DATABASE_URL}
+    env_file:
+      - .env.production
     depends_on:
       db:
         condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: "no"
+
+  seed:
+    image: approval-migrate:latest
+    container_name: approval-seed
+    command: npx tsx prisma/seed.ts
+    env_file:
+      - .env.production
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     logging:
       driver: "json-file"
       options:

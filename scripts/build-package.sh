@@ -38,7 +38,8 @@ echo ""
 echo -e "${BLUE}[1/5]${NC} Building Docker images..."
 cd "$PROJECT_DIR"
 docker build -t approval-app:latest -t "approval-app:$VERSION" --target runner .
-echo -e "${GREEN}✓ Image built: approval-app:$VERSION${NC}"
+docker build -t approval-migrate:latest --target migrator .
+echo -e "${GREEN}✓ Images built: approval-app:$VERSION, approval-migrate:latest${NC}"
 
 # Pull postgres image (needed for offline server)
 echo -e "${BLUE}[2/5]${NC} Pulling PostgreSQL image..."
@@ -54,6 +55,7 @@ echo -e "${GREEN}✓ Package directory ready${NC}"
 # Step 3: Export Docker images
 echo -e "${BLUE}[4/5]${NC} Exporting Docker images (this may take a minute)..."
 docker save approval-app:latest -o "$PACKAGE_DIR/images/approval-app.tar"
+docker save approval-migrate:latest -o "$PACKAGE_DIR/images/approval-migrate.tar"
 docker save postgres:15-alpine -o "$PACKAGE_DIR/images/postgres.tar"
 echo -e "${GREEN}✓ Images exported${NC}"
 

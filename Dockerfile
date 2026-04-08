@@ -28,6 +28,15 @@ ENV DATABASE_URL=$DATABASE_URL
 RUN npx prisma generate
 RUN npm run build
 
+# Stage: Migration runner (has prisma schema + node_modules)
+FROM base AS migrator
+WORKDIR /app
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/prisma.config.ts ./
+COPY --from=builder /app/package.json ./
+ENV NEXT_TELEMETRY_DISABLED=1
+
 # Stage: Production runner (minimal image)
 FROM base AS runner
 WORKDIR /app
