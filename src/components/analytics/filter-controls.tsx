@@ -3,7 +3,6 @@
 import * as React from 'react'
 import { useSearchParams } from 'next/navigation'
 import type { AnalyticsFilters, DateRangePreset } from '@/types/analytics'
-import { Card, CardHeader, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import {
   Select,
@@ -13,6 +12,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
+import { SlidersHorizontal, X } from 'lucide-react'
 
 interface FilterControlsProps {
   filters: {
@@ -24,8 +24,7 @@ interface FilterControlsProps {
 
 /**
  * FilterControls component for analytics dashboard
- * Provides date range, department, status, and requester filters
- * Uses URL search params for persistent, shareable filter state
+ * Compact inline filter bar with date range tabs and dropdown filters
  */
 export function FilterControls({ filters, onFilterChange }: FilterControlsProps) {
   const searchParams = useSearchParams()
@@ -43,13 +42,16 @@ export function FilterControls({ filters, onFilterChange }: FilterControlsProps)
   const [requesterId, setRequesterId] = React.useState<string | undefined>(
     searchParams.get('requesterId') || undefined
   )
+  const [showAdvanced, setShowAdvanced] = React.useState(
+    !!(searchParams.get('departmentId') || searchParams.get('status') || searchParams.get('requesterId'))
+  )
 
   // Status options based on workflow
   const statusOptions = [
     { value: 'ImprovementRequest', label: 'Improvement Request' },
     { value: 'SentToEngineer', label: 'Sent to Engineer' },
     { value: 'DesignCostEstimationApproval', label: 'Cost Estimation' },
-    { value: 'SendBackToRequester', label: 'Sent Back to Requester' },
+    { value: 'SendBackToRequester', label: 'Sent Back' },
     { value: 'FinalApproval', label: 'Final Approval' },
     { value: 'Completed', label: 'Completed' },
     { value: 'Cancelled', label: 'Cancelled' },
@@ -57,11 +59,13 @@ export function FilterControls({ filters, onFilterChange }: FilterControlsProps)
 
   // Date range presets
   const dateRangePresets: Array<{ value: DateRangePreset; label: string }> = [
-    { value: '7days', label: 'Last 7 days' },
-    { value: '30days', label: 'Last 30 days' },
-    { value: '90days', label: 'Last 90 days' },
-    { value: 'all', label: 'All time' },
+    { value: '7days', label: '7D' },
+    { value: '30days', label: '30D' },
+    { value: '90days', label: '90D' },
+    { value: 'all', label: 'All' },
   ]
+
+  const hasActiveFilters = !!(departmentId || status || requesterId)
 
   /**
    * Apply filters and notify parent component
@@ -76,110 +80,128 @@ export function FilterControls({ filters, onFilterChange }: FilterControlsProps)
     onFilterChange(newFilters)
   }
 
+  function clearFilters() {
+    setDepartmentId(undefined)
+    setStatus(undefined)
+    setRequesterId(undefined)
+  }
+
   // Auto-apply filters when any filter changes
   React.useEffect(() => {
     handleApplyFilter()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dateRange, departmentId, status, requesterId])
 
   return (
-    <Card>
-      <CardHeader>
-        <h2 className="text-lg font-semibold">Filters</h2>
-      </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-          {/* Date Range Filter */}
-          <div className="space-y-2">
-            <label htmlFor="date-range" className="text-sm font-medium">
-              Date Range
-            </label>
-            <Select
-              value={dateRange}
-              onValueChange={(value) => setDateRange(value as DateRangePreset)}
+    <div className="space-y-3">
+      {/* Primary row: date range tabs + filter toggle */}
+      <div className="flex flex-wrap items-center gap-3">
+        {/* Date range pill tabs */}
+        <div className="inline-flex items-center rounded-lg border bg-muted/50 p-1">
+          {dateRangePresets.map((preset) => (
+            <button
+              key={preset.value}
+              onClick={() => setDateRange(preset.value)}
+              className={cn(
+                'rounded-md px-3 py-1.5 text-sm font-medium transition-all',
+                dateRange === preset.value
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              )}
             >
-              <SelectTrigger id="date-range">
-                <SelectValue placeholder="Select date range" />
-              </SelectTrigger>
-              <SelectContent>
-                {dateRangePresets.map((preset) => (
-                  <SelectItem key={preset.value} value={preset.value}>
-                    {preset.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+              {preset.label}
+            </button>
+          ))}
+        </div>
 
+        {/* Filter toggle button */}
+        <Button
+          variant={showAdvanced ? 'secondary' : 'outline'}
+          size="sm"
+          onClick={() => setShowAdvanced(!showAdvanced)}
+          className="gap-1.5"
+        >
+          <SlidersHorizontal className="h-3.5 w-3.5" />
+          Filters
+          {hasActiveFilters && (
+            <span className="ml-1 rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-bold text-primary-foreground">
+              {[departmentId, status, requesterId].filter(Boolean).length}
+            </span>
+          )}
+        </Button>
+
+        {/* Clear filters button */}
+        {hasActiveFilters && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={clearFilters}
+            className="gap-1 text-muted-foreground hover:text-foreground"
+          >
+            <X className="h-3.5 w-3.5" />
+            Clear
+          </Button>
+        )}
+      </div>
+
+      {/* Advanced filters row (collapsible) */}
+      {showAdvanced && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/30 p-3">
           {/* Department Filter */}
-          <div className="space-y-2">
-            <label htmlFor="department" className="text-sm font-medium">
-              Department
-            </label>
-            <Select
-              value={departmentId || 'all'}
-              onValueChange={(value) => setDepartmentId(value === 'all' ? undefined : value)}
-            >
-              <SelectTrigger id="department">
-                <SelectValue placeholder="All Departments" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Departments</SelectItem>
-                {filters.departments.map((dept) => (
-                  <SelectItem key={dept.id} value={dept.id}>
-                    {dept.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          <Select
+            value={departmentId || 'all'}
+            onValueChange={(value) => setDepartmentId(value === 'all' ? undefined : value)}
+          >
+            <SelectTrigger className="w-[180px] bg-background">
+              <SelectValue placeholder="All Departments" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Departments</SelectItem>
+              {filters.departments.map((dept) => (
+                <SelectItem key={dept.id} value={dept.id}>
+                  {dept.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
           {/* Status Filter */}
-          <div className="space-y-2">
-            <label htmlFor="status" className="text-sm font-medium">
-              Status
-            </label>
-            <Select
-              value={status || 'all'}
-              onValueChange={(value) => setStatus(value === 'all' ? undefined : value)}
-            >
-              <SelectTrigger id="status">
-                <SelectValue placeholder="All Statuses" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Statuses</SelectItem>
-                {statusOptions.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          <Select
+            value={status || 'all'}
+            onValueChange={(value) => setStatus(value === 'all' ? undefined : value)}
+          >
+            <SelectTrigger className="w-[180px] bg-background">
+              <SelectValue placeholder="All Statuses" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Statuses</SelectItem>
+              {statusOptions.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
           {/* Requester Filter */}
-          <div className="space-y-2">
-            <label htmlFor="requester" className="text-sm font-medium">
-              Requester
-            </label>
-            <Select
-              value={requesterId || 'all'}
-              onValueChange={(value) => setRequesterId(value === 'all' ? undefined : value)}
-            >
-              <SelectTrigger id="requester">
-                <SelectValue placeholder="All Requesters" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Requesters</SelectItem>
-                {filters.users.map((user) => (
-                  <SelectItem key={user.id} value={user.id}>
-                    {user.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          <Select
+            value={requesterId || 'all'}
+            onValueChange={(value) => setRequesterId(value === 'all' ? undefined : value)}
+          >
+            <SelectTrigger className="w-[180px] bg-background">
+              <SelectValue placeholder="All Requesters" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Requesters</SelectItem>
+              {filters.users.map((user) => (
+                <SelectItem key={user.id} value={user.id}>
+                  {user.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
-      </CardContent>
-    </Card>
+      )}
+    </div>
   )
 }

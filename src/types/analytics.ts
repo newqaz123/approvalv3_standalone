@@ -58,10 +58,107 @@ export interface SummaryMetrics {
   totalRequests: number
   /** Number of currently pending requests */
   pendingRequests: number
-  /** Average approval time in days */
+  /** Number of cancelled requests */
+  cancelledCount: number
+  /** Average approval time in hours */
   avgApprovalTime: number
-  /** Approval rate as percentage (0-100) */
+  /** Completion rate as percentage (0-100), excludes cancelled from denominator */
   approvalRate: number
+}
+
+/**
+ * Per-department average approval speed
+ */
+export interface DepartmentApprovalSpeed {
+  /** Department name */
+  name: string
+  /** Total average approval time in hours */
+  avgHours: number
+  /** Number of completed requests used for calculation */
+  completedCount: number
+  /** Avg time for improvement approval step (Created → SentToEngineer) in hours */
+  avgImprovementHours: number
+  /** Avg time for engineering step (SentToEngineer → SendBackToRequester) in hours */
+  avgEngineeringHours: number
+  /** Avg time for final approval step (SendBackToRequester → Completed) in hours */
+  avgFinalApprovalHours: number
+}
+
+/**
+ * Trend comparison data vs previous period
+ */
+export interface TrendData {
+  /** Percentage change in total requests vs previous period */
+  totalRequestsChange: number
+  /** Percentage change in pending requests vs previous period */
+  pendingRequestsChange: number
+  /** Percentage change in avg approval time vs previous period */
+  avgApprovalTimeChange: number
+  /** Percentage change in approval rate vs previous period */
+  approvalRateChange: number
+}
+
+/**
+ * Timeline data point for request volume chart
+ */
+export interface TimelinePoint {
+  /** Date label (e.g., "Jan 15") */
+  date: string
+  /** Number of requests created on this date */
+  created: number
+  /** Number of requests completed on this date */
+  completed: number
+}
+
+/**
+ * Bottleneck alert for stuck requests
+ */
+export interface Bottleneck {
+  /** Workflow step name */
+  step: string
+  /** Human-readable step label */
+  label: string
+  /** Number of requests stuck at this step */
+  count: number
+  /** Average wait time in hours */
+  avgWaitHours: number
+}
+
+/**
+ * Individual engineering cycle for a single request
+ */
+export interface EngineeringCycle {
+  /** Request ID */
+  requestId: string
+  /** Request title */
+  title: string
+  /** When the request was sent to engineering */
+  sentToEngineerAt: string
+  /** When the request was sent back to requester (null if still in engineering) */
+  sentBackAt: string | null
+  /** Cycle time in hours (null if still in progress) */
+  cycleHours: number | null
+}
+
+/**
+ * Engineering KPI metrics
+ * Tracks engineering work time: SentToEngineer → SendBackToRequester
+ */
+export interface EngineeringMetrics {
+  /** Average engineering cycle time in hours */
+  avgCycleHours: number
+  /** Median engineering cycle time in hours */
+  medianCycleHours: number
+  /** Fastest engineering cycle time in hours */
+  minCycleHours: number
+  /** Slowest engineering cycle time in hours */
+  maxCycleHours: number
+  /** Total completed engineering cycles in the period */
+  completedCount: number
+  /** Number of requests currently with engineering */
+  inProgressCount: number
+  /** Individual cycle records (recent, for detail view) */
+  recentCycles: EngineeringCycle[]
 }
 
 /**
@@ -77,4 +174,14 @@ export interface AnalyticsData {
   timeMetrics: TimeMetrics
   /** Summary metrics for quick overview */
   summary: SummaryMetrics
+  /** Trend comparison vs previous period */
+  trends: TrendData
+  /** Request volume timeline */
+  timeline: TimelinePoint[]
+  /** Bottleneck alerts for stuck requests */
+  bottlenecks: Bottleneck[]
+  /** Engineering KPI metrics */
+  engineeringMetrics: EngineeringMetrics
+  /** Per-department approval speed for racing track chart */
+  departmentSpeeds: DepartmentApprovalSpeed[]
 }

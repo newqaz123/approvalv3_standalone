@@ -11,18 +11,16 @@ export default async function AnalyticsDashboard() {
     redirect('/sign-in')
   }
 
-  // Fetch initial data with default 30-day filter
-  // Note: getAnalyticsData() internally uses Promise.all() to fetch all data sources in parallel
-  const initialData = await getAnalyticsData({
-    dateRange: '30days',
-    departmentId: undefined,
-    status: undefined,
-    requesterId: undefined,
-  })
-
-  // Fetch filters for filter controls (independent of analytics data)
-  // Future optimization: Could parallelize getAnalyticsData() + getAnalyticsFilters() with Promise.all()
-  const filters = await getAnalyticsFilters()
+  // Fetch initial data and filter options in parallel
+  const [initialData, filters] = await Promise.all([
+    getAnalyticsData({
+      dateRange: '30days',
+      departmentId: undefined,
+      status: undefined,
+      requesterId: undefined,
+    }),
+    getAnalyticsFilters(),
+  ])
 
   return <AnalyticsPage initialData={initialData} filters={filters} userId={userId} />
 }
