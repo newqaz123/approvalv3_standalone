@@ -102,7 +102,7 @@ fi
 # Step 4: Stop existing services
 echo -e "${BLUE}[4/6]${NC} Stopping existing services..."
 cd "$PACKAGE_DIR"
-$COMPOSE -f docker-compose.prod.yml down --remove-orphans 2>/dev/null || true
+$COMPOSE --env-file .env.production -f docker-compose.prod.yml down --remove-orphans 2>/dev/null || true
 echo -e "${GREEN}✓ Services stopped${NC}"
 
 # Step 5: Tag the current image for rollback
@@ -124,7 +124,7 @@ fi
 # Step 6: Start services
 echo -e "${BLUE}[6/6]${NC} Starting services..."
 cd "$PACKAGE_DIR"
-$COMPOSE -f docker-compose.prod.yml up -d
+$COMPOSE --env-file .env.production -f docker-compose.prod.yml up -d
 
 # Wait for health
 echo "Waiting for services to start..."
@@ -134,7 +134,7 @@ echo ""
 echo "============================================"
 echo "  Service Status"
 echo "============================================"
-$COMPOSE -f docker-compose.prod.yml ps
+$COMPOSE --env-file .env.production -f docker-compose.prod.yml ps
 
 echo ""
 echo "============================================"
