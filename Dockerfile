@@ -41,6 +41,8 @@ COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 # Copy only the specific deps needed for seed (bcryptjs + its deps)
 COPY --from=builder /app/node_modules/bcryptjs ./node_modules/bcryptjs
+# Copy dotenv needed by prisma.config.ts
+COPY --from=builder /app/node_modules/dotenv ./node_modules/dotenv
 # Install tsx as a global binary (minimal, no node_modules tree)
 RUN npm install -g tsx
 ENV NEXT_TELEMETRY_DISABLED=1
