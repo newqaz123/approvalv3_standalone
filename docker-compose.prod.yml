@@ -99,6 +99,27 @@ services:
       retries: 3
       start_period: 40s
 
+  # Prisma Studio — visual database browser
+  # Access at http://your-server-ip:5555
+  studio:
+    image: approval-migrate:latest
+    container_name: approval-studio
+    ports:
+      - "5555:5555"
+    env_file:
+      - .env.production
+    command: npx prisma studio --hostname 0.0.0.0
+    depends_on:
+      db:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    profiles:
+      - tools
+
 volumes:
   db_data:
     driver: local
