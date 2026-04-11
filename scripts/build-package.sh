@@ -37,13 +37,14 @@ echo ""
 # Step 1: Build Docker images
 echo -e "${BLUE}[1/5]${NC} Building Docker images..."
 cd "$PROJECT_DIR"
-docker build -t approval-app:latest -t "approval-app:$VERSION" --target runner .
-docker build -t approval-migrate:latest --target migrator .
+# Build for linux/amd64 (server architecture) — Mac ARM builds won't run on Linux x86
+docker build --platform linux/amd64 -t approval-app:latest -t "approval-app:$VERSION" --target runner .
+docker build --platform linux/amd64 -t approval-migrate:latest --target migrator .
 echo -e "${GREEN}✓ Images built: approval-app:$VERSION, approval-migrate:latest${NC}"
 
 # Pull postgres image (needed for offline server)
 echo -e "${BLUE}[2/5]${NC} Pulling PostgreSQL image..."
-docker pull postgres:15-alpine
+docker pull --platform linux/amd64 postgres:15-alpine
 echo -e "${GREEN}✓ postgres:15-alpine pulled${NC}"
 
 # Step 2: Create package directory
