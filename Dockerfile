@@ -28,7 +28,7 @@ ENV DATABASE_URL=$DATABASE_URL
 RUN npx prisma generate
 RUN npm run build
 
-# Stage: Migration runner (lightweight — only Prisma + seed deps)
+# Stage: Migration runner (Prisma CLI + client + seed deps)
 FROM node:20-alpine AS migrator
 RUN apk add --no-cache libc6-compat openssl
 WORKDIR /app
@@ -36,14 +36,10 @@ COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/prisma.config.ts ./
 COPY --from=builder /app/package.json ./
 COPY --from=builder /app/prisma/seed.ts ./
-# Copy generated Prisma client + engine from builder
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
-COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
-# Copy only the specific deps needed for seed (bcryptjs + its deps)
-COPY --from=builder /app/node_modules/bcryptjs ./node_modules/bcryptjs
-# Copy dotenv needed by prisma.config.ts
-COPY --from=builder /app/node_modules/dotenv ./node_modules/dotenv
-# Install tsx as a global binary (minimal, no node_modules tree)
+# Copy all node_modules but remove heavy unused ones
+COPY --from=builder /app/node_modules ./node_modules
+RUN rm -rf ./node_modules/puppeteer* ./node_modules/chromium* ./node_modules/.cache
+# Install tsx for seed script
 RUN npm install -g tsx
 ENV NEXT_TELEMETRY_DISABLED=1
 
