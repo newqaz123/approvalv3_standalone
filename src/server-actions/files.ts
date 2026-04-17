@@ -2,7 +2,10 @@
 
 import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
-import { getFileUrl } from '@/lib/files'
+import { getFileUrl, saveFile, generateFilePath } from '@/lib/files'
+import { revalidatePath } from 'next/cache'
+import { unlink } from 'fs/promises'
+import { join } from 'path'
 import { z } from 'zod'
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
@@ -184,7 +187,6 @@ export async function confirmFileUpload(input: ConfirmFileUploadInput) {
   })
 
   // Revalidate to refresh UI
-  const { revalidatePath } = await import('next/cache')
   revalidatePath('/requests')
   revalidatePath(`/requests/${input.requestId}`)
 
@@ -238,7 +240,6 @@ export async function confirmSolutionFileUpload(input: ConfirmSolutionFileUpload
   })
 
   // Revalidate to refresh UI
-  const { revalidatePath } = await import('next/cache')
   revalidatePath('/requests')
   revalidatePath('/engineering')
 
@@ -323,10 +324,8 @@ export async function deleteFileAttachment({ fileId }: { fileId: string }) {
 
   // Delete the physical file from disk
   try {
-    const fs = await import('fs/promises')
-    const path = await import('path')
-    const filePath = path.join(process.cwd(), 'public', fileAttachment.filePath.replace(/^\//, ''))
-    await fs.unlink(filePath)
+    const filePath = join(process.cwd(), 'public', fileAttachment.filePath.replace(/^\//, ''))
+    await unlink(filePath)
   } catch (err) {
     // Log warning but don't fail - file may already be gone
     console.warn(`[deleteFileAttachment] Failed to delete physical file: ${fileAttachment.filePath}`, err)
@@ -343,7 +342,6 @@ export async function deleteFileAttachment({ fileId }: { fileId: string }) {
   })
 
   // Revalidate to refresh UI
-  const { revalidatePath } = await import('next/cache')
   revalidatePath('/requests')
   revalidatePath(`/requests/${request.id}`)
   revalidatePath('/engineering')
@@ -357,4 +355,178 @@ export async function deleteFileAttachment({ fileId }: { fileId: string }) {
  */
 export async function getDownloadUrl(filePath: string): Promise<string> {
   return getFileUrl(filePath)
+}
+
+/**
+ * Unified file upload action — handles validation, saving, and DB record in one call.
+ * Receives a File via FormData from the client, eliminating the need for a separate API route.
+ */
+export async function uploadFileAction(
+  _prevState: { success: boolean; error?: string; fileAttachment?: any } | null,
+  formData: FormData
+) {
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
+
+  if (!userId) {
+    return { success: false, error: 'Unauthorized' }
+  }
+
+  const file = formData.get('file') as File | null
+  const requestId = formData.get('requestId') as string | null
+  const description = formData.get('description') as string | null
+
+  if (!file || !requestId) {
+    return { success: false, error: 'File and requestId are required' }
+  }
+
+  // Validate file size
+  if (file.size > MAX_FILE_SIZE) {
+    return { success: false, error: `File size exceeds ${MAX_FILE_SIZE / 1024 / 1024}MB limit` }
+  }
+
+  // Validate file type
+  if (!ALLOWED_FILE_TYPES.includes(file.type)) {
+    return { success: false, error: 'File type not allowed. Allowed types: PDF, Word, Excel, Images' }
+  }
+
+  // Verify request exists and user is authorized
+  const [dbRequest, user] = await Promise.all([
+    prisma.requests.findUnique({
+      where: { id: requestId },
+      select: { id: true, requesterId: true, status: true },
+    }),
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: { role: true },
+    }),
+  ])
+
+  if (!dbRequest) {
+    return { success: false, error: 'Request not found' }
+  }
+
+  const isRequester = dbRequest.requesterId === userId
+  const isEngineeringUser = user?.role === 'engineering'
+  const isEngineeringRequest = dbRequest.status === 'SentToEngineer'
+  const canEngineerUpload = isEngineeringUser && isEngineeringRequest
+
+  if (!isRequester && !canEngineerUpload) {
+    return { success: false, error: 'Not authorized to upload to this request' }
+  }
+
+  // Save file to disk
+  const filePath = generateFilePath(requestId, file.name)
+  const bytes = await file.arrayBuffer()
+  const buffer = Buffer.from(bytes)
+  await saveFile(filePath, buffer)
+
+  // Create database record
+  const fileId = crypto.randomUUID()
+  const fileAttachment = await prisma.file_attachments.create({
+    data: {
+      id: fileId,
+      requestId,
+      fileName: file.name,
+      fileType: file.type,
+      fileSize: file.size,
+      filePath,
+      description: description || null,
+      uploadedById: userId,
+    },
+  })
+
+  // Log activity
+  await prisma.request_activities.create({
+    data: {
+      requestId,
+      action: 'file_attached',
+      comments: `File attached: ${file.name}`,
+      userId,
+    },
+  })
+
+  revalidatePath('/requests')
+  revalidatePath(`/requests/${requestId}`)
+
+  return { success: true, fileAttachment }
+}
+
+/**
+ * Unified solution file upload action — handles validation, saving, and DB record in one call.
+ * Links the file to a solutionId instead of requestId.
+ */
+export async function uploadSolutionFileAction(
+  _prevState: { success: boolean; error?: string; fileAttachment?: any } | null,
+  formData: FormData
+) {
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
+
+  if (!userId) {
+    return { success: false, error: 'Unauthorized' }
+  }
+
+  const file = formData.get('file') as File | null
+  const solutionId = formData.get('solutionId') as string | null
+  const description = formData.get('description') as string | null
+
+  if (!file || !solutionId) {
+    return { success: false, error: 'File and solutionId are required' }
+  }
+
+  // Validate file size
+  if (file.size > MAX_FILE_SIZE) {
+    return { success: false, error: `File size exceeds ${MAX_FILE_SIZE / 1024 / 1024}MB limit` }
+  }
+
+  // Validate file type
+  if (!ALLOWED_FILE_TYPES.includes(file.type)) {
+    return { success: false, error: 'File type not allowed. Allowed types: PDF, Word, Excel, Images' }
+  }
+
+  // Verify solution exists and get its requestId for file path + activity log
+  const solution = await prisma.solutions.findUnique({
+    where: { id: solutionId },
+    select: { requestId: true },
+  })
+
+  if (!solution) {
+    return { success: false, error: 'Solution not found' }
+  }
+
+  // Save file to disk (organized by requestId for consistency)
+  const filePath = generateFilePath(solution.requestId, file.name)
+  const bytes = await file.arrayBuffer()
+  const buffer = Buffer.from(bytes)
+  await saveFile(filePath, buffer)
+
+  // Create database record with solutionId (NOT requestId)
+  const fileId = crypto.randomUUID()
+  const fileAttachment = await prisma.file_attachments.create({
+    data: {
+      id: fileId,
+      solutionId,
+      requestId: null,
+      fileName: file.name,
+      fileType: file.type,
+      fileSize: file.size,
+      filePath,
+      description: description || null,
+      uploadedById: userId,
+    },
+  })
+
+  // Log activity
+  await prisma.request_activities.create({
+    data: {
+      requestId: solution.requestId,
+      action: 'file_attached',
+      comments: `Solution file attached: ${file.name}`,
+      userId,
+    },
+  })
+
+  revalidatePath('/requests')
+  revalidatePath('/engineering')
+
+  return { success: true, fileAttachment }
 }

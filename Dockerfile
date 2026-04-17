@@ -62,8 +62,11 @@ RUN chown nextjs:nodejs .next
 # Automatically leverage output traces to reduce image size
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-# Copy uploads folder structure if needed
-RUN mkdir -p uploads && chown nextjs:nodejs uploads
+# Copy full server directory to ensure all routes and actions are available
+# (standalone tracing can miss files — this is a safety net)
+COPY --from=builder --chown=nextjs:nodejs /app/.next/server ./.next/server
+# Create uploads directory matching the app's actual path (public/uploads/)
+RUN mkdir -p public/uploads && chown nextjs:nodejs public/uploads
 
 USER nextjs
 

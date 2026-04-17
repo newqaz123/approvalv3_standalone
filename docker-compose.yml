@@ -63,7 +63,7 @@ services:
     volumes:
       - .:/app
       - /app/node_modules
-      - uploads_data:/app/uploads
+      - uploads_data:/app/public/uploads
     command: sh -c "npx prisma generate && npm run dev"
     depends_on:
       db:
@@ -109,7 +109,7 @@ services:
     environment:
       NODE_ENV: production
     volumes:
-      - uploads_data:/app/uploads
+      - uploads_data:/app/public/uploads
     depends_on:
       db:
         condition: service_healthy
