@@ -35,8 +35,8 @@ services:
       target: builder
     container_name: approval-migrate
     command: npx prisma migrate deploy
-    environment:
-      DATABASE_URL: ${DATABASE_URL}
+    env_file:
+      - .env.production
     depends_on:
       db:
         condition: service_healthy
