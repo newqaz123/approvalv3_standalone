@@ -1,5 +1,5 @@
 # Multi-stage Dockerfile for Next.js with Prisma
-# Based on Vercel/Next.js and Prisma Docker best practices
+# Uses full build (not standalone) to avoid server action tracing issues
 
 FROM node:20-alpine AS base
 # Install dependencies required for Prisma and Puppeteer on Alpine
@@ -43,7 +43,7 @@ RUN rm -rf ./node_modules/puppeteer* ./node_modules/chromium* ./node_modules/.ca
 RUN npm install -g tsx
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# Stage: Production runner (minimal image)
+# Stage: Production runner
 FROM base AS runner
 WORKDIR /app
 ENV NODE_ENV production
@@ -53,18 +53,12 @@ ENV NEXT_TELEMETRY_DISABLED 1
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
-# Copy built artifacts from builder
+# Copy built application
 COPY --from=builder /app/public ./public
-# Set the correct permission for prerender cache
-RUN mkdir .next
-RUN chown nextjs:nodejs .next
-
-# Automatically leverage output traces to reduce image size
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-# Copy full server directory to ensure all routes and actions are available
-# (standalone tracing can miss files — this is a safety net)
-COPY --from=builder --chown=nextjs:nodejs /app/.next/server ./.next/server
+COPY --from=builder /app/.next ./.next
+# Copy only production node_modules (exclude devDependencies)
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./
 # Create uploads directory matching the app's actual path (public/uploads/)
 RUN mkdir -p public/uploads && chown nextjs:nodejs public/uploads
 
@@ -73,4 +67,4 @@ USER nextjs
 EXPOSE 3000
 
 ENV PORT 3000
-CMD ["node", "server.js"]
+CMD ["npx", "next", "start"]
