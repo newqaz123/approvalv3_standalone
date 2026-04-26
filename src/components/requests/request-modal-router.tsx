@@ -592,6 +592,7 @@ export function RequestModalRouter({
           }}
           userDepartment={userDepartmentType || undefined}
           onSubmitSolution={() => setShowSolutionModal(true)}
+          onDownloadFile={handleDownloadFile}
         />
       )
       break
