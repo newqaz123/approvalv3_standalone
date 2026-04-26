@@ -20,7 +20,7 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Arguments
 REMOTE="${1:?Usage: bash scripts/deploy-remote.sh user@hostname [/remote/path]}"
-REMOTE_PATH="${2:-/opt/approval}"
+REMOTE_PATH="${2:-/opt/approval-app}"
 
 VERSION="${3:-$(git describe --tags --always --dirty 2>/dev/null || echo "dev-$(date +%Y%m%d%H%M)")}"
 DATE=$(date +%Y%m%d)

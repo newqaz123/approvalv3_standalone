@@ -34,34 +34,53 @@ echo -e "${BLUE}Version:${NC} $VERSION"
 echo -e "${BLUE}Package: ${NC} $PACKAGE_NAME.tar.gz"
 echo ""
 
-# Step 1: Build Docker images
-echo -e "${BLUE}[1/5]${NC} Building Docker images..."
+# Step 1: Build Docker images for linux/amd64
+echo -e "${BLUE}[1/6]${NC} Building Docker images for linux/amd64..."
 cd "$PROJECT_DIR"
-# Build for linux/amd64 (server architecture) — Mac ARM builds won't run on Linux x86
-docker build --platform linux/amd64 -t approval-app:latest -t "approval-app:$VERSION" --target runner .
-docker build --platform linux/amd64 -t approval-migrate:latest --target migrator .
-echo -e "${GREEN}✓ Images built: approval-app:$VERSION, approval-migrate:latest${NC}"
 
-# Pull postgres image (needed for offline server)
-echo -e "${BLUE}[2/5]${NC} Pulling PostgreSQL image..."
+# Create a docker-container builder for cross-platform builds
+# This is required on ARM Mac to build x86 images that can be exported properly
+if ! docker buildx inspect approval-builder &>/dev/null; then
+    echo "Creating buildx builder for linux/amd64 cross-platform builds..."
+    docker buildx create --name approval-builder --driver docker-container --use
+    docker buildx inspect approval-builder --bootstrap
+fi
+docker buildx use approval-builder
+
+# Build and export directly to tar (avoids docker save manifest issues on ARM Mac)
+mkdir -p "$OUTPUT_DIR"
+docker buildx build --platform linux/amd64 \
+  -t approval-app:latest -t "approval-app:$VERSION" \
+  --target runner \
+  --output type=docker,dest="$OUTPUT_DIR/approval-app.tar" .
+echo -e "${GREEN}✓ approval-app image exported${NC}"
+
+docker buildx build --platform linux/amd64 \
+  -t approval-migrate:latest \
+  --target migrator \
+  --output type=docker,dest="$OUTPUT_DIR/approval-migrate.tar" .
+echo -e "${GREEN}✓ approval-migrate image exported${NC}"
+
+# Pull postgres image
+echo -e "${BLUE}[2/6]${NC} Pulling PostgreSQL image..."
 docker pull --platform linux/amd64 postgres:15-alpine
 echo -e "${GREEN}✓ postgres:15-alpine pulled${NC}"
 
 # Step 2: Create package directory
-echo -e "${BLUE}[3/5]${NC} Creating package directory..."
+echo -e "${BLUE}[3/6]${NC} Creating package directory..."
 rm -rf "$PACKAGE_DIR"
 mkdir -p "$PACKAGE_DIR/images"
 echo -e "${GREEN}✓ Package directory ready${NC}"
 
-# Step 3: Export Docker images
-echo -e "${BLUE}[4/5]${NC} Exporting Docker images (this may take a minute)..."
-docker save approval-app:latest -o "$PACKAGE_DIR/images/approval-app.tar"
-docker save approval-migrate:latest -o "$PACKAGE_DIR/images/approval-migrate.tar"
+# Step 3: Move exported images into package
+echo -e "${BLUE}[4/6]${NC} Moving images into package..."
+mv "$OUTPUT_DIR/approval-app.tar" "$PACKAGE_DIR/images/"
+mv "$OUTPUT_DIR/approval-migrate.tar" "$PACKAGE_DIR/images/"
 docker save postgres:15-alpine -o "$PACKAGE_DIR/images/postgres.tar"
-echo -e "${GREEN}✓ Images exported${NC}"
+echo -e "${GREEN}✓ Images packaged${NC}"
 
 # Step 4: Copy config files into package
-echo -e "${BLUE}[5/5]${NC} Packaging config files..."
+echo -e "${BLUE}[5/6]${NC} Packaging config files..."
 cp "$PROJECT_DIR/docker-compose.prod.yml" "$PACKAGE_DIR/"
 cp "$PROJECT_DIR/.env.example" "$PACKAGE_DIR/.env.production.example"
 cp "$PROJECT_DIR/DEPLOY.md" "$PACKAGE_DIR/"
