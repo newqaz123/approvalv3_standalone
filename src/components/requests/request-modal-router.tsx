@@ -66,7 +66,12 @@ export function RequestModalRouter({
     try {
       // Fetch request with all related data
       const request = await getRequest(requestId)
-      
+
+      if (!request) {
+        setLoading(false)
+        return
+      }
+
       // Check if user can approve - use appropriate check based on status
       let approvalCheck = { canApprove: false }
       
@@ -587,6 +592,7 @@ export function RequestModalRouter({
           }}
           userDepartment={userDepartmentType || undefined}
           onSubmitSolution={() => setShowSolutionModal(true)}
+          onDownloadFile={handleDownloadFile}
         />
       )
       break
@@ -764,47 +770,17 @@ export function RequestModalRouter({
             // Upload files first if any
             let fileIds: string[] = []
             if (data.files && data.files.length > 0) {
-              const { prepareFileUpload, confirmFileUpload } = await import('@/server-actions/files')
-              
+              const { uploadFileAction } = await import('@/server-actions/files')
+
               for (const file of data.files) {
-                // Prepare file upload
-                const prepareResult = await prepareFileUpload({
-                  fileName: file.name,
-                  fileType: file.type,
-                  fileSize: file.size,
-                  requestId: requestData.id,
-                })
-                
-                if (!prepareResult.success || !prepareResult.fileId) {
-                  throw new Error(`Failed to prepare upload for ${file.name}`)
-                }
-                
-                // Upload file to S3
-                const uploadResponse = await fetch(prepareResult.uploadUrl!, {
-                  method: 'PUT',
-                  body: file,
-                  headers: {
-                    'Content-Type': file.type,
-                  },
-                })
-                
-                if (!uploadResponse.ok) {
-                  throw new Error(`Failed to upload ${file.name}`)
-                }
-                
-                // Confirm file upload
-                const filePath = `/uploads/requests/${requestData.id}/${file.name}`
-                const confirmResult = await confirmFileUpload({
-                  requestId: requestData.id,
-                  fileId: prepareResult.fileId,
-                  fileName: file.name,
-                  fileType: file.type,
-                  fileSize: file.size,
-                  filePath,
-                })
-                
-                if (confirmResult.success) {
-                  fileIds.push(prepareResult.fileId)
+                const formData = new FormData()
+                formData.append('file', file)
+                formData.append('requestId', requestData.id)
+
+                const result = await uploadFileAction(null, formData)
+
+                if (result.success && result.fileAttachment) {
+                  fileIds.push(result.fileAttachment.id)
                 }
               }
             }

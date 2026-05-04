@@ -31,7 +31,7 @@ import { CustomApprovalPicker } from './custom-approval-picker'
 import { SolutionFileUpload } from './solution-file-upload'
 import { SolutionPreview } from './solution-preview'
 import { submitSolution } from '@/server-actions/solutions'
-import { prepareFileUpload, confirmFileUpload, deleteFileAttachment } from '@/server-actions/files'
+import { uploadFileAction, deleteFileAttachment } from '@/server-actions/files'
 
 const solutionFormSchema = z.object({
   title: z.string().min(1, 'Title is required').max(200),
@@ -110,79 +110,42 @@ export function SolutionForm({
     try {
       // Update status to uploading
       setSelectedFiles((prev) =>
-        prev.map((f) => (f.id === selectedFile.id ? { ...f, status: 'uploading' as const } : f))
+        prev.map((f) => (f.id === selectedFile.id ? { ...f, status: 'uploading' as const, progress: 10 } : f))
       )
 
-      // Step 1: Prepare upload
-      const prepareResult = await prepareFileUpload({
-        fileName: selectedFile.file.name,
-        fileType: selectedFile.file.type,
-        fileSize: selectedFile.file.size,
-        requestId,
-      })
+      // Simulate progress while upload runs
+      let currentProgress = 10
+      const progressInterval = setInterval(() => {
+        currentProgress = Math.min(currentProgress + Math.random() * 15, 90)
+        setSelectedFiles((prev) =>
+          prev.map((f) => (f.id === selectedFile.id ? { ...f, progress: Math.round(currentProgress) } : f))
+        )
+      }, 300)
 
-      if (!prepareResult.success || !prepareResult.uploadUrl) {
-        throw new Error(prepareResult.error || 'Failed to prepare upload')
+      try {
+        const formData = new FormData()
+        formData.append('file', selectedFile.file)
+        formData.append('requestId', requestId)
+
+        const result = await uploadFileAction(null, formData)
+
+        clearInterval(progressInterval)
+
+        if (result.success && result.fileAttachment) {
+          setSelectedFiles((prev) =>
+            prev.map((f) => (f.id === selectedFile.id ? { ...f, status: 'success' as const, progress: 100, fileId: result.fileAttachment!.id } : f))
+          )
+          return result.fileAttachment!.id
+        } else {
+          setSelectedFiles((prev) =>
+            prev.map((f) => (f.id === selectedFile.id ? { ...f, status: 'error' as const, error: result.error || 'Upload failed' } : f))
+          )
+          throw new Error(result.error || 'Upload failed')
+        }
+      } catch (err) {
+        clearInterval(progressInterval)
+        throw err
       }
-
-      // Step 2: Upload file with progress
-      const formData = new FormData()
-      formData.append('file', selectedFile.file)
-      formData.append('requestId', requestId)
-
-      let uploadData: any
-
-      await new Promise<void>((resolve, reject) => {
-        const xhr = new XMLHttpRequest()
-
-        xhr.upload.addEventListener('progress', (e) => {
-          if (e.lengthComputable) {
-            const progress = Math.round((e.loaded / e.total) * 100)
-            setSelectedFiles((prev) =>
-              prev.map((f) => (f.id === selectedFile.id ? { ...f, progress } : f))
-            )
-          }
-        })
-
-        xhr.addEventListener('load', () => {
-          if (xhr.status === 200) {
-            const response = JSON.parse(xhr.responseText)
-            if (response.success) {
-              uploadData = response
-              resolve()
-            } else {
-              reject(new Error(response.error || 'Upload failed'))
-            }
-          } else {
-            reject(new Error('Upload failed'))
-          }
-        })
-
-        xhr.addEventListener('error', () => reject(new Error('Upload failed')))
-        xhr.open('POST', prepareResult.uploadUrl!)
-        xhr.send(formData)
-      })
-
-      // Step 3: Confirm upload (save metadata to database)
-      const confirmResult = await confirmFileUpload({
-        requestId,
-        fileId: prepareResult.fileId!,
-        fileName: selectedFile.file.name,
-        fileType: selectedFile.file.type,
-        fileSize: selectedFile.file.size,
-        filePath: uploadData.filePath,
-      })
-
-      if (!confirmResult.success) {
-        throw new Error('Failed to save file metadata')
-      }
-
-      // Mark as success and store the file ID
-      setSelectedFiles((prev) =>
-        prev.map((f) => (f.id === selectedFile.id ? { ...f, status: 'success' as const, progress: 100, fileId: prepareResult.fileId } : f))
-      )
-
-      return prepareResult.fileId!
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Upload failed'
       setSelectedFiles((prev) =>

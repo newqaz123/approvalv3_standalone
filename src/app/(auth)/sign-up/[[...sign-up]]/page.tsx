@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { signUp } from '@/server-actions/auth'
 import { User, Mail, Lock, ArrowRight, Loader2, CheckCircle, Shield, Info } from 'lucide-react'
 
@@ -223,12 +224,12 @@ export default function SignUpPage() {
           <div className="mt-6 pt-6 border-t border-slate-100 text-center">
             <p className="text-sm text-slate-500">
               Already have an account?{' '}
-              <a 
-                href="/sign-in" 
+              <Link
+                href="/sign-in"
                 className="font-semibold text-indigo-600 hover:text-indigo-700 transition-colors"
               >
                 Sign in
-              </a>
+              </Link>
             </p>
           </div>
         </div>

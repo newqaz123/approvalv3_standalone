@@ -30,6 +30,7 @@ import {
   ArrowUp,
   ArrowDown,
   CheckCircle2,
+  Shield,
 } from 'lucide-react'
 import {
   Dialog,

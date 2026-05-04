@@ -6,3 +6,10 @@ uploads/
 tests/
 README.md
 .planning/
+deploy/
+.playwright-mcp/
+playwright-report/
+test-results/
+public/uploads/
+*.tsbuildinfo
+.DS_Store

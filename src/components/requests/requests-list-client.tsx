@@ -7,6 +7,7 @@ import { RequestsListWithFilters } from '@/components/requests/requests-list-wit
 import { BulkDeleteByDateRange } from '@/components/requests/bulk-delete-by-date-range'
 import { SubmitterModal } from '@/components/requests/submitter-modal'
 import { createRequest } from '@/server-actions/requests'
+import { uploadFileAction } from '@/server-actions/files'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 
@@ -34,10 +35,23 @@ export function RequestsListClient({
       const result = await createRequest({
         title: data.title,
         description: data.description,
-        fileIds: [],
       })
-      
-      if (result.success) {
+
+      if (result.success && result.requestId) {
+        // Upload files if any
+        if (data.files && data.files.length > 0) {
+          for (const file of data.files) {
+            const formData = new FormData()
+            formData.append('file', file)
+            formData.append('requestId', result.requestId)
+
+            const uploadResult = await uploadFileAction(null, formData)
+            if (!uploadResult.success) {
+              toast.error(`Failed to upload ${file.name}: ${uploadResult.error}`)
+            }
+          }
+        }
+
         toast.success('Request created successfully')
         setShowNewRequestModal(false)
         router.refresh()

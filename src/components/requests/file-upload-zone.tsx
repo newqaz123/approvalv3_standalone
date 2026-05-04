@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from 'react'
 import { Upload, File, X, Check } from 'lucide-react'
-import { prepareFileUpload, confirmFileUpload } from '@/server-actions/files'
+import { uploadFileAction } from '@/server-actions/files'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 
@@ -58,94 +58,51 @@ export function FileUploadZone({
   const uploadFile = async (uploadedFile: UploadedFile, requestId: string) => {
     setFiles((prev) =>
       prev.map((f) =>
-        f.id === uploadedFile.id ? { ...f, status: 'uploading' } : f
+        f.id === uploadedFile.id ? { ...f, status: 'uploading', progress: 10 } : f
       )
     )
 
+    // Simulate progress while upload runs
+    let currentProgress = 10
+    const progressInterval = setInterval(() => {
+      currentProgress = Math.min(currentProgress + Math.random() * 15, 90)
+      setFiles((prev) =>
+        prev.map((f) =>
+          f.id === uploadedFile.id ? { ...f, progress: Math.round(currentProgress) } : f
+        )
+      )
+    }, 300)
+
     try {
-      // Step 1: Prepare upload with server
-      const prepareResult = await prepareFileUpload({
-        fileName: uploadedFile.file.name,
-        fileType: uploadedFile.file.type,
-        fileSize: uploadedFile.file.size,
-        requestId,
-      })
-
-      if (!prepareResult.success || !prepareResult.uploadUrl) {
-        throw new Error(prepareResult.error || 'Failed to prepare upload')
-      }
-
-      // Step 2: Upload to API route with progress tracking
       const formData = new FormData()
       formData.append('file', uploadedFile.file)
       formData.append('requestId', requestId)
 
-      let uploadData: any
+      const result = await uploadFileAction(null, formData)
 
-      await new Promise<void>((resolve, reject) => {
-        const xhr = new XMLHttpRequest()
+      clearInterval(progressInterval)
 
-        xhr.upload.addEventListener('progress', (e) => {
-          if (e.lengthComputable) {
-            const progress = Math.round((e.loaded / e.total) * 100)
-            setFiles((prev) =>
-              prev.map((f) =>
-                f.id === uploadedFile.id ? { ...f, progress } : f
-              )
-            )
-          }
-        })
-
-        xhr.addEventListener('load', () => {
-          if (xhr.status === 200) {
-            const response = JSON.parse(xhr.responseText)
-            if (response.success) {
-              uploadData = response
-              resolve()
-            } else {
-              reject(new Error(response.error || 'Upload failed'))
-            }
-          } else {
-            reject(new Error('Upload failed'))
-          }
-        })
-
-        xhr.addEventListener('error', () => reject(new Error('Upload failed')))
-        xhr.open('POST', prepareResult.uploadUrl!)
-        xhr.send(formData)
-      })
-
-      if (!uploadData.success) {
-        throw new Error('Failed to get file data')
-      }
-
-      // Step 3: Confirm upload and save metadata
-      const confirmResult = await confirmFileUpload({
-        requestId,
-        fileId: prepareResult.fileId!,
-        fileName: uploadedFile.file.name,
-        fileType: uploadedFile.file.type,
-        fileSize: uploadedFile.file.size,
-        filePath: uploadData.filePath,
-      })
-
-      if (!confirmResult.success) {
-        throw new Error('Failed to save file metadata')
-      }
-
-      // Mark as success
-      setFiles((prev) =>
-        prev.map((f) =>
-          f.id === uploadedFile.id ? { ...f, status: 'success', progress: 100 } : f
+      if (result.success && result.fileAttachment) {
+        setFiles((prev) =>
+          prev.map((f) =>
+            f.id === uploadedFile.id ? { ...f, status: 'success', progress: 100 } : f
+          )
         )
-      )
-
-      // Notify parent
-      onFilesUploaded?.([{
-        id: prepareResult.fileId!,
-        fileName: uploadedFile.file.name,
-      }])
+        onFilesUploaded?.([{
+          id: result.fileAttachment.id,
+          fileName: uploadedFile.file.name,
+        }])
+      } else {
+        setFiles((prev) =>
+          prev.map((f) =>
+            f.id === uploadedFile.id
+              ? { ...f, status: 'error', error: result.error || 'Upload failed' }
+              : f
+          )
+        )
+      }
     } catch (error) {
+      clearInterval(progressInterval)
       const errorMessage = error instanceof Error ? error.message : 'Upload failed'
       setFiles((prev) =>
         prev.map((f) =>

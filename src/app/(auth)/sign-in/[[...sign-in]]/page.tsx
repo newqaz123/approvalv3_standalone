@@ -3,6 +3,7 @@
 import { signIn } from 'next-auth/react'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { Mail, Lock, ArrowRight, Loader2, CheckCircle } from 'lucide-react'
 
 export default function SignInPage() {
@@ -144,12 +145,12 @@ export default function SignInPage() {
           <div className="mt-6 pt-6 border-t border-slate-100 text-center">
             <p className="text-sm text-slate-500">
               Don&apos;t have an account?{' '}
-              <a 
-                href="/sign-up" 
+              <Link
+                href="/sign-up"
                 className="font-semibold text-indigo-600 hover:text-indigo-700 transition-colors"
               >
                 Create one
-              </a>
+              </Link>
             </p>
           </div>
         </div>

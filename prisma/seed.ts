@@ -5,15 +5,21 @@ const prisma = new PrismaClient();
 
 // Standard level names for approval hierarchy
 const defaultLevelNames = {
-  "1": "Supervisor",
-  "2": "Manager",
-  "3": "Director",
+  "1": "Staff",
+  "2": "Supervisor",
+  "3": "Section Manager",
+  "4": "Department Manager",
+  "5": "Division Manager",
+  "6": "Factory Manager",
 };
 
 const engineeringLevelNames = {
-  "1": "Junior Engineer",
-  "2": "Senior Engineer",
-  "3": "Engineering Manager",
+  "1": "Staff",
+  "2": "Supervisor",
+  "3": "Section Manager",
+  "4": "Department Manager",
+  "5": "Division Manager",
+  "6": "Factory Manager",
 };
 
 async function main() {
@@ -25,10 +31,19 @@ async function main() {
   const now = new Date();
   const departments = [
     { id: "ENG", name: "Engineering", type: "ENGINEERING" as const, levelNames: engineeringLevelNames, updatedAt: now },
-    { id: "QC", name: "Quality Control", type: "GENERAL" as const, levelNames: defaultLevelNames, updatedAt: now },
-    { id: "PD1", name: "Production Department 1", type: "GENERAL" as const, levelNames: defaultLevelNames, updatedAt: now },
-    { id: "PD2", name: "Production 2", type: "GENERAL" as const, levelNames: defaultLevelNames, updatedAt: now },
     { id: "ADMIN", name: "Administration", type: "GENERAL" as const, levelNames: defaultLevelNames, updatedAt: now },
+    { id: "PD2", name: "Production 2", type: "GENERAL" as const, levelNames: defaultLevelNames, updatedAt: now },
+    { id: "QC", name: "Quality Control", type: "GENERAL" as const, levelNames: defaultLevelNames, updatedAt: now },
+    { id: "PD1", name: "Production 1", type: "GENERAL" as const, levelNames: defaultLevelNames, updatedAt: now },
+    { id: "PD3", name: "Production 3", type: "GENERAL" as const, levelNames: defaultLevelNames, updatedAt: now },
+    { id: "MN", name: "Maintenance", type: "GENERAL" as const, levelNames: defaultLevelNames, updatedAt: now },
+    { id: "TTEC", name: "TTEC", type: "GENERAL" as const, levelNames: defaultLevelNames, updatedAt: now },
+    { id: "IC", name: "IC", type: "GENERAL" as const, levelNames: defaultLevelNames, updatedAt: now },
+    { id: "DM", name: "Division Manager", type: "GENERAL" as const, levelNames: defaultLevelNames, updatedAt: now },
+    { id: "FM", name: "Factory Manager", type: "GENERAL" as const, levelNames: defaultLevelNames, updatedAt: now },
+    { id: "UT", name: "Utility", type: "GENERAL" as const, levelNames: defaultLevelNames, updatedAt: now },
+    { id: "WWT", name: "Waste Water Treatment", type: "GENERAL" as const, levelNames: defaultLevelNames, updatedAt: now },
+    { id: "BM", name: "Biomass", type: "GENERAL" as const, levelNames: defaultLevelNames, updatedAt: now },
   ];
 
   for (const dept of departments) {
