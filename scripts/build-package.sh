@@ -61,10 +61,15 @@ docker buildx build --platform linux/amd64 \
   --output type=docker,dest="$OUTPUT_DIR/approval-migrate.tar" .
 echo -e "${GREEN}✓ approval-migrate image exported${NC}"
 
-# Pull postgres image
-echo -e "${BLUE}[2/6]${NC} Pulling PostgreSQL image..."
-docker pull --platform linux/amd64 postgres:15-alpine
-echo -e "${GREEN}✓ postgres:15-alpine pulled${NC}"
+# Export postgres image via buildx (avoids docker save bug on ARM Mac with cross-platform images)
+echo -e "${BLUE}[2/6]${NC} Exporting PostgreSQL image..."
+docker buildx build --platform linux/amd64 \
+  -t postgres:15-alpine \
+  --output type=docker,dest="$OUTPUT_DIR/postgres.tar" \
+  - <<EOF
+FROM postgres:15-alpine
+EOF
+echo -e "${GREEN}✓ postgres:15-alpine exported${NC}"
 
 # Step 2: Create package directory
 echo -e "${BLUE}[3/6]${NC} Creating package directory..."
@@ -76,7 +81,7 @@ echo -e "${GREEN}✓ Package directory ready${NC}"
 echo -e "${BLUE}[4/6]${NC} Moving images into package..."
 mv "$OUTPUT_DIR/approval-app.tar" "$PACKAGE_DIR/images/"
 mv "$OUTPUT_DIR/approval-migrate.tar" "$PACKAGE_DIR/images/"
-docker save postgres:15-alpine -o "$PACKAGE_DIR/images/postgres.tar"
+mv "$OUTPUT_DIR/postgres.tar" "$PACKAGE_DIR/images/"
 echo -e "${GREEN}✓ Images packaged${NC}"
 
 # Step 4: Copy config files into package
