@@ -56,4 +56,20 @@ describe('pdf package helpers', () => {
       /at least one/
     )
   })
+
+  it('accepts approval report and valid attachment IDs in mixed package order', () => {
+    assert.doesNotThrow(() =>
+      validateExportPackageRequestItems(
+        [
+          { type: 'request-attachment', attachmentId: 'r1' },
+          { type: 'approval-report' },
+          { type: 'solution-attachment', attachmentId: 's1' },
+        ],
+        {
+          requestAttachmentIds: new Set(['r1']),
+          solutionAttachmentIds: new Set(['s1']),
+        }
+      )
+    )
+  })
 })
