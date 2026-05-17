@@ -153,6 +153,7 @@ export async function exportRequestAsPDF(requestId: string) {
                 id: true,
                 name: true,
                 email: true,
+                role: true,
                 department: {
                   select: {
                     name: true,
@@ -165,6 +166,7 @@ export async function exportRequestAsPDF(requestId: string) {
                 id: true,
                 name: true,
                 email: true,
+                role: true,
                 department: {
                   select: {
                     name: true,
@@ -210,6 +212,7 @@ export async function exportRequestAsPDF(requestId: string) {
                     id: true,
                     name: true,
                     email: true,
+                    role: true,
                     department: {
                       select: {
                         name: true,
@@ -222,6 +225,7 @@ export async function exportRequestAsPDF(requestId: string) {
                     id: true,
                     name: true,
                     email: true,
+                    role: true,
                     department: {
                       select: {
                         name: true,
@@ -253,6 +257,47 @@ export async function exportRequestAsPDF(requestId: string) {
       }
     }
 
+    // d2. Validate current user can view/export this request.
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        name: true,
+        role: true,
+        departmentId: true,
+        isActive: true,
+        department: {
+          select: {
+            type: true,
+          },
+        },
+      },
+    })
+
+    if (!currentUser?.isActive) {
+      return {
+        success: false,
+        error: 'Authentication required. Please log in to export PDFs.',
+      }
+    }
+
+    const canExportRequest =
+      currentUser.role === 'admin' ||
+      currentUser.department?.type === 'ENGINEERING' ||
+      request.requesterId === currentUser.id ||
+      request.departmentId === currentUser.departmentId ||
+      request.approvals.some((a) => a.requiredApproverId === currentUser.id || a.approverId === currentUser.id) ||
+      request.solutions.some((solution) =>
+        solution.approvals.some((a) => a.requiredApproverId === currentUser.id || a.approverId === currentUser.id)
+      )
+
+    if (!canExportRequest) {
+      return {
+        success: false,
+        error: 'You are not authorized to export this request.',
+      }
+    }
+
     // e. Validate status is FinalApproval or Completed - return error if not
     const validStatuses = ['FinalApproval', 'Completed']
     if (!validStatuses.includes(request.status)) {
@@ -271,11 +316,15 @@ export async function exportRequestAsPDF(requestId: string) {
       }
     }
 
-    // g. Fetch current user name for metadata
-    const currentUser = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { name: true },
-    })
+    const pendingSolutionApproval = request.solutions[0]?.approvals.find((a) => a.status !== 'approved')
+    if (pendingSolutionApproval) {
+      return {
+        success: false,
+        error: 'PDF export is only available after all solution approvals are completed. Please wait for all approvals to be processed.',
+      }
+    }
+
+    // g. Use current user name for metadata
     const generatedBy = currentUser?.name || 'Unknown'
 
     // h. Determine completedAt from activities
@@ -285,34 +334,10 @@ export async function exportRequestAsPDF(requestId: string) {
     )
     const completedAt = completedActivity?.createdAt || undefined
 
-    // Helper to determine stage name
-    function getStageName(a: any, index: number, request: any): string {
-      // First approval is always the submitter/initial stage
-      if (index === 0) {
-        return 'Initial Request'
-      }
-
-      // Check if it's an engineering solution approval
-      if (request.solutions.length > 0 && a.isCustomChain) {
-        return 'Engineering Review'
-      }
-
-      // Check if it's the final approval
-      if (a.isFinalApproval) {
-        return 'Final Approval'
-      }
-
-      // Regular department approvals
-      const deptName = a.requiredApprover?.department?.name || request.department.name
-      if (a.requiredLevel === 1) {
-        return `${deptName} Review`
-      }
-
-      return `${deptName} Approval (Level ${a.requiredLevel})`
-    }
-
     // i. Build pdfData object matching RequestPDFData interface
     const pdfData: RequestPDFData = {
+      id: request.id,
+      referenceId: request.id,
       title: request.title,
       description: request.description,
       requester: {
@@ -354,7 +379,7 @@ export async function exportRequestAsPDF(requestId: string) {
           .filter(a => !a.isFinalApproval && !a.isCustomChain)
           .map((a, index) => ({
             approverName: a.approver?.name || a.requiredApprover?.name || request.requester.name || 'Unknown',
-            approverRole: a.requiredApprover?.department?.name,
+            approverRole: a.approver?.role || a.requiredApprover?.role,
             approverDepartment: a.approver?.department?.name || a.requiredApprover?.department?.name,
             requiredLevel: a.requiredLevel,
             status: a.status as 'approved' | 'rejected' | 'pending',
@@ -378,7 +403,7 @@ export async function exportRequestAsPDF(requestId: string) {
           const solution = request.solutions[0]
           const solutionApprovals = solution.approvals.map((a, index) => ({
             approverName: a.approver?.name || a.requiredApprover?.name || 'Engineering',
-            approverRole: a.requiredApprover?.department?.name || 'Engineering',
+            approverRole: a.approver?.role || a.requiredApprover?.role || 'Engineering',
             approverDepartment: a.approver?.department?.name || a.requiredApprover?.department?.name || 'Engineering',
             requiredLevel: a.requiredLevel || 1,
             status: a.status as 'approved' | 'rejected' | 'pending',
@@ -401,7 +426,7 @@ export async function exportRequestAsPDF(requestId: string) {
           .filter(a => a.isFinalApproval)
           .map((a, index) => ({
             approverName: a.approver?.name || a.requiredApprover?.name || 'Pending',
-            approverRole: a.requiredApprover?.department?.name,
+            approverRole: a.approver?.role || a.requiredApprover?.role,
             approverDepartment: a.approver?.department?.name || a.requiredApprover?.department?.name,
             requiredLevel: a.requiredLevel,
             status: a.status as 'approved' | 'rejected' | 'pending',
