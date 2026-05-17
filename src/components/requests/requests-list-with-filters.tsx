@@ -20,17 +20,29 @@ export function RequestsListWithFilters({
   const [filters, setFilters] = useState<GetRequestsFilters>({})
   const [isLoading, setIsLoading] = useState(false)
 
+  const buildSearchParams = (activeFilters: GetRequestsFilters) => {
+    const params = new URLSearchParams()
+
+    Object.entries(activeFilters).forEach(([key, value]) => {
+      if (!value) return
+
+      if (Array.isArray(value)) {
+        value.forEach((item) => params.append(key, item))
+        return
+      }
+
+      params.set(key, value)
+    })
+
+    return params
+  }
+
   const handleFilterChange = async (newFilters: GetRequestsFilters) => {
     setFilters(newFilters)
     setIsLoading(true)
 
     try {
-      const response = await fetch('/api/requests?' + new URLSearchParams(
-        Object.entries(newFilters).reduce((acc, [key, value]) => {
-          if (value) acc[key] = value
-          return acc
-        }, {} as Record<string, string>)
-      ))
+      const response = await fetch('/api/requests?' + buildSearchParams(newFilters))
 
       if (response.ok) {
         const data = await response.json()
@@ -46,12 +58,7 @@ export function RequestsListWithFilters({
   const refreshData = async () => {
     setIsLoading(true)
     try {
-      const response = await fetch('/api/requests?' + new URLSearchParams(
-        Object.entries(filters).reduce((acc, [key, value]) => {
-          if (value) acc[key] = value
-          return acc
-        }, {} as Record<string, string>)
-      ))
+      const response = await fetch('/api/requests?' + buildSearchParams(filters))
       if (response.ok) {
         const data = await response.json()
         setRequests(data)

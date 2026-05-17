@@ -132,7 +132,7 @@ export function FileUploadZone({
           multiple
           onChange={(e) => e.target.files && handleFileSelect(e.target.files)}
           disabled={disabled}
-          accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.gif"
+          accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.gif"
           className="hidden"
         />
         <label
@@ -144,7 +144,7 @@ export function FileUploadZone({
             Click to upload or drag and drop
           </p>
           <p className="text-xs text-gray-500">
-            PDF, Word, Excel, Images (max 10MB each, max {maxFiles} files)
+            PDF, Word, Excel, PowerPoint, Images (max 10MB each, max {maxFiles} files)
           </p>
         </label>
       </div>

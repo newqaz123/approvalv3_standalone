@@ -31,6 +31,9 @@ import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
 import { CancelRequestDialog } from './cancel-request-dialog'
 
+const ACCEPTED_UPLOAD_EXTENSIONS = '.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.gif'
+const ACCEPTED_UPLOAD_TYPES = 'PDF, Word, Excel, PowerPoint, Images'
+
 // Types
 interface FileAttachment {
   id: string
@@ -257,9 +260,13 @@ export function RequestResubmitModal({
                   type="file"
                   multiple
                   onChange={handleFileChange}
+                  accept={ACCEPTED_UPLOAD_EXTENSIONS}
                   className="hidden"
                 />
               </label>
+              <p className="mt-2 text-xs text-slate-500">
+                Allowed: {ACCEPTED_UPLOAD_TYPES}. Maximum size: 10MB per file.
+              </p>
             </div>
 
             {newFiles.length > 0 && (

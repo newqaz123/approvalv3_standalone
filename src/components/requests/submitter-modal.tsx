@@ -49,6 +49,15 @@ import {
 import { ExternalLink } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
+const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
+const ACCEPTED_UPLOAD_EXTENSIONS = '.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.gif'
+const ACCEPTED_UPLOAD_TYPES = 'PDF, Word, Excel, PowerPoint, Images'
+
+const isAllowedUploadFile = (file: File) => {
+  const extension = file.name.split('.').pop()?.toLowerCase()
+  return Boolean(extension && ACCEPTED_UPLOAD_EXTENSIONS.includes(`.${extension}`))
+}
+
 interface FileAttachment {
   id: string
   fileName: string
@@ -336,6 +345,7 @@ export function SubmitterModal({
   // Existing files state (for resubmit mode)
   const [existingFiles, setExistingFiles] = useState<FileAttachment[]>(initialData?.existingFiles || [])
   const [deletedFileIds, setDeletedFileIds] = useState<string[]>([])
+  const [fileUploadError, setFileUploadError] = useState<string | null>(null)
   const [useCustomHierarchy, setUseCustomHierarchy] = useState(false)
   const [customApprovers, setCustomApprovers] = useState<string[]>([])
 
@@ -356,7 +366,24 @@ export function SubmitterModal({
   // Handle file upload
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      const newFiles = Array.from(e.target.files)
+      const selectedFiles = Array.from(e.target.files)
+      const invalidFile = selectedFiles.find(file => !isAllowedUploadFile(file))
+      const oversizedFile = selectedFiles.find(file => file.size > MAX_UPLOAD_SIZE_BYTES)
+
+      if (invalidFile) {
+        setFileUploadError(`${invalidFile.name} is not supported. Upload ${ACCEPTED_UPLOAD_TYPES}.`)
+        e.target.value = ''
+        return
+      }
+
+      if (oversizedFile) {
+        setFileUploadError(`${oversizedFile.name} is too large. Maximum file size is 10MB.`)
+        e.target.value = ''
+        return
+      }
+
+      setFileUploadError(null)
+      const newFiles = selectedFiles
       console.log('🔍 Adding new files:', newFiles.map(f => ({ name: f.name, size: f.size })))
       setFiles((prev: File[]) => {
         console.log('🔍 Previous files:', prev.map(f => ({ name: f.name, size: f.size })))
@@ -722,9 +749,18 @@ export function SubmitterModal({
                   type="file"
                   multiple
                   onChange={handleFileChange}
+                  accept={ACCEPTED_UPLOAD_EXTENSIONS}
                   className="hidden"
                 />
               </label>
+              <p className="mt-2 text-xs text-slate-500">
+                Allowed: {ACCEPTED_UPLOAD_TYPES}. Maximum size: 10MB per file.
+              </p>
+              {fileUploadError && (
+                <p className="mt-2 text-xs text-red-600">
+                  {fileUploadError}
+                </p>
+              )}
             </div>
 
             {/* File List */}

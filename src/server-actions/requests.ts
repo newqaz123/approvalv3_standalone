@@ -4,7 +4,7 @@ import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
-import { createApprovalChain } from './approvals'
+import { createApprovalChain, getApproversAtLevel } from './approvals'
 import { requireAdmin } from '@/lib/auth'
 import { promises as fs } from 'fs'
 import path from 'path'
@@ -127,6 +127,7 @@ export async function createRequest(input: CreateRequestInput) {
 
 export interface GetRequestsFilters {
   status?: string
+  statuses?: string[]
   departmentId?: string
   requesterId?: string
   dateFrom?: string
@@ -195,7 +196,9 @@ export async function getMyRequests(filters?: GetRequestsFilters) {
 
   // Apply filters
   if (filters) {
-    if (filters.status) {
+    if (filters.statuses && filters.statuses.length > 0) {
+      whereClause.status = { in: filters.statuses as any }
+    } else if (filters.status) {
       whereClause.status = filters.status
     }
     if (filters.departmentId) {
@@ -471,6 +474,13 @@ export async function getRequest(id: string) {
               email: true,
             },
           },
+          requiredApprover: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
         },
         orderBy: {
           createdAt: 'asc',
@@ -492,6 +502,7 @@ export async function getRequest(id: string) {
               id: true,
               name: true,
               email: true,
+              departmentId: true,
             },
           },
           approvals: {
@@ -504,6 +515,13 @@ export async function getRequest(id: string) {
               createdAt: true,
               approvedAt: true,
               approver: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                },
+              },
+              requiredApprover: {
                 select: {
                   id: true,
                   name: true,
@@ -546,6 +564,41 @@ export async function getRequest(id: string) {
   // Convert Decimal to number for client components
   if (request?.solutions?.[0]) {
     request.solutions[0].costEstimate = Number(request.solutions[0].costEstimate) as any
+  }
+
+  if (request) {
+    const addPotentialApprovers = async <T extends {
+      status: string
+      requiredLevel: number | null
+      requiredApprover?: { id: string; name: string | null; email: string } | null
+    }>(approvals: T[], departmentId: string | null | undefined) => {
+      return Promise.all(approvals.map(async (approval) => {
+        if (approval.status !== 'pending' || approval.requiredApprover || !approval.requiredLevel || !departmentId) {
+          return approval
+        }
+
+        try {
+          const potentialApprovers = await getApproversAtLevel(departmentId, approval.requiredLevel)
+          return {
+            ...approval,
+            potentialApprovers: potentialApprovers.map((approver) => ({ name: approver.name })),
+          }
+        } catch (error) {
+          console.error('[getRequest] Error loading potential approvers:', error)
+          return approval
+        }
+      }))
+    }
+
+    request.approvals = await addPotentialApprovers(request.approvals, request.departmentId) as any
+
+    if (request.solutions?.[0]) {
+      const solutionDepartmentId = request.solutions[0].submittedBy?.departmentId
+      request.solutions[0].approvals = await addPotentialApprovers(
+        request.solutions[0].approvals,
+        solutionDepartmentId
+      ) as any
+    }
   }
 
   return request

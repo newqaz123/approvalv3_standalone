@@ -57,6 +57,34 @@ export interface ModalSolution {
   files: ModalFileAttachment[]
 }
 
+type ApprovalDisplaySource = {
+  requiredLevel?: number | null
+  approver?: {
+    name: string | null
+  } | null
+  requiredApprover?: {
+    name: string | null
+  } | null
+  potentialApprovers?: Array<{
+    name: string | null
+  }>
+}
+
+function getApprovalDisplayName(approval: ApprovalDisplaySource): string {
+  if (approval.approver?.name) return approval.approver.name
+  if (approval.requiredApprover?.name) return approval.requiredApprover.name
+
+  const potentialApproverNames = approval.potentialApprovers
+    ?.map((approver) => approver.name)
+    .filter((name): name is string => Boolean(name))
+
+  if (potentialApproverNames && potentialApproverNames.length > 0) {
+    return potentialApproverNames.join(' or ')
+  }
+
+  return approval.requiredLevel ? `Level ${approval.requiredLevel} approver` : 'Unassigned approver'
+}
+
 /**
  * Transform Prisma user to modal submitter format
  */
@@ -120,6 +148,9 @@ export function transformApprovalsToStages(
     requiredApprover?: {
       name: string | null
     } | null
+    potentialApprovers?: Array<{
+      name: string | null
+    }>
   }>,
   isFinalApproval: boolean = false
 ): ModalApprovalStage[] {
@@ -142,9 +173,7 @@ export function transformApprovalsToStages(
       const steps: ModalApprovalStep[] = levelApprovals
         .sort((a, b) => a.order - b.order)
         .map(approval => {
-          const approverName = approval.approver?.name || 
-                              approval.requiredApprover?.name || 
-                              'Pending Assignment'
+          const approverName = getApprovalDisplayName(approval)
           
           return {
             id: approval.id,
@@ -290,6 +319,9 @@ export function transformRequestToModalData(request: {
     requiredApprover?: {
       name: string | null
     } | null
+    potentialApprovers?: Array<{
+      name: string | null
+    }>
   }>
   activities: Array<{
     id: string
@@ -335,6 +367,9 @@ export function transformRequestToModalData(request: {
       requiredApprover?: {
         name: string | null
       } | null
+      potentialApprovers?: Array<{
+        name: string | null
+      }>
     }>
   }>
 }) {
@@ -410,9 +445,7 @@ export function transformRequestToModalData(request: {
     const steps: ModalApprovalStep[] = requestApprovals
       .sort((a, b) => a.requiredLevel - b.requiredLevel || a.order - b.order)
       .map(approval => {
-        const approverName = approval.approver?.name || 
-                            approval.requiredApprover?.name || 
-                            'Pending Assignment'
+        const approverName = getApprovalDisplayName(approval)
         
         return {
           id: approval.id,
@@ -443,9 +476,7 @@ export function transformRequestToModalData(request: {
     const steps: ModalApprovalStep[] = solutionApprovals
       .sort((a, b) => a.requiredLevel - b.requiredLevel || a.order - b.order)
       .map(approval => {
-        const approverName = approval.approver?.name || 
-                            approval.requiredApprover?.name || 
-                            'Pending Assignment'
+        const approverName = getApprovalDisplayName(approval)
         
         return {
           id: approval.id,
@@ -476,9 +507,7 @@ export function transformRequestToModalData(request: {
     const steps: ModalApprovalStep[] = finalApprovals
       .sort((a, b) => a.requiredLevel - b.requiredLevel || a.order - b.order)
       .map(approval => {
-        const approverName = approval.approver?.name || 
-                            approval.requiredApprover?.name || 
-                            'Pending Assignment'
+        const approverName = getApprovalDisplayName(approval)
         
         return {
           id: approval.id,
@@ -517,9 +546,9 @@ export function transformRequestToModalData(request: {
                    finalApprovals[0].createdAt.toISOString(),
       currentLevel: finalApprovals.filter(a => a.status === 'approved').length + 1,
       totalLevels: finalApprovals.length,
-      nextApprover: finalApprovals.find(a => a.status === 'pending')?.requiredApprover?.name || 
-                    finalApprovals.find(a => a.status === 'pending')?.approver?.name ||
-                    undefined,
+      nextApprover: finalApprovals.find(a => a.status === 'pending')
+        ? getApprovalDisplayName(finalApprovals.find(a => a.status === 'pending')!)
+        : undefined,
     }
   } : {}
 
