@@ -2,6 +2,11 @@ export type ExportPackageItemType = 'approval-report' | 'request-attachment' | '
 
 export type ExportPackageFileKind = 'approval-report' | 'pdf' | 'image' | 'docx' | 'xlsx' | 'unsupported'
 
+export type ExportPackageRequestItem =
+  | { type: 'approval-report' }
+  | { type: 'request-attachment'; attachmentId: string }
+  | { type: 'solution-attachment'; attachmentId: string }
+
 export interface ExportPackageAttachment {
   id: string
   fileName: string
@@ -113,6 +118,25 @@ export function moveExportPackageItem(items: ExportPackageItem[], activeId: stri
     ...item,
     order,
   }))
+}
+
+export function buildSelectedExportPackageRequestItems(items: ExportPackageItem[]): ExportPackageRequestItem[] {
+  return reorderExportPackageItems(items)
+    .filter((item) => item.selected && item.mergeable)
+    .map((item) => {
+      if (item.type === 'approval-report') {
+        return { type: 'approval-report' }
+      }
+
+      if (!item.attachmentId) {
+        throw new Error(`Attachment ID is missing for export package item ${item.id}.`)
+      }
+
+      return {
+        type: item.type,
+        attachmentId: item.attachmentId,
+      }
+    })
 }
 
 function buildAttachmentPackageItem(

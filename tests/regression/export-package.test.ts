@@ -2,6 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   buildDefaultExportPackageItems,
+  buildSelectedExportPackageRequestItems,
   getExportPackageFileKind,
   isMergeableExportFile,
   moveExportPackageItem,
@@ -173,5 +174,28 @@ describe('completed approval export package utilities', () => {
         { id: 'approval-report', order: 2 },
       ]
     )
+  })
+
+  it('builds ordered request payload from selected mergeable items only', () => {
+    const items = buildDefaultExportPackageItems({
+      requestAttachments: [
+        { id: 'r1', fileName: 'scope.pdf', fileType: 'application/pdf', fileSize: 100, filePath: 'uploads/r1/scope.pdf' },
+        { id: 'r2', fileName: 'slides.pptx', fileType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', fileSize: 200, filePath: 'uploads/r1/slides.pptx' },
+      ],
+      solutionAttachments: [
+        { id: 's1', fileName: 'photo.png', fileType: 'image/png', fileSize: 300, filePath: 'uploads/r1/photo.png' },
+      ],
+    }).map((item) =>
+      item.id === 'request-r1'
+        ? { ...item, selected: false }
+        : item
+    )
+
+    const moved = moveExportPackageItem(items, 'solution-s1', 'approval-report')
+
+    assert.deepEqual(buildSelectedExportPackageRequestItems(moved), [
+      { type: 'solution-attachment', attachmentId: 's1' },
+      { type: 'approval-report' },
+    ])
   })
 })
