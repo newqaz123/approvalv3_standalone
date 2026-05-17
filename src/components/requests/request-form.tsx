@@ -350,7 +350,7 @@ export function RequestForm({ templates = [], defaultTemplateId, onSuccess }: Re
           <CardHeader>
             <CardTitle className="text-base md:text-lg">Attachments (Optional)</CardTitle>
             <CardDescription className="text-base md:text-sm">
-              Attach supporting documents (PDF, Word, Excel, Images)
+              Attach supporting documents (PDF, Word, Excel, PowerPoint, Images)
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -374,7 +374,7 @@ export function RequestForm({ templates = [], defaultTemplateId, onSuccess }: Re
                   multiple
                   onChange={handleDesktopFileSelect}
                   disabled={isSubmitting}
-                  accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.gif"
+                  accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.gif"
                   className="hidden"
                 />
                 <label
@@ -386,7 +386,7 @@ export function RequestForm({ templates = [], defaultTemplateId, onSuccess }: Re
                     Click to upload or drag and drop
                   </p>
                   <p className="text-xs text-gray-500">
-                    PDF, Word, Excel, Images (max 10MB each)
+                    PDF, Word, Excel, PowerPoint, Images (max 10MB each)
                   </p>
                 </label>
               </div>

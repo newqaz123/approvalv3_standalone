@@ -15,10 +15,14 @@ const ALLOWED_FILE_TYPES = [
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/vnd.ms-excel',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   'image/jpeg',
   'image/png',
   'image/gif',
 ]
+
+const ALLOWED_FILE_TYPES_LABEL = 'PDF, Word, Excel, PowerPoint, Images'
 
 interface PrepareFileUploadInput {
   fileName: string
@@ -79,7 +83,7 @@ export async function prepareFileUpload(input: PrepareFileUploadInput) {
   if (!ALLOWED_FILE_TYPES.includes(input.fileType)) {
     return {
       success: false,
-      error: `File type not allowed. Allowed types: PDF, Word, Excel, Images`,
+      error: `File type not allowed. Allowed types: ${ALLOWED_FILE_TYPES_LABEL}`,
     }
   }
 
@@ -386,7 +390,7 @@ export async function uploadFileAction(
 
   // Validate file type
   if (!ALLOWED_FILE_TYPES.includes(file.type)) {
-    return { success: false, error: 'File type not allowed. Allowed types: PDF, Word, Excel, Images' }
+    return { success: false, error: `File type not allowed. Allowed types: ${ALLOWED_FILE_TYPES_LABEL}` }
   }
 
   // Verify request exists and user is authorized
@@ -480,7 +484,7 @@ export async function uploadSolutionFileAction(
 
   // Validate file type
   if (!ALLOWED_FILE_TYPES.includes(file.type)) {
-    return { success: false, error: 'File type not allowed. Allowed types: PDF, Word, Excel, Images' }
+    return { success: false, error: `File type not allowed. Allowed types: ${ALLOWED_FILE_TYPES_LABEL}` }
   }
 
   // Verify solution exists and get its requestId for file path + activity log

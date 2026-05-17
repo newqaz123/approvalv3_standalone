@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { format } from 'date-fns'
 import {
   X,
+  Eye,
   Download,
   Info,
   Paperclip,
@@ -122,6 +123,8 @@ interface ApproverModalProps {
   canApprove?: boolean
   onApprove?: (comment: string) => void
   onReject?: (reason: string) => void
+  onPreviewFile?: (fileId: string) => void
+  onPreviewSolutionFile?: (fileId: string) => void
   onDownloadRequestFile?: (fileId: string) => void
   onDownloadSolutionFile?: (fileId: string) => void
   showCancel?: boolean
@@ -435,6 +438,8 @@ export function ApproverModal({
   canApprove = false,
   onApprove,
   onReject,
+  onPreviewFile,
+  onPreviewSolutionFile,
   onDownloadRequestFile,
   onDownloadSolutionFile,
   showCancel,
@@ -629,17 +634,32 @@ export function ApproverModal({
                     >
                       {getFileIcon(file.fileType)}
                       <div className="min-w-0 flex-1">
-                        <p className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate">
+                        <button
+                          type="button"
+                          onClick={() => onPreviewFile?.(file.id)}
+                          className="block max-w-full truncate text-left text-xs font-bold text-slate-900 dark:text-slate-100 hover:text-blue-600 dark:hover:text-blue-400"
+                        >
                           {file.fileName}
-                        </p>
+                        </button>
                         {file.description && (
                           <p className="text-[10px] text-slate-400 truncate">
                             &ldquo;{file.description}&rdquo;
                           </p>
                         )}
                       </div>
+                      {onPreviewFile && (
+                        <button
+                          type="button"
+                          onClick={() => onPreviewFile(file.id)}
+                          className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/30 rounded transition-colors"
+                          title="Preview"
+                        >
+                          <Eye className="w-4 h-4" />
+                        </button>
+                      )}
                       {onDownloadRequestFile && (
                         <button
+                          type="button"
                           onClick={() => onDownloadRequestFile(file.id)}
                           className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition-colors"
                           title="Download"
@@ -675,17 +695,42 @@ export function ApproverModal({
                     >
                       {getFileIcon(file.fileType)}
                       <div className="min-w-0 flex-1">
-                        <p className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate">
+                        <button
+                          type="button"
+                          onClick={() => onPreviewSolutionFile?.(file.id)}
+                          className={cn(
+                            "block max-w-full truncate text-left text-xs font-bold text-slate-900 dark:text-slate-100",
+                            mode === 'final'
+                              ? "hover:text-amber-600 dark:hover:text-amber-400"
+                              : "hover:text-purple-600 dark:hover:text-purple-400"
+                          )}
+                        >
                           {file.fileName}
-                        </p>
+                        </button>
                         {file.description && (
                           <p className="text-[10px] text-slate-400 truncate">
                             &ldquo;{file.description}&rdquo;
                           </p>
                         )}
                       </div>
+                      {onPreviewSolutionFile && (
+                        <button
+                          type="button"
+                          onClick={() => onPreviewSolutionFile(file.id)}
+                          className={cn(
+                            "p-2 text-slate-400 rounded transition-colors",
+                            mode === 'final'
+                              ? "hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/30"
+                              : "hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-950/30"
+                          )}
+                          title="Preview"
+                        >
+                          <Eye className="w-4 h-4" />
+                        </button>
+                      )}
                       {onDownloadSolutionFile && (
                         <button
+                          type="button"
                           onClick={() => onDownloadSolutionFile(file.id)}
                           className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition-colors"
                           title="Download"

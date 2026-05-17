@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { RequestTable, RequestListRow } from './request-table'
 import { RequestFilters } from './request-filters'
 import type { GetRequestsFilters } from '@/server-actions/requests'
@@ -9,28 +9,49 @@ interface RequestsListWithFiltersProps {
   initialRequests: RequestListRow[]
   departments: Array<{ id: string; name: string }>
   requesters: Array<{ id: string; name: string }>
+  refreshSignal?: number
 }
 
 export function RequestsListWithFilters({
   initialRequests,
   departments,
   requesters,
+  refreshSignal = 0,
 }: RequestsListWithFiltersProps) {
   const [requests, setRequests] = useState<RequestListRow[]>(initialRequests)
   const [filters, setFilters] = useState<GetRequestsFilters>({})
   const [isLoading, setIsLoading] = useState(false)
+  const hasMountedRef = useRef(false)
+
+  useEffect(() => {
+    setRequests(initialRequests)
+  }, [initialRequests])
+
+  const buildSearchParams = (activeFilters: GetRequestsFilters) => {
+    const params = new URLSearchParams()
+
+    Object.entries(activeFilters).forEach(([key, value]) => {
+      if (!value) return
+
+      if (Array.isArray(value)) {
+        value.forEach((item) => params.append(key, item))
+        return
+      }
+
+      params.set(key, value)
+    })
+
+    return params
+  }
 
   const handleFilterChange = async (newFilters: GetRequestsFilters) => {
     setFilters(newFilters)
     setIsLoading(true)
 
     try {
-      const response = await fetch('/api/requests?' + new URLSearchParams(
-        Object.entries(newFilters).reduce((acc, [key, value]) => {
-          if (value) acc[key] = value
-          return acc
-        }, {} as Record<string, string>)
-      ))
+      const response = await fetch('/api/requests?' + buildSearchParams(newFilters), {
+        cache: 'no-store',
+      })
 
       if (response.ok) {
         const data = await response.json()
@@ -43,15 +64,12 @@ export function RequestsListWithFilters({
     }
   }
 
-  const refreshData = async () => {
+  const refreshData = useCallback(async () => {
     setIsLoading(true)
     try {
-      const response = await fetch('/api/requests?' + new URLSearchParams(
-        Object.entries(filters).reduce((acc, [key, value]) => {
-          if (value) acc[key] = value
-          return acc
-        }, {} as Record<string, string>)
-      ))
+      const response = await fetch('/api/requests?' + buildSearchParams(filters), {
+        cache: 'no-store',
+      })
       if (response.ok) {
         const data = await response.json()
         setRequests(data)
@@ -61,7 +79,23 @@ export function RequestsListWithFilters({
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [filters])
+
+  useEffect(() => {
+    if (!hasMountedRef.current) {
+      hasMountedRef.current = true
+      return
+    }
+
+    refreshData()
+  }, [refreshSignal, refreshData])
+
+  useEffect(() => {
+    window.addEventListener('approvalapp:request-data-changed', refreshData)
+    return () => {
+      window.removeEventListener('approvalapp:request-data-changed', refreshData)
+    }
+  }, [refreshData])
 
   return (
     <div className="space-y-4">

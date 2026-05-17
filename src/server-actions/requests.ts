@@ -3,8 +3,9 @@
 import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
+import { revalidateRequestViews } from './request-view-invalidation'
 import { z } from 'zod'
-import { createApprovalChain } from './approvals'
+import { createApprovalChain, getApproversAtLevel } from './approvals'
 import { requireAdmin } from '@/lib/auth'
 import { promises as fs } from 'fs'
 import path from 'path'
@@ -119,7 +120,7 @@ export async function createRequest(input: CreateRequestInput) {
     })
   }
 
-  revalidatePath('/requests')
+  revalidateRequestViews(request.id)
   revalidatePath('/requests/new')
 
   return { success: true, requestId: request.id }
@@ -127,6 +128,7 @@ export async function createRequest(input: CreateRequestInput) {
 
 export interface GetRequestsFilters {
   status?: string
+  statuses?: string[]
   departmentId?: string
   requesterId?: string
   dateFrom?: string
@@ -195,7 +197,9 @@ export async function getMyRequests(filters?: GetRequestsFilters) {
 
   // Apply filters
   if (filters) {
-    if (filters.status) {
+    if (filters.statuses && filters.statuses.length > 0) {
+      whereClause.status = { in: filters.statuses as any }
+    } else if (filters.status) {
       whereClause.status = filters.status
     }
     if (filters.departmentId) {
@@ -471,6 +475,13 @@ export async function getRequest(id: string) {
               email: true,
             },
           },
+          requiredApprover: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
         },
         orderBy: {
           createdAt: 'asc',
@@ -492,6 +503,7 @@ export async function getRequest(id: string) {
               id: true,
               name: true,
               email: true,
+              departmentId: true,
             },
           },
           approvals: {
@@ -504,6 +516,13 @@ export async function getRequest(id: string) {
               createdAt: true,
               approvedAt: true,
               approver: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                },
+              },
+              requiredApprover: {
                 select: {
                   id: true,
                   name: true,
@@ -546,6 +565,41 @@ export async function getRequest(id: string) {
   // Convert Decimal to number for client components
   if (request?.solutions?.[0]) {
     request.solutions[0].costEstimate = Number(request.solutions[0].costEstimate) as any
+  }
+
+  if (request) {
+    const addPotentialApprovers = async <T extends {
+      status: string
+      requiredLevel: number | null
+      requiredApprover?: { id: string; name: string | null; email: string } | null
+    }>(approvals: T[], departmentId: string | null | undefined) => {
+      return Promise.all(approvals.map(async (approval) => {
+        if (approval.status !== 'pending' || approval.requiredApprover || !approval.requiredLevel || !departmentId) {
+          return approval
+        }
+
+        try {
+          const potentialApprovers = await getApproversAtLevel(departmentId, approval.requiredLevel)
+          return {
+            ...approval,
+            potentialApprovers: potentialApprovers.map((approver) => ({ name: approver.name })),
+          }
+        } catch (error) {
+          console.error('[getRequest] Error loading potential approvers:', error)
+          return approval
+        }
+      }))
+    }
+
+    request.approvals = await addPotentialApprovers(request.approvals, request.departmentId) as any
+
+    if (request.solutions?.[0]) {
+      const solutionDepartmentId = request.solutions[0].submittedBy?.departmentId
+      request.solutions[0].approvals = await addPotentialApprovers(
+        request.solutions[0].approvals,
+        solutionDepartmentId
+      ) as any
+    }
   }
 
   return request
@@ -938,8 +992,7 @@ export async function cancelRequest(input: { requestId: string; reason: string }
     }),
   ])
 
-  revalidatePath('/requests')
-  revalidatePath(`/requests/${requestId}`)
+  revalidateRequestViews(requestId)
 
   return { success: true }
 }
@@ -1040,7 +1093,7 @@ export async function deleteRequest(input: { requestId: string; reason: string }
       }
     }
 
-    revalidatePath('/requests')
+    revalidateRequestViews(requestId)
     revalidatePath('/admin')
 
     return {
@@ -1201,7 +1254,7 @@ export async function permanentlyDeleteRequests(input: {
         },
       })
 
-      revalidatePath('/admin/deleted-requests')
+      revalidateRequestViews()
 
       return {
         success: true,
@@ -1283,8 +1336,7 @@ export async function restoreRequest(input: { requestId: string }) {
       },
     })
 
-    revalidatePath('/admin/deleted-requests')
-    revalidatePath('/requests')
+    revalidateRequestViews(input.requestId)
 
     return {
       success: true,
@@ -1446,8 +1498,7 @@ export async function bulkDeleteRequestsByDateRange(input: {
       })),
     })
 
-    revalidatePath('/requests')
-    revalidatePath('/admin/deleted-requests')
+    revalidateRequestViews()
 
     return {
       success: true,
@@ -1728,7 +1779,7 @@ export async function assignEngineers(requestId: string, engineerIds: string[]) 
     )
   }
 
-  revalidatePath('/engineering')
+  revalidateRequestViews(requestId)
 
   return { success: true }
 }
@@ -2000,8 +2051,7 @@ export async function resubmitRequest(input: {
   const departmentId = request.requester.departmentId!
   await createApprovalChain(input.requestId, departmentId, userLevel, userId)
 
-  revalidatePath('/dashboard')
-  revalidatePath('/requests')
+  revalidateRequestViews(input.requestId)
 
   return { success: true, request: result }
 }
@@ -2056,8 +2106,7 @@ export async function archiveRequest(requestId: string) {
       }),
     ])
 
-    revalidatePath('/admin/retention')
-    revalidatePath('/requests')
+    revalidateRequestViews(requestId)
 
     return { success: true }
   } catch (error) {
@@ -2099,8 +2148,7 @@ export async function permanentDeleteRequest(requestId: string) {
       },
     })
 
-    revalidatePath('/admin/retention')
-    revalidatePath('/requests')
+    revalidateRequestViews(requestId)
 
     return { success: true }
   } catch (error) {

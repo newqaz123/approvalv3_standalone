@@ -2,8 +2,11 @@
 
 import { useState } from 'react'
 import { Search, X } from 'lucide-react'
+import { RequestStatus } from '@prisma/client'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import {
   Select,
   SelectContent,
@@ -14,6 +17,7 @@ import {
 
 export interface RequestFilters {
   status?: string
+  statuses?: string[]
   departmentId?: string
   requesterId?: string
   dateFrom?: string
@@ -27,13 +31,37 @@ interface RequestFiltersProps {
   onFilterChange: (filters: RequestFilters) => void
 }
 
+const formatStatusLabel = (status: string): string => {
+  const statusMap: Record<string, string> = {
+    [RequestStatus.ImprovementRequest]: 'Improvement Request',
+    [RequestStatus.SentToEngineer]: 'Sent to Engineer',
+    [RequestStatus.DesignCostEstimationApproval]: 'Design/Cost Estimation',
+    [RequestStatus.SendBackToRequester]: 'Send Back to Requester',
+    [RequestStatus.FinalApproval]: 'Final Approval',
+    [RequestStatus.Completed]: 'Completed',
+    [RequestStatus.Cancelled]: 'Cancelled',
+  }
+  return statusMap[status] || status
+}
+
+const ALL_STATUSES = Object.values(RequestStatus)
+
 export function RequestFilters({ departments, requesters, onFilterChange }: RequestFiltersProps) {
   const [filters, setFilters] = useState<RequestFilters>({})
 
-  const updateFilter = (key: keyof RequestFilters, value: string | undefined) => {
+  const updateFilter = (key: keyof RequestFilters, value: string | string[] | undefined) => {
     const newFilters = { ...filters, [key]: value }
     setFilters(newFilters)
     onFilterChange(newFilters)
+  }
+
+  const updateStatusFilter = (status: string, checked: boolean) => {
+    const currentStatuses = filters.statuses || []
+    const statuses = checked
+      ? [...currentStatuses, status]
+      : currentStatuses.filter((item) => item !== status)
+
+    updateFilter('statuses', statuses.length > 0 ? statuses : undefined)
   }
 
   const clearFilters = () => {
@@ -41,7 +69,9 @@ export function RequestFilters({ departments, requesters, onFilterChange }: Requ
     onFilterChange({})
   }
 
-  const hasActiveFilters = Object.values(filters).some(v => v !== undefined && v !== '')
+  const hasActiveFilters = Object.values(filters).some(
+    v => v !== undefined && v !== '' && (!Array.isArray(v) || v.length > 0)
+  )
 
   return (
     <div className="space-y-4 p-4 bg-gray-50 rounded-lg border">
@@ -75,22 +105,28 @@ export function RequestFilters({ departments, requesters, onFilterChange }: Requ
         </div>
 
         {/* Status Filter */}
-        <div>
-          <Select
-            value={filters.status || 'all'}
-            onValueChange={(value) => updateFilter('status', value === 'all' ? undefined : value)}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="All Statuses" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Statuses</SelectItem>
-              <SelectItem value="ImprovementRequest">Improvement Request</SelectItem>
-              <SelectItem value="SentToEngineer">Sent to Engineer</SelectItem>
-              <SelectItem value="SendBackToRequester">Send Back to Requester</SelectItem>
-              <SelectItem value="Completed">Completed</SelectItem>
-            </SelectContent>
-          </Select>
+        <div className="lg:col-span-3">
+          <Label className="text-sm font-medium text-gray-700 mb-2 block">Status</Label>
+          <div className="flex flex-wrap gap-4">
+            {ALL_STATUSES.map((status) => {
+              const isChecked = filters.statuses?.includes(status) || false
+              return (
+                <div key={status} className="flex items-center space-x-2">
+                  <Checkbox
+                    id={`request-status-${status}`}
+                    checked={isChecked}
+                    onCheckedChange={(checked) => updateStatusFilter(status, checked as boolean)}
+                  />
+                  <Label
+                    htmlFor={`request-status-${status}`}
+                    className="text-sm cursor-pointer normal-case"
+                  >
+                    {formatStatusLabel(status)}
+                  </Label>
+                </div>
+              )
+            })}
+          </div>
         </div>
 
         {/* Department Filter */}

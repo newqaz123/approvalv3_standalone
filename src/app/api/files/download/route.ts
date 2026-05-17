@@ -31,13 +31,14 @@ export async function GET(request: NextRequest) {
 
   const { searchParams } = new URL(request.url)
   const filePath = searchParams.get('path')
+  const disposition = searchParams.get('disposition') === 'inline' ? 'inline' : 'attachment'
 
   if (!filePath) {
     return NextResponse.json({ error: 'File path is required' }, { status: 400 })
   }
 
   // Sanitize: strip leading slash, ensure path stays within public/
-  const normalizedPath = filePath.replace(/^\/+/, '')
+  const normalizedPath = filePath.replace(/^\/+/, '').replace(/^public\/+/, '')
 
   // Prevent directory traversal
   if (normalizedPath.includes('..')) {
@@ -61,7 +62,7 @@ export async function GET(request: NextRequest) {
   return new NextResponse(buffer, {
     headers: {
       'Content-Type': mimeType,
-      'Content-Disposition': `attachment; filename="${fileName}"`,
+      'Content-Disposition': `${disposition}; filename="${fileName}"`,
       'Content-Length': buffer.length.toString(),
     },
   })

@@ -6,6 +6,11 @@ uploads/
 tests/
 README.md
 .planning/
+.agents/
+.codex/
+.graphifyignore
+graphify-out/
+plugins/
 deploy/
 .playwright-mcp/
 playwright-report/

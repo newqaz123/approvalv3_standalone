@@ -2,10 +2,10 @@
 
 import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
-import { revalidatePath } from 'next/cache'
 import { RequestStatus, UserRole } from '@prisma/client'
 import { submitSolutionSchema, SubmitSolutionInput } from '@/lib/schemas/solution-schemas'
 import { saveFile, generateFilePath } from '@/lib/files'
+import { revalidateRequestViews } from './request-view-invalidation'
 
 /**
  * Check if data is stale based on updatedAt timestamp
@@ -243,8 +243,7 @@ export async function submitSolution(input: SubmitSolutionInput) {
     return solution
   })
 
-  revalidatePath('/requests')
-  revalidatePath('/engineering')
+  revalidateRequestViews(validated.requestId)
 
   return { success: true, solutionId: result.id }
 }
@@ -770,8 +769,7 @@ export async function approveSolution(solutionId: string, comments?: string, exp
     }
   })
 
-  revalidatePath('/requests')
-  revalidatePath('/engineering')
+  revalidateRequestViews(solution.requestId)
 
   return { success: true }
 }
@@ -866,8 +864,7 @@ export async function rejectSolution(solutionId: string, comments: string, expec
     }
   })
 
-  revalidatePath('/requests')
-  revalidatePath('/engineering')
+  revalidateRequestViews(solution.requestId)
 
   return { success: true }
 }
@@ -947,8 +944,7 @@ export async function markRequestComplete(requestId: string, completionNote?: st
     })
   })
 
-  revalidatePath('/requests')
-  revalidatePath('/engineering')
+  revalidateRequestViews(requestId)
 
   return { success: true }
 }
@@ -1222,8 +1218,7 @@ export async function initiateFinalApproval(
     }
   })
 
-  revalidatePath('/requests')
-  revalidatePath('/dashboard')
+  revalidateRequestViews(requestId)
 
   return { success: true }
 }
@@ -1615,8 +1610,7 @@ export async function approveFinalApproval(requestId: string, comments?: string,
     }
   })
 
-  revalidatePath('/requests')
-  revalidatePath('/dashboard')
+  revalidateRequestViews(requestId)
 
   return { success: true }
 }
@@ -1738,9 +1732,7 @@ export async function rejectFinalApproval(requestId: string, comments: string, e
     }
   })
 
-  revalidatePath('/requests')
-  revalidatePath('/engineering')
-  revalidatePath('/dashboard')
+  revalidateRequestViews(requestId)
 
   return { success: true }
 }
@@ -2068,9 +2060,7 @@ export async function resubmitSolution(input: {
     }
   }
 
-  revalidatePath('/requests')
-  revalidatePath('/engineering')
-  revalidatePath('/dashboard')
+  revalidateRequestViews(input.requestId)
 
   return { success: true, solutionId: result.id }
 }

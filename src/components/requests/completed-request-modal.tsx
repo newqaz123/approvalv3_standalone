@@ -4,6 +4,7 @@ import { format } from 'date-fns'
 import {
   X,
   Download,
+  Eye,
   Info,
   Paperclip,
   TrendingUp,
@@ -91,6 +92,7 @@ interface CompletedRequestModalProps {
   userDepartment?: string
   onSubmitSolution?: () => void
   onDownloadFile?: (fileId: string) => void
+  onPreviewFile?: (fileId: string) => void
 }
 
 // File icon helper
@@ -193,6 +195,7 @@ export function CompletedRequestModal({
   userDepartment,
   onSubmitSolution,
   onDownloadFile,
+  onPreviewFile,
 }: CompletedRequestModalProps) {
   const isEngineering = userDepartment === 'ENGINEERING'
   return (
@@ -286,15 +289,28 @@ export function CompletedRequestModal({
                 >
                   {getFileIcon(file.fileType)}
                   <div className="min-w-0 flex-1">
-                    <p className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate">
+                    <button
+                      type="button"
+                      onClick={() => onPreviewFile?.(file.id)}
+                      className="block max-w-full truncate text-left text-xs font-bold text-slate-900 underline-offset-4 hover:text-slate-600 hover:underline focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2 dark:text-slate-100"
+                    >
                       {file.fileName}
-                    </p>
+                    </button>
                     {file.description && (
                       <p className="text-[10px] text-slate-400 truncate">
                         &ldquo;{file.description}&rdquo;
                       </p>
                     )}
                   </div>
+                  {onPreviewFile && (
+                    <button
+                      onClick={() => onPreviewFile(file.id)}
+                      className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition-colors"
+                      title="Preview"
+                    >
+                      <Eye className="w-4 h-4" />
+                    </button>
+                  )}
                   {onDownloadFile && (
                     <button
                       onClick={() => onDownloadFile(file.id)}

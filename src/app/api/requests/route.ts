@@ -7,6 +7,9 @@ export async function GET(request: NextRequest) {
 
     const filters: GetRequestsFilters = {
       status: searchParams.get('status') || undefined,
+      statuses: searchParams.getAll('statuses').length > 0
+        ? searchParams.getAll('statuses')
+        : undefined,
       departmentId: searchParams.get('departmentId') || undefined,
       requesterId: searchParams.get('requesterId') || undefined,
       dateFrom: searchParams.get('dateFrom') || undefined,

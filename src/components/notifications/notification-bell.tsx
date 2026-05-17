@@ -5,6 +5,7 @@ import { Bell } from 'lucide-react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
 import { NotificationList } from './notification-list'
+import { RequestModalRouter } from '@/components/requests/request-modal-router'
 import {
   getNotifications,
   getUnreadCount,
@@ -22,11 +23,16 @@ export function NotificationBell({ userId }: NotificationBellProps) {
   const [unreadCount, setUnreadCount] = useState(0)
   const [isOpen, setIsOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [hasLoadedNotifications, setHasLoadedNotifications] = useState(false)
+  const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null)
+  const [isModalOpen, setIsModalOpen] = useState(false)
 
   // Fetch notifications on mount
   useEffect(() => {
     async function fetchNotifications() {
-      setIsLoading(true)
+      if (!hasLoadedNotifications) {
+        setIsLoading(true)
+      }
       try {
         const [notifs, count] = await Promise.all([
           getNotifications(userId, 20),
@@ -34,6 +40,7 @@ export function NotificationBell({ userId }: NotificationBellProps) {
         ])
         setNotifications(notifs)
         setUnreadCount(count)
+        setHasLoadedNotifications(true)
       } catch (error) {
         console.error('Failed to fetch notifications:', error)
         toast.error('Failed to load notifications')
@@ -47,7 +54,7 @@ export function NotificationBell({ userId }: NotificationBellProps) {
     // Refresh every 30 seconds
     const interval = setInterval(fetchNotifications, 30000)
     return () => clearInterval(interval)
-  }, [userId])
+  }, [userId, hasLoadedNotifications])
 
   const handleMarkAsRead = async (notificationId: string) => {
     try {
@@ -83,31 +90,55 @@ export function NotificationBell({ userId }: NotificationBellProps) {
     }
   }
 
+  const handleOpenRequest = (requestId: string) => {
+    setSelectedRequestId(requestId)
+    setIsModalOpen(true)
+    setIsOpen(false)
+  }
+
+  const handleModalChange = (open: boolean) => {
+    setIsModalOpen(open)
+    if (!open) {
+      setSelectedRequestId(null)
+    }
+  }
+
   return (
-    <Popover open={isOpen} onOpenChange={setIsOpen}>
-      <PopoverTrigger asChild>
-        <Button variant="ghost" size="icon" className="relative">
-          <Bell className="h-5 w-5" />
-          {unreadCount > 0 && (
-            <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs text-white">
-              {unreadCount > 9 ? '9+' : unreadCount}
-            </span>
+    <>
+      <Popover open={isOpen} onOpenChange={setIsOpen}>
+        <PopoverTrigger asChild>
+          <Button variant="ghost" size="icon" className="relative">
+            <Bell className="h-5 w-5" />
+            {unreadCount > 0 && (
+              <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs text-white">
+                {unreadCount > 9 ? '9+' : unreadCount}
+              </span>
+            )}
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-96 p-0" align="end">
+          {isLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="text-sm text-gray-500">Loading...</div>
+            </div>
+          ) : (
+            <NotificationList
+              notifications={notifications}
+              onMarkAsRead={handleMarkAsRead}
+              onMarkAllAsRead={handleMarkAllAsRead}
+              onOpenRequest={handleOpenRequest}
+            />
           )}
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-96 p-0" align="end">
-        {isLoading ? (
-          <div className="flex items-center justify-center py-12">
-            <div className="text-sm text-gray-500">Loading...</div>
-          </div>
-        ) : (
-          <NotificationList
-            notifications={notifications}
-            onMarkAsRead={handleMarkAsRead}
-            onMarkAllAsRead={handleMarkAllAsRead}
-          />
-        )}
-      </PopoverContent>
-    </Popover>
+        </PopoverContent>
+      </Popover>
+
+      {selectedRequestId && (
+        <RequestModalRouter
+          requestId={selectedRequestId}
+          open={isModalOpen}
+          onOpenChange={handleModalChange}
+        />
+      )}
+    </>
   )
 }
