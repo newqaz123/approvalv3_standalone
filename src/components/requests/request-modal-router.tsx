@@ -18,6 +18,8 @@ import { transformRequestToModalData } from '@/lib/modal-data-adapters'
 import { getModalTypeForStatus, canUserSubmitSolution, canUserSubmitFinalApproval } from '@/lib/permission-checks'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
+import { FilePreviewDialog } from '@/components/requests/file-preview-dialog'
+import { getFilePreviewUrl, normalizeStoredFilePath } from '@/lib/file-preview'
 
 interface RequestModalRouterProps {
   requestId: string
@@ -48,6 +50,9 @@ export function RequestModalRouter({
   const [showSolutionModal, setShowSolutionModal] = useState(false)
   const [showResubmitSolutionModal, setShowResubmitSolutionModal] = useState(false)
   const [showSubmitFinalApprovalModal, setShowSubmitFinalApprovalModal] = useState(false)
+  const [previewFile, setPreviewFile] = useState<any>(null)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [previewOpen, setPreviewOpen] = useState(false)
 
   // Debug: Log when resubmit modal state changes
   useEffect(() => {
@@ -189,7 +194,12 @@ export function RequestModalRouter({
         return
       }
 
-      const normalizedPath = file.filePath.replace(/^\/+/, '')
+      const normalizedPath = normalizeStoredFilePath(file.filePath)
+      if (!normalizedPath) {
+        toast.error('File is no longer available')
+        return
+      }
+
       const res = await fetch(`/api/files/download?path=${encodeURIComponent(normalizedPath)}`)
 
       if (!res.ok) {
@@ -223,7 +233,12 @@ export function RequestModalRouter({
         return
       }
 
-      const normalizedPath = file.filePath.replace(/^\/+/, '')
+      const normalizedPath = normalizeStoredFilePath(file.filePath)
+      if (!normalizedPath) {
+        toast.error('File is no longer available')
+        return
+      }
+
       const res = await fetch(`/api/files/download?path=${encodeURIComponent(normalizedPath)}`)
 
       if (!res.ok) {
@@ -245,6 +260,38 @@ export function RequestModalRouter({
       console.error('Download error:', error)
       toast.error('Failed to download file')
     }
+  }
+
+  const getFileUrl = (file: any) => {
+    if (!file?.filePath) return null
+    return getFilePreviewUrl(file.filePath)
+  }
+
+  const handlePreviewFile = (fileId: string) => {
+    const file = requestData.fileAttachments?.find((f: any) => f.id === fileId)
+
+    if (!file) {
+      toast.error('File not found')
+      return
+    }
+
+    setPreviewFile(file)
+    setPreviewUrl(getFileUrl(file))
+    setPreviewOpen(true)
+  }
+
+  const handlePreviewSolutionFile = (fileId: string) => {
+    const file = requestData.solutions?.[0]?.fileAttachments
+      ?.find((f: any) => f.id === fileId)
+
+    if (!file) {
+      toast.error('File not found')
+      return
+    }
+
+    setPreviewFile(file)
+    setPreviewUrl(getFileUrl(file))
+    setPreviewOpen(true)
   }
 
   const handleApprove = async (comment: string) => {
@@ -484,6 +531,8 @@ export function RequestModalRouter({
           canApprove={canApprove}
           onApprove={handleApprove}
           onReject={handleReject}
+          onPreviewFile={handlePreviewFile}
+          onPreviewSolutionFile={handlePreviewSolutionFile}
           onDownloadRequestFile={handleDownloadFile}
           onDownloadSolutionFile={handleDownloadSolutionFile}
           showCancel={canCancel}
@@ -524,6 +573,8 @@ export function RequestModalRouter({
           userDepartment={userDepartmentType || undefined}
           onDownloadFile={handleDownloadFile}
           onDownloadSolutionFile={handleDownloadSolutionFile}
+          onPreviewFile={handlePreviewFile}
+          onPreviewSolutionFile={handlePreviewSolutionFile}
           availableUsers={availableUsers}
         />
       )
@@ -595,6 +646,7 @@ export function RequestModalRouter({
           userDepartment={userDepartmentType || undefined}
           onSubmitSolution={() => setShowSolutionModal(true)}
           onDownloadFile={handleDownloadFile}
+          onPreviewFile={handlePreviewFile}
         />
       )
       break
@@ -617,6 +669,8 @@ export function RequestModalRouter({
           onSubmitFinalApproval={() => setShowSubmitFinalApprovalModal(true)}
           onDownloadRequestFile={handleDownloadFile}
           onDownloadSolutionFile={handleDownloadSolutionFile}
+          onPreviewFile={handlePreviewFile}
+          onPreviewSolutionFile={handlePreviewSolutionFile}
         />
       )
       break
@@ -638,6 +692,8 @@ export function RequestModalRouter({
           }}
           onDownloadRequestFile={handleDownloadFile}
           onDownloadSolutionFile={handleDownloadSolutionFile}
+          onPreviewFile={handlePreviewFile}
+          onPreviewSolutionFile={handlePreviewSolutionFile}
           onExport={async () => {
             try {
               const { exportRequestAsPDF } = await import('@/server-actions/reports')
@@ -744,6 +800,8 @@ export function RequestModalRouter({
           })}
           onDownloadRequestFile={handleDownloadFile}
           onDownloadSolutionFile={handleDownloadSolutionFile}
+          onPreviewFile={handlePreviewFile}
+          onPreviewSolutionFile={handlePreviewSolutionFile}
         />
       )
 
@@ -910,8 +968,22 @@ export function RequestModalRouter({
           }}
           onDownloadRequestFile={handleDownloadFile}
           onDownloadSolutionFile={handleDownloadSolutionFile}
+          onPreviewFile={handlePreviewFile}
+          onPreviewSolutionFile={handlePreviewSolutionFile}
         />
       )}
+      <FilePreviewDialog
+        file={previewFile}
+        url={previewUrl}
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        onDownload={(file) => handleDownloadFile(file.id)}
+        formatFileSize={(bytes) => {
+          if (bytes < 1024) return bytes + ' B'
+          if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+          return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+        }}
+      />
     </>
   )
 }

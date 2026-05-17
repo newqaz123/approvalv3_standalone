@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { format } from 'date-fns'
-import { X, FileText, Download, User, CheckCircle2, Trash2, Wrench } from 'lucide-react'
+import { FileText, Download, Eye, User, CheckCircle2, Trash2, Wrench } from 'lucide-react'
 import { useSession } from 'next-auth/react'
 import dynamic from 'next/dynamic'
 import {
@@ -38,6 +38,8 @@ import { RequestDrawer } from '@/components/mobile/request-drawer'
 import { MobileApprovalActions } from '@/components/mobile/mobile-approval-actions'
 import { useIsMobile } from '@/hooks/use-media-query'
 import { RejectSolutionDialog } from '@/components/solutions/reject-solution-dialog'
+import { FilePreviewDialog } from '@/components/requests/file-preview-dialog'
+import { getFileDownloadUrl, getFilePreviewUrl } from '@/lib/file-preview'
 import Link from 'next/link'
 
 // Dynamic import for heavy PDF export component
@@ -75,6 +77,9 @@ export function RequestDetailModal({
   const [request, setRequest] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [downloadUrls, setDownloadUrls] = useState<Record<string, string>>({})
+  const [previewFile, setPreviewFile] = useState<any>(null)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [previewOpen, setPreviewOpen] = useState(false)
   const [approvals, setApprovals] = useState<any[]>([])
   const [canApprove, setCanApprove] = useState(false)
   const actionPerformedRef = useRef(false)
@@ -200,7 +205,8 @@ export function RequestDetailModal({
         const urls: Record<string, string> = {}
         for (const file of data.fileAttachments) {
           // Use the stored filePath which includes UUID prefix
-          urls[file.id] = `/${file.filePath}`
+          const url = getFileDownloadUrl(file.filePath)
+          if (url) urls[file.id] = url
         }
         setDownloadUrls(urls)
       }
@@ -315,8 +321,22 @@ export function RequestDetailModal({
     }
   }
 
+  const getAttachmentUrl = (file: any) => {
+    if (file?.filePath) {
+      return getFilePreviewUrl(file.filePath)
+    }
+
+    return downloadUrls[file.id] || null
+  }
+
+  const handlePreview = (file: any) => {
+    setPreviewFile(file)
+    setPreviewUrl(getAttachmentUrl(file))
+    setPreviewOpen(true)
+  }
+
   const handleDownload = async (file: any) => {
-    const url = downloadUrls[file.id]
+    const url = getFileDownloadUrl(file?.filePath) ?? downloadUrls[file.id]
     if (url) {
       // Create hidden anchor and trigger download
       const a = document.createElement('a')
@@ -333,6 +353,48 @@ export function RequestDetailModal({
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
   }
+
+  const renderAttachmentRow = (file: any, uploadedByLabel: string, showDescription = false) => (
+    <div
+      key={file.id}
+      className="flex flex-col gap-3 p-3 border rounded-lg hover:bg-gray-50 sm:flex-row sm:items-center sm:justify-between"
+    >
+      <div className="flex-1 min-w-0">
+        <button
+          type="button"
+          onClick={() => handlePreview(file)}
+          className="block max-w-full truncate text-left text-sm font-medium text-slate-900 underline-offset-4 hover:text-indigo-600 hover:underline focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 rounded-sm"
+        >
+          {file.fileName}
+        </button>
+        <p className="text-xs text-gray-500">
+          {formatFileSize(file.fileSize)}
+          {showDescription && file.description && ` — ${file.description}`}
+        </p>
+        <p className="text-xs text-gray-400">
+          Uploaded by {uploadedByLabel} • {format(new Date(file.createdAt), 'MMM d, yyyy')}
+        </p>
+      </div>
+      <div className="flex shrink-0 flex-wrap gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => handlePreview(file)}
+        >
+          <Eye className="h-4 w-4 mr-1" />
+          Preview
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => handleDownload(file)}
+        >
+          <Download className="h-4 w-4 mr-1" />
+          Download
+        </Button>
+      </div>
+    </div>
+  )
 
   const handleOpenChange = (open: boolean) => {
     if (!open && actionPerformedRef.current) {
@@ -639,31 +701,9 @@ export function RequestDetailModal({
                         Initial Request Attachments ({request.fileAttachments.length})
                       </h4>
                       <div className="space-y-2">
-                        {request.fileAttachments.map((file: any) => (
-                          <div
-                            key={file.id}
-                            className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50"
-                          >
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium truncate">{file.fileName}</p>
-                              <p className="text-xs text-gray-500">
-                                {formatFileSize(file.fileSize)}
-                                {file.description && ` — ${file.description}`}
-                              </p>
-                              <p className="text-xs text-gray-400">
-                                Uploaded by {file.uploadedBy.name} • {format(new Date(file.createdAt), 'MMM d, yyyy')}
-                              </p>
-                            </div>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleDownload(file)}
-                            >
-                              <Download className="h-4 w-4 mr-1" />
-                              Download
-                            </Button>
-                          </div>
-                        ))}
+                        {request.fileAttachments.map((file: any) =>
+                          renderAttachmentRow(file, file.uploadedBy.name, true)
+                        )}
                       </div>
                     </div>
                   )}
@@ -675,30 +715,9 @@ export function RequestDetailModal({
                         Engineering Solution Attachments ({solution.fileAttachments.length})
                       </h4>
                       <div className="space-y-2">
-                        {solution.fileAttachments.map((file: any) => (
-                          <div
-                            key={file.id}
-                            className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50"
-                          >
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium truncate">{file.fileName}</p>
-                              <p className="text-xs text-gray-500">
-                                {formatFileSize(file.fileSize)}
-                              </p>
-                              <p className="text-xs text-gray-400">
-                                Uploaded by {solution.submittedBy?.name || 'Engineering'} • {format(new Date(file.createdAt), 'MMM d, yyyy')}
-                              </p>
-                            </div>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleDownload(file)}
-                            >
-                              <Download className="h-4 w-4 mr-1" />
-                              Download
-                            </Button>
-                          </div>
-                        ))}
+                        {solution.fileAttachments.map((file: any) =>
+                          renderAttachmentRow(file, solution.submittedBy?.name || 'Engineering')
+                        )}
                       </div>
                     </div>
                   )}
@@ -963,19 +982,34 @@ export function RequestDetailModal({
     </>
   )
 
+  const previewDialog = (
+    <FilePreviewDialog
+      file={previewFile}
+      url={previewUrl}
+      open={previewOpen}
+      onOpenChange={setPreviewOpen}
+      onDownload={handleDownload}
+      formatFileSize={formatFileSize}
+    />
+  )
+
   // Mobile: Render RequestDrawer
   if (isMobile) {
     return (
-      <RequestDrawer open={open} onOpenChange={handleOpenChange} requestId={requestId} footer={mobileApprovalActions}>
-        <RequestContent />
-      </RequestDrawer>
+      <>
+        <RequestDrawer open={open} onOpenChange={handleOpenChange} requestId={requestId} footer={mobileApprovalActions}>
+          <RequestContent />
+        </RequestDrawer>
+        {previewDialog}
+      </>
     )
   }
 
   // Desktop: Render Dialog
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col bg-white/95 backdrop-blur-xl border border-slate-200/60 shadow-2xl shadow-slate-200/50 rounded-2xl">
+    <>
+      <Dialog open={open} onOpenChange={handleOpenChange}>
+        <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col bg-white/95 backdrop-blur-xl border border-slate-200/60 shadow-2xl shadow-slate-200/50 rounded-2xl">
         <DialogHeader className="flex-shrink-0 px-6 pt-6 pb-4 border-b border-slate-100">
           <DialogTitle className="text-xl font-bold text-slate-900 pr-8 leading-tight">
             {request.title}
@@ -1215,31 +1249,9 @@ export function RequestDetailModal({
                         Initial Request Attachments ({request.fileAttachments.length})
                       </h4>
                       <div className="space-y-2">
-                        {request.fileAttachments.map((file: any) => (
-                          <div
-                            key={file.id}
-                            className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50"
-                          >
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium truncate">{file.fileName}</p>
-                              <p className="text-xs text-gray-500">
-                                {formatFileSize(file.fileSize)}
-                                {file.description && ` — ${file.description}`}
-                              </p>
-                              <p className="text-xs text-gray-400">
-                                Uploaded by {file.uploadedBy.name} • {format(new Date(file.createdAt), 'MMM d, yyyy')}
-                              </p>
-                            </div>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleDownload(file)}
-                            >
-                              <Download className="h-4 w-4 mr-1" />
-                              Download
-                            </Button>
-                          </div>
-                        ))}
+                        {request.fileAttachments.map((file: any) =>
+                          renderAttachmentRow(file, file.uploadedBy.name, true)
+                        )}
                       </div>
                     </div>
                   )}
@@ -1251,30 +1263,9 @@ export function RequestDetailModal({
                         Engineering Solution Attachments ({solution.fileAttachments.length})
                       </h4>
                       <div className="space-y-2">
-                        {solution.fileAttachments.map((file: any) => (
-                          <div
-                            key={file.id}
-                            className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50"
-                          >
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium truncate">{file.fileName}</p>
-                              <p className="text-xs text-gray-500">
-                                {formatFileSize(file.fileSize)}
-                              </p>
-                              <p className="text-xs text-gray-400">
-                                Uploaded by {solution.submittedBy?.name || 'Engineering'} • {format(new Date(file.createdAt), 'MMM d, yyyy')}
-                              </p>
-                            </div>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleDownload(file)}
-                            >
-                              <Download className="h-4 w-4 mr-1" />
-                              Download
-                            </Button>
-                          </div>
-                        ))}
+                        {solution.fileAttachments.map((file: any) =>
+                          renderAttachmentRow(file, solution.submittedBy?.name || 'Engineering')
+                        )}
                       </div>
                     </div>
                   )}
@@ -1536,7 +1527,9 @@ export function RequestDetailModal({
           onConfirm={handleRejectSolution}
           isLoading={isRejecting}
         />
-      </DialogContent>
-    </Dialog>
+        </DialogContent>
+      </Dialog>
+      {previewDialog}
+    </>
   )
 }
