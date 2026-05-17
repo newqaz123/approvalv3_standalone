@@ -23,6 +23,7 @@ export function RequestsListClient({
   requesters,
 }: RequestsListClientProps) {
   const [showNewRequestModal, setShowNewRequestModal] = useState(false)
+  const [requestListRefreshSignal, setRequestListRefreshSignal] = useState(0)
   const router = useRouter()
 
   const handleSubmitRequest = async (data: {
@@ -54,6 +55,7 @@ export function RequestsListClient({
 
         toast.success('Request created successfully')
         setShowNewRequestModal(false)
+        setRequestListRefreshSignal((signal) => signal + 1)
         router.refresh()
       } else {
         toast.error(result.error || 'Failed to create request')
@@ -89,6 +91,7 @@ export function RequestsListClient({
         initialRequests={initialRequests}
         departments={departments}
         requesters={requesters}
+        refreshSignal={requestListRefreshSignal}
       />
 
       <SubmitterModal

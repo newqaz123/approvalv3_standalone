@@ -176,6 +176,7 @@ export function RequestModalRouter({
   // Common handlers
   const handleClose = () => {
     onOpenChange(false)
+    window.dispatchEvent(new Event('approvalapp:request-data-changed'))
     onActionComplete?.()
   }
 
@@ -565,6 +566,7 @@ export function RequestModalRouter({
               if (result.success) {
                 toast.success('Solution resubmitted successfully')
                 onOpenChange(false)
+                window.dispatchEvent(new Event('approvalapp:request-data-changed'))
                 onActionComplete?.()
                 router.refresh()
               }
@@ -806,6 +808,7 @@ export function RequestModalRouter({
               toast.success('Solution submitted successfully')
               setShowSolutionModal(false)
               onOpenChange(false)
+              window.dispatchEvent(new Event('approvalapp:request-data-changed'))
               onActionComplete?.()
               router.refresh()
             }
@@ -857,6 +860,7 @@ export function RequestModalRouter({
                 toast.success('Solution resubmitted successfully')
                 setShowResubmitSolutionModal(false)
                 onOpenChange(false)
+                window.dispatchEvent(new Event('approvalapp:request-data-changed'))
                 onActionComplete?.()
                 router.refresh()
               }
@@ -891,6 +895,7 @@ export function RequestModalRouter({
                 toast.success('Final approval initiated successfully')
                 setShowSubmitFinalApprovalModal(false)
                 onOpenChange(false)
+                window.dispatchEvent(new Event('approvalapp:request-data-changed'))
                 onActionComplete?.()
                 router.refresh()
               } else {

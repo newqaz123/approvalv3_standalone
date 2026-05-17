@@ -2,7 +2,7 @@
 
 import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
-import { revalidatePath } from 'next/cache'
+import { revalidateRequestViews } from './request-view-invalidation'
 
 /**
  * Check if data is stale based on updatedAt timestamp
@@ -322,7 +322,7 @@ export async function approveRequest(
     await notifyNextApprover(requestId)
   }
 
-  revalidatePath('/requests')
+  revalidateRequestViews(requestId)
   return { success: true }
 }
 
@@ -409,7 +409,7 @@ export async function rejectRequest(
     },
   })
 
-  revalidatePath('/requests')
+  revalidateRequestViews(requestId)
   return { success: true }
 }
 

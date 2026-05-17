@@ -1,9 +1,9 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
-import type { AnalyticsData, AnalyticsFilters } from '@/types/analytics'
+import type { AnalyticsData, AnalyticsFilters, DateRangePreset } from '@/types/analytics'
 import { getAnalyticsData } from '@/server-actions/analytics'
 import { SummaryCards } from '@/components/analytics/summary-cards'
 import { FilterControls } from '@/components/analytics/filter-controls'
@@ -84,16 +84,25 @@ export function AnalyticsPage({ initialData, filters, userId }: AnalyticsPagePro
   const [isLoading, setIsLoading] = useState(false)
   const [isInitialLoad, setIsInitialLoad] = useState(true)
 
+  const getActiveFilters = useCallback((): AnalyticsFilters => {
+    const dateRange = searchParams.get('dateRange')
+    const validDateRange: DateRangePreset =
+      dateRange === '7days' || dateRange === '30days' || dateRange === '90days' || dateRange === 'all'
+        ? dateRange
+        : '30days'
+
+    return {
+      dateRange: validDateRange,
+      departmentId: searchParams.get('departmentId') || undefined,
+      status: searchParams.get('status') || undefined,
+      requesterId: searchParams.get('requesterId') || undefined,
+    }
+  }, [searchParams])
+
   // Mark initial load as complete after first render
   useEffect(() => {
     setIsInitialLoad(false)
   }, [])
-
-  // Redirect if not authenticated
-  if (!userId) {
-    router.push('/sign-in')
-    return null
-  }
 
   /**
    * Handle filter changes
@@ -125,6 +134,28 @@ export function AnalyticsPage({ initialData, filters, userId }: AnalyticsPagePro
     } finally {
       setIsLoading(false)
     }
+  }
+
+  useEffect(() => {
+    const handleRequestDataChanged = async () => {
+      try {
+        const freshData = await getAnalyticsData(getActiveFilters())
+        setData(freshData)
+      } catch (error) {
+        console.error('Failed to refresh analytics data:', error)
+      }
+    }
+
+    window.addEventListener('approvalapp:request-data-changed', handleRequestDataChanged)
+    return () => {
+      window.removeEventListener('approvalapp:request-data-changed', handleRequestDataChanged)
+    }
+  }, [getActiveFilters])
+
+  // Redirect if not authenticated
+  if (!userId) {
+    router.push('/sign-in')
+    return null
   }
 
   const showSkeleton = isLoading && !isInitialLoad

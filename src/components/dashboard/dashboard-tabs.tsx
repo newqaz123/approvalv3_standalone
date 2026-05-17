@@ -82,8 +82,8 @@ export function DashboardTabs({ userId }: DashboardTabsProps) {
     }
   }
 
-  const refreshAllData = useCallback(async () => {
-    if (isInteracting) return // Skip if user is actively interacting
+  const refreshAllData = useCallback(async (force = false) => {
+    if (isInteracting && !force) return // Skip if user is actively interacting
 
     try {
       setIsRefreshing(true)
@@ -147,6 +147,17 @@ export function DashboardTabs({ userId }: DashboardTabsProps) {
     document.addEventListener('visibilitychange', handleVisibilityChange)
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
   }, [refreshAllData, isInteracting])
+
+  useEffect(() => {
+    const handleRequestDataChanged = () => {
+      refreshAllData(true)
+    }
+
+    window.addEventListener('approvalapp:request-data-changed', handleRequestDataChanged)
+    return () => {
+      window.removeEventListener('approvalapp:request-data-changed', handleRequestDataChanged)
+    }
+  }, [refreshAllData])
 
   useEffect(() => {
     async function loadData() {

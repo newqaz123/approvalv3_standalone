@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
 import {
   ColumnDef,
   flexRender,
@@ -52,9 +52,13 @@ interface RequestTableProps {
 }
 
 export function RequestTable({ initialData, onDataRefresh }: RequestTableProps) {
-  const [data] = useState<RequestListRow[]>(initialData)
+  const [data, setData] = useState<RequestListRow[]>(initialData)
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
+
+  useEffect(() => {
+    setData(initialData)
+  }, [initialData])
 
   // Memoize event handler to prevent unnecessary re-renders
   const handleRowClick = useCallback((requestId: string) => {

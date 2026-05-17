@@ -46,4 +46,46 @@ describe('Gapforimprove regressions', () => {
     assert.match(bell, /if \(!hasLoadedNotifications\) \{\s*setIsLoading\(true\)\s*\}/)
     assert.match(bell, /<RequestModalRouter/)
   })
+
+  it('request list refreshes local table state after mutations and router refreshes', () => {
+    const requestTable = read('src/components/requests/request-table.tsx')
+    const listWithFilters = read('src/components/requests/requests-list-with-filters.tsx')
+    const listClient = read('src/components/requests/requests-list-client.tsx')
+    const modalRouter = read('src/components/requests/request-modal-router.tsx')
+    const dashboardTabs = read('src/components/dashboard/dashboard-tabs.tsx')
+    const analyticsPage = read('src/components/analytics/analytics-page.tsx')
+
+    assert.match(requestTable, /const \[data, setData\] = useState/)
+    assert.match(requestTable, /useEffect\(\(\) => \{\s*setData\(initialData\)\s*\}, \[initialData\]\)/)
+    assert.match(listWithFilters, /useEffect\(\(\) => \{\s*setRequests\(initialRequests\)\s*\}, \[initialRequests\]\)/)
+    assert.match(listWithFilters, /cache: 'no-store'/)
+    assert.match(listWithFilters, /approvalapp:request-data-changed/)
+    assert.match(listClient, /refreshSignal=\{requestListRefreshSignal\}/)
+    assert.match(listClient, /setRequestListRefreshSignal/)
+    assert.match(modalRouter, /approvalapp:request-data-changed/)
+    assert.match(dashboardTabs, /approvalapp:request-data-changed/)
+    assert.match(analyticsPage, /approvalapp:request-data-changed/)
+  })
+
+  it('request mutations invalidate every request-backed page surface', () => {
+    const invalidation = read('src/server-actions/request-view-invalidation.ts')
+    const requests = read('src/server-actions/requests.ts')
+    const approvals = read('src/server-actions/approvals.ts')
+    const solutions = read('src/server-actions/solutions.ts')
+
+    for (const route of [
+      '/requests',
+      '/requests/my-actions',
+      '/dashboard',
+      '/engineering',
+      '/analytics',
+      '/admin/retention',
+    ]) {
+      assert.match(invalidation, new RegExp(route.replaceAll('/', '\\/')))
+    }
+
+    assert.match(requests, /revalidateRequestViews/)
+    assert.match(approvals, /revalidateRequestViews/)
+    assert.match(solutions, /revalidateRequestViews/)
+  })
 })
