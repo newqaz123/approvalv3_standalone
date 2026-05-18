@@ -82,7 +82,7 @@ describe('compact approval evidence HTML', () => {
 
     assert.match(html, /Approval Evidence Packet/)
     assert.match(html, /summary-panel/)
-    assert.match(html, /Decision Summary/)
+    assert.match(html, /Department/)
     assert.match(html, /Attachment Index/)
     assert.match(html, /Approval Chain/)
     assert.match(html, /Activity Log/)
@@ -90,6 +90,7 @@ describe('compact approval evidence HTML', () => {
     assert.match(html, /Level/)
     assert.doesNotMatch(html, /<th>Role<\/th>/)
     assert.doesNotMatch(html, /<th>Type<\/th>/)
+    assert.doesNotMatch(html, /Decision Summary/)
     assert.doesNotMatch(html, /Approval Steps/)
     assert.doesNotMatch(html, /<span>Evidence<\/span>/)
     assert.match(html, /Approved &lt;script&gt;alert/)

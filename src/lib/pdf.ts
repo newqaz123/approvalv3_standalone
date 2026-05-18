@@ -204,24 +204,41 @@ export function renderRequestEvidenceHTML(data: RequestPDFData): string {
     .summary-panel {
       border: 1px solid #dbe5e0;
       border-radius: 14px;
-      padding: 12px;
+      padding: 10px;
       margin-bottom: 10px;
       page-break-inside: avoid;
       background: #ffffff;
     }
     .metrics {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 8px;
-      margin-bottom: 10px;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
     }
     .metric {
-      border: 1px solid #e2ebe6;
+      position: relative;
+      border: 1px solid #dfe9e4;
       border-radius: 10px;
-      padding: 9px;
+      padding: 10px 10px 10px 14px;
       background: #f8fbf8;
       min-height: 48px;
     }
+    .metric::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 10px;
+      bottom: 10px;
+      width: 4px;
+      border-radius: 0 4px 4px 0;
+      background: #1e6453;
+    }
+    .metric.status-card { background: #f5fbf7; }
+    .metric.requester-card { background: #f8fafc; }
+    .metric.department-card { background: #f7f8fb; }
+    .metric.date-card { background: #fbfaf5; }
+    .metric.requester-card::before { background: #3f6275; }
+    .metric.department-card::before { background: #5a5688; }
+    .metric.date-card::before { background: #a66a1f; }
     .metric span {
       display: block;
       color: #63736d;
@@ -232,17 +249,6 @@ export function renderRequestEvidenceHTML(data: RequestPDFData): string {
     }
     .metric strong {
       font-size: 11px;
-    }
-    .summary-detail {
-      border-top: 1px solid #e7edea;
-      padding-top: 10px;
-    }
-    .summary-detail h2 {
-      margin: 0 0 8px;
-      font-size: 12px;
-      letter-spacing: .1em;
-      text-transform: uppercase;
-      color: #153f35;
     }
     .section {
       border: 1px solid #dbe5e0;
@@ -338,21 +344,10 @@ export function renderRequestEvidenceHTML(data: RequestPDFData): string {
 
   <div class="summary-panel">
     <div class="metrics">
-      <div class="metric"><span>Status</span><strong>${escapeHtml(data.status)}</strong></div>
-      <div class="metric"><span>Requester</span><strong>${escapeHtml(data.requester.name)}</strong></div>
-      <div class="metric"><span>Dates</span><strong>${escapeHtml(createdLabel)} → ${escapeHtml(completedLabel)}</strong></div>
-    </div>
-    <div class="summary-detail">
-      <h2>Decision Summary</h2>
-      <div class="grid-2">
-        <div>
-          <strong>Department</strong><br>${escapeHtml(data.department)}<br><br>
-          <strong>Requester Email</strong><br>${escapeHtml(data.requester.email)}
-        </div>
-        <div>
-          <strong>Created / Completed</strong><br>${formatDate(data.createdAt)}<br>${escapeHtml(completedLabel)}
-        </div>
-      </div>
+      <div class="metric status-card"><span>Status</span><strong>${escapeHtml(data.status)}</strong></div>
+      <div class="metric requester-card"><span>Requester</span><strong>${escapeHtml(data.requester.name)}</strong></div>
+      <div class="metric department-card"><span>Department</span><strong>${escapeHtml(data.department)}</strong></div>
+      <div class="metric date-card"><span>Dates</span><strong>${escapeHtml(createdLabel)} → ${escapeHtml(completedLabel)}</strong></div>
     </div>
   </div>
 
