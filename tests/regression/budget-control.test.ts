@@ -85,4 +85,39 @@ describe('budget control helpers', () => {
       },
     ])
   })
+
+  it('rounds fractional monetary values in groups and export rows', () => {
+    const requests = [
+      {
+        id: 'r1',
+        title: 'Fractional usage A',
+        status: 'Completed',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        department: { id: 'd1', name: 'IT' },
+        budgetCode: { id: 'b1', code: 'CAPEX-2026-IT', displayCode: 'CAPEX-2026-IT', budgetAmount: 1 },
+        projectEstimateCost: 0.1,
+        engineeringEstimateCost: null,
+      },
+      {
+        id: 'r2',
+        title: 'Fractional usage B',
+        status: 'Completed',
+        createdAt: new Date('2026-01-02T00:00:00Z'),
+        department: { id: 'd1', name: 'IT' },
+        budgetCode: { id: 'b1', code: 'CAPEX-2026-IT', displayCode: 'CAPEX-2026-IT', budgetAmount: 1 },
+        projectEstimateCost: 0.2,
+        engineeringEstimateCost: null,
+      },
+    ]
+
+    const groups = buildBudgetCodeGroups(requests)
+    const rows = buildBudgetExportRows(requests)
+
+    assert.equal(groups[0].usedAmount, 0.3)
+    assert.equal(groups[0].remainingBudget, 0.7)
+    assert.equal(rows[0]['Used Amount'], 0.3)
+    assert.equal(rows[0]['Remaining Budget'], 0.7)
+    assert.equal(rows[1]['Used Amount'], 0.3)
+    assert.equal(rows[1]['Remaining Budget'], 0.7)
+  })
 })

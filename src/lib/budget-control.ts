@@ -1,5 +1,9 @@
 import type { BudgetCodeGroup, BudgetRequestRecord } from '@/types/budget'
 
+function roundMoneyAmount(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100
+}
+
 export function normalizeBudgetCode(input: string): string {
   return input.trim().replace(/\s+/g, ' ').toUpperCase()
 }
@@ -26,7 +30,7 @@ export function getBudgetUsageAmount(input: {
   projectEstimateCost: number | null
   engineeringEstimateCost: number | null
 }): number {
-  return input.engineeringEstimateCost ?? input.projectEstimateCost ?? 0
+  return roundMoneyAmount(input.engineeringEstimateCost ?? input.projectEstimateCost ?? 0)
 }
 
 export function buildBudgetCodeGroups(requests: BudgetRequestRecord[]): BudgetCodeGroup[] {
@@ -45,18 +49,18 @@ export function buildBudgetCodeGroups(requests: BudgetRequestRecord[]): BudgetCo
         remainingBudget:
           request.budgetCode.budgetAmount === null
             ? null
-            : request.budgetCode.budgetAmount - usageAmount,
+            : roundMoneyAmount(request.budgetCode.budgetAmount - usageAmount),
         assignedRequestCount: 1,
         requests: [{ ...request, usageAmount }],
       })
       continue
     }
 
-    existing.usedAmount += usageAmount
+    existing.usedAmount = roundMoneyAmount(existing.usedAmount + usageAmount)
     existing.remainingBudget =
       existing.budgetCode.budgetAmount === null
         ? null
-        : existing.budgetCode.budgetAmount - existing.usedAmount
+        : roundMoneyAmount(existing.budgetCode.budgetAmount - existing.usedAmount)
     existing.assignedRequestCount += 1
     existing.requests.push({ ...request, usageAmount })
   }
