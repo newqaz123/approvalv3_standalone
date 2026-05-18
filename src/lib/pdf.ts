@@ -90,7 +90,7 @@ export async function generatePdfFromHTML(html: string): Promise<Buffer> {
     const pdf = await page.pdf({
       format: 'A4',
       printBackground: true,
-      margin: { top: '14mm', right: '12mm', bottom: '12mm', left: '12mm' },
+      margin: { top: '14mm', right: '18mm', bottom: '12mm', left: '12mm' },
     })
 
     return Buffer.from(pdf)
@@ -152,9 +152,9 @@ function statusClass(status: RequestPDFData['approvalPhases'][number]['approvals
 
 export function renderRequestEvidenceHTML(data: RequestPDFData): string {
   const generatedAt = formatDate(new Date())
+  const createdLabel = formatDateShort(data.createdAt)
   const completedLabel = data.completedAt ? formatDateShort(data.completedAt) : 'Not completed'
   const attachmentCount = data.fileAttachments.length + (data.solution?.fileAttachments.length ?? 0)
-  const approvalCount = data.approvalPhases.reduce((sum, phase) => sum + phase.approvals.length, 0)
   const reference = data.referenceId || data.id || '-'
   const requestAttachments = data.fileAttachments
   const solutionAttachments = data.solution?.fileAttachments ?? []
@@ -203,7 +203,7 @@ export function renderRequestEvidenceHTML(data: RequestPDFData): string {
     }
     .metrics {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(3, 1fr);
       gap: 8px;
       margin-bottom: 12px;
     }
@@ -243,6 +243,24 @@ export function renderRequestEvidenceHTML(data: RequestPDFData): string {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 10px;
+    }
+    .solution-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.7fr) minmax(170px, .8fr);
+      gap: 10px;
+      align-items: start;
+    }
+    .solution-meta {
+      border: 1px solid #e7edea;
+      border-radius: 9px;
+      background: #f8fbf8;
+      padding: 8px;
+    }
+    .solution-meta p {
+      margin: 0 0 7px;
+    }
+    .solution-meta p:last-child {
+      margin-bottom: 0;
     }
     .muted {
       color: #66736e;
@@ -302,8 +320,7 @@ export function renderRequestEvidenceHTML(data: RequestPDFData): string {
   <div class="metrics">
     <div class="metric"><span>Status</span><strong>${escapeHtml(data.status)}</strong></div>
     <div class="metric"><span>Requester</span><strong>${escapeHtml(data.requester.name)}</strong></div>
-    <div class="metric"><span>Completed</span><strong>${escapeHtml(completedLabel)}</strong></div>
-    <div class="metric"><span>Evidence</span><strong>${attachmentCount} files</strong></div>
+    <div class="metric"><span>Dates</span><strong>${escapeHtml(createdLabel)} → ${escapeHtml(completedLabel)}</strong></div>
   </div>
 
   <div class="section">
@@ -314,8 +331,7 @@ export function renderRequestEvidenceHTML(data: RequestPDFData): string {
         <strong>Requester Email</strong><br>${escapeHtml(data.requester.email)}
       </div>
       <div>
-        <strong>Created</strong><br>${formatDate(data.createdAt)}<br><br>
-        <strong>Approval Steps</strong><br>${approvalCount}
+        <strong>Created / Completed</strong><br>${formatDate(data.createdAt)}<br>${escapeHtml(completedLabel)}
       </div>
     </div>
   </div>
@@ -323,15 +339,15 @@ export function renderRequestEvidenceHTML(data: RequestPDFData): string {
   ${data.solution ? `
   <div class="section">
     <h2>Engineering Solution</h2>
-    <div class="grid-2">
+    <div class="solution-grid">
       <div>
         <strong>${escapeHtml(data.solution.title)}</strong>
         <div class="description">${escapeHtml(data.solution.description)}</div>
       </div>
-      <div>
-        <strong>Approved Cost</strong><br>${escapeHtml(formatCurrency(data.solution.costEstimate, data.solution.currency))}<br><br>
-        <strong>Submitted</strong><br>${escapeHtml(data.solution.submittedBy)} • ${formatDate(data.solution.submittedAt)}
-        ${data.solution.timeline ? `<br><br><strong>Timeline</strong><br>${escapeHtml(data.solution.timeline)}` : ''}
+      <div class="solution-meta">
+        <p><strong>Approved Cost</strong><br>${escapeHtml(formatCurrency(data.solution.costEstimate, data.solution.currency))}</p>
+        <p><strong>Submitted</strong><br>${escapeHtml(data.solution.submittedBy)}<br>${formatDate(data.solution.submittedAt)}</p>
+        ${data.solution.timeline ? `<p><strong>Timeline</strong><br>${escapeHtml(data.solution.timeline)}</p>` : ''}
       </div>
     </div>
     ${data.solution.conceptDesign ? `<br><strong>Concept Design</strong><div class="description">${escapeHtml(data.solution.conceptDesign)}</div>` : ''}
@@ -347,14 +363,13 @@ export function renderRequestEvidenceHTML(data: RequestPDFData): string {
     <h2>Attachment Index</h2>
     <table>
       <thead>
-        <tr><th>Source</th><th>File</th><th>Type</th><th>Size</th><th>Date</th></tr>
+        <tr><th>Source</th><th>File</th><th>Size</th><th>Date</th></tr>
       </thead>
       <tbody>
         ${requestAttachments.map((file) => `
           <tr>
             <td>Request</td>
             <td>${escapeHtml(file.fileName)}<br><span class="muted">Uploaded by ${escapeHtml(file.uploadedBy)}</span></td>
-            <td>${escapeHtml(file.fileType)}</td>
             <td>${formatFileSize(file.fileSize)}</td>
             <td>${formatDateShort(file.createdAt)}</td>
           </tr>
@@ -363,12 +378,11 @@ export function renderRequestEvidenceHTML(data: RequestPDFData): string {
           <tr>
             <td>Solution</td>
             <td>${escapeHtml(file.fileName)}</td>
-            <td>${escapeHtml(file.fileType)}</td>
             <td>${formatFileSize(file.fileSize)}</td>
             <td>${formatDateShort(file.createdAt)}</td>
           </tr>
         `).join('')}
-        ${attachmentCount === 0 ? '<tr><td colspan="5" class="muted">No attachments recorded.</td></tr>' : ''}
+        ${attachmentCount === 0 ? '<tr><td colspan="4" class="muted">No attachments recorded.</td></tr>' : ''}
       </tbody>
     </table>
   </div>
@@ -379,14 +393,13 @@ export function renderRequestEvidenceHTML(data: RequestPDFData): string {
       <h3>${escapeHtml(phase.phaseName)}</h3>
       <table>
         <thead>
-          <tr><th>Stage</th><th>Approver</th><th>Role</th><th>Level</th><th>Department</th><th>Status</th><th>Approved</th><th>Comments</th></tr>
+          <tr><th>Stage</th><th>Approver</th><th>Level</th><th>Department</th><th>Status</th><th>Approved</th><th>Comments</th></tr>
         </thead>
         <tbody>
           ${phase.approvals.map((approval) => `
             <tr>
               <td>${escapeHtml(approval.stage)}</td>
               <td>${escapeHtml(approval.approverName)}</td>
-              <td>${escapeHtml(approval.approverRole || '-')}</td>
               <td>${approval.requiredLevel}</td>
               <td>${escapeHtml(approval.approverDepartment || approval.approverRole || '-')}</td>
               <td><span class="status ${statusClass(approval.status)}">${escapeHtml(approval.status)}</span></td>
