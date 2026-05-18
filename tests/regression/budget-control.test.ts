@@ -166,16 +166,17 @@ describe('budget monitor server actions', () => {
     assert.match(createBody, /budget_codes\.findUnique/)
   })
 
-  it('scopes budget code summaries to codes attached to visible requests', () => {
+  it('scopes budget code summaries to visible request codes and creator-owned empty codes', () => {
     const source = readServerAction()
     const getDataBody = source.slice(
       source.indexOf('export async function getBudgetMonitorData'),
       source.indexOf('export async function assignRequestToBudgetCode')
     )
 
-    assert.doesNotMatch(getDataBody, /prisma\.budget_codes\.findMany/)
+    assert.match(getDataBody, /prisma\.budget_codes\.findMany/)
+    assert.match(getDataBody, /createdById: user\.id/)
     assert.match(source, /new Map|new Set/)
-    assert.match(getDataBody, /getVisibleBudgetCodes\(mapped\)/)
+    assert.match(getDataBody, /mergeBudgetCodes\(mapped, creatorBudgetCodes\)/)
     assert.match(getDataBody, /request\.budgetCode/)
   })
 

@@ -151,6 +151,28 @@ function getVisibleBudgetCodes(requests: BudgetRequestRecord[]) {
   return [...budgetCodesById.values()].sort((a, b) => a.displayCode.localeCompare(b.displayCode))
 }
 
+function mergeBudgetCodes(
+  visibleRequests: BudgetRequestRecord[],
+  creatorCodes: Array<{ id: string; code: string; displayCode: string; budgetAmount: unknown }>,
+) {
+  const budgetCodesById = new Map<string, NonNullable<BudgetRequestRecord['budgetCode']>>()
+
+  for (const budgetCode of getVisibleBudgetCodes(visibleRequests)) {
+    budgetCodesById.set(budgetCode.id, budgetCode)
+  }
+
+  for (const code of creatorCodes) {
+    budgetCodesById.set(code.id, {
+      id: code.id,
+      code: code.code,
+      displayCode: code.displayCode,
+      budgetAmount: decimalToNumber(code.budgetAmount),
+    })
+  }
+
+  return [...budgetCodesById.values()].sort((a, b) => a.displayCode.localeCompare(b.displayCode))
+}
+
 async function requireVisibleRequest(requestId: string) {
   const user = await getCurrentUser()
   if (!user) throw new Error('Unauthorized')
@@ -174,7 +196,7 @@ export async function getBudgetMonitorData(input: BudgetMonitorFilters = {}): Pr
   const filters = filtersSchema.parse(input)
   const where = applyBudgetFilters(buildVisibleRequestWhere(user), filters)
 
-  const [requests, departments] = await Promise.all([
+  const [requests, departments, creatorBudgetCodes] = await Promise.all([
     prisma.requests.findMany({
       where,
       select: {
@@ -194,6 +216,11 @@ export async function getBudgetMonitorData(input: BudgetMonitorFilters = {}): Pr
       orderBy: { createdAt: 'desc' },
     }),
     prisma.departments.findMany({ select: { id: true, name: true }, orderBy: { name: 'asc' } }),
+    prisma.budget_codes.findMany({
+      where: { createdById: user.id },
+      select: { id: true, code: true, displayCode: true, budgetAmount: true },
+      orderBy: { displayCode: 'asc' },
+    }),
   ])
 
   let mapped = requests.map(mapBudgetRequest)
@@ -209,7 +236,7 @@ export async function getBudgetMonitorData(input: BudgetMonitorFilters = {}): Pr
   const remainingRequests = mapped.filter((request) => !request.budgetCode)
 
   return {
-    budgetCodes: getVisibleBudgetCodes(mapped),
+    budgetCodes: mergeBudgetCodes(mapped, creatorBudgetCodes),
     groups,
     remainingRequests,
     filters: {
@@ -221,7 +248,7 @@ export async function getBudgetMonitorData(input: BudgetMonitorFilters = {}): Pr
 
 export async function assignRequestToBudgetCode(input: z.infer<typeof assignSchema>) {
   const data = assignSchema.parse(input)
-  await requireVisibleRequest(data.requestId)
+  const user = await requireVisibleRequest(data.requestId)
 
   let budgetCode
   if (data.budgetCodeId) {
@@ -236,6 +263,7 @@ export async function assignRequestToBudgetCode(input: z.infer<typeof assignSche
           code: normalizedCode,
           displayCode: data.budgetCode!.trim(),
           budgetAmount: data.budgetAmount ?? null,
+          createdById: user.id,
         },
       })
     }
@@ -305,6 +333,7 @@ export async function createBudgetCode(input: z.infer<typeof createBudgetCodeSch
         code: normalizedCode,
         displayCode: data.budgetCode.trim(),
         budgetAmount: data.budgetAmount ?? null,
+        createdById: user.id,
       },
     })
   }

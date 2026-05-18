@@ -151,10 +151,13 @@ model budget_codes {
   code         String     @unique
   displayCode  String
   budgetAmount Decimal?   @db.Decimal(15, 2)
+  createdById  String?
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
+  createdBy    User?      @relation("budget_codes_createdByIdTousers", fields: [createdById], references: [id])
   requests     requests[]
 
+  @@index([createdById])
   @@index([displayCode])
 }
 
@@ -274,6 +277,7 @@ model User {
   requestActivities                                              request_activities[]
   approvedRequests                                               request_approvals[]            @relation("request_approvals_approverIdTousers")
   requiredApprovalRequests                                       request_approvals[]            @relation("request_approvals_requiredApproverIdTousers")
+  createdBudgetCodes                                             budget_codes[]                 @relation("budget_codes_createdByIdTousers")
   engineerAssignments                                            request_engineer_assignments[]
   deletedRequests                                                requests[]                     @relation("requests_deletedByTousers")
   createdRequests                                                requests[]                     @relation("requests_requesterIdTousers")
