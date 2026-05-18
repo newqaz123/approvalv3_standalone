@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import {
   buildBudgetCodeGroups,
   buildBudgetExportRows,
@@ -119,5 +120,28 @@ describe('budget control helpers', () => {
     assert.equal(rows[0]['Remaining Budget'], 0.7)
     assert.equal(rows[1]['Used Amount'], 0.3)
     assert.equal(rows[1]['Remaining Budget'], 0.7)
+  })
+})
+
+describe('budget monitor server actions', () => {
+  it('exposes data, mutation, and XLSX export actions from the assigned file', () => {
+    const source = readFileSync('src/server-actions/budget-control.ts', 'utf8')
+
+    for (const exportName of [
+      'getBudgetMonitorData',
+      'assignRequestToBudgetCode',
+      'unassignRequestBudgetCode',
+      'updateRequestProjectEstimate',
+      'updateBudgetCodeAmount',
+      'createBudgetCode',
+      'exportBudgetMonitorXlsx',
+    ]) {
+      assert.match(source, new RegExp(`export async function ${exportName}\\b`))
+    }
+
+    assert.match(source, /'use server'/)
+    assert.match(source, /getCurrentUser/)
+    assert.match(source, /XLSX\.utils\.json_to_sheet/)
+    assert.match(source, /base64/)
   })
 })
