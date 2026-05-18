@@ -29,4 +29,24 @@ describe('completed approval export builder wiring', () => {
     assert.match(router, /onExportPackage=\{handleExportPackage\}/)
     assert.match(router, /Evidence package exported successfully/)
   })
+
+  it('replaces legacy request detail export buttons with the package builder', () => {
+    const detailModal = readFileSync('src/components/requests/request-detail-modal.tsx', 'utf8')
+
+    assert.match(detailModal, /CompletedApprovalExportBuilder/)
+    assert.match(detailModal, /exportRequestPackageAsPDF/)
+    assert.match(detailModal, /renderExportBuilder/)
+    assert.match(detailModal, /request\.status !== 'Completed'/)
+    assert.doesNotMatch(detailModal, /ExportPDFButton/)
+  })
+
+  it('keeps completed-only export eligibility across legacy and server paths', () => {
+    const legacyButton = readFileSync('src/components/reports/export-pdf-button.tsx', 'utf8')
+    const reportsAction = readFileSync('src/server-actions/reports.ts', 'utf8')
+
+    assert.match(legacyButton, /requestStatus === 'Completed' && allApprovalsComplete/)
+    assert.doesNotMatch(legacyButton, /FinalApproval'\s*\|\|/)
+    assert.match(reportsAction, /request\.status !== 'Completed'/)
+    assert.doesNotMatch(reportsAction, /FinalApproval', 'Completed/)
+  })
 })

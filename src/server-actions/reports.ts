@@ -233,9 +233,8 @@ async function buildRequestPDFData(requestId: string, userId: string): Promise<{
     throw new Error('You are not authorized to export this request.')
   }
 
-  const validStatuses = ['FinalApproval', 'Completed']
-  if (!validStatuses.includes(request.status)) {
-    throw new Error(`PDF export is only available for requests in FinalApproval or Completed status. Current status: ${request.status}`)
+  if (request.status !== 'Completed') {
+    throw new Error(`PDF export is only available after the request is completed. Current status: ${request.status}`)
   }
 
   if (request.approvals.some((approval) => approval.status !== 'approved')) {
