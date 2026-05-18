@@ -1,7 +1,9 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
-import { mergePdfBuffers, validateExportPackageRequestItems } from '../../src/lib/pdf-package'
+import { convertAttachmentToPdf, mergePdfBuffers, validateExportPackageRequestItems } from '../../src/lib/pdf-package'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 async function makePdf(text: string, size: [number, number] = [240, 120]): Promise<Buffer> {
   const doc = await PDFDocument.create()
@@ -12,6 +14,29 @@ async function makePdf(text: string, size: [number, number] = [240, 120]): Promi
 }
 
 describe('pdf package helpers', () => {
+  it('falls back to browser rendering when direct PNG embedding fails', async () => {
+    const uploadDir = join(process.cwd(), 'public', 'uploads', 'test-pdf-package')
+    const filePath = join(uploadDir, 'browser-renderable.png')
+    mkdirSync(uploadDir, { recursive: true })
+    writeFileSync(filePath, Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="80" height="40"><rect width="80" height="40" fill="red"/></svg>'))
+
+    try {
+      const converted = await convertAttachmentToPdf({
+        attachment: {
+          id: 'png-fallback',
+          fileName: 'browser-renderable.png',
+          fileType: 'image/png',
+          filePath: 'uploads/test-pdf-package/browser-renderable.png',
+        },
+      })
+      const pdf = await PDFDocument.load(converted)
+
+      assert.ok(pdf.getPageCount() >= 1)
+    } finally {
+      rmSync(uploadDir, { recursive: true, force: true })
+    }
+  })
+
   it('merges pdf buffers in caller order', async () => {
     const first = await makePdf('first', [240, 120])
     const second = await makePdf('second', [360, 180])

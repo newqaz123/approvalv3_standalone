@@ -157,14 +157,10 @@ function getImageMimeType(filePath: string): string {
   return 'application/octet-stream'
 }
 
-async function convertImageToPdf(filePath: string): Promise<Buffer> {
-  const imageBytes = await readFile(filePath)
-  const extension = extname(filePath).toLowerCase()
-
-  if (extension !== '.png' && extension !== '.jpg' && extension !== '.jpeg') {
-    const mimeType = getImageMimeType(filePath)
-    const imageDataUrl = `data:${mimeType};base64,${imageBytes.toString('base64')}`
-    return generateAttachmentPdfFromHTML(`<!DOCTYPE html>
+async function renderImagePdfFromHTML(filePath: string, imageBytes: Buffer): Promise<Buffer> {
+  const mimeType = getImageMimeType(filePath)
+  const imageDataUrl = `data:${mimeType};base64,${imageBytes.toString('base64')}`
+  return generateAttachmentPdfFromHTML(`<!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
@@ -177,29 +173,41 @@ async function convertImageToPdf(filePath: string): Promise<Buffer> {
   <img src="${imageDataUrl}" alt="Attachment image">
 </body>
 </html>`)
+}
+
+async function convertImageToPdf(filePath: string): Promise<Buffer> {
+  const imageBytes = await readFile(filePath)
+  const extension = extname(filePath).toLowerCase()
+
+  if (extension !== '.png' && extension !== '.jpg' && extension !== '.jpeg') {
+    return renderImagePdfFromHTML(filePath, imageBytes)
   }
 
-  const doc = await PDFDocument.create()
-  const image = extension === '.png'
-    ? await doc.embedPng(imageBytes)
-    : await doc.embedJpg(imageBytes)
-  const page = doc.addPage([595.28, 841.89])
-  const pageWidth = page.getWidth()
-  const pageHeight = page.getHeight()
-  const maxWidth = pageWidth - 112
-  const maxHeight = pageHeight - 112
-  const scale = Math.min(maxWidth / image.width, maxHeight / image.height, 1)
-  const width = image.width * scale
-  const height = image.height * scale
+  try {
+    const doc = await PDFDocument.create()
+    const image = extension === '.png'
+      ? await doc.embedPng(imageBytes)
+      : await doc.embedJpg(imageBytes)
+    const page = doc.addPage([595.28, 841.89])
+    const pageWidth = page.getWidth()
+    const pageHeight = page.getHeight()
+    const maxWidth = pageWidth - 112
+    const maxHeight = pageHeight - 112
+    const scale = Math.min(maxWidth / image.width, maxHeight / image.height, 1)
+    const width = image.width * scale
+    const height = image.height * scale
 
-  page.drawImage(image, {
-    x: (pageWidth - width) / 2,
-    y: (pageHeight - height) / 2,
-    width,
-    height,
-  })
+    page.drawImage(image, {
+      x: (pageWidth - width) / 2,
+      y: (pageHeight - height) / 2,
+      width,
+      height,
+    })
 
-  return Buffer.from(await doc.save())
+    return Buffer.from(await doc.save())
+  } catch {
+    return renderImagePdfFromHTML(filePath, imageBytes)
+  }
 }
 
 export async function convertAttachmentToPdf({ attachment }: ConvertAttachmentToPdfInput): Promise<Buffer> {
