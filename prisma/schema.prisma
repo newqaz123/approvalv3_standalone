@@ -146,6 +146,18 @@ model request_engineer_assignments {
   @@index([requestId])
 }
 
+model budget_codes {
+  id           String     @id @default(uuid())
+  code         String     @unique
+  displayCode  String
+  budgetAmount Decimal?   @db.Decimal(15, 2)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  requests     requests[]
+
+  @@index([displayCode])
+}
+
 model requests {
   id                                String                         @id @default(uuid())
   title                             String
@@ -161,16 +173,20 @@ model requests {
   deletedBy                         String?
   isDeleted                         Boolean                        @default(false)
   isArchived                        Boolean                        @default(false)
+  budgetCodeId                      String?
+  projectEstimateCost               Decimal?                       @db.Decimal(15, 2)
   fileAttachments                   file_attachments[]
   notifications                     notifications[]
   activities                        request_activities[]
   approvals                         request_approvals[]
   engineerAssignments               request_engineer_assignments[]
+  budgetCode                        budget_codes?                 @relation(fields: [budgetCodeId], references: [id], onDelete: SetNull)
   deletedByUser                     User?                         @relation("requests_deletedByTousers", fields: [deletedBy], references: [id])
   department                        departments                    @relation(fields: [departmentId], references: [id])
   requester                         User                          @relation("requests_requesterIdTousers", fields: [requesterId], references: [id])
   solutions                         solutions[]
 
+  @@index([budgetCodeId])
   @@index([createdAt])
   @@index([departmentId])
   @@index([isDeleted])
