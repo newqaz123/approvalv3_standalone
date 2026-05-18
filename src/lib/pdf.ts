@@ -201,14 +201,22 @@ export function renderRequestEvidenceHTML(data: RequestPDFData): string {
       font-size: 10px;
       opacity: .84;
     }
+    .summary-panel {
+      border: 1px solid #dbe5e0;
+      border-radius: 14px;
+      padding: 12px;
+      margin-bottom: 10px;
+      page-break-inside: avoid;
+      background: #ffffff;
+    }
     .metrics {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
       gap: 8px;
-      margin-bottom: 12px;
+      margin-bottom: 10px;
     }
     .metric {
-      border: 1px solid #dbe5e0;
+      border: 1px solid #e2ebe6;
       border-radius: 10px;
       padding: 9px;
       background: #f8fbf8;
@@ -224,6 +232,17 @@ export function renderRequestEvidenceHTML(data: RequestPDFData): string {
     }
     .metric strong {
       font-size: 11px;
+    }
+    .summary-detail {
+      border-top: 1px solid #e7edea;
+      padding-top: 10px;
+    }
+    .summary-detail h2 {
+      margin: 0 0 8px;
+      font-size: 12px;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: #153f35;
     }
     .section {
       border: 1px solid #dbe5e0;
@@ -317,21 +336,22 @@ export function renderRequestEvidenceHTML(data: RequestPDFData): string {
     <div class="hero-meta">Reference: ${escapeHtml(reference)} • Generated ${generatedAt}</div>
   </div>
 
-  <div class="metrics">
-    <div class="metric"><span>Status</span><strong>${escapeHtml(data.status)}</strong></div>
-    <div class="metric"><span>Requester</span><strong>${escapeHtml(data.requester.name)}</strong></div>
-    <div class="metric"><span>Dates</span><strong>${escapeHtml(createdLabel)} → ${escapeHtml(completedLabel)}</strong></div>
-  </div>
-
-  <div class="section">
-    <h2>Decision Summary</h2>
-    <div class="grid-2">
-      <div>
-        <strong>Department</strong><br>${escapeHtml(data.department)}<br><br>
-        <strong>Requester Email</strong><br>${escapeHtml(data.requester.email)}
-      </div>
-      <div>
-        <strong>Created / Completed</strong><br>${formatDate(data.createdAt)}<br>${escapeHtml(completedLabel)}
+  <div class="summary-panel">
+    <div class="metrics">
+      <div class="metric"><span>Status</span><strong>${escapeHtml(data.status)}</strong></div>
+      <div class="metric"><span>Requester</span><strong>${escapeHtml(data.requester.name)}</strong></div>
+      <div class="metric"><span>Dates</span><strong>${escapeHtml(createdLabel)} → ${escapeHtml(completedLabel)}</strong></div>
+    </div>
+    <div class="summary-detail">
+      <h2>Decision Summary</h2>
+      <div class="grid-2">
+        <div>
+          <strong>Department</strong><br>${escapeHtml(data.department)}<br><br>
+          <strong>Requester Email</strong><br>${escapeHtml(data.requester.email)}
+        </div>
+        <div>
+          <strong>Created / Completed</strong><br>${formatDate(data.createdAt)}<br>${escapeHtml(completedLabel)}
+        </div>
       </div>
     </div>
   </div>
