@@ -124,8 +124,12 @@ describe('budget control helpers', () => {
 })
 
 describe('budget monitor server actions', () => {
+  function readServerAction() {
+    return readFileSync('src/server-actions/budget-control.ts', 'utf8')
+  }
+
   it('exposes data, mutation, and XLSX export actions from the assigned file', () => {
-    const source = readFileSync('src/server-actions/budget-control.ts', 'utf8')
+    const source = readServerAction()
 
     for (const exportName of [
       'getBudgetMonitorData',
@@ -143,5 +147,58 @@ describe('budget monitor server actions', () => {
     assert.match(source, /getCurrentUser/)
     assert.match(source, /XLSX\.utils\.json_to_sheet/)
     assert.match(source, /base64/)
+  })
+
+  it('does not update existing budget code amounts from create or assignment paths', () => {
+    const source = readServerAction()
+    const assignBody = source.slice(
+      source.indexOf('export async function assignRequestToBudgetCode'),
+      source.indexOf('export async function unassignRequestBudgetCode')
+    )
+    const createBody = source.slice(
+      source.indexOf('export async function createBudgetCode'),
+      source.indexOf('export async function exportBudgetMonitorXlsx')
+    )
+
+    assert.doesNotMatch(assignBody, /budget_codes\.upsert/)
+    assert.doesNotMatch(createBody, /budget_codes\.upsert/)
+    assert.match(assignBody, /budget_codes\.findUnique/)
+    assert.match(createBody, /budget_codes\.findUnique/)
+  })
+
+  it('scopes budget code summaries to codes attached to visible requests', () => {
+    const source = readServerAction()
+    const getDataBody = source.slice(
+      source.indexOf('export async function getBudgetMonitorData'),
+      source.indexOf('export async function assignRequestToBudgetCode')
+    )
+
+    assert.doesNotMatch(getDataBody, /prisma\.budget_codes\.findMany/)
+    assert.match(source, /new Map|new Set/)
+    assert.match(getDataBody, /getVisibleBudgetCodes\(mapped\)/)
+    assert.match(getDataBody, /request\.budgetCode/)
+  })
+
+  it('uses strict finite bounded money parsing without empty-string coercion', () => {
+    const source = readServerAction()
+
+    assert.doesNotMatch(source, /z\.coerce\.number/)
+    assert.match(source, /MAX_BUDGET_MONEY_AMOUNT/)
+    assert.match(source, /Number\.isFinite/)
+    assert.match(source, /9999999999999\.99/)
+    assert.match(source, /value\.trim\(\) === ''/)
+  })
+
+  it('requires exactly one assignment target in assign schema', () => {
+    const source = readServerAction()
+    const assignSchemaBody = source.slice(
+      source.indexOf('const assignSchema'),
+      source.indexOf('const requestEstimateSchema')
+    )
+
+    assert.match(assignSchemaBody, /\.superRefine|\.refine/)
+    assert.match(assignSchemaBody, /budgetCodeId/)
+    assert.match(assignSchemaBody, /budgetCode/)
+    assert.match(assignSchemaBody, /exactly one/i)
   })
 })

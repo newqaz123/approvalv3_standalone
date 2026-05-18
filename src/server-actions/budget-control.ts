@@ -13,7 +13,21 @@ import {
 } from '@/lib/budget-control'
 import type { BudgetMonitorData, BudgetMonitorFilters, BudgetRequestRecord } from '@/types/budget'
 
-const moneySchema = z.coerce.number().min(0).nullable().optional()
+const MAX_BUDGET_MONEY_AMOUNT = 9999999999999.99
+
+const moneySchema = z.preprocess((value) => {
+  if (value === null || value === undefined) return value
+  if (typeof value === 'string') {
+    if (value.trim() === '') return value
+    return Number(value)
+  }
+  return value
+}, z.number()
+  .refine((value) => Number.isFinite(value), 'Amount must be finite')
+  .min(0)
+  .max(MAX_BUDGET_MONEY_AMOUNT)
+  .nullable()
+  .optional())
 
 const filtersSchema = z.object({
   budgetCodeSearch: z.string().optional(),
@@ -29,6 +43,14 @@ const assignSchema = z.object({
   budgetCodeId: z.string().min(1).optional(),
   budgetCode: z.string().min(1).optional(),
   budgetAmount: moneySchema,
+}).superRefine((data, ctx) => {
+  if (Boolean(data.budgetCodeId) === Boolean(data.budgetCode)) {
+    ctx.addIssue({
+      code: 'custom',
+      message: 'Provide exactly one of budgetCodeId or budgetCode',
+      path: ['budgetCode'],
+    })
+  }
 })
 
 const requestEstimateSchema = z.object({
@@ -117,6 +139,18 @@ function mapBudgetRequest(request: any): BudgetRequestRecord {
   }
 }
 
+function getVisibleBudgetCodes(requests: BudgetRequestRecord[]) {
+  const budgetCodesById = new Map<string, NonNullable<BudgetRequestRecord['budgetCode']>>()
+
+  for (const request of requests) {
+    if (request.budgetCode) {
+      budgetCodesById.set(request.budgetCode.id, request.budgetCode)
+    }
+  }
+
+  return [...budgetCodesById.values()].sort((a, b) => a.displayCode.localeCompare(b.displayCode))
+}
+
 async function requireVisibleRequest(requestId: string) {
   const user = await getCurrentUser()
   if (!user) throw new Error('Unauthorized')
@@ -140,7 +174,7 @@ export async function getBudgetMonitorData(input: BudgetMonitorFilters = {}): Pr
   const filters = filtersSchema.parse(input)
   const where = applyBudgetFilters(buildVisibleRequestWhere(user), filters)
 
-  const [requests, departments, budgetCodes] = await Promise.all([
+  const [requests, departments] = await Promise.all([
     prisma.requests.findMany({
       where,
       select: {
@@ -160,7 +194,6 @@ export async function getBudgetMonitorData(input: BudgetMonitorFilters = {}): Pr
       orderBy: { createdAt: 'desc' },
     }),
     prisma.departments.findMany({ select: { id: true, name: true }, orderBy: { name: 'asc' } }),
-    prisma.budget_codes.findMany({ select: { id: true, code: true, displayCode: true, budgetAmount: true }, orderBy: { displayCode: 'asc' } }),
   ])
 
   let mapped = requests.map(mapBudgetRequest)
@@ -176,12 +209,7 @@ export async function getBudgetMonitorData(input: BudgetMonitorFilters = {}): Pr
   const remainingRequests = mapped.filter((request) => !request.budgetCode)
 
   return {
-    budgetCodes: budgetCodes.map((code) => ({
-      id: code.id,
-      code: code.code,
-      displayCode: code.displayCode,
-      budgetAmount: decimalToNumber(code.budgetAmount),
-    })),
+    budgetCodes: getVisibleBudgetCodes(mapped),
     groups,
     remainingRequests,
     filters: {
@@ -195,17 +223,23 @@ export async function assignRequestToBudgetCode(input: z.infer<typeof assignSche
   const data = assignSchema.parse(input)
   await requireVisibleRequest(data.requestId)
 
-  const budgetCode = data.budgetCodeId
-    ? await prisma.budget_codes.findUniqueOrThrow({ where: { id: data.budgetCodeId } })
-    : await prisma.budget_codes.upsert({
-        where: { code: normalizeBudgetCode(data.budgetCode!) },
-        create: {
-          code: normalizeBudgetCode(data.budgetCode!),
+  let budgetCode
+  if (data.budgetCodeId) {
+    budgetCode = await prisma.budget_codes.findUniqueOrThrow({ where: { id: data.budgetCodeId } })
+  } else {
+    const normalizedCode = normalizeBudgetCode(data.budgetCode!)
+    budgetCode = await prisma.budget_codes.findUnique({ where: { code: normalizedCode } })
+
+    if (!budgetCode) {
+      budgetCode = await prisma.budget_codes.create({
+        data: {
+          code: normalizedCode,
           displayCode: data.budgetCode!.trim(),
           budgetAmount: data.budgetAmount ?? null,
         },
-        update: data.budgetAmount === undefined ? {} : { budgetAmount: data.budgetAmount ?? null },
       })
+    }
+  }
 
   await prisma.requests.update({
     where: { id: data.requestId },
@@ -262,17 +296,18 @@ export async function createBudgetCode(input: z.infer<typeof createBudgetCodeSch
   if (!user) throw new Error('Unauthorized')
 
   const data = createBudgetCodeSchema.parse(input)
-  await prisma.budget_codes.upsert({
-    where: { code: normalizeBudgetCode(data.budgetCode) },
-    create: {
-      code: normalizeBudgetCode(data.budgetCode),
-      displayCode: data.budgetCode.trim(),
-      budgetAmount: data.budgetAmount ?? null,
-    },
-    update: {
-      budgetAmount: data.budgetAmount ?? null,
-    },
-  })
+  const normalizedCode = normalizeBudgetCode(data.budgetCode)
+  const existingBudgetCode = await prisma.budget_codes.findUnique({ where: { code: normalizedCode } })
+
+  if (!existingBudgetCode) {
+    await prisma.budget_codes.create({
+      data: {
+        code: normalizedCode,
+        displayCode: data.budgetCode.trim(),
+        budgetAmount: data.budgetAmount ?? null,
+      },
+    })
+  }
 
   revalidatePath('/budget-monitor')
   return { success: true }
