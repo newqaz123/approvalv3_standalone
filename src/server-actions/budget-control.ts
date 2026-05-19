@@ -43,6 +43,7 @@ const assignSchema = z.object({
   budgetCodeId: z.string().min(1).optional(),
   budgetCode: z.string().min(1).optional(),
   budgetAmount: moneySchema,
+  departmentId: z.string().min(1).nullable().optional(),
 }).superRefine((data, ctx) => {
   if (Boolean(data.budgetCodeId) === Boolean(data.budgetCode)) {
     ctx.addIssue({
@@ -61,11 +62,13 @@ const requestEstimateSchema = z.object({
 const budgetAmountSchema = z.object({
   budgetCodeId: z.string().min(1),
   budgetAmount: moneySchema,
+  departmentId: z.string().min(1).nullable().optional(),
 })
 
 const createBudgetCodeSchema = z.object({
   budgetCode: z.string().min(1),
   budgetAmount: moneySchema,
+  departmentId: z.string().min(1).nullable().optional(),
 })
 
 function buildVisibleRequestWhere(user: NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>) {
@@ -85,7 +88,6 @@ function buildVisibleRequestWhere(user: NonNullable<Awaited<ReturnType<typeof ge
 }
 
 function applyBudgetFilters(where: any, filters: BudgetMonitorFilters) {
-  if (filters.departmentId) where.departmentId = filters.departmentId
   if (filters.status) where.status = filters.status as any
   if (filters.dateFrom || filters.dateTo) {
     where.createdAt = {}
@@ -96,18 +98,6 @@ function applyBudgetFilters(where: any, filters: BudgetMonitorFilters) {
       where.createdAt.lte = endDate
     }
   }
-  if (filters.requestSearch) {
-    where.AND = [
-      ...(where.AND ?? []),
-      {
-        OR: [
-          { title: { contains: filters.requestSearch, mode: 'insensitive' } },
-          { description: { contains: filters.requestSearch, mode: 'insensitive' } },
-          { requester: { name: { contains: filters.requestSearch, mode: 'insensitive' } } },
-        ],
-      },
-    ]
-  }
   return where
 }
 
@@ -115,6 +105,16 @@ function decimalToNumber(value: unknown): number | null {
   if (value === null || value === undefined) return null
   if (typeof value === 'number') return value
   return Number(value)
+}
+
+function mapBudgetCodeSummary(budgetCode: any): NonNullable<BudgetRequestRecord['budgetCode']> {
+  return {
+    id: budgetCode.id,
+    code: budgetCode.code,
+    displayCode: budgetCode.displayCode,
+    budgetAmount: decimalToNumber(budgetCode.budgetAmount),
+    department: budgetCode.department ? { id: budgetCode.department.id, name: budgetCode.department.name } : null,
+  }
 }
 
 function mapBudgetRequest(request: any): BudgetRequestRecord {
@@ -126,14 +126,7 @@ function mapBudgetRequest(request: any): BudgetRequestRecord {
     status: request.status,
     createdAt: request.createdAt,
     department: request.department ? { id: request.department.id, name: request.department.name } : null,
-    budgetCode: request.budgetCode
-      ? {
-          id: request.budgetCode.id,
-          code: request.budgetCode.code,
-          displayCode: request.budgetCode.displayCode,
-          budgetAmount: decimalToNumber(request.budgetCode.budgetAmount),
-        }
-      : null,
+    budgetCode: request.budgetCode ? mapBudgetCodeSummary(request.budgetCode) : null,
     projectEstimateCost: decimalToNumber(request.projectEstimateCost),
     engineeringEstimateCost: decimalToNumber(latestSolution?.costEstimate),
   }
@@ -153,7 +146,13 @@ function getVisibleBudgetCodes(requests: BudgetRequestRecord[]) {
 
 function mergeBudgetCodes(
   visibleRequests: BudgetRequestRecord[],
-  creatorCodes: Array<{ id: string; code: string; displayCode: string; budgetAmount: unknown }>,
+  creatorCodes: Array<{
+    id: string
+    code: string
+    displayCode: string
+    budgetAmount: unknown
+    department: { id: string; name: string } | null
+  }>,
 ) {
   const budgetCodesById = new Map<string, NonNullable<BudgetRequestRecord['budgetCode']>>()
 
@@ -162,12 +161,7 @@ function mergeBudgetCodes(
   }
 
   for (const code of creatorCodes) {
-    budgetCodesById.set(code.id, {
-      id: code.id,
-      code: code.code,
-      displayCode: code.displayCode,
-      budgetAmount: decimalToNumber(code.budgetAmount),
-    })
+    budgetCodesById.set(code.id, mapBudgetCodeSummary(code))
   }
 
   return [...budgetCodesById.values()].sort((a, b) => a.displayCode.localeCompare(b.displayCode))
@@ -206,7 +200,15 @@ export async function getBudgetMonitorData(input: BudgetMonitorFilters = {}): Pr
         createdAt: true,
         projectEstimateCost: true,
         department: { select: { id: true, name: true } },
-        budgetCode: { select: { id: true, code: true, displayCode: true, budgetAmount: true } },
+        budgetCode: {
+          select: {
+            id: true,
+            code: true,
+            displayCode: true,
+            budgetAmount: true,
+            department: { select: { id: true, name: true } },
+          },
+        },
         solutions: {
           select: { costEstimate: true },
           orderBy: { createdAt: 'desc' },
@@ -218,25 +220,54 @@ export async function getBudgetMonitorData(input: BudgetMonitorFilters = {}): Pr
     prisma.departments.findMany({ select: { id: true, name: true }, orderBy: { name: 'asc' } }),
     prisma.budget_codes.findMany({
       where: { createdById: user.id },
-      select: { id: true, code: true, displayCode: true, budgetAmount: true },
+      select: {
+        id: true,
+        code: true,
+        displayCode: true,
+        budgetAmount: true,
+        department: { select: { id: true, name: true } },
+      },
       orderBy: { displayCode: 'asc' },
     }),
   ])
 
   let mapped = requests.map(mapBudgetRequest)
+  const assignedRequests = mapped.filter((request) => request.budgetCode)
+  let budgetRequests = assignedRequests
+  if (filters.departmentId) {
+    budgetRequests = budgetRequests.filter((request) => request.budgetCode?.department?.id === filters.departmentId)
+  }
   if (filters.budgetCodeSearch) {
-    mapped = mapped.filter((request) =>
+    budgetRequests = budgetRequests.filter((request) =>
       request.budgetCode
         ? fuzzyMatchBudgetCode(request.budgetCode.displayCode, filters.budgetCodeSearch!)
         : false
     )
   }
 
-  const groups = buildBudgetCodeGroups(mapped)
-  const remainingRequests = mapped.filter((request) => !request.budgetCode)
+  let remainingRequests = mapped.filter((request) => !request.budgetCode)
+  if (filters.departmentId) {
+    remainingRequests = remainingRequests.filter((request) => request.department?.id === filters.departmentId)
+  }
+  if (filters.requestSearch) {
+    const requestSearch = filters.requestSearch.toLowerCase()
+    remainingRequests = remainingRequests.filter((request) =>
+      `${request.title} ${request.department?.name ?? ''} ${request.status}`.toLowerCase().includes(requestSearch)
+    )
+  }
+
+  let budgetCodes = mergeBudgetCodes(mapped, creatorBudgetCodes)
+  if (filters.departmentId) {
+    budgetCodes = budgetCodes.filter((budgetCode) => budgetCode.department?.id === filters.departmentId)
+  }
+  if (filters.budgetCodeSearch) {
+    budgetCodes = budgetCodes.filter((budgetCode) => fuzzyMatchBudgetCode(budgetCode.displayCode, filters.budgetCodeSearch!))
+  }
+
+  const groups = buildBudgetCodeGroups(budgetRequests)
 
   return {
-    budgetCodes: mergeBudgetCodes(mapped, creatorBudgetCodes),
+    budgetCodes,
     groups,
     remainingRequests,
     filters: {
@@ -263,6 +294,7 @@ export async function assignRequestToBudgetCode(input: z.infer<typeof assignSche
           code: normalizedCode,
           displayCode: data.budgetCode!.trim(),
           budgetAmount: data.budgetAmount ?? null,
+          departmentId: data.departmentId ?? null,
           createdById: user.id,
         },
       })
@@ -308,12 +340,19 @@ export async function updateBudgetCodeAmount(input: z.infer<typeof budgetAmountS
     },
     select: { id: true },
   })
+  const creatorOwnedCode = await prisma.budget_codes.findFirst({
+    where: { id: data.budgetCodeId, createdById: user.id },
+    select: { id: true },
+  })
 
-  if (!visibleUsage) throw new Error('Budget code not visible')
+  if (!visibleUsage && !creatorOwnedCode) throw new Error('Budget code not visible')
 
   await prisma.budget_codes.update({
     where: { id: data.budgetCodeId },
-    data: { budgetAmount: data.budgetAmount ?? null },
+    data: {
+      budgetAmount: data.budgetAmount ?? null,
+      ...(data.departmentId !== undefined ? { departmentId: data.departmentId } : {}),
+    },
   })
   revalidatePath('/budget-monitor')
   return { success: true }
@@ -333,6 +372,7 @@ export async function createBudgetCode(input: z.infer<typeof createBudgetCodeSch
         code: normalizedCode,
         displayCode: data.budgetCode.trim(),
         budgetAmount: data.budgetAmount ?? null,
+        departmentId: data.departmentId ?? null,
         createdById: user.id,
       },
     })

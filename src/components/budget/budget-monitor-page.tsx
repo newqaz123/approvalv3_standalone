@@ -1,16 +1,17 @@
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
-import { DndContext, type DragEndEvent } from '@dnd-kit/core'
+import { useCallback, useEffect, useMemo, useState, useTransition } from 'react'
+import { DndContext, DragOverlay, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core'
 import { Download, Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { BudgetCodeBox } from '@/components/budget/budget-code-box'
 import { BudgetCodeCreateDialog } from '@/components/budget/budget-code-create-dialog'
+import { BudgetCodeEditDialog } from '@/components/budget/budget-code-edit-dialog'
 import { BudgetEditDialog } from '@/components/budget/budget-edit-dialog'
-import { RemainingRequestPanel } from '@/components/budget/remaining-request-panel'
+import { BudgetSearchInput } from '@/components/budget/budget-search-input'
+import { RemainingRequestCard, RemainingRequestPanel } from '@/components/budget/remaining-request-panel'
 import {
   assignRequestToBudgetCode,
   createBudgetCode,
@@ -48,6 +49,7 @@ export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorD
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
   const [remainingCollapsed, setRemainingCollapsed] = useState(false)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const [activeRequestId, setActiveRequestId] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
   const [editDialog, setEditDialog] = useState<
     | { type: 'budget'; group: BudgetCodeGroup }
@@ -57,14 +59,48 @@ export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorD
 
   const renderableGroups = useMemo(() => buildRenderableGroups(data), [data])
   const groupIds = useMemo(() => new Set(renderableGroups.map((group) => group.budgetCode.id)), [renderableGroups])
+  const activeRequest = useMemo(
+    () => data.remainingRequests.find((request) => request.id === activeRequestId) ?? null,
+    [activeRequestId, data.remainingRequests]
+  )
+  const budgetCodeOptions = useMemo(
+    () => data.budgetCodes.map((budgetCode) => ({
+      value: budgetCode.displayCode,
+      label: budgetCode.displayCode,
+      meta: budgetCode.department?.name ?? 'No department',
+    })),
+    [data.budgetCodes]
+  )
+  const remainingRequestOptions = useMemo(
+    () => data.remainingRequests.map((request) => ({
+      value: request.title,
+      label: request.title,
+      meta: request.department?.name ?? 'No department',
+    })),
+    [data.remainingRequests]
+  )
 
-  function refresh(nextFilters = filters) {
+  const refresh = useCallback((nextFilters = filters) => {
     startTransition(async () => {
       setData(await getBudgetMonitorData(nextFilters))
     })
+  }, [filters])
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => refresh(filters), 250)
+    return () => window.clearTimeout(timeout)
+  }, [filters, refresh])
+
+  function updateFilters(nextFilters: BudgetMonitorFilters) {
+    setFilters(nextFilters)
+  }
+
+  function handleDragStart(event: DragStartEvent) {
+    setActiveRequestId(String(event.active.id))
   }
 
   async function handleDragEnd(event: DragEndEvent) {
+    setActiveRequestId(null)
     const requestId = String(event.active.id)
     const budgetCodeId = event.over?.id ? String(event.over.id) : null
     if (!budgetCodeId || !groupIds.has(budgetCodeId)) return
@@ -87,8 +123,13 @@ export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorD
   }
 
   return (
-    <DndContext onDragEnd={handleDragEnd}>
-      <div className="space-y-5">
+    <DndContext
+      id="budget-monitor-dnd"
+      onDragStart={handleDragStart}
+      onDragCancel={() => setActiveRequestId(null)}
+      onDragEnd={handleDragEnd}
+    >
+      <div className="space-y-5 pb-24">
         <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
           <div>
             <h1 className="text-2xl font-bold tracking-normal">Budget Monitor</h1>
@@ -102,20 +143,22 @@ export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorD
           </Button>
         </div>
 
-        <div className="grid gap-2 rounded-lg border bg-white p-3 lg:grid-cols-[1.2fr_1fr_1fr_1fr_auto]">
-          <Input
+        <div className="grid gap-2 rounded-lg border bg-white p-3 lg:grid-cols-[1.2fr_1fr_1fr_1fr]">
+          <BudgetSearchInput
             placeholder="Filter budget code"
             value={filters.budgetCodeSearch ?? ''}
-            onChange={(event) => setFilters({ ...filters, budgetCodeSearch: event.target.value })}
+            options={budgetCodeOptions}
+            onChange={(value) => updateFilters({ ...filters, budgetCodeSearch: value || undefined })}
           />
-          <Input
+          <BudgetSearchInput
             placeholder="Filter remaining request"
             value={filters.requestSearch ?? ''}
-            onChange={(event) => setFilters({ ...filters, requestSearch: event.target.value })}
+            options={remainingRequestOptions}
+            onChange={(value) => updateFilters({ ...filters, requestSearch: value || undefined })}
           />
           <Select
             value={filters.departmentId ?? 'all'}
-            onValueChange={(value) => setFilters({ ...filters, departmentId: value === 'all' ? undefined : value })}
+            onValueChange={(value) => updateFilters({ ...filters, departmentId: value === 'all' ? undefined : value })}
           >
             <SelectTrigger>
               <SelectValue placeholder="Department" />
@@ -131,7 +174,7 @@ export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorD
           </Select>
           <Select
             value={filters.status ?? 'all'}
-            onValueChange={(value) => setFilters({ ...filters, status: value === 'all' ? undefined : value })}
+            onValueChange={(value) => updateFilters({ ...filters, status: value === 'all' ? undefined : value })}
           >
             <SelectTrigger>
               <SelectValue placeholder="Status" />
@@ -145,12 +188,9 @@ export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorD
               ))}
             </SelectContent>
           </Select>
-          <Button disabled={isPending} onClick={() => refresh()}>
-            Apply
-          </Button>
         </div>
 
-        <div className="grid items-start gap-4 lg:grid-cols-[1fr_320px]">
+        <div className="space-y-4">
           <div className="space-y-4">
             <Button variant="outline" onClick={() => setCreateDialogOpen(true)}>
               <Plus className="mr-2 h-4 w-4" />
@@ -180,19 +220,33 @@ export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorD
             requests={data.remainingRequests}
             collapsed={remainingCollapsed}
             onCollapsedChange={setRemainingCollapsed}
+            onEditProjectEstimate={(requestId, value) => setEditDialog({ type: 'estimate', requestId, value })}
           />
         </div>
 
+        <BudgetCodeEditDialog
+          open={editDialog?.type === 'budget'}
+          budgetCode={editDialog?.type === 'budget' ? editDialog.group.budgetCode : null}
+          departments={data.filters.departments}
+          onOpenChange={(open) => !open && setEditDialog(null)}
+          onSave={async ({ budgetAmount, departmentId }) => {
+            if (editDialog?.type !== 'budget') return
+            await updateBudgetCodeAmount({
+              budgetCodeId: editDialog.group.budgetCode.id,
+              budgetAmount,
+              departmentId,
+            })
+            refresh()
+          }}
+        />
         <BudgetEditDialog
-          open={editDialog !== null}
-          title={editDialog?.type === 'budget' ? 'Edit budget amount' : 'Edit project estimate cost'}
-          label={editDialog?.type === 'budget' ? 'Budget amount' : 'Project estimate cost'}
-          initialValue={editDialog?.type === 'budget' ? editDialog.group.budgetCode.budgetAmount : editDialog?.value ?? null}
+          open={editDialog?.type === 'estimate'}
+          title="Edit project estimate cost"
+          label="Project estimate cost"
+          initialValue={editDialog?.type === 'estimate' ? editDialog.value : null}
           onOpenChange={(open) => !open && setEditDialog(null)}
           onSave={async (value) => {
-            if (editDialog?.type === 'budget') {
-              await updateBudgetCodeAmount({ budgetCodeId: editDialog.group.budgetCode.id, budgetAmount: value })
-            } else if (editDialog?.type === 'estimate') {
+            if (editDialog?.type === 'estimate') {
               await updateRequestProjectEstimate({ requestId: editDialog.requestId, projectEstimateCost: value })
             }
             refresh()
@@ -201,11 +255,15 @@ export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorD
         <BudgetCodeCreateDialog
           open={createDialogOpen}
           onOpenChange={setCreateDialogOpen}
+          departments={data.filters.departments}
           onCreate={async (input) => {
             await createBudgetCode(input)
             refresh()
           }}
         />
+        <DragOverlay>
+          {activeRequest ? <RemainingRequestCard request={activeRequest} dragging /> : null}
+        </DragOverlay>
       </div>
     </DndContext>
   )

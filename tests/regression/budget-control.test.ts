@@ -34,7 +34,13 @@ describe('budget control helpers', () => {
         status: 'Completed',
         createdAt: new Date('2026-01-01T00:00:00Z'),
         department: { id: 'd1', name: 'IT' },
-        budgetCode: { id: 'b1', code: 'CAPEX-2026-IT', displayCode: 'CAPEX-2026-IT', budgetAmount: 1000 },
+        budgetCode: {
+          id: 'b1',
+          code: 'CAPEX-2026-IT',
+          displayCode: 'CAPEX-2026-IT',
+          budgetAmount: 1000,
+          department: { id: 'd1', name: 'IT' },
+        },
         projectEstimateCost: 200,
         engineeringEstimateCost: 250,
       },
@@ -44,7 +50,13 @@ describe('budget control helpers', () => {
         status: 'ImprovementRequest',
         createdAt: new Date('2026-01-02T00:00:00Z'),
         department: { id: 'd1', name: 'IT' },
-        budgetCode: { id: 'b1', code: 'CAPEX-2026-IT', displayCode: 'CAPEX-2026-IT', budgetAmount: 1000 },
+        budgetCode: {
+          id: 'b1',
+          code: 'CAPEX-2026-IT',
+          displayCode: 'CAPEX-2026-IT',
+          budgetAmount: 1000,
+          department: { id: 'd1', name: 'IT' },
+        },
         projectEstimateCost: 300,
         engineeringEstimateCost: null,
       },
@@ -64,7 +76,13 @@ describe('budget control helpers', () => {
         status: 'Completed',
         createdAt: new Date('2026-01-01T00:00:00Z'),
         department: { id: 'd1', name: 'IT' },
-        budgetCode: { id: 'b1', code: 'CAPEX-2026-IT', displayCode: 'CAPEX-2026-IT', budgetAmount: 1000 },
+        budgetCode: {
+          id: 'b1',
+          code: 'CAPEX-2026-IT',
+          displayCode: 'CAPEX-2026-IT',
+          budgetAmount: 1000,
+          department: { id: 'd1', name: 'IT' },
+        },
         projectEstimateCost: 200,
         engineeringEstimateCost: 250,
       },
@@ -73,15 +91,15 @@ describe('budget control helpers', () => {
     assert.deepEqual(rows, [
       {
         'Budget Code': 'CAPEX-2026-IT',
+        'Budget Department': 'IT',
         'Budget Amount': 1000,
         'Used Amount': 250,
         'Remaining Budget': 750,
         'Request Title': 'Server storage',
-        Department: 'IT',
+        'Request Department': 'IT',
         Status: 'Completed',
         'Project Estimate Cost': 200,
         'Engineering Estimate Cost': 250,
-        'Usage Amount': 250,
         'Request Created Date': '2026-01-01',
       },
     ])
@@ -95,7 +113,13 @@ describe('budget control helpers', () => {
         status: 'Completed',
         createdAt: new Date('2026-01-01T00:00:00Z'),
         department: { id: 'd1', name: 'IT' },
-        budgetCode: { id: 'b1', code: 'CAPEX-2026-IT', displayCode: 'CAPEX-2026-IT', budgetAmount: 1 },
+        budgetCode: {
+          id: 'b1',
+          code: 'CAPEX-2026-IT',
+          displayCode: 'CAPEX-2026-IT',
+          budgetAmount: 1,
+          department: { id: 'd1', name: 'IT' },
+        },
         projectEstimateCost: 0.1,
         engineeringEstimateCost: null,
       },
@@ -105,7 +129,13 @@ describe('budget control helpers', () => {
         status: 'Completed',
         createdAt: new Date('2026-01-02T00:00:00Z'),
         department: { id: 'd1', name: 'IT' },
-        budgetCode: { id: 'b1', code: 'CAPEX-2026-IT', displayCode: 'CAPEX-2026-IT', budgetAmount: 1 },
+        budgetCode: {
+          id: 'b1',
+          code: 'CAPEX-2026-IT',
+          displayCode: 'CAPEX-2026-IT',
+          budgetAmount: 1,
+          department: { id: 'd1', name: 'IT' },
+        },
         projectEstimateCost: 0.2,
         engineeringEstimateCost: null,
       },
@@ -178,6 +208,21 @@ describe('budget monitor server actions', () => {
     assert.match(source, /new Map|new Set/)
     assert.match(getDataBody, /mergeBudgetCodes\(mapped, creatorBudgetCodes\)/)
     assert.match(getDataBody, /request\.budgetCode/)
+  })
+
+  it('links budget codes to departments and applies department filtering by budget code for groups', () => {
+    const source = readServerAction()
+    const schema = readFileSync('prisma/schema.prisma', 'utf8')
+    const getDataBody = source.slice(
+      source.indexOf('export async function getBudgetMonitorData'),
+      source.indexOf('export async function assignRequestToBudgetCode')
+    )
+
+    assert.match(schema, /model budget_codes[\s\S]*departmentId/)
+    assert.match(schema, /model departments[\s\S]*budgetCodes/)
+    assert.match(getDataBody, /budgetCode\?\.department\?\.id === filters\.departmentId/)
+    assert.match(getDataBody, /request\.department\?\.id === filters\.departmentId/)
+    assert.doesNotMatch(source.slice(source.indexOf('function applyBudgetFilters'), source.indexOf('function decimalToNumber')), /where\.departmentId/)
   })
 
   it('uses strict finite bounded money parsing without empty-string coercion', () => {

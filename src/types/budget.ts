@@ -3,6 +3,10 @@ export interface BudgetCodeSummary {
   code: string
   displayCode: string
   budgetAmount: number | null
+  department: {
+    id: string
+    name: string
+  } | null
 }
 
 export interface BudgetRequestRecord {

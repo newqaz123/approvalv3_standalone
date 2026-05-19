@@ -83,15 +83,15 @@ export function buildBudgetExportRows(requests: BudgetRequestRecord[]) {
 
       return {
         'Budget Code': budgetCode.displayCode,
+        'Budget Department': budgetCode.department?.name ?? '',
         'Budget Amount': budgetCode.budgetAmount,
         'Used Amount': usedByCode.get(budgetCode.id) ?? usageAmount,
         'Remaining Budget': remainingByCode.get(budgetCode.id) ?? null,
         'Request Title': request.title,
-        Department: request.department?.name ?? '',
+        'Request Department': request.department?.name ?? '',
         Status: request.status,
         'Project Estimate Cost': request.projectEstimateCost,
         'Engineering Estimate Cost': request.engineeringEstimateCost,
-        'Usage Amount': usageAmount,
         'Request Created Date': request.createdAt.toISOString().slice(0, 10),
       }
     })

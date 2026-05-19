@@ -26,14 +26,21 @@ export function BudgetCodeBox({
   })
 
   return (
-    <section className={`overflow-hidden rounded-lg border bg-white shadow-sm ${isOver ? 'ring-2 ring-blue-500' : ''}`}>
+    <section
+      ref={setNodeRef}
+      className={`overflow-hidden rounded-lg border bg-white shadow-sm transition ${
+        isOver ? 'border-blue-400 bg-blue-50/30 ring-2 ring-blue-500' : ''
+      }`}
+    >
       <div className="border-b bg-slate-50 p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <h2 className="break-words text-2xl font-bold tracking-normal text-gray-950">
               {group.budgetCode.displayCode}
             </h2>
-            <p className="mt-1 text-xs text-gray-500">{group.assignedRequestCount} assigned request(s)</p>
+            <p className="mt-1 text-xs text-gray-500">
+              {group.budgetCode.department?.name ?? 'No department'} - {group.assignedRequestCount} assigned request(s)
+            </p>
           </div>
           <div className="flex items-center gap-1">
             <Button variant="ghost" size="icon" onClick={onEditBudgetAmount} title="Edit budget amount">
@@ -61,38 +68,50 @@ export function BudgetCodeBox({
       </div>
 
       {!collapsed && (
-        <div ref={setNodeRef} className="p-3">
-          <div className="grid grid-cols-[1.6fr_.7fr_.8fr_.9fr_.9fr_auto] border-b px-2 py-2 text-xs font-semibold text-gray-600">
-            <div>Request</div>
-            <div>Dept.</div>
-            <div>Status</div>
-            <div className="text-right">Budget amount</div>
-            <div className="text-right">Remaining budget</div>
-            <div />
-          </div>
-          {group.requests.map((request) => (
-            <div
-              key={request.id}
-              className="grid grid-cols-[1.6fr_.7fr_.8fr_.9fr_.9fr_auto] items-center border-b px-2 py-2 text-sm"
-            >
-              <div className="min-w-0 truncate font-medium">{request.title}</div>
-              <div className="truncate text-gray-600">{request.department?.name ?? '-'}</div>
-              <div className="truncate text-gray-600">{request.status}</div>
-              <button
-                className="text-right text-blue-700 hover:underline"
-                onClick={() => onEditProjectEstimate(request.id, request.projectEstimateCost)}
-              >
-                {request.projectEstimateCost?.toLocaleString() ?? '-'}
-              </button>
-              <div className="text-right text-gray-600">{group.remainingBudget?.toLocaleString() ?? '-'}</div>
-              <Button variant="ghost" size="icon" onClick={() => onUnassign(request.id)} title="Unassign request">
-                <MinusCircle className="h-4 w-4" />
-              </Button>
+        <div className="p-3">
+          <div className="overflow-x-auto">
+            <div className="min-w-[960px]">
+              <div className="grid grid-cols-[minmax(320px,1.8fr)_150px_220px_150px_160px_64px] border-b px-2 py-2 text-xs font-semibold text-gray-600">
+                <div>Request</div>
+                <div>Dept.</div>
+                <div>Status</div>
+                <div className="text-right">Project estimate</div>
+                <div className="text-right">Remaining budget</div>
+                <div className="sticky right-0 bg-white text-center">Remove</div>
+              </div>
+              {group.requests.map((request) => (
+                <div
+                  key={request.id}
+                  className="grid grid-cols-[minmax(320px,1.8fr)_150px_220px_150px_160px_64px] items-center border-b px-2 py-2 text-sm"
+                >
+                  <div className="min-w-0 truncate pr-3 font-medium">{request.title}</div>
+                  <div className="truncate pr-3 text-gray-600">{request.department?.name ?? '-'}</div>
+                  <div className="truncate pr-3 text-gray-600">{request.status}</div>
+                  <button
+                    type="button"
+                    className="text-right text-blue-700 hover:underline"
+                    onClick={() => onEditProjectEstimate(request.id, request.projectEstimateCost)}
+                  >
+                    {request.projectEstimateCost?.toLocaleString() ?? '-'}
+                  </button>
+                  <div className="text-right text-gray-600">{group.remainingBudget?.toLocaleString() ?? '-'}</div>
+                  <div className="sticky right-0 flex justify-center bg-white">
+                    <Button variant="ghost" size="icon" onClick={() => onUnassign(request.id)} title="Remove request from budget code">
+                      <MinusCircle className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
             </div>
-          ))}
+          </div>
           <div className="mt-3 rounded-md border border-dashed border-gray-300 bg-gray-50 p-4 text-center text-sm text-gray-500">
             Drop remaining request here
           </div>
+        </div>
+      )}
+      {collapsed && (
+        <div className="border-t border-dashed bg-slate-50 px-4 py-3 text-sm text-gray-500">
+          Drop remaining request on this collapsed box
         </div>
       )}
     </section>

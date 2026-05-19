@@ -1,36 +1,45 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import type { BudgetCodeSummary } from '@/types/budget'
 
-interface BudgetCodeCreateDialogProps {
+interface BudgetCodeEditDialogProps {
   open: boolean
-  onOpenChange: (open: boolean) => void
+  budgetCode: BudgetCodeSummary | null
   departments: Array<{ id: string; name: string }>
-  onCreate: (input: { budgetCode: string; budgetAmount: number | null; departmentId: string | null }) => Promise<void>
+  onOpenChange: (open: boolean) => void
+  onSave: (input: { budgetAmount: number | null; departmentId: string | null }) => Promise<void>
 }
 
-export function BudgetCodeCreateDialog({ open, onOpenChange, departments, onCreate }: BudgetCodeCreateDialogProps) {
-  const [budgetCode, setBudgetCode] = useState('')
+export function BudgetCodeEditDialog({
+  open,
+  budgetCode,
+  departments,
+  onOpenChange,
+  onSave,
+}: BudgetCodeEditDialogProps) {
   const [budgetAmount, setBudgetAmount] = useState('')
-  const [departmentId, setDepartmentId] = useState<string>('none')
+  const [departmentId, setDepartmentId] = useState('none')
   const [isSaving, setIsSaving] = useState(false)
 
-  async function handleCreate() {
+  useEffect(() => {
+    if (!open) return
+    setBudgetAmount(budgetCode?.budgetAmount?.toString() ?? '')
+    setDepartmentId(budgetCode?.department?.id ?? 'none')
+  }, [budgetCode, open])
+
+  async function handleSave() {
     setIsSaving(true)
     try {
-      await onCreate({
-        budgetCode,
+      await onSave({
         budgetAmount: budgetAmount.trim() === '' ? null : Number(budgetAmount),
         departmentId: departmentId === 'none' ? null : departmentId,
       })
-      setBudgetCode('')
-      setBudgetAmount('')
-      setDepartmentId('none')
       onOpenChange(false)
     } finally {
       setIsSaving(false)
@@ -41,21 +50,13 @@ export function BudgetCodeCreateDialog({ open, onOpenChange, departments, onCrea
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>New budget code</DialogTitle>
+          <DialogTitle>Edit budget code</DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
           <div className="space-y-2">
-            <Label htmlFor="new-budget-code">Budget code</Label>
+            <Label htmlFor="budget-code-edit-amount">Budget amount</Label>
             <Input
-              id="new-budget-code"
-              value={budgetCode}
-              onChange={(event) => setBudgetCode(event.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="new-budget-amount">Budget amount</Label>
-            <Input
-              id="new-budget-amount"
+              id="budget-code-edit-amount"
               type="number"
               min="0"
               step="0.01"
@@ -83,8 +84,8 @@ export function BudgetCodeCreateDialog({ open, onOpenChange, departments, onCrea
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="button" onClick={handleCreate} disabled={isSaving || budgetCode.trim() === ''}>
-              Create
+            <Button type="button" onClick={handleSave} disabled={isSaving}>
+              Save
             </Button>
           </div>
         </div>

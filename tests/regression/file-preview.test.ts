@@ -62,4 +62,15 @@ describe('file preview type detection', () => {
     assert.equal((router.match(/onPreviewFile=\{handlePreviewFile\}/g) ?? []).length, 7)
     assert.equal((router.match(/onPreviewSolutionFile=\{handlePreviewSolutionFile\}/g) ?? []).length, 6)
   })
+
+  it('serializes budget project estimate before request data reaches preview modals', () => {
+    const source = readFileSync('src/server-actions/requests.ts', 'utf8')
+    const getRequestBody = source.slice(
+      source.indexOf('export async function getRequest'),
+      source.indexOf('/**\n * Get filter options')
+    )
+
+    assert.match(getRequestBody, /projectEstimateCost/)
+    assert.match(getRequestBody, /request\.projectEstimateCost = Number\(request\.projectEstimateCost\) as any/)
+  })
 })

@@ -563,6 +563,10 @@ export async function getRequest(id: string) {
   })
 
   // Convert Decimal to number for client components
+  if (request?.projectEstimateCost !== null && request?.projectEstimateCost !== undefined) {
+    request.projectEstimateCost = Number(request.projectEstimateCost) as any
+  }
+
   if (request?.solutions?.[0]) {
     request.solutions[0].costEstimate = Number(request.solutions[0].costEstimate) as any
   }

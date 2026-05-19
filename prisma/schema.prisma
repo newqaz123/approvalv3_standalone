@@ -30,6 +30,7 @@ model departments {
   updatedAt             DateTime                @updatedAt
   levelNames            Json?
   departmentApprovers   department_approvers[]
+  budgetCodes           budget_codes[]
   hierarchyChangeLogs   hierarchy_change_logs[]
   requests              requests[]
   users                 User[]
@@ -151,13 +152,16 @@ model budget_codes {
   code         String     @unique
   displayCode  String
   budgetAmount Decimal?   @db.Decimal(15, 2)
+  departmentId String?
   createdById  String?
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
   createdBy    User?      @relation("budget_codes_createdByIdTousers", fields: [createdById], references: [id])
+  department   departments? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
   requests     requests[]
 
   @@index([createdById])
+  @@index([departmentId])
   @@index([displayCode])
 }
 
