@@ -297,10 +297,10 @@ export function SubmitterModal({
   // Form states
   const [title, setTitle] = useState(initialData?.title || '')
   const [description, setDescription] = useState(initialData?.description || '')
-  const [solutionTitle, setSolutionTitle] = useState(initialData?.solution?.title || '')
+  const [solutionTitle, setSolutionTitle] = useState(initialData?.solution?.title || (mode === 'solution' ? initialData?.requestTitle || '' : ''))
   const [solutionDescription, setSolutionDescription] = useState(initialData?.solution?.description || '')
   const [cost, setCost] = useState(initialData?.solution?.cost?.toString() || '')
-  const [currency, setCurrency] = useState(initialData?.solution?.currency || 'USD')
+  const [currency, setCurrency] = useState(initialData?.solution?.currency || 'THB')
   const [timeline, setTimeline] = useState(initialData?.solution?.timeline || '')
   const [files, setFiles] = useState<File[]>([])
   const [fileDescriptions, setFileDescriptions] = useState<Record<string, string>>({})
@@ -355,13 +355,20 @@ export function SubmitterModal({
       setSolutionTitle(initialData.solution.title || '')
       setSolutionDescription(initialData.solution.description || '')
       setCost(initialData.solution.cost?.toString() || '')
-      setCurrency(initialData.solution.currency || 'USD')
+      setCurrency(initialData.solution.currency || 'THB')
       setTimeline(initialData.solution.timeline || '')
       
       // Debug: Log existing files
       console.log('🔍 Resubmit modal - existingFiles:', initialData?.existingFiles?.map(f => ({ id: f.id, name: f.fileName })))
     }
   }, [mode, initialData?.solution, initialData?.existingFiles])
+
+  useEffect(() => {
+    if (mode === 'solution' && open) {
+      setSolutionTitle(initialData?.requestTitle || '')
+      setCurrency(initialData?.solution?.currency || 'THB')
+    }
+  }, [mode, open, initialData?.requestTitle, initialData?.solution?.currency])
 
   // Handle file upload
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {

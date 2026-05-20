@@ -50,6 +50,14 @@ describe('Gapforimprove regressions', () => {
     assert.doesNotMatch(adapters, /'Pending Assignment'/)
   })
 
+  it('solution submission starts from the request title and THB currency', () => {
+    const submitterModal = read('src/components/requests/submitter-modal.tsx')
+
+    assert.match(submitterModal, /mode === 'solution' \? initialData\?\.requestTitle \|\| '' : ''/)
+    assert.match(submitterModal, /useState\(initialData\?\.solution\?\.currency \|\| 'THB'\)/)
+    assert.match(submitterModal, /setCurrency\(initialData\.solution\.currency \|\| 'THB'\)/)
+  })
+
   it('notification refresh does not replace an open notification list with loading state', () => {
     const bell = read('src/components/notifications/notification-bell.tsx')
 
