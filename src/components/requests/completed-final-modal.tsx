@@ -32,6 +32,8 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
+import { CompletedApprovalExportBuilder } from '@/components/reports/completed-approval-export-builder'
+import type { ExportPackageRequestItem } from '@/lib/export-package'
 import { cn } from '@/lib/utils'
 import { useState } from 'react'
 
@@ -106,6 +108,7 @@ interface CompletedFinalModalProps {
   onPreviewFile?: (fileId: string) => void
   onPreviewSolutionFile?: (fileId: string) => void
   onExport?: () => void
+  onExportPackage?: (items: ExportPackageRequestItem[]) => Promise<void>
 }
 
 // File icon helper
@@ -210,6 +213,7 @@ export function CompletedFinalModal({
   onPreviewFile,
   onPreviewSolutionFile,
   onExport,
+  onExportPackage,
 }: CompletedFinalModalProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -432,6 +436,16 @@ export function CompletedFinalModal({
 
           <Separator className="bg-slate-200 dark:bg-slate-700" />
 
+          {onExportPackage && (
+            <CompletedApprovalExportBuilder
+              requestAttachments={data.requestFiles}
+              solutionAttachments={data.solution.files}
+              onExportPackage={onExportPackage}
+            />
+          )}
+
+          <Separator className="bg-slate-200 dark:bg-slate-700" />
+
           {/* Approval Flow */}
           <section>
             <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-4 flex items-center gap-2">
@@ -527,10 +541,11 @@ export function CompletedFinalModal({
           </div>
           <Button
             onClick={onExport}
+            disabled={!onExport}
             className="bg-emerald-600 hover:bg-emerald-700 text-white"
           >
             <Printer className="w-4 h-4 mr-1.5" />
-            Export Report
+            Export Report Only
           </Button>
         </div>
       </DialogContent>

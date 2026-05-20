@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useSession } from 'next-auth/react'
-import { LayoutDashboard, FileText, Bell, BarChart3 } from 'lucide-react'
+import { LayoutDashboard, FileText, Bell, BarChart3, WalletCards } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useScrollDirection } from '@/hooks/use-scroll-direction'
 
@@ -20,6 +20,7 @@ const tabs: Tab[] = [
   { name: 'My Requests', href: '/requests', icon: FileText },
   { name: 'Pending Approvals', href: '/requests/my-actions', icon: Bell, badge: true },
   { name: 'Analytics', href: '/analytics', icon: BarChart3 },
+  { name: 'Budget', href: '/budget-monitor', icon: WalletCards },
 ]
 
 /**

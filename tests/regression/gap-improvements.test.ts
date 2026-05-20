@@ -32,6 +32,17 @@ describe('Gapforimprove regressions', () => {
     }
   })
 
+  it('/requests filters use a compact responsive layout', () => {
+    const requestFilters = read('src/components/requests/request-filters.tsx')
+
+    assert.match(requestFilters, /gap-2/)
+    assert.ok(requestFilters.includes('lg:grid-cols-[minmax(16rem,1.4fr)_repeat(4,minmax(0,1fr))]'))
+    assert.match(requestFilters, /h-9/)
+    assert.match(requestFilters, /From date/)
+    assert.match(requestFilters, /To date/)
+    assert.doesNotMatch(requestFilters, /lg:col-span-3/)
+  })
+
   it('modal approval steps can show potential pending approver names instead of Pending Assignment', () => {
     const adapters = read('src/lib/modal-data-adapters.ts')
 

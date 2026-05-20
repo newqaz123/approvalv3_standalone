@@ -1,16 +1,15 @@
 /**
  * PDF Generation Library
- * 
- * Provides utilities for generating PDF documents from approval requests.
+ *
+ * Provides utilities for generating compact approval evidence PDF documents.
  * Uses Puppeteer with headless Chromium for HTML-to-PDF conversion.
  */
 
 import puppeteer from 'puppeteer'
 
-/**
- * Data structure for PDF generation
- */
 export interface RequestPDFData {
+  id?: string
+  referenceId?: string
   title: string
   description: string
   requester: {
@@ -45,7 +44,6 @@ export interface RequestPDFData {
     createdAt: Date
     uploadedBy: string
   }>
-  // Changed from flat array to phased structure
   approvalPhases: Array<{
     phaseName: string
     phaseOrder: number
@@ -71,12 +69,7 @@ export interface RequestPDFData {
   generatedBy: string
 }
 
-/**
- * Generates a PDF document from request data
- * @param data - The request data to include in the PDF
- * @returns A Buffer containing the PDF document
- */
-export async function generateRequestPDF(data: RequestPDFData): Promise<Buffer> {
+export async function generatePdfFromHTML(html: string): Promise<Buffer> {
   const browser = await puppeteer.launch({
     headless: true,
     args: [
@@ -84,21 +77,20 @@ export async function generateRequestPDF(data: RequestPDFData): Promise<Buffer> 
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--disable-gpu',
-      '--font-render-hinting=none'
+      '--font-render-hinting=none',
     ],
-    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
   })
 
   try {
     const page = await browser.newPage()
-    const html = renderRequestHTML(data)
 
     await page.setContent(html, { waitUntil: 'networkidle0' })
 
     const pdf = await page.pdf({
       format: 'A4',
       printBackground: true,
-      margin: { top: '20mm', right: '15mm', bottom: '15mm', left: '15mm' }
+      margin: { top: '14mm', right: '18mm', bottom: '12mm', left: '12mm' },
     })
 
     return Buffer.from(pdf)
@@ -107,43 +99,36 @@ export async function generateRequestPDF(data: RequestPDFData): Promise<Buffer> 
   }
 }
 
-/**
- * Formats a date for display in the PDF
- */
+export async function generateRequestPDF(data: RequestPDFData): Promise<Buffer> {
+  return generatePdfFromHTML(renderRequestEvidenceHTML(data))
+}
+
 function formatDate(date: Date | string): string {
   return new Intl.DateTimeFormat('en-US', {
     year: 'numeric',
-    month: 'long',
+    month: 'short',
     day: 'numeric',
     hour: '2-digit',
-    minute: '2-digit'
+    minute: '2-digit',
   }).format(new Date(date))
 }
 
-/**
- * Formats file size in bytes to human-readable format
- */
+function formatDateShort(date: Date | string): string {
+  return new Intl.DateTimeFormat('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  }).format(new Date(date))
+}
+
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return bytes + ' B'
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
 }
 
-/**
- * Escapes HTML special characters to prevent injection attacks
- */
-function escapeHtml(text: string): string {
-  const div = typeof document !== 'undefined' 
-    ? document.createElement('div')
-    : null
-  
-  if (div) {
-    div.textContent = text
-    return div.innerHTML
-  }
-  
-  // Server-side fallback
-  return text
+function escapeHtml(text: string | number | null | undefined): string {
+  return String(text ?? '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -151,12 +136,29 @@ function escapeHtml(text: string): string {
     .replace(/'/g, '&#039;')
 }
 
-/**
- * Renders the HTML template for the PDF
- */
-function renderRequestHTML(data: RequestPDFData): string {
+function formatCurrency(amount: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat('th-TH', { style: 'currency', currency }).format(amount)
+  } catch {
+    return `${currency} ${amount.toLocaleString('en-US')}`
+  }
+}
+
+function statusClass(status: RequestPDFData['approvalPhases'][number]['approvals'][number]['status']): string {
+  if (status === 'approved') return 'approved'
+  if (status === 'rejected') return 'rejected'
+  return 'pending'
+}
+
+export function renderRequestEvidenceHTML(data: RequestPDFData): string {
   const generatedAt = formatDate(new Date())
-  
+  const createdLabel = formatDateShort(data.createdAt)
+  const completedLabel = data.completedAt ? formatDateShort(data.completedAt) : 'Not completed'
+  const attachmentCount = data.fileAttachments.length + (data.solution?.fileAttachments.length ?? 0)
+  const reference = data.referenceId || data.id || '-'
+  const requestAttachments = data.fileAttachments
+  const solutionAttachments = data.solution?.fileAttachments ?? []
+
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -164,465 +166,284 @@ function renderRequestHTML(data: RequestPDFData): string {
   <style>
     * { box-sizing: border-box; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      font-size: 12px;
-      line-height: 1.5;
-      color: #1f2937;
       margin: 0;
-      padding: 20px;
-    }
-    .header {
-      border-bottom: 2px solid #374151;
-      padding-bottom: 12px;
-      margin-bottom: 20px;
-    }
-    .header h1 {
-      font-size: 20px;
-      font-weight: 600;
-      margin: 0 0 8px 0;
-      color: #111827;
-    }
-    .header .meta {
+      padding: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      color: #17231f;
       font-size: 11px;
-      color: #6b7280;
+      line-height: 1.38;
+      background: #ffffff;
+    }
+    .hero {
+      padding: 18px 20px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, #103f34 0%, #1e6453 100%);
+      color: white;
+      margin-bottom: 12px;
+    }
+    .kicker {
+      font-size: 9px;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+      opacity: .78;
+    }
+    h1 {
+      margin: 6px 0 4px;
+      font-size: 22px;
+      line-height: 1.1;
+    }
+    h3 {
+      margin: 10px 0 6px;
+      color: #254139;
+      font-size: 11px;
+    }
+    .hero-meta {
+      font-size: 10px;
+      opacity: .84;
+    }
+    .summary-panel {
+      border: 1px solid #dbe5e0;
+      border-radius: 14px;
+      padding: 10px;
+      margin-bottom: 10px;
+      page-break-inside: avoid;
+      background: #ffffff;
+    }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+    .metric {
+      position: relative;
+      border: 1px solid #dfe9e4;
+      border-radius: 10px;
+      padding: 10px 10px 10px 14px;
+      background: #f8fbf8;
+      min-height: 48px;
+    }
+    .metric::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 10px;
+      bottom: 10px;
+      width: 4px;
+      border-radius: 0 4px 4px 0;
+      background: #1e6453;
+    }
+    .metric.status-card { background: #f5fbf7; }
+    .metric.requester-card { background: #f8fafc; }
+    .metric.department-card { background: #f7f8fb; }
+    .metric.date-card { background: #fbfaf5; }
+    .metric.requester-card::before { background: #3f6275; }
+    .metric.department-card::before { background: #5a5688; }
+    .metric.date-card::before { background: #a66a1f; }
+    .metric span {
+      display: block;
+      color: #63736d;
+      font-size: 8px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      margin-bottom: 3px;
+    }
+    .metric strong {
+      font-size: 11px;
     }
     .section {
-      margin-bottom: 20px;
+      border: 1px solid #dbe5e0;
+      border-radius: 12px;
+      padding: 11px 12px;
+      margin-bottom: 10px;
+      page-break-inside: avoid;
     }
-    .section-title {
-      font-size: 14px;
-      font-weight: 600;
-      color: #374151;
-      margin-bottom: 8px;
-      padding-bottom: 4px;
-      border-bottom: 1px solid #e5e7eb;
+    .section h2 {
+      margin: 0 0 8px;
+      font-size: 12px;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: #153f35;
     }
-    .row {
-      display: flex;
-      margin-bottom: 6px;
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
     }
-    .label {
-      font-weight: 500;
-      color: #4b5563;
-      min-width: 120px;
+    .solution-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.7fr) minmax(170px, .8fr);
+      gap: 10px;
+      align-items: start;
     }
-    .value {
-      color: #1f2937;
+    .solution-meta {
+      border: 1px solid #e7edea;
+      border-radius: 9px;
+      background: #f8fbf8;
+      padding: 8px;
+    }
+    .solution-meta p {
+      margin: 0 0 7px;
+    }
+    .solution-meta p:last-child {
+      margin-bottom: 0;
+    }
+    .muted {
+      color: #66736e;
     }
     .description {
       white-space: pre-wrap;
-      background: #f9fafb;
-      padding: 10px;
-      border-radius: 4px;
-      margin: 8px 0;
-    }
-    .file-list {
-      list-style: none;
-      padding: 0;
-      margin: 0;
-    }
-    .file-item {
-      padding: 6px 0;
-      border-bottom: 1px solid #f3f4f6;
-    }
-    .file-item:last-child {
-      border-bottom: none;
-    }
-    .timeline {
-      position: relative;
-      padding-left: 24px;
-    }
-    .timeline::before {
-      content: '';
-      position: absolute;
-      left: 6px;
-      top: 0;
-      bottom: 0;
-      width: 2px;
-      background: #e5e7eb;
-    }
-    .timeline-item {
-      position: relative;
-      margin-bottom: 14px;
-    }
-    .timeline-dot {
-      position: absolute;
-      left: -20px;
-      top: 2px;
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      background: #3b82f6;
-      border: 2px solid white;
-    }
-    .timeline-dot.approved { background: #10b981; }
-    .timeline-dot.rejected { background: #ef4444; }
-    .timeline-dot.pending { background: #9ca3af; }
-    .status-badge {
-      display: inline-block;
-      padding: 2px 8px;
-      border-radius: 4px;
-      font-size: 10px;
-      font-weight: 500;
-    }
-    .status-badge.approved { background: #d1fae5; color: #065f46; }
-    .status-badge.rejected { background: #fee2e2; color: #991b1b; }
-    .status-badge.pending { background: #f3f4f6; color: #374151; }
-    .pipeline {
-      display: flex;
-      align-items: flex-start;
-      gap: 8px;
-      margin: 12px 0;
-      overflow-x: auto;
-      padding-bottom: 8px;
-    }
-    .stage {
-      flex-shrink: 0;
-      width: 160px;
-      padding: 10px;
-      border-radius: 6px;
-      border: 2px solid;
-      background: white;
-      position: relative;
-    }
-    .stage.approved {
-      border-color: #10b981;
-      background: #ecfdf5;
-    }
-    .stage.rejected {
-      border-color: #ef4444;
-      background: #fef2f2;
-    }
-    .stage.pending {
-      border-color: #9ca3af;
-      background: #f9fafb;
-    }
-    .stage-header {
-      font-weight: 600;
-      font-size: 11px;
-      margin-bottom: 4px;
-      color: #374151;
-    }
-    .stage-info {
-      font-size: 10px;
-      color: #6b7280;
-      line-height: 1.4;
-    }
-    .stage-status {
-      display: inline-block;
-      padding: 2px 6px;
-      border-radius: 3px;
-      font-size: 9px;
-      font-weight: 600;
-      text-transform: uppercase;
-      margin-top: 4px;
-    }
-    .stage-status.approved {
-      background: #10b981;
-      color: white;
-    }
-    .stage-status.rejected {
-      background: #ef4444;
-      color: white;
-    }
-    .stage-status.pending {
-      background: #9ca3af;
-      color: white;
-    }
-    .stage-type {
-      font-size: 10px;
-      font-weight: 600;
-      color: #6b7280;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 4px;
-      padding-bottom: 4px;
-      border-bottom: 1px solid #e5e7eb;
-    }
-    .arrow {
-      flex-shrink: 0;
-      display: flex;
-      align-items: center;
-      height: 40px;
-      color: #9ca3af;
-    }
-    .arrow svg {
-      width: 24px;
-      height: 24px;
-    }
-    .comment-box {
-      margin-top: 8px;
-      padding: 6px;
-      background: #fef3c7;
-      border-left: 3px solid #f59e0b;
-      border-radius: 3px;
-      font-size: 9px;
-      color: #92400e;
-      font-style: italic;
-    }
-    .approval-phases {
-      margin: 12px 0;
-    }
-    .phase-section {
-      margin-bottom: 20px;
-      page-break-inside: avoid;
-    }
-    .phase-header {
-      font-size: 12px;
-      font-weight: 600;
-      color: #374151;
-      margin-bottom: 10px;
-      padding: 6px 10px;
-      background: #f3f4f6;
-      border-radius: 4px;
-      border-left: 4px solid #3b82f6;
-    }
-    .phase-row {
-      display: flex;
-      align-items: flex-start;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
-    .phase-connector {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin: 10px 0;
+      background: #f8faf9;
+      border-radius: 8px;
       padding: 8px;
-      background: #ecfdf5;
-      border-radius: 4px;
-      font-size: 11px;
-      color: #065f46;
-      font-weight: 500;
+      border: 1px solid #edf2ef;
     }
-    .phase-connector svg {
-      width: 20px;
-      height: 20px;
-      margin-right: 8px;
-    }
-    .stage-small {
-      flex-shrink: 0;
-      width: 180px;
-      padding: 10px;
-      border-radius: 6px;
-      border: 2px solid;
-      background: white;
+    table {
+      width: 100%;
+      border-collapse: collapse;
       font-size: 10px;
-      box-sizing: border-box;
-      word-wrap: break-word;
-      overflow-wrap: break-word;
     }
-    .stage-small.approved { border-color: #10b981; background: #ecfdf5; }
-    .stage-small.rejected { border-color: #ef4444; background: #fef2f2; }
-    .stage-small.pending { border-color: #9ca3af; background: #f9fafb; }
-    .stage-small .stage-type {
-      font-size: 9px;
-      font-weight: 600;
-      color: #6b7280;
+    th, td {
+      border-bottom: 1px solid #e7edea;
+      padding: 5px 4px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      color: #52625c;
+      font-size: 8px;
+      letter-spacing: .08em;
       text-transform: uppercase;
-      letter-spacing: 0.3px;
-      margin-bottom: 3px;
-      padding-bottom: 3px;
-      border-bottom: 1px solid #e5e7eb;
+      background: #f7faf8;
     }
-    .stage-small .stage-header {
-      font-weight: 600;
-      font-size: 10px;
-      margin-bottom: 2px;
-      color: #374151;
-    }
-    .stage-small .stage-info {
-      font-size: 9px;
-      color: #6b7280;
-      line-height: 1.3;
-    }
-    .stage-small .stage-status {
+    .status {
       display: inline-block;
-      padding: 1px 4px;
-      border-radius: 3px;
-      font-size: 8px;
-      font-weight: 600;
-      text-transform: uppercase;
-      margin-top: 3px;
+      border-radius: 999px;
+      padding: 2px 7px;
+      font-weight: 700;
+      text-transform: capitalize;
     }
-    .stage-small .stage-status.approved { background: #10b981; color: white; }
-    .stage-small .stage-status.rejected { background: #ef4444; color: white; }
-    .stage-small .stage-status.pending { background: #9ca3af; color: white; }
-    .stage-small .comment-box {
-      margin-top: 4px;
-      padding: 4px;
-      background: #fef3c7;
-      border-left: 2px solid #f59e0b;
-      border-radius: 2px;
-      font-size: 8px;
-      color: #92400e;
-      font-style: italic;
-    }
+    .status.approved { background: #dff5e8; color: #14643d; }
+    .status.rejected { background: #fee2e2; color: #991b1b; }
+    .status.pending { background: #f1f5f9; color: #475569; }
     .footer {
-      margin-top: 30px;
-      padding-top: 10px;
+      margin-top: 14px;
+      padding-top: 8px;
       border-top: 1px solid #e5e7eb;
-      font-size: 10px;
-      color: #9ca3af;
+      color: #8a9691;
+      font-size: 9px;
       text-align: center;
     }
   </style>
 </head>
 <body>
-  <div class="header">
+  <div class="hero">
+    <div class="kicker">Approval Evidence Packet</div>
     <h1>${escapeHtml(data.title)}</h1>
-    <div class="meta">
-      Approval Request Report • Generated ${generatedAt}
+    <div class="hero-meta">Reference: ${escapeHtml(reference)} • Generated ${generatedAt}</div>
+  </div>
+
+  <div class="summary-panel">
+    <div class="metrics">
+      <div class="metric status-card"><span>Status</span><strong>${escapeHtml(data.status)}</strong></div>
+      <div class="metric requester-card"><span>Requester</span><strong>${escapeHtml(data.requester.name)}</strong></div>
+      <div class="metric department-card"><span>Department</span><strong>${escapeHtml(data.department)}</strong></div>
+      <div class="metric date-card"><span>Dates</span><strong>${escapeHtml(createdLabel)} → ${escapeHtml(completedLabel)}</strong></div>
     </div>
-  </div>
-
-  <div class="section">
-    <div class="section-title">Request Information</div>
-    <div class="row"><span class="label">Requester:</span><span class="value">${escapeHtml(data.requester.name)}</span></div>
-    <div class="row"><span class="label">Department:</span><span class="value">${escapeHtml(data.department)}</span></div>
-    <div class="row"><span class="label">Email:</span><span class="value">${escapeHtml(data.requester.email)}</span></div>
-    <div class="row"><span class="label">Status:</span><span class="value">${escapeHtml(data.status)}</span></div>
-    <div class="row"><span class="label">Created:</span><span class="value">${formatDate(data.createdAt)}</span></div>
-    ${data.completedAt ? `<div class="row"><span class="label">Completed:</span><span class="value">${formatDate(data.completedAt)}</span></div>` : ''}
-  </div>
-
-  <div class="section">
-    <div class="section-title">Description</div>
-    <div class="description">${escapeHtml(data.description)}</div>
   </div>
 
   ${data.solution ? `
   <div class="section">
-    <div class="section-title">Engineering Solution</div>
-    <div class="row"><span class="label">Solution:</span><span class="value">${escapeHtml(data.solution.title)}</span></div>
-    <div class="row"><span class="label">Cost Estimate:</span><span class="value">${new Intl.NumberFormat('th-TH', { style: 'currency', currency: data.solution.currency }).format(data.solution.costEstimate)}</span></div>
-    ${data.solution.timeline ? `<div class="row"><span class="label">Timeline:</span><span class="value">${escapeHtml(data.solution.timeline)}</span></div>` : ''}
-    <div class="row"><span class="label">Submitted By:</span><span class="value">${escapeHtml(data.solution.submittedBy)}</span></div>
-    <div class="row"><span class="label">Submitted:</span><span class="value">${formatDate(data.solution.submittedAt)}</span></div>
-    ${data.solution.conceptDesign ? `<div class="row"><span class="label">Concept:</span></div><div class="description">${escapeHtml(data.solution.conceptDesign)}</div>` : ''}
-  </div>
-  ` : ''}
-
-  ${(data.fileAttachments.length > 0 || (data.solution && data.solution.fileAttachments.length > 0)) ? `
-  <div class="section">
-    <div class="section-title">All Attachments</div>
-
-    ${data.fileAttachments.length > 0 ? `
-    <div style="margin-bottom: 12px;">
-      <div style="font-weight: 600; font-size: 13px; color: #374151; margin-bottom: 6px;">Initial Request Attachments (${data.fileAttachments.length})</div>
-      <ul class="file-list">
-        ${data.fileAttachments.map(file => `
-          <li class="file-item">
-            <div>${escapeHtml(file.fileName)}</div>
-            <div style="font-size: 10px; color: #6b7280;">
-              ${formatFileSize(file.fileSize)} • ${escapeHtml(file.fileType)} • Uploaded by ${escapeHtml(file.uploadedBy)} • ${formatDate(file.createdAt)}
-            </div>
-          </li>
-        `).join('')}
-      </ul>
+    <h2>Engineering Solution</h2>
+    <div class="solution-grid">
+      <div>
+        <strong>${escapeHtml(data.solution.title)}</strong>
+        <div class="description">${escapeHtml(data.solution.description)}</div>
+      </div>
+      <div class="solution-meta">
+        <p><strong>Approved Cost</strong><br>${escapeHtml(formatCurrency(data.solution.costEstimate, data.solution.currency))}</p>
+        <p><strong>Submitted</strong><br>${escapeHtml(data.solution.submittedBy)}<br>${formatDate(data.solution.submittedAt)}</p>
+        ${data.solution.timeline ? `<p><strong>Timeline</strong><br>${escapeHtml(data.solution.timeline)}</p>` : ''}
+      </div>
     </div>
-    ` : ''}
-
-    ${data.solution && data.solution.fileAttachments.length > 0 ? `
-    <div>
-      <div style="font-weight: 600; font-size: 13px; color: #374151; margin-bottom: 6px;">Engineering Solution Attachments (${data.solution.fileAttachments.length})</div>
-      <ul class="file-list">
-        ${data.solution.fileAttachments.map(file => `
-          <li class="file-item">
-            <div>${escapeHtml(file.fileName)}</div>
-            <div style="font-size: 10px; color: #6b7280;">
-              ${formatFileSize(file.fileSize)} • ${escapeHtml(file.fileType)} • ${formatDate(file.createdAt)}
-            </div>
-          </li>
-        `).join('')}
-      </ul>
-    </div>
-    ` : ''}
+    ${data.solution.conceptDesign ? `<br><strong>Concept Design</strong><div class="description">${escapeHtml(data.solution.conceptDesign)}</div>` : ''}
   </div>
   ` : ''}
 
   <div class="section">
-    <div class="section-title">Approval Workflow</div>
-    <div class="approval-phases">
-      ${data.approvalPhases.length === 1 && data.approvalPhases[0].approvals.length === 1
-        ? `
-          <!-- Single approver - simplified layout -->
-          <div class="phase-row" style="justify-content: flex-start;">
-            <div class="stage-small ${data.approvalPhases[0].approvals[0].status}">
-              <div class="stage-type">${escapeHtml(data.approvalPhases[0].approvals[0].stage)}</div>
-              <div class="stage-header">${escapeHtml(data.approvalPhases[0].approvals[0].approverName)}</div>
-              <div class="stage-info">
-                Submitter: ${escapeHtml(data.requester.department)}
-                <br>Level ${data.approvalPhases[0].approvals[0].requiredLevel}
-                ${data.approvalPhases[0].approvals[0].approvedAt ? `<br>${formatDate(data.approvalPhases[0].approvals[0].approvedAt)}` : ''}
-              </div>
-              <div class="stage-status ${data.approvalPhases[0].approvals[0].status}">${data.approvalPhases[0].approvals[0].status}</div>
-              ${data.approvalPhases[0].approvals[0].comments ? `<div class="comment-box">"${escapeHtml(data.approvalPhases[0].approvals[0].comments)}"</div>` : ''}
-            </div>
-          </div>
-        `
-        : `
-          <!-- Multi-phase workflow -->
-          ${data.approvalPhases.map((phase, phaseIndex) => `
-            <div class="phase-section">
-              <div class="phase-header">${escapeHtml(phase.phaseName)}</div>
-              <div class="phase-row">
-                ${phase.approvals.map((approval, index) => `
-                  <div class="stage-small ${approval.status}">
-                    <div class="stage-type">${escapeHtml(approval.stage)}</div>
-                    <div class="stage-header">${escapeHtml(approval.approverName)}</div>
-                    <div class="stage-info">
-                      ${phaseIndex === 0 && index === 0
-                        ? `Submitter: ${escapeHtml(data.requester.department)}`
-                        : (approval.approverDepartment || '')
-                      }
-                      ${approval.approverRole && approval.approverRole !== approval.approverDepartment ? `<br>Role: ${escapeHtml(approval.approverRole)}` : ''}
-                      <br>Level ${approval.requiredLevel}
-                      ${approval.approvedAt ? `<br>${formatDate(approval.approvedAt)}` : ''}
-                    </div>
-                    <div class="stage-status ${approval.status}">${approval.status}</div>
-                    ${approval.comments ? `<div class="comment-box">"${escapeHtml(approval.comments)}"</div>` : ''}
-                  </div>
-                  ${index < phase.approvals.length - 1 ? `
-                    <div class="arrow" style="height: 30px;">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 20px; height: 20px;">
-                        <line x1="5" y1="12" x2="19" y2="12"></line>
-                        <polyline points="12 5 19 12 12 19"></polyline>
-                      </svg>
-                    </div>
-                  ` : ''}
-                `).join('')}
-              </div>
-            </div>
-            ${phaseIndex < data.approvalPhases.length - 1 ? `
-              <div class="phase-connector">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <line x1="12" y1="5" x2="12" y2="19"></line>
-                  <polyline points="19 12 12 19 5 12"></polyline>
-                </svg>
-                Proceeds to next phase
-              </div>
-            ` : ''}
+    <h2>Original Request</h2>
+    <div class="description">${escapeHtml(data.description)}</div>
+  </div>
+
+  <div class="section">
+    <h2>Attachment Index</h2>
+    <table>
+      <thead>
+        <tr><th>Source</th><th>File</th><th>Size</th><th>Date</th></tr>
+      </thead>
+      <tbody>
+        ${requestAttachments.map((file) => `
+          <tr>
+            <td>Request</td>
+            <td>${escapeHtml(file.fileName)}<br><span class="muted">Uploaded by ${escapeHtml(file.uploadedBy)}</span></td>
+            <td>${formatFileSize(file.fileSize)}</td>
+            <td>${formatDateShort(file.createdAt)}</td>
+          </tr>
+        `).join('')}
+        ${solutionAttachments.map((file) => `
+          <tr>
+            <td>Solution</td>
+            <td>${escapeHtml(file.fileName)}</td>
+            <td>${formatFileSize(file.fileSize)}</td>
+            <td>${formatDateShort(file.createdAt)}</td>
+          </tr>
+        `).join('')}
+        ${attachmentCount === 0 ? '<tr><td colspan="4" class="muted">No attachments recorded.</td></tr>' : ''}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="section">
+    <h2>Approval Chain</h2>
+    ${data.approvalPhases.map((phase) => `
+      <h3>${escapeHtml(phase.phaseName)}</h3>
+      <table>
+        <thead>
+          <tr><th>Stage</th><th>Approver</th><th>Level</th><th>Department</th><th>Status</th><th>Approved</th><th>Comments</th></tr>
+        </thead>
+        <tbody>
+          ${phase.approvals.map((approval) => `
+            <tr>
+              <td>${escapeHtml(approval.stage)}</td>
+              <td>${escapeHtml(approval.approverName)}</td>
+              <td>${approval.requiredLevel}</td>
+              <td>${escapeHtml(approval.approverDepartment || approval.approverRole || '-')}</td>
+              <td><span class="status ${statusClass(approval.status)}">${escapeHtml(approval.status)}</span></td>
+              <td>${approval.approvedAt ? formatDate(approval.approvedAt) : '-'}</td>
+              <td>${escapeHtml(approval.comments || '-')}</td>
+            </tr>
           `).join('')}
-        `
-      }
-    </div>
+        </tbody>
+      </table>
+    `).join('')}
   </div>
 
   <div class="section">
-    <div class="section-title">Activity Timeline</div>
-    <div class="timeline">
-      ${data.activities.map(activity => `
-        <div class="timeline-item">
-          <div class="timeline-dot"></div>
-          <div style="font-weight: 500;">${escapeHtml(activity.action)}</div>
-          <div style="font-size: 11px; color: #6b7280;">
-            ${escapeHtml(activity.userName)} • ${formatDate(activity.createdAt)}
-          </div>
-          ${activity.comments ? `<div style="font-size: 11px; color: #4b5563; margin-top: 2px;">"${escapeHtml(activity.comments)}"</div>` : ''}
-        </div>
-      `).join('')}
-    </div>
+    <h2>Activity Log</h2>
+    <table>
+      <thead>
+        <tr><th>Action</th><th>User</th><th>Date</th><th>Comments</th></tr>
+      </thead>
+      <tbody>
+        ${data.activities.map((activity) => `
+          <tr>
+            <td>${escapeHtml(activity.action)}</td>
+            <td>${escapeHtml(activity.userName)}</td>
+            <td>${formatDate(activity.createdAt)}</td>
+            <td>${escapeHtml(activity.comments || '-')}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
   </div>
 
   <div class="footer">

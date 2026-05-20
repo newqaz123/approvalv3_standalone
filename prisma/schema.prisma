@@ -30,6 +30,7 @@ model departments {
   updatedAt             DateTime                @updatedAt
   levelNames            Json?
   departmentApprovers   department_approvers[]
+  budgetCodes           budget_codes[]
   hierarchyChangeLogs   hierarchy_change_logs[]
   requests              requests[]
   users                 User[]
@@ -146,6 +147,24 @@ model request_engineer_assignments {
   @@index([requestId])
 }
 
+model budget_codes {
+  id           String     @id @default(uuid())
+  code         String     @unique
+  displayCode  String
+  budgetAmount Decimal?   @db.Decimal(15, 2)
+  departmentId String?
+  createdById  String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  createdBy    User?      @relation("budget_codes_createdByIdTousers", fields: [createdById], references: [id])
+  department   departments? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  requests     requests[]
+
+  @@index([createdById])
+  @@index([departmentId])
+  @@index([displayCode])
+}
+
 model requests {
   id                                String                         @id @default(uuid())
   title                             String
@@ -161,16 +180,20 @@ model requests {
   deletedBy                         String?
   isDeleted                         Boolean                        @default(false)
   isArchived                        Boolean                        @default(false)
+  budgetCodeId                      String?
+  projectEstimateCost               Decimal?                       @db.Decimal(15, 2)
   fileAttachments                   file_attachments[]
   notifications                     notifications[]
   activities                        request_activities[]
   approvals                         request_approvals[]
   engineerAssignments               request_engineer_assignments[]
+  budgetCode                        budget_codes?                 @relation(fields: [budgetCodeId], references: [id], onDelete: SetNull)
   deletedByUser                     User?                         @relation("requests_deletedByTousers", fields: [deletedBy], references: [id])
   department                        departments                    @relation(fields: [departmentId], references: [id])
   requester                         User                          @relation("requests_requesterIdTousers", fields: [requesterId], references: [id])
   solutions                         solutions[]
 
+  @@index([budgetCodeId])
   @@index([createdAt])
   @@index([departmentId])
   @@index([isDeleted])
@@ -258,6 +281,7 @@ model User {
   requestActivities                                              request_activities[]
   approvedRequests                                               request_approvals[]            @relation("request_approvals_approverIdTousers")
   requiredApprovalRequests                                       request_approvals[]            @relation("request_approvals_requiredApproverIdTousers")
+  createdBudgetCodes                                             budget_codes[]                 @relation("budget_codes_createdByIdTousers")
   engineerAssignments                                            request_engineer_assignments[]
   deletedRequests                                                requests[]                     @relation("requests_deletedByTousers")
   createdRequests                                                requests[]                     @relation("requests_requesterIdTousers")

@@ -4,7 +4,6 @@ import { useState, useEffect, useRef } from 'react'
 import { format } from 'date-fns'
 import { FileText, Download, Eye, User, CheckCircle2, Trash2, Wrench } from 'lucide-react'
 import { useSession } from 'next-auth/react'
-import dynamic from 'next/dynamic'
 import {
   Dialog,
   DialogContent,
@@ -40,13 +39,9 @@ import { useIsMobile } from '@/hooks/use-media-query'
 import { RejectSolutionDialog } from '@/components/solutions/reject-solution-dialog'
 import { FilePreviewDialog } from '@/components/requests/file-preview-dialog'
 import { getFileDownloadUrl, getFilePreviewUrl } from '@/lib/file-preview'
+import { CompletedApprovalExportBuilder } from '@/components/reports/completed-approval-export-builder'
+import type { ExportPackageRequestItem } from '@/lib/export-package'
 import Link from 'next/link'
-
-// Dynamic import for heavy PDF export component
-const ExportPDFButton = dynamic(
-  () => import('@/components/reports/export-pdf-button').then(mod => ({ default: mod.ExportPDFButton })),
-  { loading: () => <Button disabled>Exporting PDF...</Button> }
-)
 
 /**
  * PERFORMANCE OPTIMIZATION: Static JSX elements hoisted outside component
@@ -346,6 +341,53 @@ export function RequestDetailModal({
       a.click()
       document.body.removeChild(a)
     }
+  }
+
+  const downloadBase64File = (data: string, contentType: string, filename: string) => {
+    const byteCharacters = atob(data)
+    const byteNumbers = new Array(byteCharacters.length)
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i)
+    }
+    const byteArray = new Uint8Array(byteNumbers)
+    const blob = new Blob([byteArray], { type: contentType })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  const handleExportPackage = async (items: ExportPackageRequestItem[]) => {
+    const { exportRequestPackageAsPDF } = await import('@/server-actions/reports')
+    const result = await exportRequestPackageAsPDF(requestId, items)
+
+    if (!result.success || !result.data) {
+      throw new Error(result.error || 'Failed to generate PDF package')
+    }
+
+    downloadBase64File(
+      result.data,
+      result.contentType || 'application/pdf',
+      result.filename || `approval-package-${requestId}.pdf`
+    )
+  }
+
+  const renderExportBuilder = () => {
+    if (request.status !== 'Completed' || !allApprovalsComplete) return null
+
+    return (
+      <div className="mt-3">
+        <CompletedApprovalExportBuilder
+          requestAttachments={request.fileAttachments ?? []}
+          solutionAttachments={solution?.fileAttachments ?? []}
+          onExportPackage={handleExportPackage}
+        />
+      </div>
+    )
   }
 
   const formatFileSize = (bytes: number) => {
@@ -800,16 +842,7 @@ export function RequestDetailModal({
                     </div>
                   </div>
                 </div>
-                {/* Export PDF Button - only for completed requests with all approvals approved */}
-                {allApprovalsComplete && (
-                  <div className="mt-3">
-                    <ExportPDFButton
-                      requestId={request.id}
-                      requestStatus={request.status}
-                      allApprovalsComplete={allApprovalsComplete}
-                    />
-                  </div>
-                )}
+                {renderExportBuilder()}
               </>
             )}
 
@@ -919,17 +952,6 @@ export function RequestDetailModal({
                   {/* Final Approval Progress */}
                   {finalApprovals.length > 0 && (
                     <ApprovalProgress approvals={finalApprovals} />
-                  )}
-
-                  {/* Export PDF Button - only for FinalApproval requests with all approvals approved */}
-                  {allApprovalsComplete && finalApprovals.length > 0 && finalApprovals.every(a => a.status === 'approved') && (
-                    <div className="pt-2">
-                      <ExportPDFButton
-                        requestId={request.id}
-                        requestStatus={request.status}
-                        allApprovalsComplete={allApprovalsComplete}
-                      />
-                    </div>
                   )}
                 </div>
               </>
@@ -1348,16 +1370,7 @@ export function RequestDetailModal({
                     </div>
                   </div>
                 </div>
-                {/* Export PDF Button - only for completed requests with all approvals approved */}
-                {allApprovalsComplete && (
-                  <div className="mt-3">
-                    <ExportPDFButton
-                      requestId={request.id}
-                      requestStatus={request.status}
-                      allApprovalsComplete={allApprovalsComplete}
-                    />
-                  </div>
-                )}
+                {renderExportBuilder()}
               </>
             )}
 
@@ -1467,17 +1480,6 @@ export function RequestDetailModal({
                   {/* Final Approval Progress */}
                   {finalApprovals.length > 0 && (
                     <ApprovalProgress approvals={finalApprovals} />
-                  )}
-
-                  {/* Export PDF Button - only for FinalApproval requests with all approvals approved */}
-                  {allApprovalsComplete && finalApprovals.length > 0 && finalApprovals.every(a => a.status === 'approved') && (
-                    <div className="pt-2">
-                      <ExportPDFButton
-                        requestId={request.id}
-                        requestStatus={request.status}
-                        allApprovalsComplete={allApprovalsComplete}
-                      />
-                    </div>
                   )}
                 </div>
               </>

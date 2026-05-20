@@ -20,6 +20,7 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { FilePreviewDialog } from '@/components/requests/file-preview-dialog'
 import { getFilePreviewUrl, normalizeStoredFilePath } from '@/lib/file-preview'
+import type { ExportPackageRequestItem } from '@/lib/export-package'
 
 interface RequestModalRouterProps {
   requestId: string
@@ -292,6 +293,62 @@ export function RequestModalRouter({
     setPreviewFile(file)
     setPreviewUrl(getFileUrl(file))
     setPreviewOpen(true)
+  }
+
+  const downloadBase64File = (data: string, contentType: string, filename: string) => {
+    const byteCharacters = atob(data)
+    const byteNumbers = new Array(byteCharacters.length)
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i)
+    }
+    const byteArray = new Uint8Array(byteNumbers)
+    const blob = new Blob([byteArray], { type: contentType })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  const handleExportReport = async () => {
+    try {
+      const { exportRequestAsPDF } = await import('@/server-actions/reports')
+      const result = await exportRequestAsPDF(requestId)
+
+      if (!result.success || !result.data) {
+        toast.error(result.error || 'Failed to generate PDF')
+        return
+      }
+
+      downloadBase64File(
+        result.data,
+        result.contentType || 'application/pdf',
+        result.filename || `request-${requestId}.pdf`
+      )
+      toast.success('PDF exported successfully')
+    } catch (error) {
+      console.error('PDF export error:', error)
+      toast.error('Failed to export PDF')
+    }
+  }
+
+  const handleExportPackage = async (items: ExportPackageRequestItem[]) => {
+    const { exportRequestPackageAsPDF } = await import('@/server-actions/reports')
+    const result = await exportRequestPackageAsPDF(requestId, items)
+
+    if (!result.success || !result.data) {
+      throw new Error(result.error || 'Failed to generate PDF package')
+    }
+
+    downloadBase64File(
+      result.data,
+      result.contentType || 'application/pdf',
+      result.filename || `approval-package-${requestId}.pdf`
+    )
+    toast.success('Evidence package exported successfully')
   }
 
   const handleApprove = async (comment: string) => {
@@ -694,44 +751,8 @@ export function RequestModalRouter({
           onDownloadSolutionFile={handleDownloadSolutionFile}
           onPreviewFile={handlePreviewFile}
           onPreviewSolutionFile={handlePreviewSolutionFile}
-          onExport={async () => {
-            try {
-              const { exportRequestAsPDF } = await import('@/server-actions/reports')
-              const result = await exportRequestAsPDF(requestId)
-              
-              if (!result.success) {
-                toast.error(result.error || 'Failed to generate PDF')
-                return
-              }
-
-              // Trigger download in browser
-              if (result.data) {
-                // Decode base64 to binary
-                const byteCharacters = atob(result.data)
-                const byteNumbers = new Array(byteCharacters.length)
-                for (let i = 0; i < byteCharacters.length; i++) {
-                  byteNumbers[i] = byteCharacters.charCodeAt(i)
-                }
-                const byteArray = new Uint8Array(byteNumbers)
-
-                // Create blob and trigger download
-                const blob = new Blob([byteArray], { type: result.contentType || 'application/pdf' })
-                const url = URL.createObjectURL(blob)
-                const a = document.createElement('a')
-                a.href = url
-                a.download = result.filename || `request-${requestId}.pdf`
-                document.body.appendChild(a)
-                a.click()
-                document.body.removeChild(a)
-                URL.revokeObjectURL(url)
-                
-                toast.success('PDF exported successfully')
-              }
-            } catch (error) {
-              console.error('PDF export error:', error)
-              toast.error('Failed to export PDF')
-            }
-          }}
+          onExport={handleExportReport}
+          onExportPackage={handleExportPackage}
         />
       )
       break

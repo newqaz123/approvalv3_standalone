@@ -21,10 +21,9 @@ export function ExportPDFButton({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Export only available for FinalApproval/Completed with all approvals complete
+  // Export only available for completed requests with all approvals complete
   const canExport =
-    (requestStatus === 'FinalApproval' || requestStatus === 'Completed') &&
-    allApprovalsComplete
+    requestStatus === 'Completed' && allApprovalsComplete
 
   const handleExport = async () => {
     setError(null)
