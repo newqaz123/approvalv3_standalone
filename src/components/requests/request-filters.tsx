@@ -74,7 +74,7 @@ export function RequestFilters({ departments, requesters, onFilterChange }: Requ
   )
 
   return (
-    <div className="space-y-4 p-4 bg-gray-50 rounded-lg border">
+    <div className="space-y-3 rounded-lg border bg-gray-50 p-3">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-gray-700">Filters</h3>
         {hasActiveFilters && (
@@ -90,52 +90,25 @@ export function RequestFilters({ departments, requesters, onFilterChange }: Requ
         )}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-        {/* Search */}
-        <div className="lg:col-span-3">
+      <div className="grid grid-cols-1 gap-2 md:grid-cols-2 lg:grid-cols-[minmax(16rem,1.4fr)_repeat(4,minmax(0,1fr))]">
+        <div>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
             <Input
               placeholder="Search title or description..."
               value={filters.search || ''}
               onChange={(e) => updateFilter('search', e.target.value)}
-              className="pl-9"
+              className="h-9 min-h-9 pl-9"
             />
           </div>
         </div>
 
-        {/* Status Filter */}
-        <div className="lg:col-span-3">
-          <Label className="text-sm font-medium text-gray-700 mb-2 block">Status</Label>
-          <div className="flex flex-wrap gap-4">
-            {ALL_STATUSES.map((status) => {
-              const isChecked = filters.statuses?.includes(status) || false
-              return (
-                <div key={status} className="flex items-center space-x-2">
-                  <Checkbox
-                    id={`request-status-${status}`}
-                    checked={isChecked}
-                    onCheckedChange={(checked) => updateStatusFilter(status, checked as boolean)}
-                  />
-                  <Label
-                    htmlFor={`request-status-${status}`}
-                    className="text-sm cursor-pointer normal-case"
-                  >
-                    {formatStatusLabel(status)}
-                  </Label>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-
-        {/* Department Filter */}
         <div>
           <Select
             value={filters.departmentId || 'all'}
             onValueChange={(value) => updateFilter('departmentId', value === 'all' ? undefined : value)}
           >
-            <SelectTrigger>
+            <SelectTrigger className="h-9 min-h-9">
               <SelectValue placeholder="All Departments" />
             </SelectTrigger>
             <SelectContent>
@@ -149,13 +122,12 @@ export function RequestFilters({ departments, requesters, onFilterChange }: Requ
           </Select>
         </div>
 
-        {/* Requester Filter */}
         <div>
           <Select
             value={filters.requesterId || 'all'}
             onValueChange={(value) => updateFilter('requesterId', value === 'all' ? undefined : value)}
           >
-            <SelectTrigger>
+            <SelectTrigger className="h-9 min-h-9">
               <SelectValue placeholder="All Requesters" />
             </SelectTrigger>
             <SelectContent>
@@ -169,25 +141,69 @@ export function RequestFilters({ departments, requesters, onFilterChange }: Requ
           </Select>
         </div>
 
-        {/* Date From */}
         <div>
           <Input
-            type="date"
-            placeholder="From Date"
+            id="request-date-from"
+            type={filters.dateFrom ? 'date' : 'text'}
+            placeholder="From date"
+            aria-label="From date"
             value={filters.dateFrom || ''}
+            onFocus={(e) => {
+              e.currentTarget.type = 'date'
+              e.currentTarget.showPicker?.()
+            }}
+            onBlur={(e) => {
+              if (!e.currentTarget.value) e.currentTarget.type = 'text'
+            }}
             onChange={(e) => updateFilter('dateFrom', e.target.value)}
+            className="h-9 min-h-9"
           />
         </div>
 
-        {/* Date To */}
         <div>
           <Input
-            type="date"
-            placeholder="To Date"
+            id="request-date-to"
+            type={filters.dateTo ? 'date' : 'text'}
+            placeholder="To date"
+            aria-label="To date"
             value={filters.dateTo || ''}
+            onFocus={(e) => {
+              e.currentTarget.type = 'date'
+              e.currentTarget.showPicker?.()
+            }}
+            onBlur={(e) => {
+              if (!e.currentTarget.value) e.currentTarget.type = 'text'
+            }}
             onChange={(e) => updateFilter('dateTo', e.target.value)}
+            className="h-9 min-h-9"
           />
         </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium text-gray-600">Status</span>
+        {ALL_STATUSES.map((status) => {
+          const isChecked = filters.statuses?.includes(status) || false
+          return (
+            <div
+              key={status}
+              className="flex h-8 cursor-pointer items-center gap-1.5 rounded-md border bg-white px-2 text-xs font-normal text-gray-700 shadow-sm"
+            >
+              <Checkbox
+                id={`request-status-${status}`}
+                checked={isChecked}
+                onCheckedChange={(checked) => updateStatusFilter(status, checked as boolean)}
+                className="h-3.5 w-3.5"
+              />
+              <Label
+                htmlFor={`request-status-${status}`}
+                className="cursor-pointer text-xs font-normal"
+              >
+                {formatStatusLabel(status)}
+              </Label>
+            </div>
+          )
+        })}
       </div>
     </div>
   )
