@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useSession } from 'next-auth/react'
-import { LayoutDashboard, FileText, Bell, BarChart3, WalletCards } from 'lucide-react'
+import { LayoutDashboard, FileText, Bell, BarChart3, WalletCards, Wrench } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useScrollDirection } from '@/hooks/use-scroll-direction'
 
@@ -23,6 +23,14 @@ const tabs: Tab[] = [
   { name: 'Budget', href: '/budget-monitor', icon: WalletCards },
 ]
 
+const engineeringTabs: Tab[] = [
+  { name: 'Engineering', href: '/engineering', icon: Wrench },
+  { name: 'My Requests', href: '/requests', icon: FileText },
+  { name: 'Pending Approvals', href: '/requests/my-actions', icon: Bell, badge: true },
+  { name: 'Analytics', href: '/analytics', icon: BarChart3 },
+  { name: 'Budget', href: '/budget-monitor', icon: WalletCards },
+]
+
 /**
  * Mobile top tab bar navigation with smart scroll behavior.
  * Visible only on mobile breakpoints (< md).
@@ -33,6 +41,8 @@ export function MobileNav() {
   const { data: session } = useSession(); const user = session?.user
   const isVisible = useScrollDirection()
   const [pendingCount, setPendingCount] = useState(0)
+  const isEngineering = user?.role === 'engineering'
+  const visibleTabs = isEngineering ? engineeringTabs : tabs
 
   // Fetch pending actions count for badge
   useEffect(() => {
@@ -68,7 +78,7 @@ export function MobileNav() {
       <div className="flex items-center justify-between px-2 sm:px-4 h-16">
         {/* Left side - Tabs */}
         <div className="flex items-center gap-1 flex-1">
-          {tabs.map((tab) => {
+          {visibleTabs.map((tab) => {
             const isActive = pathname === tab.href
             const Icon = tab.icon
 

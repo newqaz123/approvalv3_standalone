@@ -58,6 +58,16 @@ describe('Gapforimprove regressions', () => {
     assert.match(submitterModal, /setCurrency\(initialData\.solution\.currency \|\| 'THB'\)/)
   })
 
+  it('engineering users see engineering dashboard navigation instead of dashboard', () => {
+    const navbar = read('src/components/navigation/navbar.tsx')
+    const mobileNav = read('src/components/mobile/mobile-nav.tsx')
+
+    assert.match(navbar, /{!isEngineering && \(\s*<Link\s+href="\/dashboard"/)
+    assert.match(navbar, /{isEngineering && \(\s*<Link\s+href="\/engineering"/)
+    assert.match(mobileNav, /isEngineering \? engineeringTabs : tabs/)
+    assert.match(mobileNav, /href: '\/engineering'/)
+  })
+
   it('notification refresh does not replace an open notification list with loading state', () => {
     const bell = read('src/components/notifications/notification-bell.tsx')
 

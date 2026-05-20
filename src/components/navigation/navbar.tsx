@@ -88,17 +88,19 @@ export function Navbar() {
                 Budget Monitor
               </Link>
 
-              <Link
-                href="/dashboard"
-                className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium ${
-                  pathname === '/dashboard'
-                    ? 'bg-gray-100 text-gray-900'
-                    : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900'
-                }`}
-              >
-                <LayoutDashboard className="h-4 w-4" />
-                Dashboard
-              </Link>
+              {!isEngineering && (
+                <Link
+                  href="/dashboard"
+                  className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium ${
+                    pathname === '/dashboard'
+                      ? 'bg-gray-100 text-gray-900'
+                      : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900'
+                  }`}
+                >
+                  <LayoutDashboard className="h-4 w-4" />
+                  Dashboard
+                </Link>
+              )}
 
               {isEngineering && (
                 <Link
