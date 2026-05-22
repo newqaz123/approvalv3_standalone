@@ -1611,7 +1611,12 @@ export async function getRequestsNeedingEngineeringAction(userId: string): Promi
   const needsSolutionFiltered = needsSolution
     .map(request => ({
       request: {
-        ...request,
+        id: request.id,
+        title: request.title,
+        status: request.status,
+        createdAt: request.createdAt,
+        department: request.department,
+        requester: request.requester,
         hasRejection: requestIdsWithSolution.includes(request.id),
       },
       assignedEngineers: request.engineerAssignments.map(ea => ea.engineer),
@@ -1634,6 +1639,11 @@ export async function getRequestsNeedingEngineeringAction(userId: string): Promi
           title: true,
           status: true,
           createdAt: true,
+        },
+      },
+      submittedBy: {
+        select: {
+          name: true,
         },
       },
     },
@@ -1676,10 +1686,20 @@ export async function getRequestsNeedingEngineeringAction(userId: string): Promi
           needsApprovalFiltered.push({
             request: solution.request,
             solution: {
-              ...solution,
+              id: solution.id,
               costEstimate: Number(solution.costEstimate),
+              currency: solution.currency,
+              submittedAt: solution.submittedAt,
+              submittedBy: solution.submittedBy,
             },
-            approval,
+            approval: {
+              id: approval.id,
+              status: approval.status,
+              order: approval.order,
+              requiredLevel: approval.requiredLevel,
+              requiredApproverId: approval.requiredApproverId,
+              isCustomChain: approval.isCustomChain,
+            },
           })
           break // Only add one approval per solution
         }

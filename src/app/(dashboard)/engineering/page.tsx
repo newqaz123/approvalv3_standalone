@@ -82,9 +82,14 @@ export default async function EngineeringDashboardPage() {
     },
   })
 
-  // Map to add hasRejection flag
+  // Send only plain fields used by the client component. Full Prisma records
+  // include Decimal values, which cannot cross the Server/Client boundary.
   const allEngineeringRequests = allEngineeringRequestsRaw.map(request => ({
-    ...request,
+    id: request.id,
+    title: request.title,
+    status: request.status,
+    department: request.department,
+    requester: request.requester,
     hasRejection: request.solutions.some(s => s.approvals.length > 0) || request.activities.length > 0,
   }))
 

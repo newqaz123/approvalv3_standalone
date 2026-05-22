@@ -68,6 +68,21 @@ describe('Gapforimprove regressions', () => {
     assert.match(mobileNav, /href: '\/engineering'/)
   })
 
+  it('engineering dashboard sends plain request objects to client tabs', () => {
+    const page = read('src/app/(dashboard)/engineering/page.tsx')
+    const requests = read('src/server-actions/requests.ts')
+
+    assert.doesNotMatch(page, /\.\.\.request,\s*hasRejection/)
+    assert.match(page, /id: request\.id/)
+    assert.match(page, /title: request\.title/)
+    assert.match(page, /status: request\.status/)
+    assert.match(page, /department: request\.department/)
+    assert.match(page, /requester: request\.requester/)
+    assert.doesNotMatch(requests, /request: \{\s*\.\.\.request,\s*hasRejection/)
+    assert.doesNotMatch(requests, /solution: \{\s*\.\.\.solution,/)
+    assert.match(requests, /costEstimate: Number\(solution\.costEstimate\)/)
+  })
+
   it('notification refresh does not replace an open notification list with loading state', () => {
     const bell = read('src/components/notifications/notification-bell.tsx')
 
