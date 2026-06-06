@@ -131,6 +131,7 @@ interface SolutionModalProps {
   onSubmitFinalApproval?: () => void
   userDepartment?: string
   availableUsers?: User[]
+  subTasksElement?: React.ReactNode
 }
 
 // Status config
@@ -523,6 +524,7 @@ export function SolutionModal({
   onSubmitFinalApproval,
   userDepartment,
   availableUsers = [],
+  subTasksElement,
 }: SolutionModalProps) {
   const status = statusConfig[data.status]
 
@@ -854,6 +856,13 @@ export function SolutionModal({
               onApprove={onApprove}
               onReject={onReject}
             />
+          )}
+
+          {subTasksElement && (
+            <>
+              <Separator className="bg-slate-200 dark:bg-slate-700" />
+              {subTasksElement}
+            </>
           )}
 
           <Separator className="bg-slate-200 dark:bg-slate-700" />

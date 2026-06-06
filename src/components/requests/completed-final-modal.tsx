@@ -109,6 +109,7 @@ interface CompletedFinalModalProps {
   onPreviewSolutionFile?: (fileId: string) => void
   onExport?: () => void
   onExportPackage?: (items: ExportPackageRequestItem[]) => Promise<void>
+  subTasksElement?: React.ReactNode
 }
 
 // File icon helper
@@ -214,6 +215,7 @@ export function CompletedFinalModal({
   onPreviewSolutionFile,
   onExport,
   onExportPackage,
+  subTasksElement,
 }: CompletedFinalModalProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -520,6 +522,13 @@ export function CompletedFinalModal({
               ))}
             </div>
           </section>
+
+          {subTasksElement && (
+            <>
+              <Separator className="bg-slate-200 dark:bg-slate-700" />
+              {subTasksElement}
+            </>
+          )}
 
           <Separator className="bg-slate-200 dark:bg-slate-700" />
 

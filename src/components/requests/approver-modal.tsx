@@ -131,6 +131,7 @@ interface ApproverModalProps {
   requestId?: string
   requestTitle?: string
   onCancelled?: () => void
+  subTasksElement?: React.ReactNode
 }
 
 // File icon helper
@@ -446,6 +447,7 @@ export function ApproverModal({
   requestId,
   requestTitle,
   onCancelled,
+  subTasksElement,
 }: ApproverModalProps) {
   const status = statusConfig[data.status] || statusConfig.request
 
@@ -855,6 +857,13 @@ export function ApproverModal({
                   onCancelled={onCancelled}
                 />
               </div>
+            </>
+          )}
+
+          {subTasksElement && (
+            <>
+              <Separator className="bg-slate-200 dark:bg-slate-700" />
+              {subTasksElement}
             </>
           )}
 

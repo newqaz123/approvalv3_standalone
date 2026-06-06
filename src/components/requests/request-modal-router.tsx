@@ -12,15 +12,18 @@ import { RequestResubmitModal } from './request-resubmit-modal'
 import { FinalApprovalResubmitModal } from './final-approval-resubmit-modal'
 import { SubmitFinalApprovalModal } from './submit-final-approval-modal'
 import { getRequest, resubmitRequest } from '@/server-actions/requests'
+import { getEngineeringSubTaskOptions } from '@/server-actions/engineering-sub-tasks'
 import { canUserApprove, approveRequest, rejectRequest } from '@/server-actions/approvals'
 import { approveSolution, rejectSolution, submitSolution, resubmitSolution, initiateFinalApproval } from '@/server-actions/solutions'
 import { transformRequestToModalData } from '@/lib/modal-data-adapters'
+import { canManageEngineeringSubTasks, isSubTaskVisibleForRequestStatus } from '@/lib/engineering-sub-tasks'
 import { getModalTypeForStatus, canUserSubmitSolution, canUserSubmitFinalApproval } from '@/lib/permission-checks'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { FilePreviewDialog } from '@/components/requests/file-preview-dialog'
 import { getFilePreviewUrl, normalizeStoredFilePath } from '@/lib/file-preview'
 import type { ExportPackageRequestItem } from '@/lib/export-package'
+import { SubTasksSection } from './sub-tasks-section'
 
 interface RequestModalRouterProps {
   requestId: string
@@ -54,6 +57,10 @@ export function RequestModalRouter({
   const [previewFile, setPreviewFile] = useState<any>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
+  const [subTaskOptions, setSubTaskOptions] = useState<{
+    stages: Array<{ id: string; name: string; isOthers: boolean }>
+    subcontractors: Array<{ id: string; name: string }>
+  } | null>(null)
 
   // Debug: Log when resubmit modal state changes
   useEffect(() => {
@@ -76,6 +83,12 @@ export function RequestModalRouter({
       if (!request) {
         setLoading(false)
         return
+      }
+
+      if (isSubTaskVisibleForRequestStatus(request.status)) {
+        setSubTaskOptions(await getEngineeringSubTaskOptions())
+      } else {
+        setSubTaskOptions(null)
       }
 
       // Check if user can approve - use appropriate check based on status
@@ -167,6 +180,25 @@ export function RequestModalRouter({
     !hasApprovedApprovals &&
     requestData.status !== 'Completed' &&
     requestData.status !== 'Cancelled'
+
+  const canManageSubTasks = canManageEngineeringSubTasks(user)
+  const subTasksElement = isSubTaskVisibleForRequestStatus(requestData.status) && subTaskOptions ? (
+    <SubTasksSection
+      key={`${requestData.id}-${open ? 'open' : 'closed'}`}
+      requestId={requestData.id}
+      subTasks={requestData.subTasks ?? []}
+      workRequisitionReceived={requestData.workRequisitionReceived}
+      stages={subTaskOptions.stages}
+      subcontractors={subTaskOptions.subcontractors}
+      canManage={canManageSubTasks}
+      onChanged={() => {
+        void loadRequestData()
+        router.refresh()
+        window.dispatchEvent(new Event('approvalapp:request-data-changed'))
+        onActionComplete?.()
+      }}
+    />
+  ) : undefined
 
   // Determine modal type
   const modalConfig = getModalTypeForStatus(
@@ -596,6 +628,7 @@ export function RequestModalRouter({
           requestId={requestData.id}
           requestTitle={requestData.title}
           onCancelled={handleClose}
+          subTasksElement={subTasksElement}
         />
       )
       break
@@ -633,6 +666,7 @@ export function RequestModalRouter({
           onPreviewFile={handlePreviewFile}
           onPreviewSolutionFile={handlePreviewSolutionFile}
           availableUsers={availableUsers}
+          subTasksElement={subTasksElement}
         />
       )
       break
@@ -704,6 +738,7 @@ export function RequestModalRouter({
           onSubmitSolution={() => setShowSolutionModal(true)}
           onDownloadFile={handleDownloadFile}
           onPreviewFile={handlePreviewFile}
+          subTasksElement={subTasksElement}
         />
       )
       break
@@ -728,6 +763,7 @@ export function RequestModalRouter({
           onDownloadSolutionFile={handleDownloadSolutionFile}
           onPreviewFile={handlePreviewFile}
           onPreviewSolutionFile={handlePreviewSolutionFile}
+          subTasksElement={subTasksElement}
         />
       )
       break
@@ -753,6 +789,7 @@ export function RequestModalRouter({
           onPreviewSolutionFile={handlePreviewSolutionFile}
           onExport={handleExportReport}
           onExportPackage={handleExportPackage}
+          subTasksElement={subTasksElement}
         />
       )
       break
@@ -800,6 +837,7 @@ export function RequestModalRouter({
             useCustomChain: data.useCustomHierarchy,
             customApproverIds: data.customApprovers,
           })}
+          subTasksElement={subTasksElement}
         />
       )
       break
@@ -823,6 +861,7 @@ export function RequestModalRouter({
           onDownloadSolutionFile={handleDownloadSolutionFile}
           onPreviewFile={handlePreviewFile}
           onPreviewSolutionFile={handlePreviewSolutionFile}
+          subTasksElement={subTasksElement}
         />
       )
 
@@ -991,6 +1030,7 @@ export function RequestModalRouter({
           onDownloadSolutionFile={handleDownloadSolutionFile}
           onPreviewFile={handlePreviewFile}
           onPreviewSolutionFile={handlePreviewSolutionFile}
+          subTasksElement={subTasksElement}
         />
       )}
       <FilePreviewDialog

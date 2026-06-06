@@ -231,3 +231,68 @@ describe('engineering sub-task request and filter wiring', () => {
     assert.match(dashboardTable, /data: tableData/)
   })
 })
+
+describe('engineering sub-task request modal panel wiring', () => {
+  const modalFiles = [
+    'src/components/requests/approver-modal.tsx',
+    'src/components/requests/solution-modal.tsx',
+    'src/components/requests/completed-request-modal.tsx',
+    'src/components/requests/completed-solution-modal.tsx',
+    'src/components/requests/final-approval-modal.tsx',
+    'src/components/requests/completed-final-modal.tsx',
+    'src/components/requests/submit-final-approval-modal.tsx',
+    'src/components/requests/final-approval-resubmit-modal.tsx',
+  ]
+
+  it('adds the collapsed Sub-tasks section with WR and task management actions', () => {
+    const source = readFileSync('src/components/requests/sub-tasks-section.tsx', 'utf8')
+
+    assert.match(source, /'use client'/)
+    assert.match(source, /Collapsible[\s\S]*defaultOpen=\{false\}/)
+    assert.match(source, /Sub-tasks/)
+    assert.match(source, /getSubTaskSummary/)
+    assert.match(source, /getWorkRequisitionLabel/)
+    assert.match(source, /Work requisition received/)
+    assert.match(source, /Last edited/)
+    assert.match(source, /canManage/)
+    assert.match(source, /toggleWorkRequisitionReceived/)
+    assert.match(source, /setSubTaskCompleted/)
+    assert.match(source, /deleteSubTask/)
+    assert.match(source, /onChanged\(\)/)
+  })
+
+  it('adds an add/edit sub-task form dialog with Others stage custom text', () => {
+    const source = readFileSync('src/components/requests/sub-task-form-dialog.tsx', 'utf8')
+
+    assert.match(source, /'use client'/)
+    assert.match(source, /createSubTask/)
+    assert.match(source, /updateSubTask/)
+    assert.match(source, /isOthers/)
+    assert.match(source, /customStageText/)
+    assert.match(source, /subContractorId/)
+    assert.match(source, /No subcontractor/)
+  })
+
+  it('routes visible requests to SubTasksSection with options and permissions', () => {
+    const source = readFileSync('src/components/requests/request-modal-router.tsx', 'utf8')
+
+    assert.match(source, /SubTasksSection/)
+    assert.match(source, /getEngineeringSubTaskOptions/)
+    assert.match(source, /canManageEngineeringSubTasks/)
+    assert.match(source, /isSubTaskVisibleForRequestStatus/)
+    assert.match(source, /setSubTaskOptions/)
+    assert.match(source, /subTasksElement/)
+    assert.match(source, /requestData\.subTasks/)
+    assert.match(source, /workRequisitionReceived/)
+  })
+
+  it('renders the optional sub-task section before each activity timeline', () => {
+    for (const file of modalFiles) {
+      const source = readFileSync(file, 'utf8')
+
+      assert.match(source, /subTasksElement\?: React\.ReactNode/)
+      assert.match(source, /\{subTasksElement && \(\s*<>\s*<Separator[\s\S]*?\{subTasksElement\}/)
+      assert.match(source, /Retractable Activity Timeline/)
+    }
+  })
+})

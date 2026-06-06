@@ -140,6 +140,7 @@ interface FinalApprovalModalProps {
   availableUsers?: User[]
   canInitiate?: boolean
   canApprove?: boolean
+  subTasksElement?: React.ReactNode
 }
 
 // Status configs
@@ -551,6 +552,7 @@ export function FinalApprovalModal({
   availableUsers = [],
   canInitiate = false,
   canApprove = false,
+  subTasksElement,
 }: FinalApprovalModalProps) {
   const status = statusConfig[data.status]
 
@@ -925,6 +927,13 @@ export function FinalApprovalModal({
                   nextApprover={data.finalApproval.nextApprover}
                 />
               )}
+            </>
+          )}
+
+          {subTasksElement && (
+            <>
+              <Separator className="bg-slate-200 dark:bg-slate-700" />
+              {subTasksElement}
             </>
           )}
 

@@ -93,6 +93,7 @@ interface CompletedRequestModalProps {
   onSubmitSolution?: () => void
   onDownloadFile?: (fileId: string) => void
   onPreviewFile?: (fileId: string) => void
+  subTasksElement?: React.ReactNode
 }
 
 // File icon helper
@@ -196,6 +197,7 @@ export function CompletedRequestModal({
   onSubmitSolution,
   onDownloadFile,
   onPreviewFile,
+  subTasksElement,
 }: CompletedRequestModalProps) {
   const isEngineering = userDepartment === 'ENGINEERING'
   return (
@@ -401,6 +403,13 @@ export function CompletedRequestModal({
               ))}
             </div>
           </section>
+
+          {subTasksElement && (
+            <>
+              <Separator className="bg-slate-200 dark:bg-slate-700" />
+              {subTasksElement}
+            </>
+          )}
 
           <Separator className="bg-slate-200 dark:bg-slate-700" />
 

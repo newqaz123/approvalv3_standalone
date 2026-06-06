@@ -122,6 +122,7 @@ interface SubmitFinalApprovalModalProps {
   onDownloadSolutionFile?: (fileId: string) => void
   onPreviewFile?: (fileId: string) => void
   onPreviewSolutionFile?: (fileId: string) => void
+  subTasksElement?: React.ReactNode
 }
 
 // File icon helper
@@ -363,6 +364,7 @@ export function SubmitFinalApprovalModal({
   onDownloadSolutionFile,
   onPreviewFile,
   onPreviewSolutionFile,
+  subTasksElement,
 }: SubmitFinalApprovalModalProps) {
   const [useCustomHierarchy, setUseCustomHierarchy] = useState(false)
   const [customApprovers, setCustomApprovers] = useState<string[]>([])
@@ -686,6 +688,13 @@ export function SubmitFinalApprovalModal({
               )}
             </div>
           </section>
+
+          {subTasksElement && (
+            <>
+              <Separator className="bg-slate-200 dark:bg-slate-700" />
+              {subTasksElement}
+            </>
+          )}
 
           <Separator className="bg-slate-200 dark:bg-slate-700" />
 

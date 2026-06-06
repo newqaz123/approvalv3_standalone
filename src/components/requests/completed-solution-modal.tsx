@@ -110,6 +110,7 @@ interface CompletedSolutionModalProps {
   onDownloadSolutionFile?: (fileId: string) => void
   onPreviewFile?: (fileId: string) => void
   onPreviewSolutionFile?: (fileId: string) => void
+  subTasksElement?: React.ReactNode
 }
 
 // File icon helper
@@ -217,6 +218,7 @@ export function CompletedSolutionModal({
   onDownloadSolutionFile,
   onPreviewFile,
   onPreviewSolutionFile,
+  subTasksElement,
 }: CompletedSolutionModalProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -514,6 +516,13 @@ export function CompletedSolutionModal({
               ))}
             </div>
           </section>
+
+          {subTasksElement && (
+            <>
+              <Separator className="bg-slate-200 dark:bg-slate-700" />
+              {subTasksElement}
+            </>
+          )}
 
           <Separator className="bg-slate-200 dark:bg-slate-700" />
 
