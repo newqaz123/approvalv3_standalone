@@ -3,6 +3,16 @@ import { hashSync } from "bcryptjs";
 
 const prisma = new PrismaClient();
 
+const defaultSubTaskStages = [
+  { name: "Design", sortOrder: 10, isOthers: false },
+  { name: "Site survey", sortOrder: 20, isOthers: false },
+  { name: "Waiting user data", sortOrder: 30, isOthers: false },
+  { name: "Waiting quotation", sortOrder: 40, isOthers: false },
+  { name: "Waiting WR", sortOrder: 50, isOthers: false },
+  { name: "Completed", sortOrder: 60, isOthers: false },
+  { name: "Others", sortOrder: 70, isOthers: true },
+];
+
 // Standard level names for approval hierarchy
 const defaultLevelNames = {
   "1": "Staff",
@@ -54,6 +64,30 @@ async function main() {
     });
   }
   console.log(`${departments.length} departments created/updated.`);
+
+  // ── Default Sub-task Stages ─────────────────────────────────────
+  console.log("Creating default sub-task stages...");
+
+  for (const stage of defaultSubTaskStages) {
+    await prisma.sub_task_stages.upsert({
+      where: { name: stage.name },
+      update: {
+        sortOrder: stage.sortOrder,
+        isDefault: true,
+        isOthers: stage.isOthers,
+        isActive: true,
+      },
+      create: {
+        name: stage.name,
+        sortOrder: stage.sortOrder,
+        isDefault: true,
+        isOthers: stage.isOthers,
+        isActive: true,
+      },
+    });
+  }
+
+  console.log(`${defaultSubTaskStages.length} sub-task stages created/updated.`);
 
   // ── Default Admin User ───────────────────────────────────────────
   console.log("Creating default admin user...");

@@ -147,6 +147,70 @@ model request_engineer_assignments {
   @@index([requestId])
 }
 
+model sub_task_stages {
+  id        String              @id @default(uuid())
+  name      String              @unique
+  sortOrder Int
+  isDefault Boolean             @default(true)
+  isOthers  Boolean             @default(false)
+  isActive  Boolean             @default(true)
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+  subTasks  request_sub_tasks[]
+
+  @@index([isActive])
+  @@index([isOthers])
+  @@index([sortOrder])
+}
+
+model sub_contractors {
+  id          String              @id @default(uuid())
+  name        String              @unique
+  isActive    Boolean             @default(true)
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  createdById String
+  updatedById String?
+  createdBy   User                @relation("sub_contractors_createdByIdTousers", fields: [createdById], references: [id])
+  updatedBy   User?               @relation("sub_contractors_updatedByIdTousers", fields: [updatedById], references: [id])
+  subTasks    request_sub_tasks[]
+
+  @@index([createdById])
+  @@index([isActive])
+  @@index([updatedById])
+}
+
+model request_sub_tasks {
+  id              String           @id @default(uuid())
+  requestId       String
+  description     String
+  subContractorId String?
+  stageId         String
+  customStageText String?
+  isCompleted     Boolean          @default(false)
+  completedAt     DateTime?
+  completedById   String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  createdById     String
+  updatedById     String?
+  request         requests         @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  subContractor   sub_contractors? @relation(fields: [subContractorId], references: [id], onDelete: SetNull)
+  stage           sub_task_stages  @relation(fields: [stageId], references: [id])
+  createdBy       User             @relation("request_sub_tasks_createdByIdTousers", fields: [createdById], references: [id])
+  updatedBy       User?            @relation("request_sub_tasks_updatedByIdTousers", fields: [updatedById], references: [id])
+  completedBy     User?            @relation("request_sub_tasks_completedByIdTousers", fields: [completedById], references: [id])
+
+  @@index([completedById])
+  @@index([createdById])
+  @@index([isCompleted])
+  @@index([requestId])
+  @@index([stageId])
+  @@index([subContractorId])
+  @@index([updatedAt])
+  @@index([updatedById])
+}
+
 model budget_codes {
   id           String     @id @default(uuid())
   code         String     @unique
@@ -182,15 +246,20 @@ model requests {
   isArchived                        Boolean                        @default(false)
   budgetCodeId                      String?
   projectEstimateCost               Decimal?                       @db.Decimal(15, 2)
+  workRequisitionReceived           Boolean                        @default(false)
+  workRequisitionReceivedAt         DateTime?
+  workRequisitionReceivedById       String?
   fileAttachments                   file_attachments[]
   notifications                     notifications[]
   activities                        request_activities[]
   approvals                         request_approvals[]
   engineerAssignments               request_engineer_assignments[]
+  subTasks                          request_sub_tasks[]
   budgetCode                        budget_codes?                 @relation(fields: [budgetCodeId], references: [id], onDelete: SetNull)
   deletedByUser                     User?                         @relation("requests_deletedByTousers", fields: [deletedBy], references: [id])
   department                        departments                    @relation(fields: [departmentId], references: [id])
   requester                         User                          @relation("requests_requesterIdTousers", fields: [requesterId], references: [id])
+  workRequisitionReceivedBy         User?                         @relation("requests_workRequisitionReceivedByIdTousers", fields: [workRequisitionReceivedById], references: [id])
   solutions                         solutions[]
 
   @@index([budgetCodeId])
@@ -199,6 +268,8 @@ model requests {
   @@index([isDeleted])
   @@index([requesterId])
   @@index([status])
+  @@index([workRequisitionReceived])
+  @@index([workRequisitionReceivedById])
 }
 
 model solution_approvals {
@@ -283,8 +354,14 @@ model User {
   requiredApprovalRequests                                       request_approvals[]            @relation("request_approvals_requiredApproverIdTousers")
   createdBudgetCodes                                             budget_codes[]                 @relation("budget_codes_createdByIdTousers")
   engineerAssignments                                            request_engineer_assignments[]
+  createdSubTasks                                                request_sub_tasks[]            @relation("request_sub_tasks_createdByIdTousers")
+  updatedSubTasks                                                request_sub_tasks[]            @relation("request_sub_tasks_updatedByIdTousers")
+  completedSubTasks                                              request_sub_tasks[]            @relation("request_sub_tasks_completedByIdTousers")
+  createdSubContractors                                          sub_contractors[]              @relation("sub_contractors_createdByIdTousers")
+  updatedSubContractors                                          sub_contractors[]              @relation("sub_contractors_updatedByIdTousers")
   deletedRequests                                                requests[]                     @relation("requests_deletedByTousers")
   createdRequests                                                requests[]                     @relation("requests_requesterIdTousers")
+  workRequisitionRequests                                        requests[]                     @relation("requests_workRequisitionReceivedByIdTousers")
   approvedSolutions                                              solution_approvals[]           @relation("solution_approvals_approverIdTousers")
   requiredApprovalSolutions                                      solution_approvals[]           @relation("solution_approvals_requiredApproverIdTousers")
   solutions                                                       solutions[]
