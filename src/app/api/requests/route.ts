@@ -15,6 +15,7 @@ export async function GET(request: NextRequest) {
       dateFrom: searchParams.get('dateFrom') || undefined,
       dateTo: searchParams.get('dateTo') || undefined,
       search: searchParams.get('search') || undefined,
+      wrStatus: (searchParams.get('wrStatus') as GetRequestsFilters['wrStatus']) || undefined,
     }
 
     const requests = await getMyRequests(filters)

@@ -31,6 +31,7 @@ import { TablePagination } from './table-pagination'
 import { TableFilters, type DashboardFilters } from './table-filters'
 import type { RequestListRow } from '@/server-actions/dashboard'
 import { RequestCard, RequestCardsEmptyState } from '@/components/mobile/request-card'
+import { filterRowsByWorkRequisition } from '@/lib/engineering-sub-tasks'
 
 interface DashboardTableProps {
   initialData: RequestListRow[]
@@ -242,8 +243,13 @@ export function DashboardTable({
     },
   ], [])
 
+  const tableData = useMemo(
+    () => filterRowsByWorkRequisition(data, externalFilters?.wrStatus),
+    [data, externalFilters?.wrStatus]
+  )
+
   const table = useReactTable({
-    data,
+    data: tableData,
     columns,
     getCoreRowModel: getCoreRowModel(),
     getPaginationRowModel: getPaginationRowModel(),

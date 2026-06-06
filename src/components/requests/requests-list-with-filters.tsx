@@ -29,8 +29,9 @@ export function RequestsListWithFilters({
 
   const buildSearchParams = (activeFilters: GetRequestsFilters) => {
     const params = new URLSearchParams()
+    const { wrStatus, ...remainingFilters } = activeFilters
 
-    Object.entries(activeFilters).forEach(([key, value]) => {
+    Object.entries(remainingFilters).forEach(([key, value]) => {
       if (!value) return
 
       if (Array.isArray(value)) {
@@ -38,8 +39,12 @@ export function RequestsListWithFilters({
         return
       }
 
-      params.set(key, value)
+      params.set(key, String(value))
     })
+
+    if (wrStatus) {
+      params.set('wrStatus', wrStatus)
+    }
 
     return params
   }

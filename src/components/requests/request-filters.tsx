@@ -23,6 +23,7 @@ export interface RequestFilters {
   dateFrom?: string
   dateTo?: string
   search?: string
+  wrStatus?: 'all' | 'not-received' | 'received'
 }
 
 interface RequestFiltersProps {
@@ -90,7 +91,7 @@ export function RequestFilters({ departments, requesters, onFilterChange }: Requ
         )}
       </div>
 
-      <div className="grid grid-cols-1 gap-2 md:grid-cols-2 lg:grid-cols-[minmax(16rem,1.4fr)_repeat(4,minmax(0,1fr))]">
+      <div className="grid grid-cols-1 gap-2 md:grid-cols-2 lg:grid-cols-[minmax(16rem,1.4fr)_repeat(5,minmax(0,1fr))]">
         <div>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -137,6 +138,22 @@ export function RequestFilters({ departments, requesters, onFilterChange }: Requ
                   {user.name}
                 </SelectItem>
               ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div>
+          <Select
+            value={filters.wrStatus || 'all'}
+            onValueChange={(value) => updateFilter('wrStatus', value === 'all' ? undefined : value)}
+          >
+            <SelectTrigger className="h-9 min-h-9">
+              <SelectValue placeholder="WR status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All WR</SelectItem>
+              <SelectItem value="not-received">No WR</SelectItem>
+              <SelectItem value="received">WR received</SelectItem>
             </SelectContent>
           </Select>
         </div>

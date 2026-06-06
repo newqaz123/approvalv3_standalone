@@ -9,6 +9,7 @@ export type RequestListRow = {
   title: string
   status: string
   createdAt: Date
+  workRequisitionReceived?: boolean
   requesterId: string
   department: { name: string } | null
   requester: { id: string; name: string } | null
@@ -235,6 +236,7 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
           title: approval.request.title,
           status: approval.request.status,
           createdAt: approval.request.createdAt,
+          workRequisitionReceived: approval.request.workRequisitionReceived,
           requesterId: approval.request.requesterId,
           department: approval.request.department,
           requester: approval.request.requester,
@@ -375,6 +377,7 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
           title: request.title,
           status: request.status,
           createdAt: request.createdAt,
+          workRequisitionReceived: request.workRequisitionReceived,
           requesterId: request.requesterId,
           department: request.department,
           requester: request.requester,
@@ -410,6 +413,7 @@ export async function getMyCreatedRequests(): Promise<RequestListRow[]> {
       title: true,
       status: true,
       createdAt: true,
+      workRequisitionReceived: true,
       requesterId: true,
       departmentId: true,
       department: {
@@ -554,6 +558,7 @@ export async function getMyCreatedRequests(): Promise<RequestListRow[]> {
       title: req.title,
       status: req.status,
       createdAt: req.createdAt,
+      workRequisitionReceived: req.workRequisitionReceived,
       requesterId: req.requesterId,
       department: req.department,
       requester: req.requester,
@@ -632,6 +637,7 @@ export async function getAllRequests(): Promise<RequestListRow[]> {
       title: true,
       status: true,
       createdAt: true,
+      workRequisitionReceived: true,
       requesterId: true,
       departmentId: true,
       department: {
@@ -776,6 +782,7 @@ export async function getAllRequests(): Promise<RequestListRow[]> {
       title: req.title,
       status: req.status,
       createdAt: req.createdAt,
+      workRequisitionReceived: req.workRequisitionReceived,
       requesterId: req.requesterId,
       department: req.department,
       requester: req.requester,

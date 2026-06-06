@@ -191,3 +191,43 @@ describe('engineering sub-task server action wiring', () => {
     assert.match(source, /subContractorId,/)
   })
 })
+
+describe('engineering sub-task request and filter wiring', () => {
+  it('adds WR fields to request server rows and request detail data', () => {
+    const requests = readFileSync('src/server-actions/requests.ts', 'utf8')
+    const dashboard = readFileSync('src/server-actions/dashboard.ts', 'utf8')
+
+    for (const source of [requests, dashboard]) {
+      assert.match(source, /workRequisitionReceived: true/)
+    }
+
+    assert.match(requests, /wrStatus\?: 'all' \| 'not-received' \| 'received'/)
+    assert.match(requests, /whereClause\.workRequisitionReceived = true/)
+    assert.match(requests, /whereClause\.workRequisitionReceived = false/)
+    assert.match(requests, /subTasks:\s*\{/)
+    assert.match(requests, /workRequisitionReceivedAt: true/)
+    assert.match(requests, /workRequisitionReceivedBy/)
+    assert.match(requests, /orderBy:\s*\[\s*\{\s*isCompleted: 'asc'\s*\},\s*\{\s*updatedAt: 'desc'\s*\}/)
+  })
+
+  it('wires WR filters into requests API, request filters, and dashboard filters', () => {
+    const api = readFileSync('src/app/api/requests/route.ts', 'utf8')
+    const requestFilters = readFileSync('src/components/requests/request-filters.tsx', 'utf8')
+    const requestList = readFileSync('src/components/requests/requests-list-with-filters.tsx', 'utf8')
+    const dashboardFilters = readFileSync('src/components/dashboard/table-filters.tsx', 'utf8')
+    const dashboardTable = readFileSync('src/components/dashboard/dashboard-table.tsx', 'utf8')
+
+    assert.match(api, /wrStatus/)
+    assert.match(requestFilters, /wrStatus\?: 'all' \| 'not-received' \| 'received'/)
+    assert.match(requestFilters, /All WR/)
+    assert.match(requestFilters, /WR received/)
+    assert.match(requestFilters, /No WR/)
+    assert.match(requestList, /wrStatus/)
+    assert.match(dashboardFilters, /wrStatus\?: 'all' \| 'not-received' \| 'received'/)
+    assert.match(dashboardFilters, /All WR/)
+    assert.match(dashboardFilters, /WR received/)
+    assert.match(dashboardFilters, /No WR/)
+    assert.match(dashboardTable, /filterRowsByWorkRequisition/)
+    assert.match(dashboardTable, /data: tableData/)
+  })
+})

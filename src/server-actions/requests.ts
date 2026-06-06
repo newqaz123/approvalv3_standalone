@@ -134,6 +134,7 @@ export interface GetRequestsFilters {
   dateFrom?: string
   dateTo?: string
   search?: string
+  wrStatus?: 'all' | 'not-received' | 'received'
   includeArchived?: boolean
 }
 
@@ -202,6 +203,11 @@ export async function getMyRequests(filters?: GetRequestsFilters) {
     } else if (filters.status) {
       whereClause.status = filters.status
     }
+    if (filters.wrStatus === 'received') {
+      whereClause.workRequisitionReceived = true
+    } else if (filters.wrStatus === 'not-received') {
+      whereClause.workRequisitionReceived = false
+    }
     if (filters.departmentId) {
       whereClause.departmentId = filters.departmentId
     }
@@ -237,6 +243,14 @@ export async function getMyRequests(filters?: GetRequestsFilters) {
       status: true,
       createdAt: true,
       updatedAt: true,
+      workRequisitionReceived: true,
+      workRequisitionReceivedAt: true,
+      workRequisitionReceivedBy: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
       requesterId: true,
       departmentId: true,
       department: {
@@ -381,6 +395,9 @@ export async function getMyRequests(filters?: GetRequestsFilters) {
       status: req.status,
       createdAt: req.createdAt,
       updatedAt: req.updatedAt,
+      workRequisitionReceived: req.workRequisitionReceived,
+      workRequisitionReceivedAt: req.workRequisitionReceivedAt,
+      workRequisitionReceivedBy: req.workRequisitionReceivedBy,
       requesterId: req.requesterId,
       department: req.department,
       requester: req.requester,
@@ -420,6 +437,51 @@ export async function getRequest(id: string) {
         select: {
           name: true,
         },
+      },
+      workRequisitionReceivedBy: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+      subTasks: {
+        select: {
+          id: true,
+          description: true,
+          customStageText: true,
+          isCompleted: true,
+          completedAt: true,
+          createdAt: true,
+          updatedAt: true,
+          stage: {
+            select: {
+              id: true,
+              name: true,
+              isOthers: true,
+              isActive: true,
+            },
+          },
+          subContractor: {
+            select: {
+              id: true,
+              name: true,
+              isActive: true,
+            },
+          },
+          createdBy: {
+            select: { id: true, name: true },
+          },
+          updatedBy: {
+            select: { id: true, name: true },
+          },
+          completedBy: {
+            select: { id: true, name: true },
+          },
+        },
+        orderBy: [
+          { isCompleted: 'asc' },
+          { updatedAt: 'desc' },
+        ],
       },
       fileAttachments: {
         select: {

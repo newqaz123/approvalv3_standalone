@@ -29,6 +29,7 @@ export interface DashboardFilters {
   dateFrom?: string
   dateTo?: string
   search?: string
+  wrStatus?: 'all' | 'not-received' | 'received'
 }
 
 interface TableFiltersProps {
@@ -169,6 +170,25 @@ export function TableFilters({ departments, onFilterChange, initialFilters }: Ta
                   </Select>
                 </div>
 
+                <div>
+                  <Label className="text-sm font-medium text-gray-700 mb-2 block">
+                    WR Status
+                  </Label>
+                  <Select
+                    value={filters.wrStatus || 'all'}
+                    onValueChange={(value) => updateFilter('wrStatus', value === 'all' ? undefined : value)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="WR status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All WR</SelectItem>
+                      <SelectItem value="not-received">No WR</SelectItem>
+                      <SelectItem value="received">WR received</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
                 {/* Date Range */}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -290,6 +310,22 @@ export function TableFilters({ departments, onFilterChange, initialFilters }: Ta
                     {dept.name}
                   </SelectItem>
                 ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div>
+            <Select
+              value={filters.wrStatus || 'all'}
+              onValueChange={(value) => updateFilter('wrStatus', value === 'all' ? undefined : value)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="WR status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All WR</SelectItem>
+                <SelectItem value="not-received">No WR</SelectItem>
+                <SelectItem value="received">WR received</SelectItem>
               </SelectContent>
             </Select>
           </div>
