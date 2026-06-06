@@ -160,6 +160,7 @@ export function SubTasksSection({
                 return (
                   <div
                     key={task.id}
+                    data-testid="sub-task-card"
                     className="rounded-lg border border-slate-200 p-3 dark:border-slate-800"
                   >
                     <div className="flex items-start gap-3">
