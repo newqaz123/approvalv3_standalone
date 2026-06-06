@@ -247,6 +247,7 @@ function AllEngineeringRequests({
                 <div
                   key={request.id}
                   data-testid="engineering-request-row"
+                  data-request-id={request.id}
                   data-request-status={request.status}
                   onClick={() => handleRequestClick(request.id)}
                   className="p-4 border rounded-lg hover:bg-gray-50 transition-colors cursor-pointer"
