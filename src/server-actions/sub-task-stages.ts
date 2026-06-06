@@ -14,6 +14,15 @@ async function requireAdminUser() {
   return adminId
 }
 
+async function stageNameExists(name: string, excludeId?: string) {
+  const existing = await prisma.sub_task_stages.findUnique({
+    where: { name },
+    select: { id: true },
+  })
+
+  return !!existing && existing.id !== excludeId
+}
+
 export async function getSubTaskStagesForAdmin() {
   await requireAdminUser()
 
@@ -42,11 +51,19 @@ export async function updateSubTaskStage(input: {
 
     const existing = await prisma.sub_task_stages.findUnique({
       where: { id: input.id },
-      select: { isOthers: true },
+      select: { isOthers: true, name: true },
     })
+
+    if (existing?.isOthers && trimmed !== existing.name) {
+      return { success: false, error: 'Others stage cannot be renamed' }
+    }
 
     if (existing?.isOthers && !input.isActive) {
       return { success: false, error: 'Others stage cannot be deactivated' }
+    }
+
+    if (await stageNameExists(trimmed, input.id)) {
+      return { success: false, error: 'Stage name already exists' }
     }
 
     await prisma.sub_task_stages.update({
@@ -76,6 +93,10 @@ export async function createSubTaskStage(input: {
     await requireAdminUser()
     const trimmed = input.name.trim()
     if (!trimmed) return { success: false, error: 'Stage name is required' }
+
+    if (await stageNameExists(trimmed)) {
+      return { success: false, error: 'Stage name already exists' }
+    }
 
     await prisma.sub_task_stages.create({
       data: {

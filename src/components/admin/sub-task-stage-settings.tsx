@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useEffect, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Plus, Save, Power } from 'lucide-react'
 import { toast } from 'sonner'
@@ -43,6 +43,12 @@ export function SubTaskStageSettings({ initialStages }: SubTaskStageSettingsProp
   })
   const [pendingId, setPendingId] = useState<string | null>(null)
   const [isCreating, startCreating] = useTransition()
+
+  useEffect(() => {
+    setStages(initialStages)
+    const maxSortOrder = initialStages.reduce((max, stage) => Math.max(max, stage.sortOrder), 0)
+    setNewSortOrder(String(maxSortOrder + 10))
+  }, [initialStages])
 
   const updateLocalStage = (id: string, patch: Partial<SubTaskStage>) => {
     setStages((current) => current.map((stage) => (
@@ -149,6 +155,7 @@ export function SubTaskStageSettings({ initialStages }: SubTaskStageSettingsProp
                 <div className="space-y-1">
                   <Input
                     value={stage.name}
+                    disabled={stage.isOthers}
                     onChange={(event) => updateLocalStage(stage.id, { name: event.target.value })}
                     aria-label={`Name for ${stage.name}`}
                   />
