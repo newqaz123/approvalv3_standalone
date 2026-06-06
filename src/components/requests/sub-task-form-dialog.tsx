@@ -123,7 +123,10 @@ export function SubTaskFormDialog({
           <span>{task ? 'Edit' : 'Add sub-task'}</span>
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent
+        className="sm:max-w-lg"
+        data-testid={task ? 'edit-sub-task-dialog' : 'add-sub-task-dialog'}
+      >
         <DialogHeader>
           <DialogTitle>{task ? 'Edit sub-task' : 'Add sub-task'}</DialogTitle>
         </DialogHeader>
@@ -206,6 +209,7 @@ export function SubTaskFormDialog({
             type="button"
             onClick={handleSubmit}
             disabled={submitting || !description.trim() || !stageId || (selectedStage?.isOthers && !customStageText.trim())}
+            data-testid={task ? 'edit-sub-task-save' : 'add-sub-task-save'}
           >
             {submitting ? 'Saving...' : 'Save'}
           </Button>
