@@ -4,8 +4,12 @@ import { useState } from 'react'
 import { NeedsActionList, NeedsActionListProps } from './needs-action-list'
 import { StatusBadge } from '@/components/requests/status-badge'
 import { Card, CardContent } from '@/components/ui/card'
-import { FileText, Users, CheckCircle2 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { FileText, CheckCircle2 } from 'lucide-react'
 import { RequestModalRouter } from '@/components/requests/request-modal-router'
+import { getStaleSubTaskRequests } from '@/server-actions/engineering-sub-tasks'
 
 interface EngineeringDashboardTabsProps extends NeedsActionListProps {
   allEngineeringRequests: Array<{
@@ -17,6 +21,7 @@ interface EngineeringDashboardTabsProps extends NeedsActionListProps {
     hasRejection?: boolean
   }>
   currentUserId: string
+  subTaskStages: Array<{ id: string; name: string; isOthers: boolean }>
 }
 
 export function EngineeringDashboardTabs({
@@ -25,6 +30,7 @@ export function EngineeringDashboardTabs({
   allEngineeringRequests,
   engineeringUsers,
   currentUserId,
+  subTaskStages,
 }: EngineeringDashboardTabsProps) {
   const [activeTab, setActiveTab] = useState<'needs-action' | 'all'>('needs-action')
 
@@ -68,14 +74,30 @@ export function EngineeringDashboardTabs({
           />
         </>
       ) : (
-        <AllEngineeringRequests requests={allEngineeringRequests} />
+        <AllEngineeringRequests requests={allEngineeringRequests} subTaskStages={subTaskStages} />
       )}
     </div>
   )
 }
 
+type StaleRequest = {
+  id: string
+  title: string
+  status: any
+  department: { name: string } | null
+  requester: { name: string } | null
+  subTasks: Array<{
+    id: string
+    description: string
+    updatedAt: Date | string
+    stage: { id: string; name: string }
+    subContractor: { name: string } | null
+  }>
+}
+
 function AllEngineeringRequests({
-  requests
+  requests,
+  subTaskStages,
 }: {
   requests: Array<{
     id: string
@@ -85,17 +107,121 @@ function AllEngineeringRequests({
     requester: { name: string } | null
     hasRejection?: boolean
   }>
+  subTaskStages: Array<{ id: string; name: string; isOthers: boolean }>
 }) {
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [stageId, setStageId] = useState<string>('all')
+  const [olderThanDays, setOlderThanDays] = useState<string>('')
+  const [staleRequests, setStaleRequests] = useState<StaleRequest[]>([])
+  const [loadingStale, setLoadingStale] = useState(false)
 
   const handleRequestClick = (requestId: string) => {
     setSelectedRequestId(requestId)
     setIsModalOpen(true)
   }
 
+  const loadStaleRequests = async () => {
+    const days = Number(olderThanDays)
+    if (!days || days <= 0) {
+      setStaleRequests([])
+      return
+    }
+
+    setLoadingStale(true)
+    try {
+      const rows = await getStaleSubTaskRequests({
+        olderThanDays: days,
+        stageId: stageId === 'all' ? undefined : stageId,
+      })
+      setStaleRequests(rows)
+    } finally {
+      setLoadingStale(false)
+    }
+  }
+
+  const formatLastUpdate = (value: Date | string) => (
+    new Intl.DateTimeFormat('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    }).format(new Date(value))
+  )
+
   return (
     <>
+      <div className="rounded-lg border bg-gray-50 p-4 space-y-3">
+        <h3 className="text-sm font-semibold text-gray-700">Sub-task follow-up filter</h3>
+        <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-3">
+          <Select value={stageId} onValueChange={setStageId}>
+            <SelectTrigger>
+              <SelectValue placeholder="All stages" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All stages</SelectItem>
+              {subTaskStages.map((stage) => (
+                <SelectItem key={stage.id} value={stage.id}>
+                  {stage.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Input
+            type="number"
+            min={1}
+            value={olderThanDays}
+            onChange={(event) => setOlderThanDays(event.target.value)}
+            placeholder="Last update older than X days"
+            aria-label="Last update older than days"
+          />
+          <Button onClick={loadStaleRequests} disabled={loadingStale}>
+            {loadingStale ? 'Finding...' : 'Find stuck sub-tasks'}
+          </Button>
+        </div>
+      </div>
+
+      {staleRequests.length > 0 && (
+        <Card>
+          <CardContent className="pt-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Stuck sub-tasks</h2>
+            <div className="space-y-2">
+              {staleRequests.map((request) => (
+                <button
+                  key={request.id}
+                  type="button"
+                  onClick={() => handleRequestClick(request.id)}
+                  className="w-full p-4 border rounded-lg text-left hover:bg-gray-50 transition-colors"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <h3 className="font-medium text-gray-900">{request.title}</h3>
+                      <p className="text-sm text-gray-500 mt-1">
+                        {request.department?.name || 'No department'} •{' '}
+                        {request.requester?.name || 'Unknown'}
+                      </p>
+                    </div>
+                    <StatusBadge status={request.status} />
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    {request.subTasks.map((subTask) => (
+                      <div key={subTask.id} className="rounded-md bg-white px-3 py-2 text-sm text-gray-700">
+                        <div className="font-medium text-gray-900">{subTask.description}</div>
+                        <div className="mt-1 text-gray-500">
+                          {subTask.stage.name}
+                          {subTask.subContractor ? ` • ${subTask.subContractor.name}` : ''}
+                          {' • '}
+                          Last update {formatLastUpdate(subTask.updatedAt)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardContent className="pt-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">All Engineering Requests</h2>

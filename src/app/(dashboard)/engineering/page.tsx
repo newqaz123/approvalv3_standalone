@@ -2,6 +2,7 @@ import { auth } from '@/lib/auth-config'
 import { redirect } from 'next/navigation'
 import prisma from '@/lib/prisma'
 import { getRequestsNeedingEngineeringAction, getEngineeringUsers } from '@/server-actions/requests'
+import { getEngineeringSubTaskOptions } from '@/server-actions/engineering-sub-tasks'
 import { EngineeringDashboardTabs } from '@/components/engineering/engineering-dashboard-tabs'
 import { FileText, Clock, CheckCircle2 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
@@ -44,6 +45,8 @@ export default async function EngineeringDashboardPage() {
 
   // Fetch engineering users for Person in Charge selector
   const engineeringUsers = await getEngineeringUsers()
+
+  const subTaskOptions = await getEngineeringSubTaskOptions()
 
   // Fetch all engineering requests for "All Engineering Requests" tab
   const allEngineeringRequestsRaw = await prisma.requests.findMany({
@@ -191,6 +194,7 @@ export default async function EngineeringDashboardPage() {
         allEngineeringRequests={allEngineeringRequests}
         engineeringUsers={engineeringUsers}
         currentUserId={userId}
+        subTaskStages={subTaskOptions.stages}
       />
     </div>
   )

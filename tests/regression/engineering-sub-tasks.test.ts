@@ -309,3 +309,32 @@ describe('engineering sub-task request modal panel wiring', () => {
     }
   })
 })
+
+describe('engineering stale sub-task filters', () => {
+  it('loads stage options and passes them to the engineering tabs', () => {
+    const page = readFileSync('src/app/(dashboard)/engineering/page.tsx', 'utf8')
+
+    assert.match(page, /getEngineeringSubTaskOptions/)
+    assert.match(page, /const subTaskOptions = await getEngineeringSubTaskOptions\(\)/)
+    assert.match(page, /subTaskStages=\{subTaskOptions\.stages\}/)
+  })
+
+  it('wires stale sub-task filter state, controls, action call, and result rendering', () => {
+    const tabs = readFileSync('src/components/engineering/engineering-dashboard-tabs.tsx', 'utf8')
+
+    assert.match(tabs, /getStaleSubTaskRequests/)
+    assert.match(tabs, /subTaskStages: Array<\{ id: string; name: string; isOthers: boolean \}>/)
+    assert.match(tabs, /const \[stageId, setStageId\] = useState<string>\('all'\)/)
+    assert.match(tabs, /const \[olderThanDays, setOlderThanDays\] = useState<string>\(''\)/)
+    assert.match(tabs, /const \[staleRequests, setStaleRequests\] = useState/)
+    assert.match(tabs, /const \[loadingStale, setLoadingStale\] = useState\(false\)/)
+    assert.match(tabs, /getStaleSubTaskRequests\(\{\s*olderThanDays: days,\s*stageId: stageId === 'all' \? undefined : stageId,\s*\}\)/)
+    assert.match(tabs, /Last update older than X days/)
+    assert.match(tabs, /aria-label="Last update older than days"/)
+    assert.match(tabs, /Find stuck sub-tasks/)
+    assert.match(tabs, /staleRequests\.length > 0/)
+    assert.match(tabs, /subTask\.description/)
+    assert.match(tabs, /subTask\.updatedAt/)
+    assert.match(tabs, /handleRequestClick\(request\.id\)/)
+  })
+})
