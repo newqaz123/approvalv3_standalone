@@ -1,15 +1,15 @@
 'use client'
 
-import { useState } from 'react'
+import { KeyboardEvent, useState } from 'react'
 import { NeedsActionList, NeedsActionListProps } from './needs-action-list'
 import { StatusBadge } from '@/components/requests/status-badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { FileText, CheckCircle2 } from 'lucide-react'
 import { RequestModalRouter } from '@/components/requests/request-modal-router'
 import { getStaleSubTaskRequests } from '@/server-actions/engineering-sub-tasks'
+import { toast } from 'sonner'
 
 interface EngineeringDashboardTabsProps extends NeedsActionListProps {
   allEngineeringRequests: Array<{
@@ -121,6 +121,13 @@ function AllEngineeringRequests({
     setIsModalOpen(true)
   }
 
+  const handleStaleResultKeyDown = (event: KeyboardEvent<HTMLDivElement>, requestId: string) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return
+
+    event.preventDefault()
+    handleRequestClick(requestId)
+  }
+
   const loadStaleRequests = async () => {
     const days = Number(olderThanDays)
     if (!days || days <= 0) {
@@ -135,6 +142,9 @@ function AllEngineeringRequests({
         stageId: stageId === 'all' ? undefined : stageId,
       })
       setStaleRequests(rows)
+    } catch (error) {
+      setStaleRequests([])
+      toast.error(error instanceof Error ? error.message : 'Failed to load stuck sub-tasks')
     } finally {
       setLoadingStale(false)
     }
@@ -186,11 +196,13 @@ function AllEngineeringRequests({
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Stuck sub-tasks</h2>
             <div className="space-y-2">
               {staleRequests.map((request) => (
-                <button
+                <div
                   key={request.id}
-                  type="button"
+                  role="button"
+                  tabIndex={0}
                   onClick={() => handleRequestClick(request.id)}
-                  className="w-full p-4 border rounded-lg text-left hover:bg-gray-50 transition-colors"
+                  onKeyDown={(event) => handleStaleResultKeyDown(event, request.id)}
+                  className="w-full cursor-pointer rounded-lg border p-4 text-left transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div>
@@ -215,7 +227,7 @@ function AllEngineeringRequests({
                       </div>
                     ))}
                   </div>
-                </button>
+                </div>
               ))}
             </div>
           </CardContent>

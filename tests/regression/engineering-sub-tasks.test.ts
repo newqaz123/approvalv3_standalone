@@ -337,4 +337,23 @@ describe('engineering stale sub-task filters', () => {
     assert.match(tabs, /subTask\.updatedAt/)
     assert.match(tabs, /handleRequestClick\(request\.id\)/)
   })
+
+  it('shows feedback and clears stale results when stale sub-task loading fails', () => {
+    const tabs = readFileSync('src/components/engineering/engineering-dashboard-tabs.tsx', 'utf8')
+
+    assert.match(tabs, /import \{ toast \} from 'sonner'/)
+    assert.match(tabs, /catch \(error\)/)
+    assert.match(tabs, /setStaleRequests\(\[\]\)/)
+    assert.match(tabs, /toast\.error\(error instanceof Error \? error\.message : 'Failed to load stuck sub-tasks'\)/)
+  })
+
+  it('uses accessible non-button markup for stale result rows', () => {
+    const tabs = readFileSync('src/components/engineering/engineering-dashboard-tabs.tsx', 'utf8')
+    const staleResultsBlock = tabs.match(/<h2[^>]*>Stuck sub-tasks<\/h2>[\s\S]*?<Card>\s*<CardContent className="pt-6">\s*<h2[^>]*>All Engineering Requests<\/h2>/)?.[0] ?? ''
+
+    assert.doesNotMatch(staleResultsBlock, /<button\b/)
+    assert.match(staleResultsBlock, /role="button"/)
+    assert.match(staleResultsBlock, /tabIndex=\{0\}/)
+    assert.match(staleResultsBlock, /onKeyDown=\{\(event\) => handleStaleResultKeyDown\(event, request\.id\)\}/)
+  })
 })
