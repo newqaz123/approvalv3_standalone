@@ -370,6 +370,7 @@ describe('admin sub-task stage management wiring', () => {
     assert.match(actions, /deactivateSubTaskStage/)
     assert.match(actions, /revalidatePath\('\/admin'\)/)
     assert.match(actions, /isOthers/)
+    assert.match(actions, /existing\?\.isOthers && !input\.isActive/)
     assert.match(actions, /Others stage cannot be deactivated/)
   })
 
@@ -385,6 +386,7 @@ describe('admin sub-task stage management wiring', () => {
     assert.match(component, /createSubTaskStage/)
     assert.match(component, /deactivateSubTaskStage/)
     assert.match(component, /toast\.error/)
+    assert.match(component, /disabled=\{stage\.isOthers\}/)
     assert.match(component, /disabled=\{isPending \|\| stage\.isOthers \|\| !stage\.isActive\}/)
     assert.match(page, /getSubTaskStagesForAdmin/)
     assert.match(page, /SubTaskStageSettings/)

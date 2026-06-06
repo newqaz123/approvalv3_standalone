@@ -167,6 +167,7 @@ export function SubTaskStageSettings({ initialStages }: SubTaskStageSettingsProp
                 <label className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Checkbox
                     checked={stage.isActive}
+                    disabled={stage.isOthers}
                     onCheckedChange={(checked) => updateLocalStage(stage.id, { isActive: checked === true })}
                   />
                   <span>Active</span>

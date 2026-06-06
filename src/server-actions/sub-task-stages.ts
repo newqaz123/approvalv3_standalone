@@ -40,6 +40,15 @@ export async function updateSubTaskStage(input: {
     const trimmed = input.name.trim()
     if (!trimmed) return { success: false, error: 'Stage name is required' }
 
+    const existing = await prisma.sub_task_stages.findUnique({
+      where: { id: input.id },
+      select: { isOthers: true },
+    })
+
+    if (existing?.isOthers && !input.isActive) {
+      return { success: false, error: 'Others stage cannot be deactivated' }
+    }
+
     await prisma.sub_task_stages.update({
       where: { id: input.id },
       data: {
