@@ -1,6 +1,13 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import {
+  ENGINEERING_SUB_TASK_VISIBLE_STATUSES,
+  filterRowsByWorkRequisition,
+  isSubTaskVisibleForRequestStatus,
+  isSubTaskStale,
+  validateSubTaskInput,
+} from '../../src/lib/engineering-sub-tasks'
 
 describe('engineering sub-task schema', () => {
   const schema = () => readFileSync('prisma/schema.prisma', 'utf8')
@@ -29,5 +36,95 @@ describe('engineering sub-task schema', () => {
     for (const stage of ['Design', 'Site survey', 'Waiting user data', 'Waiting quotation', 'Waiting WR', 'Completed', 'Others']) {
       assert.match(sql, new RegExp(stage.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
     }
+  })
+})
+
+describe('engineering sub-task helpers', () => {
+  it('limits sub-task visibility to the approved request stages', () => {
+    assert.deepEqual(ENGINEERING_SUB_TASK_VISIBLE_STATUSES, [
+      'SentToEngineer',
+      'SendBackToRequester',
+      'FinalApproval',
+      'Completed',
+    ])
+    assert.equal(isSubTaskVisibleForRequestStatus('SentToEngineer'), true)
+    assert.equal(isSubTaskVisibleForRequestStatus('DesignCostEstimationApproval'), false)
+    assert.equal(isSubTaskVisibleForRequestStatus('Cancelled'), false)
+  })
+
+  it('filters rows by WR state', () => {
+    const rows = [
+      { id: 'a', workRequisitionReceived: true },
+      { id: 'b', workRequisitionReceived: false },
+    ]
+
+    assert.deepEqual(filterRowsByWorkRequisition(rows, 'all').map((row) => row.id), ['a', 'b'])
+    assert.deepEqual(filterRowsByWorkRequisition(rows, 'received').map((row) => row.id), ['a'])
+    assert.deepEqual(filterRowsByWorkRequisition(rows, 'not-received').map((row) => row.id), ['b'])
+  })
+
+  it('detects stale incomplete sub-tasks by updatedAt and stage', () => {
+    const now = new Date('2026-06-06T12:00:00Z')
+    const oldWaitingQuotation = {
+      isCompleted: false,
+      updatedAt: new Date('2026-05-30T11:59:59Z'),
+      stage: { id: 'stage-wq', name: 'Waiting quotation' },
+    }
+    const recentWaitingQuotation = {
+      isCompleted: false,
+      updatedAt: new Date('2026-06-05T12:00:00Z'),
+      stage: { id: 'stage-wq', name: 'Waiting quotation' },
+    }
+    const completedOldTask = {
+      isCompleted: true,
+      updatedAt: new Date('2026-05-01T12:00:00Z'),
+      stage: { id: 'stage-wq', name: 'Waiting quotation' },
+    }
+
+    assert.equal(isSubTaskStale(oldWaitingQuotation, { olderThanDays: 7, now }), true)
+    assert.equal(isSubTaskStale(recentWaitingQuotation, { olderThanDays: 7, now }), false)
+    assert.equal(isSubTaskStale(completedOldTask, { olderThanDays: 7, now }), false)
+    assert.equal(isSubTaskStale(oldWaitingQuotation, { olderThanDays: 7, stageId: 'other-stage', now }), false)
+    assert.equal(isSubTaskStale(oldWaitingQuotation, { olderThanDays: 7, stageId: 'stage-wq', now }), true)
+  })
+
+  it('requires custom stage text only for Others', () => {
+    assert.deepEqual(validateSubTaskInput({ description: '', stageIsOthers: false }), {
+      success: false,
+      error: 'Description is required',
+    })
+    assert.deepEqual(validateSubTaskInput({ description: 'Piping work', stageIsOthers: true, customStageText: '' }), {
+      success: false,
+      error: 'Custom stage text is required when stage is Others',
+    })
+    assert.deepEqual(validateSubTaskInput({ description: 'Piping work', stageIsOthers: false, customStageText: 'ignored' }), {
+      success: true,
+      customStageText: null,
+    })
+  })
+})
+
+describe('engineering sub-task server action wiring', () => {
+  it('exposes CRUD, WR, stages, subcontractor, and stale filter actions', () => {
+    const source = readFileSync('src/server-actions/engineering-sub-tasks.ts', 'utf8')
+
+    for (const exportName of [
+      'getEngineeringSubTaskOptions',
+      'createSubTask',
+      'updateSubTask',
+      'setSubTaskCompleted',
+      'deleteSubTask',
+      'toggleWorkRequisitionReceived',
+      'createSubContractor',
+      'deactivateSubContractor',
+      'getStaleSubTaskRequests',
+    ]) {
+      assert.match(source, new RegExp(`export async function ${exportName}\\b`))
+    }
+
+    assert.match(source, /'use server'/)
+    assert.match(source, /canManageEngineeringSubTasks/)
+    assert.match(source, /revalidateRequestViews/)
+    assert.match(source, /isSubTaskVisibleForRequestStatus/)
   })
 })
