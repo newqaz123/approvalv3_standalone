@@ -291,6 +291,14 @@ describe('engineering sub-task request modal panel wiring', () => {
     assert.match(source, /workRequisitionReceived/)
   })
 
+  it('does not fall through after rendering submit-final sub-task panel', () => {
+    const source = readFileSync('src/components/requests/request-modal-router.tsx', 'utf8')
+    const submitFinalCase = source.match(/case 'submit-final':[\s\S]*?default:/)?.[0] ?? ''
+
+    assert.match(submitFinalCase, /subTasksElement=\{subTasksElement\}/)
+    assert.match(submitFinalCase, /\)\s*break\s*default:/)
+  })
+
   it('renders the optional sub-task section before each activity timeline', () => {
     for (const file of modalFiles) {
       const source = readFileSync(file, 'utf8')

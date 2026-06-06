@@ -864,6 +864,7 @@ export function RequestModalRouter({
           subTasksElement={subTasksElement}
         />
       )
+      break
 
     default:
       return null
