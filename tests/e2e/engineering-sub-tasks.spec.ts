@@ -57,16 +57,22 @@ test.describe('engineering sub-tasks', () => {
     await subTasksTrigger.click()
     await expect(page.getByText('Work requisition received')).toBeVisible()
 
+    const subTaskDescription = `Piping work ${Date.now()}`
     await page.getByRole('button', { name: 'Add sub-task' }).click()
-    await page.getByPlaceholder('Describe the engineering follow-up work').fill(`Piping work ${Date.now()}`)
+    await page.getByPlaceholder('Describe the engineering follow-up work').fill(subTaskDescription)
     await page.getByRole('combobox').first().click()
     await page.getByRole('option', { name: 'Site survey' }).click()
     await page.getByRole('button', { name: 'Save' }).click()
 
-    await expect(page.getByText(/Piping work/)).toBeVisible()
+    await expect(page.getByText(subTaskDescription)).toBeVisible()
     await expect(page.getByText(/Last edited/)).toBeVisible()
 
-    await page.getByLabel('Work requisition received').check()
+    const wrCheckbox = page.getByLabel('Work requisition received')
+    if (await wrCheckbox.isChecked()) {
+      await wrCheckbox.uncheck()
+      await expect(page.getByText('No WR')).toBeVisible()
+    }
+    await wrCheckbox.check()
     await expect(page.getByText('WR received')).toBeVisible()
 
     await page.keyboard.press('Escape')
