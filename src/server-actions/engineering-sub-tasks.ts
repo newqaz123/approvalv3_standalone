@@ -26,10 +26,10 @@ async function requireSubTaskManager() {
 async function requireVisibleStageRequest(requestId: string) {
   const request = await prisma.requests.findUnique({
     where: { id: requestId },
-    select: { id: true, status: true },
+    select: { id: true, status: true, isDeleted: true },
   })
 
-  if (!request) throw new Error('Request not found')
+  if (!request || request.isDeleted) throw new Error('Request not found')
   if (!isSubTaskVisibleForRequestStatus(request.status)) {
     throw new Error('Sub-tasks are not available for this request stage')
   }
@@ -45,6 +45,18 @@ async function getStage(stageId: string) {
 
   if (!stage || !stage.isActive) throw new Error('Selected stage is not available')
   return stage
+}
+
+async function getActiveSubContractor(subContractorId?: string | null) {
+  if (!subContractorId) return null
+
+  const contractor = await prisma.sub_contractors.findUnique({
+    where: { id: subContractorId },
+    select: { id: true, isActive: true },
+  })
+
+  if (!contractor || !contractor.isActive) throw new Error('Selected subcontractor is not available')
+  return contractor.id
 }
 
 export async function getEngineeringSubTaskOptions() {
@@ -81,6 +93,7 @@ export async function createSubTask(input: {
       customStageText: input.customStageText,
     })
     if (!validation.success) return validation
+    const subContractorId = await getActiveSubContractor(input.subContractorId)
 
     const subTask = await prisma.request_sub_tasks.create({
       data: {
@@ -88,7 +101,7 @@ export async function createSubTask(input: {
         description: input.description.trim(),
         stageId: input.stageId,
         customStageText: validation.customStageText,
-        subContractorId: input.subContractorId || null,
+        subContractorId,
         createdById: user.id,
         updatedById: user.id,
       },
@@ -124,6 +137,7 @@ export async function updateSubTask(input: {
       customStageText: input.customStageText,
     })
     if (!validation.success) return validation
+    const subContractorId = await getActiveSubContractor(input.subContractorId)
 
     await prisma.request_sub_tasks.update({
       where: { id: input.id },
@@ -131,7 +145,7 @@ export async function updateSubTask(input: {
         description: input.description.trim(),
         stageId: input.stageId,
         customStageText: validation.customStageText,
-        subContractorId: input.subContractorId || null,
+        subContractorId,
         updatedById: user.id,
       },
     })

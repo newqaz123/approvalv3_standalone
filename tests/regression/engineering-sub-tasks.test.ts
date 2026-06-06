@@ -69,6 +69,7 @@ describe('engineering sub-task helpers', () => {
   it('allows only engineering and admin users to manage sub-tasks', () => {
     assert.equal(canManageEngineeringSubTasks({ role: 'engineering' }), true)
     assert.equal(canManageEngineeringSubTasks({ role: 'admin' }), true)
+    assert.equal(canManageEngineeringSubTasks({ role: 'engineering', isActive: false }), false)
     assert.equal(canManageEngineeringSubTasks({ role: 'general_dept' }), false)
     assert.equal(canManageEngineeringSubTasks({ role: null }), false)
     assert.equal(canManageEngineeringSubTasks(null), false)
@@ -175,5 +176,18 @@ describe('engineering sub-task server action wiring', () => {
       'toggleWorkRequisitionReceived',
       'updateSubTask',
     ])
+  })
+
+  it('rejects inactive users, deleted requests, and inactive subcontractors before mutations', () => {
+    const source = readFileSync('src/server-actions/engineering-sub-tasks.ts', 'utf8')
+
+    assert.match(source, /canManageEngineeringSubTasks\(user\)/)
+    assert.match(source, /select:\s*\{\s*id:\s*true,\s*status:\s*true,\s*isDeleted:\s*true\s*\}/)
+    assert.match(source, /if \(!request\s*\|\|\s*request\.isDeleted\) throw new Error\('Request not found'\)/)
+    assert.match(source, /async function getActiveSubContractor\(subContractorId\?: string \| null\)/)
+    assert.match(source, /prisma\.sub_contractors\.findUnique\(\{[\s\S]*where:\s*\{\s*id: subContractorId\s*\}/)
+    assert.match(source, /if \(!contractor \|\| !contractor\.isActive\) throw new Error\('Selected subcontractor is not available'\)/)
+    assert.match(source, /const subContractorId = await getActiveSubContractor\(input\.subContractorId\)/)
+    assert.match(source, /subContractorId,/)
   })
 })

@@ -11,7 +11,8 @@ export function isSubTaskVisibleForRequestStatus(status: string): boolean {
   return ENGINEERING_SUB_TASK_VISIBLE_STATUSES.includes(status as (typeof ENGINEERING_SUB_TASK_VISIBLE_STATUSES)[number])
 }
 
-export function canManageEngineeringSubTasks(user?: { role?: string | null } | null): boolean {
+export function canManageEngineeringSubTasks(user?: { role?: string | null; isActive?: boolean | null } | null): boolean {
+  if (user?.isActive === false) return false
   return user?.role === 'engineering' || user?.role === 'admin'
 }
 
