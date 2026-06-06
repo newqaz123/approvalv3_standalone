@@ -2,8 +2,11 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
+  canManageEngineeringSubTasks,
   ENGINEERING_SUB_TASK_VISIBLE_STATUSES,
   filterRowsByWorkRequisition,
+  getSubTaskSummary,
+  getWorkRequisitionLabel,
   isSubTaskVisibleForRequestStatus,
   isSubTaskStale,
   validateSubTaskInput,
@@ -61,6 +64,35 @@ describe('engineering sub-task helpers', () => {
     assert.deepEqual(filterRowsByWorkRequisition(rows, 'all').map((row) => row.id), ['a', 'b'])
     assert.deepEqual(filterRowsByWorkRequisition(rows, 'received').map((row) => row.id), ['a'])
     assert.deepEqual(filterRowsByWorkRequisition(rows, 'not-received').map((row) => row.id), ['b'])
+  })
+
+  it('allows only engineering and admin users to manage sub-tasks', () => {
+    assert.equal(canManageEngineeringSubTasks({ role: 'engineering' }), true)
+    assert.equal(canManageEngineeringSubTasks({ role: 'admin' }), true)
+    assert.equal(canManageEngineeringSubTasks({ role: 'general_dept' }), false)
+    assert.equal(canManageEngineeringSubTasks({ role: null }), false)
+    assert.equal(canManageEngineeringSubTasks(null), false)
+  })
+
+  it('builds WR labels and sub-task completion summaries', () => {
+    assert.equal(getWorkRequisitionLabel(true), 'WR received')
+    assert.equal(getWorkRequisitionLabel(false), 'No WR')
+    assert.equal(getWorkRequisitionLabel(), 'No WR')
+
+    assert.deepEqual(getSubTaskSummary([
+      { isCompleted: true },
+      { isCompleted: false },
+      { isCompleted: true },
+    ]), {
+      total: 3,
+      completed: 2,
+      label: '2/3 complete',
+    })
+    assert.deepEqual(getSubTaskSummary([]), {
+      total: 0,
+      completed: 0,
+      label: '0/0 complete',
+    })
   })
 
   it('detects stale incomplete sub-tasks by updatedAt and stage', () => {
@@ -126,5 +158,22 @@ describe('engineering sub-task server action wiring', () => {
     assert.match(source, /canManageEngineeringSubTasks/)
     assert.match(source, /revalidateRequestViews/)
     assert.match(source, /isSubTaskVisibleForRequestStatus/)
+  })
+
+  it('exports exactly the planned server actions', () => {
+    const source = readFileSync('src/server-actions/engineering-sub-tasks.ts', 'utf8')
+    const exportedAsyncFunctions = Array.from(source.matchAll(/export async function (\w+)\b/g), (match) => match[1]).sort()
+
+    assert.deepEqual(exportedAsyncFunctions, [
+      'createSubContractor',
+      'createSubTask',
+      'deactivateSubContractor',
+      'deleteSubTask',
+      'getEngineeringSubTaskOptions',
+      'getStaleSubTaskRequests',
+      'setSubTaskCompleted',
+      'toggleWorkRequisitionReceived',
+      'updateSubTask',
+    ])
   })
 })
