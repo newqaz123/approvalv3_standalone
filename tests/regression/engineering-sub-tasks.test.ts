@@ -357,3 +357,37 @@ describe('engineering stale sub-task filters', () => {
     assert.match(staleResultsBlock, /onKeyDown=\{\(event\) => handleStaleResultKeyDown\(event, request\.id\)\}/)
   })
 })
+
+describe('admin sub-task stage management wiring', () => {
+  it('adds admin-managed global stage actions', () => {
+    const actions = readFileSync('src/server-actions/sub-task-stages.ts', 'utf8')
+
+    assert.match(actions, /'use server'/)
+    assert.match(actions, /requireAdmin/)
+    assert.match(actions, /getSubTaskStagesForAdmin/)
+    assert.match(actions, /updateSubTaskStage/)
+    assert.match(actions, /createSubTaskStage/)
+    assert.match(actions, /deactivateSubTaskStage/)
+    assert.match(actions, /revalidatePath\('\/admin'\)/)
+    assert.match(actions, /isOthers/)
+    assert.match(actions, /Others stage cannot be deactivated/)
+  })
+
+  it('adds admin stage settings UI and renders it on the admin page', () => {
+    const component = readFileSync('src/components/admin/sub-task-stage-settings.tsx', 'utf8')
+    const page = readFileSync('src/app/admin/page.tsx', 'utf8')
+
+    assert.match(component, /'use client'/)
+    assert.match(component, /Sub-task stages/)
+    assert.match(component, /initialStages/)
+    assert.match(component, /isActive/)
+    assert.match(component, /updateSubTaskStage/)
+    assert.match(component, /createSubTaskStage/)
+    assert.match(component, /deactivateSubTaskStage/)
+    assert.match(component, /toast\.error/)
+    assert.match(component, /disabled=\{isPending \|\| stage\.isOthers \|\| !stage\.isActive\}/)
+    assert.match(page, /getSubTaskStagesForAdmin/)
+    assert.match(page, /SubTaskStageSettings/)
+    assert.match(page, /initialStages=\{subTaskStages\}/)
+  })
+})

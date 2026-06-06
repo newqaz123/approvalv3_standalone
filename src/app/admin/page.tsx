@@ -1,6 +1,8 @@
 import Link from 'next/link'
 import { Users, Building2, FileText, Trash2, ClipboardList, LayoutTemplate } from 'lucide-react'
 import prisma from '@/lib/prisma'
+import { getSubTaskStagesForAdmin } from '@/server-actions/sub-task-stages'
+import { SubTaskStageSettings } from '@/components/admin/sub-task-stage-settings'
 
 async function getStats() {
   const [userCount, deptCount, requestCount, deletedCount] = await Promise.all([
@@ -14,7 +16,10 @@ async function getStats() {
 }
 
 export default async function AdminPage() {
-  const stats = await getStats()
+  const [stats, subTaskStages] = await Promise.all([
+    getStats(),
+    getSubTaskStagesForAdmin(),
+  ])
 
   return (
     <div className="space-y-8">
@@ -150,6 +155,8 @@ export default async function AdminPage() {
           </Link>
         </div>
       </div>
+
+      <SubTaskStageSettings initialStages={subTaskStages} />
 
       {/* Phase Status */}
       <div className="rounded-lg border bg-muted/50 p-6">
