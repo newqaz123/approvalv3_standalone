@@ -27,6 +27,7 @@ import {
   getSubTaskSummary,
   getWorkRequisitionLabel,
 } from '@/lib/engineering-sub-tasks'
+import { toast } from 'sonner'
 import {
   SubContractorOption,
   SubTaskFormDialog,
@@ -72,14 +73,22 @@ export function SubTasksSection({
     setPendingId(id)
     const result = await action()
     setPendingId(null)
-    if (result.success) onChanged()
+    if (result.success) {
+      onChanged()
+      return
+    }
+    toast.error(result.error || 'Failed to update sub-task')
   }
 
   const handleToggleWorkRequisition = async (received: boolean) => {
     setPendingWr(true)
     const result = await toggleWorkRequisitionReceived(requestId, received)
     setPendingWr(false)
-    if (result.success) onChanged()
+    if (result.success) {
+      onChanged()
+      return
+    }
+    toast.error(result.error || 'Failed to update WR status')
   }
 
   return (
@@ -88,8 +97,12 @@ export function SubTasksSection({
         <div className="flex min-w-0 items-center gap-3">
           <ListChecks className="h-4 w-4 shrink-0 text-slate-500" />
           <div className="min-w-0">
-            <p className="text-sm font-bold text-slate-800 dark:text-slate-200">Sub-tasks</p>
-            <p className="truncate text-xs text-slate-500">{summary.label}</p>
+            <div className="flex min-w-0 items-center gap-2">
+              <p className="text-sm font-bold text-slate-800 dark:text-slate-200">Sub-tasks</p>
+              <Badge variant="secondary" className="h-6 rounded-md text-xs">
+                {summary.label}
+              </Badge>
+            </div>
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">

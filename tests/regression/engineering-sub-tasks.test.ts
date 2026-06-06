@@ -252,12 +252,17 @@ describe('engineering sub-task request modal panel wiring', () => {
     assert.match(source, /Sub-tasks/)
     assert.match(source, /getSubTaskSummary/)
     assert.match(source, /getWorkRequisitionLabel/)
+    const collapsedTrigger = source.match(/<CollapsibleTrigger[\s\S]*?<\/CollapsibleTrigger>/)?.[0] ?? ''
+    assert.match(collapsedTrigger, /<Badge[\s\S]*\{summary\.label\}[\s\S]*<\/Badge>/)
+    assert.ok((collapsedTrigger.match(/<Badge\b/g) ?? []).length > 1)
     assert.match(source, /Work requisition received/)
     assert.match(source, /Last edited/)
     assert.match(source, /canManage/)
     assert.match(source, /toggleWorkRequisitionReceived/)
     assert.match(source, /setSubTaskCompleted/)
     assert.match(source, /deleteSubTask/)
+    assert.match(source, /import \{ toast \} from 'sonner'/)
+    assert.match(source, /toast\.error\(result\.error/)
     assert.match(source, /onChanged\(\)/)
   })
 
