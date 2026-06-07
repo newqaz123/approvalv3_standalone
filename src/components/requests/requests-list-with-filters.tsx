@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { RequestTable, RequestListRow } from './request-table'
-import { RequestFilters } from './request-filters'
+import { DEFAULT_WR_FILTER, RequestFilters } from './request-filters'
 import type { GetRequestsFilters } from '@/server-actions/requests'
 
 interface RequestsListWithFiltersProps {
@@ -19,7 +19,7 @@ export function RequestsListWithFilters({
   refreshSignal = 0,
 }: RequestsListWithFiltersProps) {
   const [requests, setRequests] = useState<RequestListRow[]>(initialRequests)
-  const [filters, setFilters] = useState<GetRequestsFilters>({})
+  const [filters, setFilters] = useState<GetRequestsFilters>({ wrStatus: DEFAULT_WR_FILTER })
   const [isLoading, setIsLoading] = useState(false)
   const hasMountedRef = useRef(false)
 

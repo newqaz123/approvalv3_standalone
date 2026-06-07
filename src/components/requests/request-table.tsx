@@ -22,12 +22,14 @@ import { RequestModalRouter } from './request-modal-router'
 import { RejectedBadge } from './rejected-badge'
 import { RequestCard, RequestCardsEmptyState } from '@/components/mobile/request-card'
 import { ApprovalStatusBadge } from './approval-status-badge'
+import { cn } from '@/lib/utils'
 
 export type RequestListRow = {
   id: string
   title: string
   status: string
   createdAt: Date
+  workRequisitionReceived?: boolean
   requesterId: string
   department: { name: string } | null
   requester: { id: string; name: string } | null
@@ -203,7 +205,10 @@ export function RequestTable({ initialData, onDataRefresh }: RequestTableProps) 
               table.getRowModel().rows.map((row) => (
                 <TableRow
                   key={row.id}
-                  className="cursor-pointer hover:bg-gray-50"
+                  className={cn(
+                    "cursor-pointer hover:bg-gray-50",
+                    row.original.workRequisitionReceived && "bg-sky-50 hover:bg-sky-100/60"
+                  )}
                   onClick={() => handleRowClick(row.original.id)}
                 >
                   {row.getVisibleCells().map((cell) => (

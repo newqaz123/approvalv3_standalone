@@ -4,7 +4,7 @@ import { getMyRequests, getRequestFilterOptions } from '@/server-actions/request
 
 async function RequestsList() {
   const [requests, filterOptions] = await Promise.all([
-    getMyRequests(),
+    getMyRequests({ wrStatus: 'all' }),
     getRequestFilterOptions(),
   ])
 

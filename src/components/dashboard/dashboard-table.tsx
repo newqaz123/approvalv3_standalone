@@ -32,6 +32,7 @@ import { TableFilters, type DashboardFilters } from './table-filters'
 import type { RequestListRow } from '@/server-actions/dashboard'
 import { RequestCard, RequestCardsEmptyState } from '@/components/mobile/request-card'
 import { filterRowsByWorkRequisition } from '@/lib/engineering-sub-tasks'
+import { cn } from '@/lib/utils'
 
 interface DashboardTableProps {
   initialData: RequestListRow[]
@@ -42,6 +43,7 @@ interface DashboardTableProps {
   onModalOpen?: () => void
   onModalClose?: () => void
   onActionComplete?: () => void
+  onVisibleRowCountChange?: (count: number) => void
 }
 
 export function DashboardTable({
@@ -53,6 +55,7 @@ export function DashboardTable({
   onModalOpen,
   onModalClose,
   onActionComplete,
+  onVisibleRowCountChange,
 }: DashboardTableProps) {
   const [data, setData] = useState<RequestListRow[]>(initialData)
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null)
@@ -201,7 +204,8 @@ export function DashboardTable({
       cell: ({ row }) => row.original.requester?.name || '—',
     },
     {
-      accessorKey: 'department',
+      id: 'departmentId',
+      accessorFn: (row) => row.department?.id ?? '',
       header: 'Department',
       cell: ({ row }) => row.original.department?.name || '—',
     },
@@ -265,6 +269,12 @@ export function DashboardTable({
     onColumnFiltersChange: setColumnFilters,
   })
 
+  const visibleRowCount = table.getFilteredRowModel().rows.length
+
+  useEffect(() => {
+    onVisibleRowCountChange?.(visibleRowCount)
+  }, [onVisibleRowCountChange, visibleRowCount])
+
   return (
     <>
       <TableFilters
@@ -314,7 +324,10 @@ export function DashboardTable({
               table.getRowModel().rows.map((row) => (
                 <TableRow
                   key={row.id}
-                  className="cursor-pointer hover:bg-gray-50"
+                  className={cn(
+                    "cursor-pointer hover:bg-gray-50",
+                    row.original.workRequisitionReceived && "bg-sky-50 hover:bg-sky-100/60"
+                  )}
                   onClick={() => handleRowClick(row.original.id)}
                 >
                   {row.getVisibleCells().map((cell) => (

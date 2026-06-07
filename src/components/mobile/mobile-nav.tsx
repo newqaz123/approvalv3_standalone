@@ -38,7 +38,8 @@ const engineeringTabs: Tab[] = [
  */
 export function MobileNav() {
   const pathname = usePathname()
-  const { data: session } = useSession(); const user = session?.user
+  const { data: session } = useSession()
+  const user = session?.user
   const isVisible = useScrollDirection()
   const [pendingCount, setPendingCount] = useState(0)
   const isEngineering = user?.role === 'engineering'
@@ -46,6 +47,11 @@ export function MobileNav() {
 
   // Fetch pending actions count for badge
   useEffect(() => {
+    if (!user?.id) {
+      setPendingCount(0)
+      return
+    }
+
     async function fetchPendingCount() {
       try {
         const response = await fetch('/api/actions/pending-count')
@@ -60,10 +66,15 @@ export function MobileNav() {
 
     fetchPendingCount()
 
+    window.addEventListener('approvalapp:request-data-changed', fetchPendingCount)
+
     // Refresh every 30 seconds
     const interval = setInterval(fetchPendingCount, 30000)
-    return () => clearInterval(interval)
-  }, [])
+    return () => {
+      window.removeEventListener('approvalapp:request-data-changed', fetchPendingCount)
+      clearInterval(interval)
+    }
+  }, [user?.id])
 
   // Get user first initial for profile icon
   const userInitial = user?.name?.[0] || user?.email?.[0] || 'U'

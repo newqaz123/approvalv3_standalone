@@ -12,6 +12,7 @@ export function Navbar() {
   const user = session?.user
   const pathname = usePathname()
   const [menuOpen, setMenuOpen] = useState(false)
+  const [pendingCount, setPendingCount] = useState(0)
   const menuRef = useRef<HTMLDivElement>(null)
 
   const userRole = user?.role || null
@@ -28,6 +29,35 @@ export function Navbar() {
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
+
+  useEffect(() => {
+    if (!user?.id) {
+      setPendingCount(0)
+      return
+    }
+
+    async function fetchPendingCount() {
+      try {
+        const response = await fetch('/api/actions/pending-count')
+        if (response.ok) {
+          const data = await response.json()
+          setPendingCount(data.count || 0)
+        }
+      } catch (error) {
+        console.error('Failed to fetch pending count:', error)
+      }
+    }
+
+    fetchPendingCount()
+
+    window.addEventListener('approvalapp:request-data-changed', fetchPendingCount)
+
+    const interval = setInterval(fetchPendingCount, 30000)
+    return () => {
+      window.removeEventListener('approvalapp:request-data-changed', fetchPendingCount)
+      clearInterval(interval)
+    }
+  }, [user?.id])
 
   return (
     <nav className="border-b bg-white">
@@ -54,7 +84,7 @@ export function Navbar() {
 
               <Link
                 href="/requests/my-actions"
-                className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium ${
+                className={`relative flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium ${
                   pathname === '/requests/my-actions'
                     ? 'bg-gray-100 text-gray-900'
                     : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900'
@@ -62,6 +92,14 @@ export function Navbar() {
               >
                 <Bell className="h-4 w-4" />
                 My Actions
+                {pendingCount > 0 && (
+                  <span
+                    className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[11px] font-semibold leading-none text-white shadow-sm"
+                    aria-label={`${pendingCount} pending actions`}
+                  >
+                    {pendingCount > 9 ? '9+' : pendingCount}
+                  </span>
+                )}
               </Link>
 
               <Link

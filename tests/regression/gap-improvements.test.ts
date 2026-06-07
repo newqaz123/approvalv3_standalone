@@ -36,10 +36,11 @@ describe('Gapforimprove regressions', () => {
     const requestFilters = read('src/components/requests/request-filters.tsx')
 
     assert.match(requestFilters, /gap-2/)
-    assert.ok(requestFilters.includes('lg:grid-cols-[minmax(16rem,1.4fr)_repeat(4,minmax(0,1fr))]'))
-    assert.match(requestFilters, /h-9/)
+    assert.ok(requestFilters.includes('lg:grid-cols-[minmax(16rem,1.4fr)_repeat(5,minmax(0,1fr))]'))
+    assert.match(requestFilters, /h-10/)
     assert.match(requestFilters, /From date/)
     assert.match(requestFilters, /To date/)
+    assert.match(requestFilters, /Show only no WR/)
     assert.doesNotMatch(requestFilters, /lg:col-span-3/)
   })
 
@@ -66,6 +67,26 @@ describe('Gapforimprove regressions', () => {
     assert.match(navbar, /{isEngineering && \(\s*<Link\s+href="\/engineering"/)
     assert.match(mobileNav, /isEngineering \? engineeringTabs : tabs/)
     assert.match(mobileNav, /href: '\/engineering'/)
+  })
+
+  it('desktop My Actions navigation shows the pending action count badge', () => {
+    const navbar = read('src/components/navigation/navbar.tsx')
+
+    assert.match(navbar, /const \[pendingCount, setPendingCount\] = useState\(0\)/)
+    assert.match(navbar, /fetch\('\/api\/actions\/pending-count'\)/)
+    assert.match(navbar, /setInterval\(fetchPendingCount, 30000\)/)
+    assert.match(navbar, /approvalapp:request-data-changed/)
+    assert.match(navbar, /pendingCount > 0/)
+    assert.match(navbar, /pendingCount > 9 \? '9\+' : pendingCount/)
+    assert.match(navbar, /bg-red-500/)
+  })
+
+  it('mobile My Actions navigation refreshes the pending badge after request actions', () => {
+    const mobileNav = read('src/components/mobile/mobile-nav.tsx')
+
+    assert.match(mobileNav, /fetch\('\/api\/actions\/pending-count'\)/)
+    assert.match(mobileNav, /setInterval\(fetchPendingCount, 30000\)/)
+    assert.match(mobileNav, /approvalapp:request-data-changed/)
   })
 
   it('engineering dashboard sends plain request objects to client tabs', () => {

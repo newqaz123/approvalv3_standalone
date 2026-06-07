@@ -11,7 +11,7 @@ export type RequestListRow = {
   createdAt: Date
   workRequisitionReceived?: boolean
   requesterId: string
-  department: { name: string } | null
+  department: { id: string; name: string } | null
   requester: { id: string; name: string } | null
   _count: { fileAttachments: number }
   hasRejection?: boolean
@@ -90,6 +90,7 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
         include: {
           department: {
             select: {
+              id: true,
               name: true,
             },
           },
@@ -267,6 +268,7 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
             include: {
               department: {
                 select: {
+                  id: true,
                   name: true,
                 },
               },
@@ -418,6 +420,7 @@ export async function getMyCreatedRequests(): Promise<RequestListRow[]> {
       departmentId: true,
       department: {
         select: {
+          id: true,
           name: true,
         },
       },
@@ -642,6 +645,7 @@ export async function getAllRequests(): Promise<RequestListRow[]> {
       departmentId: true,
       department: {
         select: {
+          id: true,
           name: true,
         },
       },

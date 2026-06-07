@@ -14,6 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { cn } from '@/lib/utils'
 
 export interface RequestFilters {
   status?: string
@@ -25,6 +26,8 @@ export interface RequestFilters {
   search?: string
   wrStatus?: 'all' | 'not-received' | 'received'
 }
+
+export const DEFAULT_WR_FILTER = 'all' as const
 
 interface RequestFiltersProps {
   departments: Array<{ id: string; name: string }>
@@ -48,7 +51,7 @@ const formatStatusLabel = (status: string): string => {
 const ALL_STATUSES = Object.values(RequestStatus)
 
 export function RequestFilters({ departments, requesters, onFilterChange }: RequestFiltersProps) {
-  const [filters, setFilters] = useState<RequestFilters>({})
+  const [filters, setFilters] = useState<RequestFilters>({ wrStatus: DEFAULT_WR_FILTER })
 
   const updateFilter = (key: keyof RequestFilters, value: string | string[] | undefined) => {
     const newFilters = { ...filters, [key]: value }
@@ -66,13 +69,21 @@ export function RequestFilters({ departments, requesters, onFilterChange }: Requ
   }
 
   const clearFilters = () => {
-    setFilters({})
-    onFilterChange({})
+    const defaultFilters = { wrStatus: DEFAULT_WR_FILTER }
+    setFilters(defaultFilters)
+    onFilterChange(defaultFilters)
   }
 
-  const hasActiveFilters = Object.values(filters).some(
-    v => v !== undefined && v !== '' && (!Array.isArray(v) || v.length > 0)
-  )
+  const toggleNoWrFilter = () => {
+    updateFilter('wrStatus', filters.wrStatus === 'not-received' ? DEFAULT_WR_FILTER : 'not-received')
+  }
+
+  const hasActiveFilters = Object.entries(filters).some(([key, value]) => {
+    if (key === 'wrStatus' && value === DEFAULT_WR_FILTER) return false
+    return value !== undefined && value !== '' && (!Array.isArray(value) || value.length > 0)
+  })
+
+  const showOnlyNoWr = filters.wrStatus === 'not-received'
 
   return (
     <div className="space-y-3 rounded-lg border bg-gray-50 p-3">
@@ -99,7 +110,7 @@ export function RequestFilters({ departments, requesters, onFilterChange }: Requ
               placeholder="Search title or description..."
               value={filters.search || ''}
               onChange={(e) => updateFilter('search', e.target.value)}
-              className="h-9 min-h-9 pl-9"
+              className="h-10 min-h-10 pl-9"
             />
           </div>
         </div>
@@ -109,7 +120,7 @@ export function RequestFilters({ departments, requesters, onFilterChange }: Requ
             value={filters.departmentId || 'all'}
             onValueChange={(value) => updateFilter('departmentId', value === 'all' ? undefined : value)}
           >
-            <SelectTrigger className="h-9 min-h-9">
+            <SelectTrigger className="h-10 min-h-10">
               <SelectValue placeholder="All Departments" />
             </SelectTrigger>
             <SelectContent>
@@ -128,7 +139,7 @@ export function RequestFilters({ departments, requesters, onFilterChange }: Requ
             value={filters.requesterId || 'all'}
             onValueChange={(value) => updateFilter('requesterId', value === 'all' ? undefined : value)}
           >
-            <SelectTrigger className="h-9 min-h-9">
+            <SelectTrigger className="h-10 min-h-10">
               <SelectValue placeholder="All Requesters" />
             </SelectTrigger>
             <SelectContent>
@@ -138,22 +149,6 @@ export function RequestFilters({ departments, requesters, onFilterChange }: Requ
                   {user.name}
                 </SelectItem>
               ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div>
-          <Select
-            value={filters.wrStatus || 'all'}
-            onValueChange={(value) => updateFilter('wrStatus', value === 'all' ? undefined : value)}
-          >
-            <SelectTrigger className="h-9 min-h-9">
-              <SelectValue placeholder="WR status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All WR</SelectItem>
-              <SelectItem value="not-received">No WR</SelectItem>
-              <SelectItem value="received">WR received</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -173,7 +168,7 @@ export function RequestFilters({ departments, requesters, onFilterChange }: Requ
               if (!e.currentTarget.value) e.currentTarget.type = 'text'
             }}
             onChange={(e) => updateFilter('dateFrom', e.target.value)}
-            className="h-9 min-h-9"
+            className="h-10 min-h-10"
           />
         </div>
 
@@ -192,9 +187,36 @@ export function RequestFilters({ departments, requesters, onFilterChange }: Requ
               if (!e.currentTarget.value) e.currentTarget.type = 'text'
             }}
             onChange={(e) => updateFilter('dateTo', e.target.value)}
-            className="h-9 min-h-9"
+            className="h-10 min-h-10"
           />
         </div>
+
+        <Button
+          type="button"
+          variant="outline"
+          onClick={toggleNoWrFilter}
+          aria-pressed={showOnlyNoWr}
+          className={cn(
+            'h-10 min-h-10 w-full justify-start gap-2 text-xs font-medium',
+            showOnlyNoWr && 'border-emerald-300 bg-white text-emerald-800 hover:bg-emerald-50'
+          )}
+        >
+          <span
+            aria-hidden="true"
+            className={cn(
+              'relative h-5 w-9 rounded-full bg-gray-200 transition-colors',
+              showOnlyNoWr && 'bg-emerald-500'
+            )}
+          >
+            <span
+              className={cn(
+                'absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform',
+                showOnlyNoWr && 'translate-x-4'
+              )}
+            />
+          </span>
+          <span>Show only no WR</span>
+        </Button>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
