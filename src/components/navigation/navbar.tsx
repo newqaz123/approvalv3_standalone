@@ -2,7 +2,7 @@
 
 import { useSession, signOut } from 'next-auth/react'
 import Link from 'next/link'
-import { FileText, Settings, Bell, Wrench, BarChart3, LogOut, Lock, LayoutDashboard, WalletCards } from 'lucide-react'
+import { FileText, Settings, Bell, Wrench, BarChart3, LogOut, Lock, LayoutDashboard, WalletCards, User, GitBranch } from 'lucide-react'
 import { usePathname } from 'next/navigation'
 import { NotificationBell } from '@/components/notifications/notification-bell'
 import { useState, useRef, useEffect } from 'react'
@@ -155,8 +155,24 @@ export function Navbar() {
               </button>
 
               {menuOpen && (
-                <div className="absolute right-0 mt-2 w-48 rounded-md bg-white shadow-lg ring-1 ring-black ring-opacity-5 z-50">
+                <div className="absolute right-0 mt-2 w-56 rounded-md bg-white shadow-lg ring-1 ring-black ring-opacity-5 z-50">
                   <div className="py-1">
+                    <Link
+                      href="/profile"
+                      onClick={() => setMenuOpen(false)}
+                      className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    >
+                      <User className="h-4 w-4" />
+                      Profile
+                    </Link>
+                    <Link
+                      href="/approval-chain"
+                      onClick={() => setMenuOpen(false)}
+                      className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    >
+                      <GitBranch className="h-4 w-4" />
+                      Approval Chain
+                    </Link>
                     <Link
                       href="/change-password"
                       onClick={() => setMenuOpen(false)}

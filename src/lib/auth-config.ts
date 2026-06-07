@@ -108,6 +108,7 @@ const authConfig: NextAuthConfig = {
     async jwt({ token, user, trigger, session }) {
       if (user) {
         token.id = user.id
+        token.name = user.name
         token.role = user.role
         token.departmentId = user.departmentId
         token.forcePasswordChange = user.forcePasswordChange
@@ -115,6 +116,7 @@ const authConfig: NextAuthConfig = {
 
       // Allow session updates (e.g., after password change)
       if (trigger === 'update' && session) {
+        if (session.name) token.name = session.name
         if (session.role) token.role = session.role
         if (session.departmentId !== undefined) token.departmentId = session.departmentId
         if (session.forcePasswordChange !== undefined) token.forcePasswordChange = session.forcePasswordChange
@@ -125,6 +127,7 @@ const authConfig: NextAuthConfig = {
     async session({ session, token }) {
       if (token) {
         session.user.id = token.id as string
+        session.user.name = token.name as string
         session.user.role = token.role as string
         session.user.departmentId = token.departmentId as string | null
         session.user.forcePasswordChange = token.forcePasswordChange as boolean

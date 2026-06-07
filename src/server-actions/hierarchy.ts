@@ -622,6 +622,114 @@ export async function getHierarchyDataForUser(departmentId: string) {
 }
 
 /**
+ * Get the current user's default department approval chain.
+ * Returns a read-only hierarchy including internal users and external approvers.
+ */
+export async function getCurrentUserApprovalChain() {
+  const session = await auth()
+  if (!session?.user?.id) {
+    throw new Error('Unauthorized')
+  }
+
+  const currentUser = await prisma.user.findUnique({
+    where: { id: session.user.id },
+    select: {
+      departmentId: true,
+      isActive: true,
+    },
+  })
+
+  if (!currentUser?.isActive) {
+    throw new Error('User not found')
+  }
+
+  if (!currentUser.departmentId) {
+    return null
+  }
+
+  const department = await prisma.departments.findUnique({
+    where: { id: currentUser.departmentId },
+    include: {
+      users: {
+        where: { isActive: true, level: { not: null } },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          level: true,
+        },
+        orderBy: { name: 'asc' },
+      },
+      departmentApprovers: {
+        include: {
+          approver: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+        },
+      },
+    },
+  })
+
+  if (!department) {
+    throw new Error('Department not found')
+  }
+
+  const usersByLevel: Record<number, HierarchyUser[]> = {}
+  const processedUserIds = new Set<string>()
+  let maxLevel = 0
+
+  for (const user of department.users) {
+    const level = user.level!
+    if (!usersByLevel[level]) {
+      usersByLevel[level] = []
+    }
+    usersByLevel[level].push({ ...user, isExternal: false })
+    processedUserIds.add(user.id)
+    maxLevel = Math.max(maxLevel, level)
+  }
+
+  for (const departmentApprover of department.departmentApprovers) {
+    if (processedUserIds.has(departmentApprover.approver.id)) {
+      continue
+    }
+
+    const level = departmentApprover.approverLevel
+    if (!usersByLevel[level]) {
+      usersByLevel[level] = []
+    }
+    usersByLevel[level].push({
+      id: departmentApprover.approver.id,
+      name: departmentApprover.approver.name,
+      email: departmentApprover.approver.email,
+      level,
+      isExternal: true,
+    })
+    maxLevel = Math.max(maxLevel, level)
+  }
+
+  for (let level = 1; level <= Math.max(maxLevel, 3); level += 1) {
+    if (!usersByLevel[level]) {
+      usersByLevel[level] = []
+    }
+  }
+
+  return {
+    department: {
+      id: department.id,
+      name: department.name,
+      type: department.type,
+      levelNames: department.levelNames as Record<string, string> | null,
+    },
+    usersByLevel,
+    maxLevel: Math.max(maxLevel, 3),
+  }
+}
+
+/**
  * Get all departments accessible to a user for viewing hierarchy
  */
 export async function getDepartmentsForHierarchyView() {

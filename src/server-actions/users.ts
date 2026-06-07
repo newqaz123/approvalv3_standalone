@@ -38,6 +38,14 @@ export type UserWithDepartment = {
   departmentApproverRoles?: { id: string; department: { id: string; name: string } }[]
 }
 
+export type CurrentUserProfile = {
+  id: string
+  name: string
+  email: string
+  role: UserRole
+  department: { id: string; name: string } | null
+}
+
 /**
  * Get all users with their department information
  */
@@ -294,6 +302,111 @@ export async function resetUserPassword(userId: string, newPassword: string) {
 }
 
 /**
+ * Get the current user's self-service profile.
+ */
+export async function getCurrentUserProfile(): Promise<CurrentUserProfile> {
+  const session = await auth()
+  if (!session?.user?.id) {
+    throw new Error('Not authenticated')
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: session.user.id },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
+      isActive: true,
+      department: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+    },
+  })
+
+  if (!user?.isActive) {
+    throw new Error('User not found')
+  }
+
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    department: user.department,
+  }
+}
+
+/**
+ * Update only the current user's display name.
+ */
+export async function updateOwnDisplayName(displayName: string) {
+  const session = await auth()
+  if (!session?.user?.id) {
+    throw new Error('Not authenticated')
+  }
+
+  const nextName = displayName.trim().replace(/\s+/g, ' ')
+  if (nextName.length < 2) {
+    throw new Error('Display name must be at least 2 characters')
+  }
+  if (nextName.length > 100) {
+    throw new Error('Display name must be 100 characters or fewer')
+  }
+
+  const existingUser = await prisma.user.findUnique({
+    where: { id: session.user.id },
+    select: {
+      id: true,
+      name: true,
+      isActive: true,
+    },
+  })
+
+  if (!existingUser?.isActive) {
+    throw new Error('User not found')
+  }
+
+  if (existingUser.name === nextName) {
+    return {
+      id: existingUser.id,
+      name: existingUser.name,
+    }
+  }
+
+  const user = await prisma.$transaction(async (tx) => {
+    const updatedUser = await tx.user.update({
+      where: { id: session.user.id },
+      data: {
+        name: nextName,
+        updatedAt: new Date(),
+      },
+      select: {
+        id: true,
+        name: true,
+      },
+    })
+
+    await tx.request_activities.create({
+      data: {
+        action: 'profile_display_name_changed',
+        comments: `Display name changed from "${existingUser.name}" to "${nextName}"`,
+        userId: session.user.id,
+        createdAt: new Date(),
+      },
+    })
+
+    return updatedUser
+  })
+
+  revalidatePath('/profile')
+  return user
+}
+
+/**
  * Change own password (authenticated user action)
  */
 export async function changePassword(currentPassword: string, newPassword: string) {
@@ -361,4 +474,3 @@ export async function getUsersForCustomHierarchy(departmentId: string, minLevel:
 
   return users
 }
-
