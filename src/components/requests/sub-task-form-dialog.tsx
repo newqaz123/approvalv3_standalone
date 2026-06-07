@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { Pencil, Plus } from 'lucide-react'
+import { Check, ChevronsUpDown, Pencil, Plus } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -20,7 +20,16 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Input } from '@/components/ui/input'
-import { createSubTask, updateSubTask } from '@/server-actions/engineering-sub-tasks'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command'
+import { createSubContractor, createSubTask, updateSubTask } from '@/server-actions/engineering-sub-tasks'
 import { cn } from '@/lib/utils'
 
 export interface SubTaskStageOption {
@@ -47,7 +56,7 @@ interface SubTaskFormDialogProps {
   stages: SubTaskStageOption[]
   subcontractors: SubContractorOption[]
   task?: EditableSubTask
-  onChanged: () => void
+  onChanged: () => void | Promise<void>
   className?: string
 }
 
@@ -66,6 +75,10 @@ export function SubTaskFormDialog({
   const [stageId, setStageId] = useState('')
   const [customStageText, setCustomStageText] = useState('')
   const [subContractorId, setSubContractorId] = useState(NO_SUBCONTRACTOR)
+  const [subContractorOpen, setSubContractorOpen] = useState(false)
+  const [subContractorSearch, setSubContractorSearch] = useState('')
+  const [availableSubContractors, setAvailableSubContractors] = useState(subcontractors)
+  const [addingSubContractor, setAddingSubContractor] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -73,6 +86,23 @@ export function SubTaskFormDialog({
     () => stages.find((stage) => stage.id === stageId),
     [stageId, stages]
   )
+  const sortedSubContractors = useMemo(
+    () => [...availableSubContractors].sort((left, right) => left.name.localeCompare(right.name)),
+    [availableSubContractors]
+  )
+  const filteredSubContractors = useMemo(
+    () => sortedSubContractors.filter((subContractor) => fuzzyMatch(subContractor.name, subContractorSearch)),
+    [sortedSubContractors, subContractorSearch]
+  )
+  const selectedSubContractor = sortedSubContractors.find((subContractor) => subContractor.id === subContractorId)
+  const trimmedSubContractorSearch = subContractorSearch.trim()
+  const canAddSubContractor = !!trimmedSubContractorSearch && !sortedSubContractors.some(
+    (subContractor) => subContractor.name.toLowerCase() === trimmedSubContractorSearch.toLowerCase()
+  )
+
+  useEffect(() => {
+    setAvailableSubContractors(subcontractors)
+  }, [subcontractors])
 
   useEffect(() => {
     if (!open) return
@@ -81,8 +111,38 @@ export function SubTaskFormDialog({
     setStageId(task?.stage.id ?? stages[0]?.id ?? '')
     setCustomStageText(task?.customStageText ?? '')
     setSubContractorId(task?.subContractor?.id ?? NO_SUBCONTRACTOR)
+    setSubContractorSearch('')
     setError(null)
   }, [open, stages, task])
+
+  const handleCreateSubContractor = async () => {
+    if (!canAddSubContractor || addingSubContractor) return
+
+    setAddingSubContractor(true)
+    setError(null)
+    const result = await createSubContractor(trimmedSubContractorSearch)
+    setAddingSubContractor(false)
+
+    if (!result.success) {
+      setError(result.error)
+      return
+    }
+
+    setAvailableSubContractors((current) => {
+      const withoutDuplicate = current.filter((subContractor) => subContractor.id !== result.data.id)
+      return [...withoutDuplicate, result.data].sort((left, right) => left.name.localeCompare(right.name))
+    })
+    setSubContractorId(result.data.id)
+    setSubContractorSearch('')
+    setSubContractorOpen(false)
+  }
+
+  const handleSubContractorKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== 'Enter' || !canAddSubContractor) return
+
+    event.preventDefault()
+    void handleCreateSubContractor()
+  }
 
   const handleSubmit = async () => {
     setSubmitting(true)
@@ -107,7 +167,7 @@ export function SubTaskFormDialog({
     }
 
     setOpen(false)
-    onChanged()
+    await onChanged()
   }
 
   return (
@@ -115,12 +175,18 @@ export function SubTaskFormDialog({
       <DialogTrigger asChild>
         <Button
           type="button"
-          size="sm"
+          size={task ? 'icon' : 'sm'}
           variant={task ? 'ghost' : 'outline'}
-          className={cn(task ? 'h-8 px-2' : 'gap-2', className)}
+          aria-label={task ? 'Edit sub-task' : undefined}
+          title={task ? 'Edit sub-task' : undefined}
+          className={cn(task ? 'h-8 w-8' : 'gap-2', className)}
         >
           {task ? <Pencil className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-          <span>{task ? 'Edit' : 'Add sub-task'}</span>
+          {task ? (
+            <span className="sr-only">Edit sub-task</span>
+          ) : (
+            <span>Add sub-task</span>
+          )}
         </Button>
       </DialogTrigger>
       <DialogContent
@@ -167,19 +233,75 @@ export function SubTaskFormDialog({
               <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
                 Subcontractor
               </label>
-              <Select value={subContractorId} onValueChange={setSubContractorId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="No subcontractor" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={NO_SUBCONTRACTOR}>No subcontractor</SelectItem>
-                  {subcontractors.map((subcontractor) => (
-                    <SelectItem key={subcontractor.id} value={subcontractor.id}>
-                      {subcontractor.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Popover open={subContractorOpen} onOpenChange={setSubContractorOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    role="combobox"
+                    aria-label="Subcontractor"
+                    aria-expanded={subContractorOpen}
+                    className="w-full justify-between font-normal"
+                  >
+                    <span className="truncate">
+                      {selectedSubContractor?.name ?? 'No subcontractor'}
+                    </span>
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[320px] p-0" align="start">
+                  <Command shouldFilter={false}>
+                    <CommandInput
+                      value={subContractorSearch}
+                      onValueChange={setSubContractorSearch}
+                      onKeyDown={handleSubContractorKeyDown}
+                      placeholder="Search or add subcontractor"
+                    />
+                    <CommandList>
+                      <CommandGroup>
+                        <CommandItem
+                          value={NO_SUBCONTRACTOR}
+                          onSelect={() => {
+                            setSubContractorId(NO_SUBCONTRACTOR)
+                            setSubContractorSearch('')
+                            setSubContractorOpen(false)
+                          }}
+                        >
+                          <Check className={cn('h-4 w-4', subContractorId === NO_SUBCONTRACTOR ? 'opacity-100' : 'opacity-0')} />
+                          No subcontractor
+                        </CommandItem>
+                        {filteredSubContractors.map((subcontractor) => (
+                          <CommandItem
+                            key={subcontractor.id}
+                            value={subcontractor.name}
+                            onSelect={() => {
+                              setSubContractorId(subcontractor.id)
+                              setSubContractorSearch('')
+                              setSubContractorOpen(false)
+                            }}
+                          >
+                            <Check className={cn('h-4 w-4', subContractorId === subcontractor.id ? 'opacity-100' : 'opacity-0')} />
+                            {subcontractor.name}
+                          </CommandItem>
+                        ))}
+                        {canAddSubContractor && (
+                          <CommandItem
+                            value={`add-${trimmedSubContractorSearch}`}
+                            onSelect={() => void handleCreateSubContractor()}
+                            disabled={addingSubContractor}
+                          >
+                            <Plus className="h-4 w-4" />
+                            Add "{subContractorSearch.trim()}"
+                          </CommandItem>
+                        )}
+                      </CommandGroup>
+                      {filteredSubContractors.length === 0 && !canAddSubContractor && (
+                        <CommandEmpty>No subcontractors found</CommandEmpty>
+                      )}
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
             </div>
           </div>
 
@@ -217,4 +339,18 @@ export function SubTaskFormDialog({
       </DialogContent>
     </Dialog>
   )
+}
+
+function fuzzyMatch(value: string, query: string) {
+  const normalizedValue = value.toLowerCase()
+  const normalizedQuery = query.trim().toLowerCase()
+  if (!normalizedQuery) return true
+
+  let queryIndex = 0
+  for (const character of normalizedValue) {
+    if (character === normalizedQuery[queryIndex]) queryIndex += 1
+    if (queryIndex === normalizedQuery.length) return true
+  }
+
+  return false
 }

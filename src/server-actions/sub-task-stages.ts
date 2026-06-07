@@ -32,16 +32,25 @@ export async function getSubTaskStagesForAdmin() {
       id: true,
       name: true,
       sortOrder: true,
+      isDefault: true,
       isOthers: true,
       isActive: true,
     },
   })
 }
 
+async function getNextSortOrder() {
+  const lastStage = await prisma.sub_task_stages.findFirst({
+    orderBy: { sortOrder: 'desc' },
+    select: { sortOrder: true },
+  })
+
+  return (lastStage?.sortOrder ?? 0) + 10
+}
+
 export async function updateSubTaskStage(input: {
   id: string
   name: string
-  sortOrder: number
   isActive: boolean
 }): Promise<StageActionResult> {
   try {
@@ -70,12 +79,12 @@ export async function updateSubTaskStage(input: {
       where: { id: input.id },
       data: {
         name: trimmed,
-        sortOrder: input.sortOrder,
         isActive: input.isActive,
       },
     })
 
-    revalidatePath('/admin')
+    revalidatePath('/admin/sub-task-stages')
+    revalidatePath('/engineering')
     return { success: true }
   } catch (error) {
     return {
@@ -87,7 +96,6 @@ export async function updateSubTaskStage(input: {
 
 export async function createSubTaskStage(input: {
   name: string
-  sortOrder: number
 }): Promise<StageActionResult> {
   try {
     await requireAdminUser()
@@ -101,14 +109,15 @@ export async function createSubTaskStage(input: {
     await prisma.sub_task_stages.create({
       data: {
         name: trimmed,
-        sortOrder: input.sortOrder,
+        sortOrder: await getNextSortOrder(),
         isDefault: false,
         isOthers: false,
         isActive: true,
       },
     })
 
-    revalidatePath('/admin')
+    revalidatePath('/admin/sub-task-stages')
+    revalidatePath('/engineering')
     return { success: true }
   } catch (error) {
     return {
@@ -123,9 +132,13 @@ export async function deactivateSubTaskStage(id: string): Promise<StageActionRes
     await requireAdminUser()
     const stage = await prisma.sub_task_stages.findUnique({
       where: { id },
-      select: { isOthers: true },
+      select: { isOthers: true, name: true },
     })
 
+    if (!stage) return { success: false, error: 'Stage not found' }
+    if (stage.name === 'Completed') {
+      return { success: false, error: 'Completed stage cannot be deactivated' }
+    }
     if (stage?.isOthers) {
       return { success: false, error: 'Others stage cannot be deactivated' }
     }
@@ -135,12 +148,70 @@ export async function deactivateSubTaskStage(id: string): Promise<StageActionRes
       data: { isActive: false },
     })
 
-    revalidatePath('/admin')
+    revalidatePath('/admin/sub-task-stages')
+    revalidatePath('/engineering')
     return { success: true }
   } catch (error) {
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Failed to deactivate stage',
+    }
+  }
+}
+
+export async function activateSubTaskStage(id: string): Promise<StageActionResult> {
+  try {
+    await requireAdminUser()
+
+    await prisma.sub_task_stages.update({
+      where: { id },
+      data: { isActive: true },
+    })
+
+    revalidatePath('/admin/sub-task-stages')
+    revalidatePath('/engineering')
+    return { success: true }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to activate stage',
+    }
+  }
+}
+
+export async function deleteSubTaskStage(id: string): Promise<StageActionResult> {
+  try {
+    await requireAdminUser()
+    const stage = await prisma.sub_task_stages.findUnique({
+      where: { id },
+      select: {
+        isDefault: true,
+        isOthers: true,
+        name: true,
+        _count: { select: { subTasks: true } },
+      },
+    })
+
+    if (!stage) return { success: false, error: 'Stage not found' }
+    if (stage.name === 'Completed') {
+      return { success: false, error: 'Completed stage cannot be deleted' }
+    }
+    if (stage.isOthers) {
+      return { success: false, error: 'Others stage cannot be deleted' }
+    }
+    if (stage._count.subTasks > 0) {
+      return { success: false, error: 'Stage is used by sub-tasks and cannot be deleted' }
+    }
+
+    await prisma.sub_task_stages.delete({ where: { id } })
+
+    revalidatePath('/admin/sub-task-stages')
+    revalidatePath('/engineering')
+    return { success: true }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to delete stage',
     }
   }
 }

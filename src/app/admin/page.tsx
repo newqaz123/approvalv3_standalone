@@ -1,8 +1,6 @@
 import Link from 'next/link'
-import { Users, Building2, FileText, Trash2, ClipboardList, LayoutTemplate } from 'lucide-react'
+import { Users, Building2, FileText, Trash2, ClipboardList, LayoutTemplate, ListChecks } from 'lucide-react'
 import prisma from '@/lib/prisma'
-import { getSubTaskStagesForAdmin } from '@/server-actions/sub-task-stages'
-import { SubTaskStageSettings } from '@/components/admin/sub-task-stage-settings'
 
 async function getStats() {
   const [userCount, deptCount, requestCount, deletedCount] = await Promise.all([
@@ -16,10 +14,7 @@ async function getStats() {
 }
 
 export default async function AdminPage() {
-  const [stats, subTaskStages] = await Promise.all([
-    getStats(),
-    getSubTaskStagesForAdmin(),
-  ])
+  const stats = await getStats()
 
   return (
     <div className="space-y-8">
@@ -153,10 +148,25 @@ export default async function AdminPage() {
               </div>
             </div>
           </Link>
+
+          <Link
+            href="/admin/sub-task-stages"
+            className="rounded-lg border bg-card p-6 hover:bg-accent transition-colors cursor-pointer"
+          >
+            <div className="flex items-center gap-4">
+              <div className="rounded-full bg-primary/10 p-3">
+                <ListChecks className="h-6 w-6 text-primary" />
+              </div>
+              <div>
+                <h3 className="font-semibold">Sub-task Stages</h3>
+                <p className="text-sm text-muted-foreground">
+                  Manage engineering follow-up stage options
+                </p>
+              </div>
+            </div>
+          </Link>
         </div>
       </div>
-
-      <SubTaskStageSettings initialStages={subTaskStages} />
 
       {/* Phase Status */}
       <div className="rounded-lg border bg-muted/50 p-6">

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, Save, Power } from 'lucide-react'
+import { GripVertical, MoreHorizontal, Plus, Power, RotateCcw, Save, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -13,11 +13,19 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import {
+  activateSubTaskStage,
   createSubTaskStage,
   deactivateSubTaskStage,
+  deleteSubTaskStage,
   updateSubTaskStage,
 } from '@/server-actions/sub-task-stages'
 
@@ -25,6 +33,7 @@ interface SubTaskStage {
   id: string
   name: string
   sortOrder: number
+  isDefault: boolean
   isOthers: boolean
   isActive: boolean
 }
@@ -37,17 +46,11 @@ export function SubTaskStageSettings({ initialStages }: SubTaskStageSettingsProp
   const router = useRouter()
   const [stages, setStages] = useState(initialStages)
   const [newName, setNewName] = useState('')
-  const [newSortOrder, setNewSortOrder] = useState(() => {
-    const maxSortOrder = initialStages.reduce((max, stage) => Math.max(max, stage.sortOrder), 0)
-    return String(maxSortOrder + 10)
-  })
   const [pendingId, setPendingId] = useState<string | null>(null)
   const [isCreating, startCreating] = useTransition()
 
   useEffect(() => {
     setStages(initialStages)
-    const maxSortOrder = initialStages.reduce((max, stage) => Math.max(max, stage.sortOrder), 0)
-    setNewSortOrder(String(maxSortOrder + 10))
   }, [initialStages])
 
   const updateLocalStage = (id: string, patch: Partial<SubTaskStage>) => {
@@ -61,7 +64,6 @@ export function SubTaskStageSettings({ initialStages }: SubTaskStageSettingsProp
     const result = await updateSubTaskStage({
       id: stage.id,
       name: stage.name,
-      sortOrder: stage.sortOrder,
       isActive: stage.isActive,
     })
     setPendingId(null)
@@ -72,6 +74,21 @@ export function SubTaskStageSettings({ initialStages }: SubTaskStageSettingsProp
     }
 
     toast.success('Sub-task stage updated')
+    router.refresh()
+  }
+
+  const handleActivate = async (stage: SubTaskStage) => {
+    setPendingId(stage.id)
+    const result = await activateSubTaskStage(stage.id)
+    setPendingId(null)
+
+    if (!result.success) {
+      toast.error(result.error)
+      return
+    }
+
+    updateLocalStage(stage.id, { isActive: true })
+    toast.success('Sub-task stage activated')
     router.refresh()
   }
 
@@ -90,11 +107,25 @@ export function SubTaskStageSettings({ initialStages }: SubTaskStageSettingsProp
     router.refresh()
   }
 
+  const handleDelete = async (stage: SubTaskStage) => {
+    setPendingId(stage.id)
+    const result = await deleteSubTaskStage(stage.id)
+    setPendingId(null)
+
+    if (!result.success) {
+      toast.error(result.error)
+      return
+    }
+
+    setStages((current) => current.filter((item) => item.id !== stage.id))
+    toast.success('Sub-task stage deleted')
+    router.refresh()
+  }
+
   const handleCreate = () => {
     startCreating(async () => {
       const result = await createSubTaskStage({
         name: newName,
-        sortOrder: Number(newSortOrder),
       })
 
       if (!result.success) {
@@ -103,110 +134,138 @@ export function SubTaskStageSettings({ initialStages }: SubTaskStageSettingsProp
       }
 
       setNewName('')
-      setNewSortOrder(String(Number(newSortOrder || 0) + 10))
       toast.success('Sub-task stage created')
       router.refresh()
     })
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Sub-task stages</CardTitle>
-        <CardDescription>
-          Manage the shared global stage list engineers use for request sub-tasks.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid gap-3 rounded-lg border bg-muted/30 p-4 md:grid-cols-[1fr_140px_auto]">
+    <div className="space-y-6">
+      <Card role="region" aria-label="Add stage card">
+        <CardHeader className="p-6 pb-3">
+          <CardTitle className="text-base">Add stage</CardTitle>
+          <CardDescription>Create a stage for engineering sub-task follow-up.</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 p-6 pt-0 md:grid-cols-[1fr_auto]">
           <Input
             value={newName}
             onChange={(event) => setNewName(event.target.value)}
             placeholder="New stage name"
             aria-label="New sub-task stage name"
-          />
-          <Input
-            type="number"
-            value={newSortOrder}
-            onChange={(event) => setNewSortOrder(event.target.value)}
-            placeholder="Sort order"
-            aria-label="New sub-task stage sort order"
+            className="h-11"
           />
           <Button
             type="button"
             onClick={handleCreate}
-            disabled={isCreating || !newName.trim() || !newSortOrder}
-            className="gap-2"
+            disabled={isCreating || !newName.trim()}
+            className="h-10 gap-2"
           >
             <Plus className="h-4 w-4" />
             Add stage
           </Button>
-        </div>
+        </CardContent>
+      </Card>
 
-        <div className="space-y-3">
+      <Card role="region" aria-label="Stage list card">
+        <CardHeader className="p-6 pb-3">
+          <CardTitle className="text-base">Stage list</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 p-6 pt-0">
           {stages.map((stage) => {
             const isPending = pendingId === stage.id
+            const isCompletedDefaultStage = stage.name === 'Completed'
 
             return (
               <div
                 key={stage.id}
-                className="grid gap-3 rounded-lg border p-4 md:grid-cols-[1fr_120px_120px_auto_auto]"
+                className="grid min-h-[68px] gap-3 rounded-lg border bg-background p-3 md:grid-cols-[auto_1fr_auto_auto_auto] md:items-center"
               >
-                <div className="space-y-1">
+                <div
+                  className="flex h-10 w-8 items-center justify-center text-muted-foreground"
+                  aria-label="Drag handle"
+                  title="Drag handle"
+                >
+                  <GripVertical className="h-5 w-5" />
+                </div>
+
+                <div className="flex min-w-0 flex-col gap-2 md:flex-row md:items-center">
                   <Input
                     value={stage.name}
                     disabled={stage.isOthers}
                     onChange={(event) => updateLocalStage(stage.id, { name: event.target.value })}
                     aria-label={`Name for ${stage.name}`}
+                    className="h-11 md:max-w-xl"
                   />
+                  {isCompletedDefaultStage && (
+                    <Badge variant="outline" className="w-fit">Default</Badge>
+                  )}
                   {stage.isOthers && (
-                    <Badge variant="secondary">Others</Badge>
+                    <Badge variant="secondary" className="w-fit">Others</Badge>
                   )}
                 </div>
 
-                <Input
-                  type="number"
-                  value={stage.sortOrder}
-                  onChange={(event) => updateLocalStage(stage.id, { sortOrder: Number(event.target.value) })}
-                  aria-label={`Sort order for ${stage.name}`}
-                />
-
-                <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Checkbox
-                    checked={stage.isActive}
-                    disabled={stage.isOthers}
-                    onCheckedChange={(checked) => updateLocalStage(stage.id, { isActive: checked === true })}
-                  />
-                  <span>Active</span>
-                </label>
+                <Badge
+                  variant={stage.isActive ? 'secondary' : 'outline'}
+                  className={stage.isActive ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-50' : 'text-muted-foreground'}
+                >
+                  {stage.isActive ? 'Active' : 'Inactive'}
+                </Badge>
 
                 <Button
                   type="button"
                   variant="outline"
                   onClick={() => handleSave(stage)}
                   disabled={isPending || !stage.name.trim()}
-                  className="gap-2"
+                  className="h-10 gap-2"
                 >
                   <Save className="h-4 w-4" />
-                  Save
+                  Save changes
                 </Button>
 
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={() => handleDeactivate(stage)}
-                  disabled={isPending || stage.isOthers || !stage.isActive}
-                  title={stage.isOthers ? 'Others stage cannot be deactivated' : 'Deactivate stage'}
-                  className="gap-2 text-muted-foreground"
-                >
-                  <Power className="h-4 w-4" />
-                  Deactivate
-                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-10 w-10"
+                      aria-label={`More actions for ${stage.name}`}
+                      disabled={isPending}
+                    >
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="min-w-[160px]">
+                    <DropdownMenuItem
+                      onClick={() => handleActivate(stage)}
+                      disabled={isPending || stage.isActive}
+                    >
+                      <RotateCcw className="mr-2 h-4 w-4" />
+                      Activate
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => handleDeactivate(stage)}
+                      disabled={isPending || stage.isOthers || isCompletedDefaultStage || !stage.isActive}
+                    >
+                      <Power className="mr-2 h-4 w-4" />
+                      Deactivate
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={() => handleDelete(stage)}
+                      disabled={isPending || stage.isOthers || isCompletedDefaultStage}
+                      className="text-red-600 focus:text-red-600"
+                    >
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Delete
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             )
           })}
-        </div>
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+    </div>
   )
 }

@@ -141,8 +141,11 @@ export function RequestModalRouter({
     }
   }
 
-  if (loading || !requestData) {
+  if (loading && !requestData) {
     return null // Or a loading skeleton
+  }
+  if (!requestData) {
+    return null
   }
 
   // Transform data for modals
@@ -191,11 +194,9 @@ export function RequestModalRouter({
       stages={subTaskOptions.stages}
       subcontractors={subTaskOptions.subcontractors}
       canManage={canManageSubTasks}
-      onChanged={() => {
-        void loadRequestData()
-        router.refresh()
+      onChanged={async () => {
+        await loadRequestData()
         window.dispatchEvent(new Event('approvalapp:request-data-changed'))
-        onActionComplete?.()
       }}
     />
   ) : undefined
