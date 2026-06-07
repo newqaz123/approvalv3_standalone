@@ -69,7 +69,7 @@ export async function getEngineeringSubTaskOptions() {
     prisma.sub_contractors.findMany({
       where: { isActive: true },
       orderBy: { name: 'asc' },
-      select: { id: true, name: true },
+      select: { id: true, name: true, isActive: true },
     }),
   ])
 
@@ -166,6 +166,16 @@ export async function setSubTaskCompleted(id: string, completed: boolean): Promi
     })
     if (!existing) throw new Error('Sub-task not found')
     await requireVisibleStageRequest(existing.requestId)
+    const completedStage = completed
+      ? await prisma.sub_task_stages.findFirst({
+          where: { name: 'Completed', isActive: true },
+          select: { id: true },
+        })
+      : null
+
+    if (completed && !completedStage) {
+      throw new Error('Completed stage is not available')
+    }
 
     await prisma.request_sub_tasks.update({
       where: { id },
@@ -173,6 +183,7 @@ export async function setSubTaskCompleted(id: string, completed: boolean): Promi
         isCompleted: completed,
         completedAt: completed ? new Date() : null,
         completedById: completed ? user.id : null,
+        ...(completedStage ? { stageId: completedStage.id } : {}),
         updatedById: user.id,
       },
     })

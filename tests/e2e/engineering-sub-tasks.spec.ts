@@ -78,11 +78,11 @@ test.describe('engineering sub-tasks', () => {
 
     const openAllEngineeringRequests = async () => {
       await page.waitForLoadState('networkidle').catch(() => undefined)
-      const allRequestsHeading = page.getByRole('heading', { name: 'All Engineering Requests' })
-      if (await allRequestsHeading.isVisible().catch(() => false)) return
+      const followUpBanner = page.getByText(/This table does not show completed requests/)
+      if (await followUpBanner.isVisible().catch(() => false)) return
 
-      await page.getByRole('button', { name: 'All Engineering Requests' }).click()
-      await expect(allRequestsHeading).toBeVisible({ timeout: 10000 })
+      await page.getByRole('button', { name: 'Follow up work' }).click()
+      await expect(followUpBanner).toBeVisible({ timeout: 10000 })
     }
 
     await openAllEngineeringRequests()
@@ -109,21 +109,20 @@ test.describe('engineering sub-tasks', () => {
     const selectedRequestId = await selectedRow.getAttribute('data-request-id')
     expect(selectedRequestId).toBeTruthy()
     const selectedRequestRow = () => page.locator(`[data-testid="engineering-request-row"][data-request-id="${selectedRequestId}"]`)
-    const waitForActionReload = async () => {
-      await expect(page.getByRole('dialog')).toBeHidden({ timeout: 15000 })
-      await expect(page.getByRole('heading', { name: 'Engineering Dashboard' })).toBeVisible({ timeout: 15000 })
+    const waitForModalRefresh = async () => {
+      await expect(page.getByRole('dialog')).toBeVisible({ timeout: 30000 })
       await page.waitForLoadState('networkidle').catch(() => undefined)
     }
     const openSelectedRequest = async () => {
       if (await page.getByRole('dialog').isVisible().catch(() => false)) return
 
       await openAllEngineeringRequests()
-      await selectedRequestRow().click()
-      await expect(page.getByRole('dialog')).toBeVisible()
+      await selectedRequestRow().click({ position: { x: 20, y: 20 } })
+      await expect(page.getByRole('dialog')).toBeVisible({ timeout: 20000 })
     }
 
-    await selectedRow.click()
-    await expect(page.getByRole('dialog')).toBeVisible()
+    await selectedRequestRow().click({ position: { x: 20, y: 20 } })
+    await expect(page.getByRole('dialog')).toBeVisible({ timeout: 20000 })
 
     const subTasksTrigger = page.getByRole('button', { name: /Sub-tasks/ })
     await expect(subTasksTrigger).toBeVisible()
@@ -152,7 +151,8 @@ test.describe('engineering sub-tasks', () => {
         const createdTask = createdTaskCard()
         if (await createdTask.isVisible().catch(() => false)) {
           await createdTask.getByRole('button', { name: 'Delete' }).click()
-          await waitForActionReload()
+          await expect(createdTask).toBeHidden({ timeout: 15000 })
+          await waitForModalRefresh()
         }
       }
 
@@ -164,7 +164,7 @@ test.describe('engineering sub-tasks', () => {
         const currentWrChecked = await wrCheckbox.isChecked()
         if (currentWrChecked !== originalWrChecked) {
           await wrCheckbox.click()
-          await waitForActionReload()
+          await waitForModalRefresh()
         }
       }
     }
@@ -178,26 +178,35 @@ test.describe('engineering sub-tasks', () => {
       await page.getByRole('option', { name: 'Site survey' }).click()
       await page.getByTestId('add-sub-task-save').click()
       await expect(addSubTaskDialog).toBeHidden({ timeout: 15000 })
-      await waitForActionReload()
+      await waitForModalRefresh()
       createdSubTask = true
 
-      await openSelectedRequest()
       await ensureSubTasksExpanded()
       await expect(createdTaskCard()).toBeVisible()
-      await expect(createdTaskCard().getByText(/Last edited/)).toBeVisible()
+      await expect(createdTaskCard().getByText(/Last edited by/)).toBeVisible()
+
+      const taskCheckbox = createdTaskCard().getByRole('checkbox')
+      await expect(taskCheckbox).toBeEnabled({ timeout: 15000 })
+      await expect(taskCheckbox).not.toBeChecked()
+      await taskCheckbox.click()
+      await waitForModalRefresh()
+      await expect(page.getByRole('button', { name: /Sub-tasks/ })).toContainText(/[1-9]\d*\/\d+ complete/, { timeout: 15000 })
+      await ensureSubTasksExpanded()
+      await expect(createdTaskCard()).toBeVisible({ timeout: 15000 })
+      await expect(createdTaskCard()).toContainText('Completed', { timeout: 15000 })
 
       const wrCheckbox = page.getByLabel('Work requisition received')
       originalWrChecked = await wrCheckbox.isChecked()
       if (originalWrChecked) {
         await wrCheckbox.click()
-        await waitForActionReload()
-        await openSelectedRequest()
+        await waitForModalRefresh()
+        await expect(page.getByRole('button', { name: /Sub-tasks/ })).toContainText('No WR', { timeout: 15000 })
         await ensureSubTasksExpanded()
         await expect(page.getByText('No WR')).toBeVisible()
       }
       await page.getByLabel('Work requisition received').click()
-      await waitForActionReload()
-      await openSelectedRequest()
+      await waitForModalRefresh()
+      await expect(page.getByRole('button', { name: /Sub-tasks/ })).toContainText('WR received', { timeout: 15000 })
       await ensureSubTasksExpanded()
       await expect(page.getByText('WR received')).toBeVisible()
 

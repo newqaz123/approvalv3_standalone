@@ -1,9 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import Link from 'next/link'
 import { format } from 'date-fns'
-import { FileText, Users, CheckCircle2 } from 'lucide-react'
+import { FileText, CheckCircle2 } from 'lucide-react'
 import {
   Table,
   TableBody,
@@ -14,10 +13,14 @@ import {
 } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import { StatusBadge } from '@/components/requests/status-badge'
+import { Badge } from '@/components/ui/badge'
 import { RequestModalRouter } from '@/components/requests/request-modal-router'
 import { RejectedBadge } from '@/components/requests/rejected-badge'
 import { EngineerPicPicker } from './engineer-pic-picker'
+import { cn } from '@/lib/utils'
+
+const ENGINEER_ALL_FILTER = 'all'
+const ENGINEER_UNASSIGNED_FILTER = 'unassigned'
 
 export interface NeedsActionListProps {
   needsSolution: Array<{
@@ -48,6 +51,16 @@ export function NeedsActionList({
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [selectedSolutionRequestId, setSelectedSolutionRequestId] = useState<string | null>(null)
   const [isSolutionModalOpen, setIsSolutionModalOpen] = useState(false)
+  const [engineerId, setEngineerId] = useState<string>(ENGINEER_ALL_FILTER)
+
+  const filteredNeedsSolution = needsSolution.filter(({ assignedEngineers }) => {
+    const matchesEngineer = engineerId === ENGINEER_ALL_FILTER
+      || (engineerId === ENGINEER_UNASSIGNED_FILTER
+        ? assignedEngineers.length === 0
+        : assignedEngineers.some((engineer) => engineer.id === engineerId))
+
+    return matchesEngineer
+  })
 
   const formatCurrency = (amount: number, currency: string) => {
     return new Intl.NumberFormat('th-TH', {
@@ -68,126 +81,7 @@ export function NeedsActionList({
 
   return (
     <div className="space-y-6">
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">
-                  Requests Awaiting Solution
-                </p>
-                <p className="text-3xl font-bold text-gray-900 mt-1">
-                  {needsSolution.length}
-                </p>
-              </div>
-              <div className="h-12 w-12 rounded-full bg-blue-100 flex items-center justify-center">
-                <FileText className="h-6 w-6 text-blue-600" />
-              </div>
-            </div>
-            {needsSolution.length > 0 && (
-              <Link href="/engineering?status=SentToEngineer">
-                <Button variant="link" className="mt-2 p-0 h-auto text-sm">
-                  View all requests →
-                </Button>
-              </Link>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">
-                  Solutions Awaiting Your Approval
-                </p>
-                <p className="text-3xl font-bold text-gray-900 mt-1">
-                  {needsApproval.length}
-                </p>
-              </div>
-              <div className="h-12 w-12 rounded-full bg-purple-100 flex items-center justify-center">
-                <CheckCircle2 className="h-6 w-6 text-purple-600" />
-              </div>
-            </div>
-            {needsApproval.length > 0 && (
-              <Link href="/engineering?status=DesignCostEstimationApproval">
-                <Button variant="link" className="mt-2 p-0 h-auto text-sm">
-                  View all approvals →
-                </Button>
-              </Link>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Section 1: Requests Awaiting Solution */}
-      <div>
-        <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-          <FileText className="h-5 w-5" />
-          Requests Awaiting Solution
-        </h2>
-        {needsSolution.length === 0 ? (
-          <Card>
-            <CardContent className="py-8 text-center text-gray-500">
-              No requests awaiting solution
-            </CardContent>
-          </Card>
-        ) : (
-          <Card>
-            <div className="rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Title</TableHead>
-                    <TableHead>Department</TableHead>
-                    <TableHead>Requester</TableHead>
-                    <TableHead>Submitted Date</TableHead>
-                    <TableHead>Assigned To</TableHead>
-                    <TableHead className="text-right">Action</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {needsSolution.map(({ request, assignedEngineers }) => (
-                    <TableRow key={request.id}>
-                      <TableCell className="font-medium">
-                        <div className="flex items-center gap-2">
-                          {request.title}
-                          {request.hasRejection && <RejectedBadge size="sm" showText={false} />}
-                        </div>
-                      </TableCell>
-                      <TableCell>{request.department?.name || '-'}</TableCell>
-                      <TableCell>{request.requester?.name || '-'}</TableCell>
-                      <TableCell>
-                        {format(new Date(request.createdAt), 'MMM d, yyyy')}
-                      </TableCell>
-                      <TableCell>
-                        <EngineerPicPicker
-                          requestId={request.id}
-                          engineeringUsers={engineeringUsers}
-                          initialAssignedIds={assignedEngineers.map((e: any) => e.id)}
-                          currentUserId={currentUserId}
-                        />
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button 
-                          size="sm" 
-                          variant="default"
-                          onClick={() => handleSubmitSolution(request.id)}
-                        >
-                          {request.hasRejection ? 'Resubmit Solution' : 'Submit Solution'}
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          </Card>
-        )}
-      </div>
-
-      {/* Section 2: Solutions Awaiting Your Approval */}
+      {/* Section 1: Solutions Awaiting Your Approval */}
       <div>
         <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
           <CheckCircle2 className="h-5 w-5" />
@@ -248,6 +142,107 @@ export function NeedsActionList({
         )}
       </div>
 
+      {/* Section 2: Requests Awaiting Solution */}
+      <div>
+        <div className="mb-4 space-y-3">
+          <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+            <FileText className="h-5 w-5" />
+            Requests Awaiting Solution
+          </h2>
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase text-gray-500">Engineer PIC</p>
+            <div className="flex flex-wrap gap-2">
+              <EngineerFilterChip
+                active={engineerId === ENGINEER_ALL_FILTER}
+                onClick={() => setEngineerId(ENGINEER_ALL_FILTER)}
+              >
+                All PIC
+              </EngineerFilterChip>
+              <EngineerFilterChip
+                active={engineerId === ENGINEER_UNASSIGNED_FILTER}
+                onClick={() => setEngineerId(ENGINEER_UNASSIGNED_FILTER)}
+              >
+                Unassigned
+              </EngineerFilterChip>
+              {engineeringUsers.map((engineer) => (
+                <EngineerFilterChip
+                  key={engineer.id}
+                  active={engineerId === engineer.id}
+                  onClick={() => setEngineerId(engineer.id)}
+                >
+                  {engineer.name}
+                </EngineerFilterChip>
+              ))}
+            </div>
+          </div>
+        </div>
+        {filteredNeedsSolution.length === 0 ? (
+          <Card>
+            <CardContent className="py-8 text-center text-gray-500">
+              No requests awaiting solution
+            </CardContent>
+          </Card>
+        ) : (
+          <Card>
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Title</TableHead>
+                    <TableHead>Department</TableHead>
+                    <TableHead>Requester</TableHead>
+                    <TableHead>Submitted Date</TableHead>
+                    <TableHead>Assigned To</TableHead>
+                    <TableHead className="text-right">Action</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredNeedsSolution.map(({ request, assignedEngineers }) => (
+                    <TableRow key={request.id}>
+                      <TableCell className="font-medium">
+                        <div className="flex items-center gap-2">
+                          {request.title}
+                          {request.hasRejection && <RejectedBadge size="sm" showText={false} />}
+                        </div>
+                      </TableCell>
+                      <TableCell>{request.department?.name || '-'}</TableCell>
+                      <TableCell>{request.requester?.name || '-'}</TableCell>
+                      <TableCell>
+                        {format(new Date(request.createdAt), 'MMM d, yyyy')}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <EngineerPicPicker
+                            requestId={request.id}
+                            engineeringUsers={engineeringUsers}
+                            initialAssignedIds={assignedEngineers.map((e: any) => e.id)}
+                            currentUserId={currentUserId}
+                          />
+                          {assignedEngineers.length === 0 && (
+                            <Badge variant="secondary" className="rounded-full text-xs">
+                              Unassigned
+                            </Badge>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          size="sm"
+                          variant="default"
+                          onClick={() => handleSubmitSolution(request.id)}
+                        >
+                          {request.hasRejection ? 'Resubmit Solution' : 'Submit Solution'}
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </Card>
+        )}
+      </div>
+
       {/* Request Modal Router for Approvals */}
       {selectedRequestId && (
         <RequestModalRouter
@@ -274,5 +269,30 @@ export function NeedsActionList({
         />
       )}
     </div>
+  )
+}
+
+function EngineerFilterChip({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <Button
+      type="button"
+      size="sm"
+      variant={active ? 'default' : 'outline'}
+      onClick={onClick}
+      className={cn(
+        'h-8 rounded-full px-3 text-xs',
+        active ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-white text-gray-600 hover:bg-gray-50'
+      )}
+    >
+      {children}
+    </Button>
   )
 }
