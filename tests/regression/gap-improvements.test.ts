@@ -153,4 +153,108 @@ describe('Gapforimprove regressions', () => {
     assert.match(approvals, /revalidateRequestViews/)
     assert.match(solutions, /revalidateRequestViews/)
   })
+
+  it('email notification request links open the same modal flow as in-app notifications', () => {
+    const notifications = read('src/server-actions/notifications.ts')
+    const deepLinkModal = read('src/components/requests/request-deep-link-modal.tsx')
+    const myActionsPage = read('src/app/(dashboard)/requests/my-actions/page.tsx')
+    const requestsPage = read('src/app/(dashboard)/requests/page.tsx')
+    const middleware = read('src/middleware.ts')
+    const signInPage = read('src/app/(auth)/sign-in/[[...sign-in]]/page.tsx')
+
+    assert.match(notifications, /buildNotificationRequestPath/)
+    assert.match(notifications, /approval_needed/)
+    assert.match(notifications, /final_approval_needed/)
+    assert.match(notifications, /\/requests\/my-actions\?requestId=/)
+    assert.doesNotMatch(notifications, /\$\{baseUrl\}\/requests\/\$\{notification\.requestId\}/)
+    assert.match(myActionsPage, /searchParams/)
+    assert.match(requestsPage, /searchParams/)
+    assert.match(myActionsPage, /RequestDeepLinkModal requestId=\{requestId\} returnTo="\/requests\/my-actions"/)
+    assert.match(myActionsPage, /requestId \? \(\s*<ActionItemsList \/>\s*\) : \(/)
+    assert.match(requestsPage, /RequestDeepLinkModal requestId=\{requestId\} returnTo="\/requests"/)
+    assert.match(requestsPage, /requestId \? \(\s*<RequestsList \/>\s*\) : \(/)
+    assert.match(deepLinkModal, /RequestModalRouter/)
+    assert.match(deepLinkModal, /router\.replace\(returnTo\)/)
+    assert.match(middleware, /callbackUrl/)
+    assert.match(middleware, /encodeURIComponent\(req\.nextUrl\.pathname \+ req\.nextUrl\.search\)/)
+    assert.match(signInPage, /useSearchParams/)
+    assert.match(signInPage, /callbackUrl/)
+    assert.match(signInPage, /router\.push\(callbackUrl\)/)
+  })
+
+  it('approval and rejection emails include request details and use the email helper', () => {
+    const notifications = read('src/server-actions/notifications.ts')
+    const approvals = read('src/server-actions/approvals.ts')
+    const solutions = read('src/server-actions/solutions.ts')
+
+    assert.match(notifications, /getNotificationRequestDetails/)
+    assert.match(notifications, /Approval System/)
+    assert.match(notifications, /Request topic/)
+    assert.match(notifications, /resolveEmailCostEstimate/)
+    assert.match(notifications, /Cost estimate/)
+    assert.doesNotMatch(notifications, /Budget code/)
+    assert.doesNotMatch(notifications, /Project estimate/)
+    assert.doesNotMatch(notifications, /Engineering estimate/)
+    assert.doesNotMatch(notifications, /Latest solution estimate/)
+
+    const notifyNextApprover = approvals.match(/async function notifyNextApprover[\s\S]*?\n\}/)?.[0] ?? ''
+    assert.match(notifyNextApprover, /createNotification/)
+    assert.doesNotMatch(notifyNextApprover, /notifications\.createMany/)
+
+    const notifyNextSolutionApprover = solutions.match(/async function notifyNextSolutionApprover[\s\S]*?^}/m)?.[0] ?? ''
+    const notifyNextFinalApprover = solutions.match(/async function notifyNextFinalApprover[\s\S]*?^}/m)?.[0] ?? ''
+    const rejectSolution = solutions.match(/export async function rejectSolution[\s\S]*?^}/m)?.[0] ?? ''
+
+    assert.match(notifyNextSolutionApprover, /createNotification/)
+    assert.doesNotMatch(notifyNextSolutionApprover, /tx\.notifications\.create/)
+    assert.doesNotMatch(notifyNextSolutionApprover, /notifications\.createMany/)
+    assert.match(notifyNextFinalApprover, /createNotification/)
+    assert.doesNotMatch(notifyNextFinalApprover, /tx\.notifications\.create/)
+    assert.doesNotMatch(notifyNextFinalApprover, /notifications\.createMany/)
+    assert.match(rejectSolution, /createNotification/)
+    assert.doesNotMatch(rejectSolution, /tx\.notifications\.create/)
+
+    const directNotificationCreates = `${approvals}\n${solutions}`
+      .match(/notifications\.create(?:Many)?\(\{[\s\S]*?\n\s*\}\)/g) ?? []
+
+    for (const createCall of directNotificationCreates) {
+      assert.doesNotMatch(createCall, /approval_needed|final_approval_needed|approval_rejected/)
+    }
+  })
+
+  it('seeds the session provider from the server session for email deep links', () => {
+    const rootLayout = read('src/app/layout.tsx')
+
+    assert.match(rootLayout, /import \{ auth \} from ['"]@\/lib\/auth-config['"]/)
+    assert.match(rootLayout, /const session = await auth\(\)/)
+    assert.match(rootLayout, /<SessionProvider session=\{session\}>/)
+  })
+
+  it('sends solution submission emails after the solution transaction commits', () => {
+    const solutions = read('src/server-actions/solutions.ts')
+    const submitSolution = solutions.match(/export async function submitSolution[\s\S]*?\n\}/)?.[0] ?? ''
+    const transactionStart = submitSolution.indexOf('const result = await prisma.$transaction')
+    const notificationSendStart = submitSolution.indexOf('if (pendingNotifications.length > 0)')
+
+    assert.match(submitSolution, /pendingNotifications/)
+    assert.ok(transactionStart >= 0)
+    assert.ok(notificationSendStart > transactionStart)
+
+    const transactionBlock = submitSolution.slice(transactionStart, notificationSendStart)
+
+    assert.doesNotMatch(transactionBlock, /createNotification|notifyUsersInDepartment|tx\.notifications\.create/)
+    assert.match(submitSolution, /await Promise\.all\(\s*pendingNotifications\.map\(\(notification\) =>\s*createNotification\(notification\)/)
+  })
+
+  it('merges department-wide notification emails while keeping per-user in-app notifications', () => {
+    const notifications = read('src/server-actions/notifications.ts')
+    const notifyUsersInDepartment = notifications.match(/export async function notifyUsersInDepartment[\s\S]*?^}/m)?.[0] ?? ''
+
+    assert.match(notifyUsersInDepartment, /select:\s*\{\s*id:\s*true,\s*email:\s*true\s*\}/)
+    assert.match(notifyUsersInDepartment, /prisma\.notifications\.createMany/)
+    assert.match(notifyUsersInDepartment, /emailRecipients/)
+    assert.match(notifyUsersInDepartment, /new Set/)
+    assert.match(notifyUsersInDepartment, /sendEmailNotification\(\s*notification,\s*emailRecipients/)
+    assert.doesNotMatch(notifyUsersInDepartment, /createNotification\(/)
+  })
 })

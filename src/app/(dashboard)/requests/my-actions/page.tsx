@@ -3,7 +3,12 @@ import Link from 'next/link'
 import { ArrowLeft, Bell } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { RequestTable } from '@/components/requests/request-table'
+import { RequestDeepLinkModal } from '@/components/requests/request-deep-link-modal'
 import { getMyActionItems } from '@/server-actions/requests'
+
+interface MyActionsPageProps {
+  searchParams: Promise<{ requestId?: string }>
+}
 
 async function ActionItemsList() {
   const requests = await getMyActionItems()
@@ -49,12 +54,19 @@ async function ActionItemsList() {
   )
 }
 
-export default function MyActionsPage() {
+export default async function MyActionsPage({ searchParams }: MyActionsPageProps) {
+  const { requestId } = await searchParams
+
   return (
     <div className="container mx-auto py-6">
-      <Suspense fallback={<div>Loading...</div>}>
+      <RequestDeepLinkModal requestId={requestId} returnTo="/requests/my-actions" />
+      {requestId ? (
         <ActionItemsList />
-      </Suspense>
+      ) : (
+        <Suspense fallback={<div>Loading...</div>}>
+          <ActionItemsList />
+        </Suspense>
+      )}
     </div>
   )
 }

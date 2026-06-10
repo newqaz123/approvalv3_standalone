@@ -291,7 +291,7 @@ export function SubTaskFormDialog({
                             disabled={addingSubContractor}
                           >
                             <Plus className="h-4 w-4" />
-                            Add "{subContractorSearch.trim()}"
+                            Add &quot;{subContractorSearch.trim()}&quot;
                           </CommandItem>
                         )}
                       </CommandGroup>

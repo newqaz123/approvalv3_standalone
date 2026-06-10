@@ -9,11 +9,19 @@ export default auth((req) => {
   const isAdminRoute = pathname.startsWith('/admin')
   const isProtectedRoute = pathname.startsWith('/dashboard') || pathname.startsWith('/requests') || pathname.startsWith('/admin') || pathname.startsWith('/engineering')
   const isSignInRoute = pathname.startsWith('/sign-in') || pathname.startsWith('/sign-up')
+  const redirectToSignIn = () => {
+    const callbackUrl = encodeURIComponent(req.nextUrl.pathname + req.nextUrl.search)
+    return NextResponse.redirect(new URL(`/sign-in?callbackUrl=${callbackUrl}`, req.url))
+  }
+  const callbackUrl = req.nextUrl.searchParams.get('callbackUrl')
+  const safeCallbackUrl = callbackUrl?.startsWith('/') && !callbackUrl.startsWith('//')
+    ? callbackUrl
+    : null
 
   // Protect admin routes
   if (isAdminRoute) {
     if (!user) {
-      return NextResponse.redirect(new URL('/sign-in', req.url))
+      return redirectToSignIn()
     }
     if (user.role !== 'admin') {
       return NextResponse.redirect(new URL('/dashboard', req.url))
@@ -23,7 +31,7 @@ export default auth((req) => {
   // Protect dashboard/request/engineering routes
   if (isProtectedRoute) {
     if (!user) {
-      return NextResponse.redirect(new URL('/sign-in', req.url))
+      return redirectToSignIn()
     }
 
     // Role-based redirects from /dashboard
@@ -39,6 +47,9 @@ export default auth((req) => {
 
   // Redirect authenticated users from sign-in to appropriate dashboard
   if (isSignInRoute && user) {
+    if (safeCallbackUrl) {
+      return NextResponse.redirect(new URL(safeCallbackUrl, req.url))
+    }
     return NextResponse.redirect(new URL(getRoleDashboard(user.role), req.url))
   }
 

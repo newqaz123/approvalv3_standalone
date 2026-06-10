@@ -520,15 +520,18 @@ async function notifyNextApprover(requestId: string) {
   )
 
   // Create notifications for all approvers at this level
-  const notifications = approvers.map((approver) => ({
-    userId: approver.id,
-    type: 'approval_needed' as const,
-    title: 'Approval Needed',
-    message: `Request "${nextApproval.request.title}" needs your approval`,
-    requestId,
-  }))
-
-  await prisma.notifications.createMany({ data: notifications })
+  const { createNotification } = await import('./notifications')
+  await Promise.all(
+    approvers.map((approver) =>
+      createNotification({
+        userId: approver.id,
+        type: 'approval_needed',
+        title: 'Approval Needed',
+        message: `Request "${nextApproval.request.title}" needs your approval`,
+        requestId,
+      })
+    )
+  )
 }
 
 /**

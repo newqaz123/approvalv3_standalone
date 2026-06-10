@@ -78,6 +78,14 @@ export async function submitSolution(input: SubmitSolutionInput) {
     throw new Error('Engineering department not found')
   }
 
+  const pendingNotifications: Array<{
+    userId: string
+    type: 'approval_needed' | 'solution_ready'
+    title: string
+    message: string
+    requestId: string
+  }> = []
+
   // Transaction: Create solution, approval chain, and update request status
   const result = await prisma.$transaction(async (tx) => {
     // Find when status first changed to SentToEngineer (from activity log)
@@ -152,9 +160,8 @@ export async function submitSolution(input: SubmitSolutionInput) {
       })
 
       // Notify custom approvers about the solution submission
-      const { createNotification } = await import('./notifications')
       for (const approverId of validated.customApproverIds) {
-        await createNotification({
+        pendingNotifications.push({
           userId: approverId,
           type: 'approval_needed',
           title: 'Solution Submitted for Approval',
@@ -193,14 +200,12 @@ export async function submitSolution(input: SubmitSolutionInput) {
         },
       })
       // Create notification for requester
-      await tx.notifications.create({
-        data: {
-          userId: request.requesterId,
-          type: 'solution_ready',
-          title: 'Solution Ready for Review',
-          message: `Engineering solution for "${request.title}" is ready for your review.`,
-          requestId: validated.requestId,
-        },
+      pendingNotifications.push({
+        userId: request.requesterId,
+        type: 'solution_ready',
+        title: 'Solution Ready for Review',
+        message: `Engineering solution for "${request.title}" is ready for your review.`,
+        requestId: validated.requestId,
       })
     } else {
       // Default hierarchy-based approval chain
@@ -218,9 +223,8 @@ export async function submitSolution(input: SubmitSolutionInput) {
       const firstLevelApprovers = await getApproversAtLevel(engineeringDept.id, firstPendingLevel)
       
       // Notify each approver
-      const { createNotification } = await import('./notifications')
       for (const approver of firstLevelApprovers) {
-        await createNotification({
+        pendingNotifications.push({
           userId: approver.id,
           type: 'approval_needed',
           title: 'Solution Submitted for Approval',
@@ -242,6 +246,15 @@ export async function submitSolution(input: SubmitSolutionInput) {
 
     return solution
   })
+
+  if (pendingNotifications.length > 0) {
+    const { createNotification } = await import('./notifications')
+    await Promise.all(
+      pendingNotifications.map((notification) =>
+        createNotification(notification)
+      )
+    )
+  }
 
   revalidateRequestViews(validated.requestId)
 
@@ -852,14 +865,13 @@ export async function rejectSolution(solutionId: string, comments: string, expec
 
     if (solutionData) {
       // Create notification for solution submitter
-      await tx.notifications.create({
-        data: {
-          userId: solutionData.submittedById,
-          type: 'approval_rejected',
-          title: 'Solution Rejected',
-          message: `Your solution "${solutionData.title}" was rejected and returned for resubmission.`,
-          requestId: solution.requestId,
-        },
+      const { createNotification } = await import('./notifications')
+      await createNotification({
+        userId: solutionData.submittedById,
+        type: 'approval_rejected',
+        title: 'Solution Rejected',
+        message: `Your solution "${solutionData.title}" was rejected and returned for resubmission.`,
+        requestId: solution.requestId,
       })
     }
   })
@@ -1012,16 +1024,16 @@ async function notifyNextSolutionApprover(tx: any, solutionId: string) {
 
   if (!nextApproval) return
 
+  const { createNotification } = await import('./notifications')
+
   // For custom chain: notify specific requiredApproverId
   if (nextApproval.isCustomChain && nextApproval.requiredApproverId) {
-    await tx.notifications.create({
-      data: {
-        userId: nextApproval.requiredApproverId,
-        type: 'approval_needed',
-        title: 'Solution Approval Needed',
-        message: `Solution "${nextApproval.solution.title}" needs your approval.`,
-        requestId: nextApproval.solution.requestId,
-      },
+    await createNotification({
+      userId: nextApproval.requiredApproverId,
+      type: 'approval_needed',
+      title: 'Solution Approval Needed',
+      message: `Solution "${nextApproval.solution.title}" needs your approval.`,
+      requestId: nextApproval.solution.requestId,
     })
     return
   }
@@ -1044,17 +1056,17 @@ async function notifyNextSolutionApprover(tx: any, solutionId: string) {
       })
 
       // Create notifications for all approvers at this level
-      const notifications = approvers.map((approver: { id: string }) => ({
-        userId: approver.id,
-        type: 'approval_needed' as const,
-        title: 'Solution Approval Needed',
-        message: `Solution "${nextApproval.solution.title}" needs your approval.`,
-        requestId: nextApproval.solution.requestId,
-      }))
-
-      if (notifications.length > 0) {
-        await tx.notifications.createMany({ data: notifications })
-      }
+      await Promise.all(
+        approvers.map((approver: { id: string }) =>
+          createNotification({
+            userId: approver.id,
+            type: 'approval_needed',
+            title: 'Solution Approval Needed',
+            message: `Solution "${nextApproval.solution.title}" needs your approval.`,
+            requestId: nextApproval.solution.requestId,
+          })
+        )
+      )
     }
   }
 }
@@ -1371,16 +1383,16 @@ async function notifyNextFinalApprover(tx: any, requestId: string) {
 
   if (!nextApproval) return
 
+  const { createNotification } = await import('./notifications')
+
   // For custom chain: notify specific requiredApproverId
   if (nextApproval.isCustomChain && nextApproval.requiredApproverId) {
-    await tx.notifications.create({
-      data: {
-        userId: nextApproval.requiredApproverId,
-        type: 'final_approval_needed',
-        title: 'Final Approval Needed',
-        message: `Request "${nextApproval.request.title}" needs your final approval.`,
-        requestId,
-      },
+    await createNotification({
+      userId: nextApproval.requiredApproverId,
+      type: 'final_approval_needed',
+      title: 'Final Approval Needed',
+      message: `Request "${nextApproval.request.title}" needs your final approval.`,
+      requestId,
     })
     return
   }
@@ -1396,17 +1408,17 @@ async function notifyNextFinalApprover(tx: any, requestId: string) {
       select: { id: true },
     })
 
-    const notifications = approvers.map((approver: { id: string }) => ({
-      userId: approver.id,
-      type: 'final_approval_needed' as const,
-      title: 'Final Approval Needed',
-      message: `Request "${nextApproval.request.title}" needs your final approval.`,
-      requestId,
-    }))
-
-    if (notifications.length > 0) {
-      await tx.notifications.createMany({ data: notifications })
-    }
+    await Promise.all(
+      approvers.map((approver: { id: string }) =>
+        createNotification({
+          userId: approver.id,
+          type: 'final_approval_needed',
+          title: 'Final Approval Needed',
+          message: `Request "${nextApproval.request.title}" needs your final approval.`,
+          requestId,
+        })
+      )
+    )
   }
 }
 

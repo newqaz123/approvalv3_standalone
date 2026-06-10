@@ -30,6 +30,8 @@ interface RequestModalRouterProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onActionComplete?: () => void
+  onLoadStateChange?: (loading: boolean) => void
+  onLoadError?: (message: string) => void
 }
 
 /**
@@ -41,6 +43,8 @@ export function RequestModalRouter({
   open,
   onOpenChange,
   onActionComplete,
+  onLoadStateChange,
+  onLoadError,
 }: RequestModalRouterProps) {
   const { data: session } = useSession()
   const user = session?.user
@@ -76,12 +80,15 @@ export function RequestModalRouter({
 
   const loadRequestData = async () => {
     setLoading(true)
+    onLoadStateChange?.(true)
     try {
       // Fetch request with all related data
       const request = await getRequest(requestId)
 
       if (!request) {
+        onLoadError?.('Request not found or you may not have access.')
         setLoading(false)
+        onLoadStateChange?.(false)
         return
       }
 
@@ -136,8 +143,10 @@ export function RequestModalRouter({
       setRequestData(request)
     } catch (error) {
       console.error('Failed to load request data:', error)
+      onLoadError?.('Could not open request. Please refresh and try again.')
     } finally {
       setLoading(false)
+      onLoadStateChange?.(false)
     }
   }
 

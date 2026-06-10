@@ -17,6 +17,257 @@ const transporter = process.env.SMTP_HOST
     })
   : null
 
+type NotificationRequestLinkInput = {
+  type: string
+  requestId?: string
+}
+
+type RequestEmailDetails = {
+  id: string
+  title: string
+  description: string
+  status: string
+  createdAt: Date
+  requesterName: string
+  requesterEmail: string
+  departmentName: string
+  projectEstimateCost: number | null
+  engineeringCostEstimate: number | null
+  latestSolutionEstimate: number | null
+  latestSolutionCurrency: string | null
+}
+
+function buildNotificationRequestPath(notification: NotificationRequestLinkInput) {
+  if (!notification.requestId) {
+    return '/requests'
+  }
+
+  const requestId = encodeURIComponent(notification.requestId)
+  if (notification.type === 'approval_needed' || notification.type === 'final_approval_needed') {
+    return `/requests/my-actions?requestId=${requestId}`
+  }
+
+  return `/requests?requestId=${requestId}`
+}
+
+function escapeHtml(value: unknown) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;')
+}
+
+function formatMoney(value: number | null, currency = 'THB') {
+  if (value === null || !Number.isFinite(value)) {
+    return 'Not set'
+  }
+
+  try {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency,
+      maximumFractionDigits: 2,
+    }).format(value)
+  } catch {
+    return `${currency} ${value.toLocaleString()}`
+  }
+}
+
+function formatRequestStatus(status: string) {
+  return status
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z])([A-Z][a-z])/g, '$1 $2')
+}
+
+function formatDate(value: Date) {
+  return new Intl.DateTimeFormat('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value))
+}
+
+function truncateText(value: string, maxLength: number) {
+  if (value.length <= maxLength) {
+    return value
+  }
+
+  return `${value.slice(0, maxLength - 1)}...`
+}
+
+async function getNotificationRequestDetails(requestId?: string): Promise<RequestEmailDetails | null> {
+  if (!requestId) {
+    return null
+  }
+
+  const request = await prisma.requests.findUnique({
+    where: { id: requestId },
+    select: {
+      id: true,
+      title: true,
+      description: true,
+      status: true,
+      createdAt: true,
+      projectEstimateCost: true,
+      engineeringCostEstimate: true,
+      requester: {
+        select: {
+          name: true,
+          email: true,
+        },
+      },
+      department: {
+        select: {
+          name: true,
+        },
+      },
+      solutions: {
+        select: {
+          costEstimate: true,
+          currency: true,
+        },
+        orderBy: {
+          submittedAt: 'desc',
+        },
+        take: 1,
+      },
+    },
+  })
+
+  if (!request) {
+    return null
+  }
+
+  const latestSolution = request.solutions[0] ?? null
+
+  return {
+    id: request.id,
+    title: request.title,
+    description: request.description,
+    status: request.status,
+    createdAt: request.createdAt,
+    requesterName: request.requester.name,
+    requesterEmail: request.requester.email,
+    departmentName: request.department.name,
+    projectEstimateCost: request.projectEstimateCost === null ? null : Number(request.projectEstimateCost),
+    engineeringCostEstimate: request.engineeringCostEstimate === null ? null : Number(request.engineeringCostEstimate),
+    latestSolutionEstimate: latestSolution ? Number(latestSolution.costEstimate) : null,
+    latestSolutionCurrency: latestSolution?.currency ?? null,
+  }
+}
+
+function buildDetailRow(label: string, value: string) {
+  return `
+    <tr>
+      <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; color: #6b7280; font-size: 13px; width: 38%;">${escapeHtml(label)}</td>
+      <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; color: #111827; font-size: 13px; font-weight: 600;">${escapeHtml(value)}</td>
+    </tr>
+  `
+}
+
+function resolveEmailCostEstimate(details: RequestEmailDetails) {
+  if (details.latestSolutionEstimate !== null) {
+    return formatMoney(details.latestSolutionEstimate, details.latestSolutionCurrency ?? 'THB')
+  }
+
+  if (details.engineeringCostEstimate !== null) {
+    return formatMoney(details.engineeringCostEstimate)
+  }
+
+  return formatMoney(details.projectEstimateCost)
+}
+
+function buildRequestDetailsHtml(details: RequestEmailDetails | null) {
+  if (!details) {
+    return ''
+  }
+
+  const rows = [
+    buildDetailRow('Request topic', details.title),
+    buildDetailRow('Requester', `${details.requesterName} (${details.requesterEmail})`),
+    buildDetailRow('Department', details.departmentName),
+    buildDetailRow('Status', formatRequestStatus(details.status)),
+    buildDetailRow('Created', formatDate(details.createdAt)),
+    buildDetailRow('Cost estimate', resolveEmailCostEstimate(details)),
+    buildDetailRow('Description', truncateText(details.description, 280)),
+  ]
+
+  return `
+    <section style="margin-top: 24px;">
+      <h3 style="margin: 0 0 10px; color: #111827; font-size: 16px;">Request details</h3>
+      <table role="presentation" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
+        <tbody>
+          ${rows.join('')}
+        </tbody>
+      </table>
+    </section>
+  `
+}
+
+function buildRequestDetailsText(details: RequestEmailDetails | null) {
+  if (!details) {
+    return ''
+  }
+
+  return `
+Request details
+- Request topic: ${details.title}
+- Requester: ${details.requesterName} (${details.requesterEmail})
+- Department: ${details.departmentName}
+- Status: ${formatRequestStatus(details.status)}
+- Created: ${formatDate(details.createdAt)}
+- Cost estimate: ${resolveEmailCostEstimate(details)}
+- Description: ${truncateText(details.description, 280)}
+`
+}
+
+function buildNotificationEmailHtml(input: {
+  heading: string
+  message: string
+  requestLink: string
+  requestDetails: RequestEmailDetails | null
+}) {
+  return `
+    <div style="margin: 0; padding: 24px; background: #f3f4f6; font-family: Arial, sans-serif;">
+      <div style="max-width: 680px; margin: 0 auto; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden;">
+        <header style="background: #111827; color: #ffffff; padding: 24px;">
+          <div style="font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #93c5fd;">Approval System</div>
+          <h1 style="margin: 8px 0 0; font-size: 22px; line-height: 1.3;">${escapeHtml(input.heading)}</h1>
+        </header>
+        <main style="padding: 24px;">
+          <p style="margin: 0; color: #374151; font-size: 15px; line-height: 1.6;">${escapeHtml(input.message)}</p>
+          ${buildRequestDetailsHtml(input.requestDetails)}
+          <p style="margin: 24px 0 0;">
+            <a href="${escapeHtml(input.requestLink)}" style="display: inline-block; padding: 12px 24px; background-color: #2563eb; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: 700;">View Request</a>
+          </p>
+        </main>
+        <footer style="padding: 16px 24px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 13px;">
+          This is an automated notification from the Approval System.
+        </footer>
+      </div>
+    </div>
+  `
+}
+
+function buildNotificationEmailText(input: {
+  heading: string
+  message: string
+  requestLink: string
+  requestDetails: RequestEmailDetails | null
+}) {
+  return `Approval System
+${input.heading}
+
+${input.message}
+${buildRequestDetailsText(input.requestDetails)}
+View Request: ${input.requestLink}
+`
+}
+
 /**
  * Get notifications for a user
  */
@@ -175,21 +426,31 @@ export async function notifyUsersInDepartment(
         id: { notIn: excludeUserIds }
       } : {})
     },
-    select: { id: true },
+    select: { id: true, email: true },
   })
 
-  // Create notifications for each user
-  await Promise.all(
-    users.map(user =>
-      createNotification({
+  if (users.length > 0) {
+    await prisma.notifications.createMany({
+      data: users.map(user => ({
         userId: user.id,
         type: notification.type,
         title: notification.title,
         message: notification.message,
         requestId: notification.requestId,
-      })
-    )
-  )
+      })),
+    })
+  }
+
+  const emailRecipients = [
+    ...new Set(users.map(user => user.email).filter((email): email is string => Boolean(email))),
+  ]
+
+  if (emailRecipients.length > 0) {
+    await sendEmailNotification(notification, emailRecipients).catch((error) => {
+      // Log error but don't fail the notification creation
+      console.error('Failed to send department email notification:', error)
+    })
+  }
 
   return { notified: users.length }
 }
@@ -204,7 +465,7 @@ async function sendEmailNotification(
     message: string
     requestId?: string
   },
-  userEmail: string
+  userEmail: string | string[]
 ) {
   // Skip if SMTP is not configured
   if (!transporter) {
@@ -219,49 +480,37 @@ async function sendEmailNotification(
     return { success: false, error: 'From email not configured' }
   }
 
+  const baseUrl = (process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000').replace(/\/$/, '')
+  const requestLink = `${baseUrl}${buildNotificationRequestPath(notification)}`
+  const requestDetails = await getNotificationRequestDetails(notification.requestId)
+  const requestTitle = requestDetails?.title || notification.title
+
   // Build email content based on type
   let subject = notification.title
-  let htmlContent = ''
-
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
-  const requestLink = notification.requestId
-    ? `${baseUrl}/requests/${notification.requestId}`
-    : `${baseUrl}/requests`
-
+  let heading = notification.title
   switch (notification.type) {
     case 'solution_ready':
-      subject = `Solution Ready: ${notification.title}`
-      htmlContent = `
-        <h2>Solution is Ready</h2>
-        <p>${notification.message}</p>
-        <p><a href="${requestLink}" style="display: inline-block; padding: 12px 24px; background-color: #2563eb; color: white; text-decoration: none; border-radius: 6px;">View Request</a></p>
-      `
+      subject = `Solution Ready: ${requestTitle}`
+      heading = 'Solution is Ready'
       break
 
     case 'final_approval_needed':
-      subject = `Final Approval Needed: ${notification.title}`
-      htmlContent = `
-        <h2>Your Approval is Needed</h2>
-        <p>${notification.message}</p>
-        <p><a href="${requestLink}" style="display: inline-block; padding: 12px 24px; background-color: #2563eb; color: white; text-decoration: none; border-radius: 6px;">View Request</a></p>
-      `
+      subject = `Final Approval Needed: ${requestTitle}`
+      heading = 'Final Approval Needed'
       break
 
     case 'approval_needed':
-      subject = `Approval Needed: ${notification.title}`
-      htmlContent = `
-        <h2>Approval Needed</h2>
-        <p>${notification.message}</p>
-        <p><a href="${requestLink}" style="display: inline-block; padding: 12px 24px; background-color: #2563eb; color: white; text-decoration: none; border-radius: 6px;">View Request</a></p>
-      `
+      subject = `Approval Needed: ${requestTitle}`
+      heading = 'Approval Needed'
+      break
+
+    case 'approval_rejected':
+      subject = `Rejected: ${requestTitle}`
+      heading = 'Approval Rejected'
       break
 
     default:
-      htmlContent = `
-        <h2>${notification.title}</h2>
-        <p>${notification.message}</p>
-        <p><a href="${requestLink}">View Request</a></p>
-      `
+      heading = notification.title
   }
 
   try {
@@ -269,15 +518,18 @@ async function sendEmailNotification(
       from: fromEmail,
       to: userEmail,
       subject,
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          ${htmlContent}
-          <hr style="margin: 24px 0; border: none; border-top: 1px solid #e5e7eb;">
-          <p style="color: #6b7280; font-size: 14px;">
-            This is an automated notification from the Approval System.
-          </p>
-        </div>
-      `,
+      html: buildNotificationEmailHtml({
+        heading,
+        message: notification.message,
+        requestLink,
+        requestDetails,
+      }),
+      text: buildNotificationEmailText({
+        heading,
+        message: notification.message,
+        requestLink,
+        requestDetails,
+      }),
     })
 
     return { success: true }
