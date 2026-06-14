@@ -33,6 +33,7 @@ POSTGRES_USER="postgres"
 POSTGRES_PASSWORD="changeme"
 POSTGRES_DB="app_db"
 SMTP_HOST=""
+SMTP_PORT="587"
 `)
   const current = parseEnvText(`
 DATABASE_URL="postgresql://postgres:changeme@db:5432/app_db?schema=public"
@@ -52,7 +53,7 @@ SMTP_HOST=""
     'POSTGRES_USER',
     'UPLOAD_DIR',
   ].sort())
-  assert.deepEqual(report.missingOptional, [])
+  assert.deepEqual(report.missingOptional, ['SMTP_PORT'])
   assert.deepEqual(report.presentRequired, ['DATABASE_URL', 'NEXTAUTH_URL'])
   assert.equal(REQUIRED_PRODUCTION_KEYS.includes('DATABASE_URL'), true)
   assert.equal(OPTIONAL_PRODUCTION_KEYS.includes('SMTP_HOST'), true)
