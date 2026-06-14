@@ -48,7 +48,7 @@ export function parseEnvText(text) {
 
 export function createEnvReport({ current, template }) {
   const templateKeys = Object.keys(template)
-  const missingRequired = REQUIRED_PRODUCTION_KEYS.filter((key) => !(key in current))
+  const missingRequired = REQUIRED_PRODUCTION_KEYS.filter((key) => !current[key])
   const missingOptional = templateKeys
     .filter((key) => OPTIONAL_PRODUCTION_KEYS.includes(key))
     .filter((key) => !(key in current))

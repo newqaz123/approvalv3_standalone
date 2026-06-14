@@ -37,6 +37,8 @@ SMTP_HOST=""
   const current = parseEnvText(`
 DATABASE_URL="postgresql://postgres:changeme@db:5432/app_db?schema=public"
 NEXTAUTH_URL="http://localhost:3000"
+NEXTAUTH_SECRET=""
+SMTP_HOST=""
 `)
 
   const report = createEnvReport({ current, template })
@@ -50,7 +52,7 @@ NEXTAUTH_URL="http://localhost:3000"
     'POSTGRES_USER',
     'UPLOAD_DIR',
   ].sort())
-  assert.deepEqual(report.missingOptional, ['SMTP_HOST'])
+  assert.deepEqual(report.missingOptional, [])
   assert.equal(REQUIRED_PRODUCTION_KEYS.includes('DATABASE_URL'), true)
   assert.equal(OPTIONAL_PRODUCTION_KEYS.includes('SMTP_HOST'), true)
 })
