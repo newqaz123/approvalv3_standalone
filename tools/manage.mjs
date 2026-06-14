@@ -19,8 +19,29 @@ export async function fileExists(filePath) {
   }
 }
 
-export function timestamp() {
-  return new Date().toISOString().replace(/[-:]/g, '').replace(/\..+/, '').replace('T', '-')
+export function timestamp(date = new Date()) {
+  return date.toISOString().replace(/[-:]/g, '').replace('T', '-').replace('Z', '')
+}
+
+export async function createUniqueEnvBackupPath({
+  envProductionPath,
+  stamp = timestamp(),
+  exists = fileExists,
+} = {}) {
+  const basePath = `${envProductionPath}.backup.${stamp}`
+
+  if (!(await exists(basePath))) {
+    return basePath
+  }
+
+  let suffix = 1
+  while (true) {
+    const candidate = `${basePath}.${suffix}`
+    if (!(await exists(candidate))) {
+      return candidate
+    }
+    suffix += 1
+  }
 }
 
 export function createPrompt() {
@@ -59,6 +80,8 @@ export async function envDoctor({
   paths = defaultPaths,
   ask = async () => '',
   log = console.log,
+  timestampFn = timestamp,
+  exists = fileExists,
 } = {}) {
   if (!(await fileExists(paths.envExample))) {
     throw new Error('.env.example not found')
@@ -93,7 +116,11 @@ export async function envDoctor({
     return
   }
 
-  const backupPath = `${paths.envProduction}.backup.${timestamp()}`
+  const backupPath = await createUniqueEnvBackupPath({
+    envProductionPath: paths.envProduction,
+    stamp: timestampFn(),
+    exists,
+  })
   await copyFile(paths.envProduction, backupPath)
   await writeFile(paths.envProduction, mergeMissingEnvKeys({ currentText, templateText }))
   log(`Backup written: ${backupPath}`)
