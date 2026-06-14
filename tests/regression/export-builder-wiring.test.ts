@@ -21,6 +21,23 @@ describe('completed approval export builder wiring', () => {
     assert.match(builder, /disabled=\{!item\.mergeable\}/)
   })
 
+  it('keeps completed export builders hidden until the export action is clicked', () => {
+    const completedFinalModal = readFileSync('src/components/requests/completed-final-modal.tsx', 'utf8')
+    const detailModal = readFileSync('src/components/requests/request-detail-modal.tsx', 'utf8')
+
+    assert.match(completedFinalModal, /showExportBuilder, setShowExportBuilder[\s\S]*useState\(false\)/)
+    assert.match(completedFinalModal, /setShowExportBuilder\(true\)/)
+    assert.match(completedFinalModal, /scrollIntoView\(\{[\s\S]*behavior:\s*'smooth'[\s\S]*block:\s*'start'/)
+    assert.match(completedFinalModal, /showExportBuilder &&[\s\S]*CompletedApprovalExportBuilder/)
+    assert.match(completedFinalModal, /Export Report/)
+
+    assert.match(detailModal, /showExportBuilder, setShowExportBuilder[\s\S]*useState\(false\)/)
+    assert.match(detailModal, /setShowExportBuilder\(true\)/)
+    assert.match(detailModal, /scrollIntoView\(\{[\s\S]*behavior:\s*'smooth'[\s\S]*block:\s*'start'/)
+    assert.match(detailModal, /if \(!showExportBuilder\)/)
+    assert.match(detailModal, /CompletedApprovalExportBuilder/)
+  })
+
   it('routes ordered selected package items to the package server action', () => {
     const router = readFileSync('src/components/requests/request-modal-router.tsx', 'utf8')
 

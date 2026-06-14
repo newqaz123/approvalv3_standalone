@@ -186,7 +186,10 @@ export async function submitSolution(input: SubmitSolutionInput) {
       // Skip approval phase, go directly to SendBackToRequester
       await tx.requests.update({
         where: { id: validated.requestId },
-        data: { status: RequestStatus.SendBackToRequester },
+        data: {
+          status: RequestStatus.SendBackToRequester,
+          projectEstimateCost: validated.costEstimate ?? 0,
+        },
       })
       // Log status change
       await tx.request_activities.create({
@@ -712,7 +715,7 @@ export async function approveSolution(solutionId: string, comments?: string, exp
     // Get solution details for logging
     const solutionData = await tx.solutions.findUnique({
       where: { id: solutionId },
-      select: { requestId: true, title: true },
+      select: { requestId: true, title: true, costEstimate: true },
     })
 
     if (!solutionData) {
@@ -742,7 +745,10 @@ export async function approveSolution(solutionId: string, comments?: string, exp
       // Update request status to SendBackToRequester
       await tx.requests.update({
         where: { id: solutionData.requestId },
-        data: { status: RequestStatus.SendBackToRequester },
+        data: {
+          status: RequestStatus.SendBackToRequester,
+          projectEstimateCost: solutionData.costEstimate,
+        },
       })
 
       // Get request for notification (include departmentId for department-wide notification)
@@ -1978,6 +1984,7 @@ export async function resubmitSolution(input: {
       where: { id: input.requestId },
       data: {
         status: newStatus,
+        ...(isAutoApproved ? { projectEstimateCost: input.cost } : {}),
         updatedAt: new Date(),
       },
     })

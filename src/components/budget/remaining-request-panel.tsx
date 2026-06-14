@@ -2,8 +2,11 @@
 
 import { useDraggable } from '@dnd-kit/core'
 import { ChevronLeft, ChevronRight, Edit2, GripVertical } from 'lucide-react'
+import { useMemo, useState } from 'react'
 import type { HTMLAttributes } from 'react'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { getBudgetProjectEstimateAmount } from '@/lib/budget-control'
 import type { BudgetRequestRecord } from '@/types/budget'
 
 export function RemainingRequestCard({
@@ -17,6 +20,9 @@ export function RemainingRequestCard({
   dragging?: boolean
   dragHandleProps?: HTMLAttributes<HTMLButtonElement>
 }) {
+  const projectEstimateAmount = getBudgetProjectEstimateAmount(request)
+  const hasApprovedEstimate = request.engineeringEstimateCost !== null
+
   return (
     <div
       className={`rounded-md border border-amber-200 bg-amber-50 p-3 shadow-sm ${
@@ -37,17 +43,23 @@ export function RemainingRequestCard({
           <div className="mt-1 text-xs text-gray-600">
             {request.department?.name ?? 'No department'} - {request.status}
           </div>
-          <button
-            type="button"
-            className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-amber-900 hover:underline"
-            onClick={(event) => {
-              event.stopPropagation()
-              onEditProjectEstimate?.(request.id, request.projectEstimateCost)
-            }}
-          >
-            <Edit2 className="h-3 w-3" />
-            Project estimate: {request.projectEstimateCost?.toLocaleString() ?? '-'}
-          </button>
+          {!hasApprovedEstimate && onEditProjectEstimate ? (
+            <button
+              type="button"
+              className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-amber-900 hover:underline"
+              onClick={(event) => {
+                event.stopPropagation()
+                onEditProjectEstimate(request.id, request.projectEstimateCost)
+              }}
+            >
+              <Edit2 className="h-3 w-3" />
+              Project estimate: {projectEstimateAmount?.toLocaleString() ?? '-'}
+            </button>
+          ) : (
+            <div className="mt-1 text-xs font-medium text-gray-700">
+              Project estimate: {projectEstimateAmount?.toLocaleString() ?? '-'}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -91,6 +103,16 @@ export function RemainingRequestPanel({
   onCollapsedChange: (collapsed: boolean) => void
   onEditProjectEstimate: (requestId: string, value: number | null) => void
 }) {
+  const [requestSearch, setRequestSearch] = useState('')
+  const filteredRequests = useMemo(() => {
+    const query = requestSearch.trim().toLowerCase()
+    if (!query) return requests
+
+    return requests.filter((request) =>
+      `${request.title} ${request.department?.name ?? ''} ${request.status}`.toLowerCase().includes(query)
+    )
+  }, [requestSearch, requests])
+
   if (collapsed) {
     return (
       <aside className="fixed bottom-4 right-4 z-40 lg:bottom-auto lg:top-24">
@@ -117,13 +139,20 @@ export function RemainingRequestPanel({
           <ChevronRight className="h-4 w-4" />
         </Button>
       </div>
+      <div className="border-b bg-white p-3">
+        <Input
+          value={requestSearch}
+          onChange={(event) => setRequestSearch(event.target.value)}
+          placeholder="Filter remaining request"
+        />
+      </div>
       <div className="grid gap-2 overflow-y-auto p-3">
-        {requests.length === 0 ? (
+        {filteredRequests.length === 0 ? (
           <div className="rounded-md border border-dashed p-4 text-center text-sm text-gray-500">
             No remaining requests
           </div>
         ) : (
-          requests.map((request) => (
+          filteredRequests.map((request) => (
             <DraggableRemainingRequestCard
               key={request.id}
               request={request}

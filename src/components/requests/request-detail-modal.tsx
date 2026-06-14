@@ -94,6 +94,8 @@ export function RequestDetailModal({
   const [isUserInteracting, setIsUserInteracting] = useState(false)
   const [interactionTimer, setInteractionTimer] = useState<NodeJS.Timeout | null>(null)
   const [contentVisible, setContentVisible] = useState(false)
+  const [showExportBuilder, setShowExportBuilder] = useState(false)
+  const exportBuilderRef = useRef<HTMLDivElement | null>(null)
 
   // Reject solution dialog state
   const [showRejectDialog, setShowRejectDialog] = useState(false)
@@ -379,8 +381,31 @@ export function RequestDetailModal({
   const renderExportBuilder = () => {
     if (request.status !== 'Completed' || !allApprovalsComplete) return null
 
+    if (!showExportBuilder) {
+      return (
+        <div className="mt-3">
+          <Button
+            type="button"
+            onClick={() => {
+              setShowExportBuilder(true)
+              window.requestAnimationFrame(() => {
+                exportBuilderRef.current?.scrollIntoView({
+                  behavior: 'smooth',
+                  block: 'start',
+                })
+              })
+            }}
+            className="bg-emerald-600 text-white hover:bg-emerald-700"
+          >
+            <Download className="mr-2 h-4 w-4" />
+            Export Report
+          </Button>
+        </div>
+      )
+    }
+
     return (
-      <div className="mt-3">
+      <div ref={exportBuilderRef} className="mt-3">
         <CompletedApprovalExportBuilder
           requestAttachments={request.fileAttachments ?? []}
           solutionAttachments={solution?.fileAttachments ?? []}
@@ -439,6 +464,9 @@ export function RequestDetailModal({
   )
 
   const handleOpenChange = (open: boolean) => {
+    if (!open) {
+      setShowExportBuilder(false)
+    }
     if (!open && actionPerformedRef.current) {
       onActionComplete?.()
       actionPerformedRef.current = false

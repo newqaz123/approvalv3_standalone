@@ -71,15 +71,6 @@ export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorD
     })),
     [data.budgetCodes]
   )
-  const remainingRequestOptions = useMemo(
-    () => data.remainingRequests.map((request) => ({
-      value: request.title,
-      label: request.title,
-      meta: request.department?.name ?? 'No department',
-    })),
-    [data.remainingRequests]
-  )
-
   const refresh = useCallback((nextFilters = filters) => {
     startTransition(async () => {
       setData(await getBudgetMonitorData(nextFilters))
@@ -143,18 +134,12 @@ export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorD
           </Button>
         </div>
 
-        <div className="grid gap-2 rounded-lg border bg-white p-3 lg:grid-cols-[1.2fr_1fr_1fr_1fr]">
+        <div className="grid gap-2 rounded-lg border bg-white p-3 lg:grid-cols-[1.2fr_1fr_1fr]">
           <BudgetSearchInput
-            placeholder="Filter budget code"
+            placeholder="Search budget code or request"
             value={filters.budgetCodeSearch ?? ''}
             options={budgetCodeOptions}
             onChange={(value) => updateFilters({ ...filters, budgetCodeSearch: value || undefined })}
-          />
-          <BudgetSearchInput
-            placeholder="Filter remaining request"
-            value={filters.requestSearch ?? ''}
-            options={remainingRequestOptions}
-            onChange={(value) => updateFilters({ ...filters, requestSearch: value || undefined })}
           />
           <Select
             value={filters.departmentId ?? 'all'}
