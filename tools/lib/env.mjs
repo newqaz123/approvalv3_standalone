@@ -57,7 +57,7 @@ export function createEnvReport({ current, template }) {
     missingRequired,
     missingOptional,
     unknownKeys: Object.keys(current).filter((key) => !templateKeys.includes(key)),
-    presentRequired: REQUIRED_PRODUCTION_KEYS.filter((key) => key in current),
+    presentRequired: REQUIRED_PRODUCTION_KEYS.filter((key) => current[key]),
   }
 }
 

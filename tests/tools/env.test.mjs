@@ -53,6 +53,7 @@ SMTP_HOST=""
     'UPLOAD_DIR',
   ].sort())
   assert.deepEqual(report.missingOptional, [])
+  assert.deepEqual(report.presentRequired, ['DATABASE_URL', 'NEXTAUTH_URL'])
   assert.equal(REQUIRED_PRODUCTION_KEYS.includes('DATABASE_URL'), true)
   assert.equal(OPTIONAL_PRODUCTION_KEYS.includes('SMTP_HOST'), true)
 })
