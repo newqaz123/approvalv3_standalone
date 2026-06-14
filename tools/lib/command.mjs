@@ -16,15 +16,15 @@ export function runCommand({ command, args = [], cwd, dryRun = false }) {
     const child = spawn(command, args, {
       cwd,
       stdio: 'inherit',
-      shell: process.platform === 'win32',
     })
 
     child.on('error', reject)
-    child.on('close', (code) => {
+    child.on('close', (code, signal) => {
       if (code === 0) {
         resolve({ code, plan })
       } else {
-        reject(new Error(`Command failed with exit code ${code}: ${command} ${args.join(' ')}`))
+        const reason = code === null ? `signal ${signal}` : `exit code ${code}`
+        reject(new Error(`Command failed with ${reason}: ${command} ${args.join(' ')}`))
       }
     })
   })
