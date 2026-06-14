@@ -1,5 +1,6 @@
 node_modules
 .next
+.worktrees/
 # Keep environment variables out of version control
 .env
 
