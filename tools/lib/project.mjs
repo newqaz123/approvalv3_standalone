@@ -7,11 +7,14 @@ export function getProjectRoot() {
 }
 
 export function resolveManagerPaths(root = getProjectRoot()) {
+  const backups = path.join(root, 'backups')
+
   return {
     root,
     envExample: path.join(root, '.env.example'),
     envProduction: path.join(root, '.env.production'),
-    backupsDir: path.join(root, 'backups'),
+    backups,
+    backupsDir: backups,
     scripts: {
       backup: path.join(root, 'scripts', 'backup.sh'),
       restore: path.join(root, 'scripts', 'restore.sh'),
