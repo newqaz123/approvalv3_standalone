@@ -42,6 +42,29 @@ docker compose up -d
 curl http://localhost:3000/api/health
 ```
 
+## Interactive Deployment Manager
+
+The project includes an operator menu for Docker-based install, update, backup, restore, health check, and rollback tasks:
+
+```bash
+npm run manage
+```
+
+Use this before updating a live installation. The manager checks `.env.production`, creates backups before update operations, wraps the existing Docker scripts, and runs a health check after deployment.
+
+Supported update sources:
+
+- Existing Git checkout
+- Extracted GitHub zip/package
+- Flash drive or local package folder
+
+Persistent data is kept outside source updates:
+
+- `.env.production`
+- PostgreSQL Docker volume
+- uploads Docker volume
+- `backups/`
+
 ## Features
 
 - **Request Workflow** — Create requests with file attachments, route through configurable approval chains
