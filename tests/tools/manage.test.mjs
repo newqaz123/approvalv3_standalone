@@ -95,6 +95,25 @@ test('envDoctor does not overwrite an existing backup path collision', async () 
   assert.equal(nextBackup, originalProduction)
 })
 
+test('restoreBackup cancels when the database backup path is blank', async () => {
+  const { restoreBackup } = await import('../../tools/manage.mjs')
+  const prompts = []
+
+  await restoreBackup({
+    paths: { scripts: { restore: '/tmp/restore.sh' } },
+    ask: async (question) => {
+      prompts.push(question)
+      return ''
+    },
+    log: () => {},
+    run: async () => {
+      throw new Error('restore script should not run')
+    },
+  })
+
+  assert.deepEqual(prompts, ['Database backup path: '])
+})
+
 test('manage cli renders menu and exits on option 8', async () => {
   const stdout = await new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ['tools/manage.mjs'], {

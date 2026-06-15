@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { access, copyFile, readFile, writeFile } from 'node:fs/promises'
+import { access, copyFile, open, readFile, writeFile } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { createInterface } from 'node:readline/promises'
 import { stdin as input, stdout as output, argv } from 'node:process'
@@ -23,24 +23,37 @@ export function timestamp(date = new Date()) {
   return date.toISOString().replace(/[-:]/g, '').replace('T', '-').replace('Z', '')
 }
 
-export async function createUniqueEnvBackupPath({
+export function buildEnvBackupPath(envProductionPath, stamp, suffix = 0) {
+  return suffix === 0
+    ? `${envProductionPath}.backup.${stamp}`
+    : `${envProductionPath}.backup.${stamp}.${suffix}`
+}
+
+export async function writeEnvBackupAtomically({
+  sourcePath,
   envProductionPath,
   stamp = timestamp(),
-  exists = fileExists,
 } = {}) {
-  const basePath = `${envProductionPath}.backup.${stamp}`
+  const sourceBytes = await readFile(sourcePath)
+  let suffix = 0
 
-  if (!(await exists(basePath))) {
-    return basePath
-  }
-
-  let suffix = 1
   while (true) {
-    const candidate = `${basePath}.${suffix}`
-    if (!(await exists(candidate))) {
-      return candidate
+    const backupPath = buildEnvBackupPath(envProductionPath, stamp, suffix)
+
+    try {
+      const handle = await open(backupPath, 'wx')
+      try {
+        await handle.writeFile(sourceBytes)
+      } finally {
+        await handle.close()
+      }
+      return backupPath
+    } catch (error) {
+      if (error?.code !== 'EEXIST') {
+        throw error
+      }
+      suffix += 1
     }
-    suffix += 1
   }
 }
 
@@ -81,7 +94,6 @@ export async function envDoctor({
   ask = async () => '',
   log = console.log,
   timestampFn = timestamp,
-  exists = fileExists,
 } = {}) {
   if (!(await fileExists(paths.envExample))) {
     throw new Error('.env.example not found')
@@ -116,12 +128,11 @@ export async function envDoctor({
     return
   }
 
-  const backupPath = await createUniqueEnvBackupPath({
+  const backupPath = await writeEnvBackupAtomically({
+    sourcePath: paths.envProduction,
     envProductionPath: paths.envProduction,
     stamp: timestampFn(),
-    exists,
   })
-  await copyFile(paths.envProduction, backupPath)
   await writeFile(paths.envProduction, mergeMissingEnvKeys({ currentText, templateText }))
   log(`Backup written: ${backupPath}`)
   log('Missing keys appended to .env.production.')
@@ -187,8 +198,14 @@ export async function restoreBackup({
   paths = defaultPaths,
   ask = async () => '',
   log = console.log,
+  run = runScript,
 } = {}) {
   const dbBackup = await ask('Database backup path: ')
+  if (!dbBackup) {
+    log('Restore cancelled.')
+    return
+  }
+
   const uploadsBackup = await ask('Uploads backup path, or press Enter to skip: ')
   const confirm = await ask('Type RESTORE to replace current data: ')
 
@@ -198,7 +215,7 @@ export async function restoreBackup({
   }
 
   const args = uploadsBackup ? [dbBackup, uploadsBackup] : [dbBackup]
-  await runScript(paths.scripts.restore, args, { paths, log })
+  await run(paths.scripts.restore, args, { paths, log })
 }
 
 export async function showMenu(log = console.log, ask = async () => '') {
