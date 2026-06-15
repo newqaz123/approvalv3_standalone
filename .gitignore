@@ -6,3 +6,9 @@ node_modules
 
 /src/generated/prisma
 .env.test
+
+# Deployment manager generated files
+.env.production
+.env.production.backup.*
+backups/
+deploy/
