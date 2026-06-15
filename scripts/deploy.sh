@@ -20,6 +20,15 @@ echo "  Approval App - Deployment"
 echo "============================================"
 echo ""
 
+if docker compose version &>/dev/null; then
+    COMPOSE=(docker compose)
+elif command -v docker-compose &>/dev/null; then
+    COMPOSE=(docker-compose)
+else
+    echo -e "${RED}✗ ERROR: Docker Compose not found${NC}"
+    exit 1
+fi
+
 # Check if .env.production exists
 if [ ! -f .env.production ]; then
     echo -e "${RED}✗ ERROR: .env.production not found${NC}"
@@ -36,17 +45,17 @@ git pull origin main || git pull origin master || {
 
 # Step 2: Rebuild Docker images
 echo -e "${BLUE}[2/4]${NC} Rebuilding Docker images..."
-docker compose build --no-cache || docker-compose build --no-cache
+"${COMPOSE[@]}" build --no-cache
 echo -e "${GREEN}✓ Images rebuilt${NC}"
 
 # Step 3: Stop and remove old containers
 echo -e "${BLUE}[3/4]${NC} Stopping old containers..."
-docker compose down || docker-compose down
+"${COMPOSE[@]}" down
 echo -e "${GREEN}✓ Old containers stopped${NC}"
 
 # Step 4: Start new containers
 echo -e "${BLUE}[4/4]${NC} Starting services..."
-docker compose up -d || docker-compose up -d
+"${COMPOSE[@]}" up -d
 
 # Wait for services to be healthy
 echo "Waiting for services to be healthy..."
@@ -57,7 +66,7 @@ echo ""
 echo "============================================"
 echo "  Service Status"
 echo "============================================"
-docker compose ps || docker-compose ps
+"${COMPOSE[@]}" ps
 
 echo ""
 echo "============================================"
