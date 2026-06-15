@@ -19,6 +19,8 @@ NC='\033[0m' # No Color
 BACKUP_DIR="./backups"
 RETENTION_COUNT=5  # Keep last 5 backups
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+DB_CONTAINER="${DB_CONTAINER:-approval-db}"
+APP_CONTAINER="${APP_CONTAINER:-approval-app}"
 
 echo "============================================"
 echo "  Approval App - Backup"
@@ -34,9 +36,11 @@ fi
 
 # Check if Docker Compose is running
 if ! docker compose ps &>/dev/null && ! docker-compose ps &>/dev/null; then
-    echo -e "${RED}✗ ERROR: Docker Compose services are not running${NC}"
-    echo "Start services with: ./scripts/deploy.sh"
-    exit 1
+    if ! docker ps --format '{{.Names}}' | grep -qx "$DB_CONTAINER"; then
+        echo -e "${RED}✗ ERROR: Docker Compose services are not running and $DB_CONTAINER was not found${NC}"
+        echo "Start services with: ./scripts/deploy.sh"
+        exit 1
+    fi
 fi
 
 # ==============================================
@@ -46,11 +50,14 @@ echo -e "${BLUE}[1/3]${NC} Backing up database..."
 
 DB_BACKUP_FILE="$BACKUP_DIR/db_$TIMESTAMP.sql"
 
-# Use docker compose exec or docker-compose exec (for compatibility)
-if command -v docker-compose &>/dev/null; then
-    docker-compose exec -T db pg_dump -U postgres app_db > "$DB_BACKUP_FILE" 2>/dev/null
+# Prefer the known container name because some existing VPS installs are not
+# visible to `docker compose exec db` from the current checkout.
+if docker ps --format '{{.Names}}' | grep -qx "$DB_CONTAINER"; then
+    docker exec "$DB_CONTAINER" pg_dump -U "${POSTGRES_USER:-postgres}" "${POSTGRES_DB:-app_db}" > "$DB_BACKUP_FILE"
+elif command -v docker-compose &>/dev/null; then
+    docker-compose exec -T db pg_dump -U "${POSTGRES_USER:-postgres}" "${POSTGRES_DB:-app_db}" > "$DB_BACKUP_FILE"
 else
-    docker compose exec -T db pg_dump -U postgres app_db > "$DB_BACKUP_FILE" 2>/dev/null
+    docker compose exec -T db pg_dump -U "${POSTGRES_USER:-postgres}" "${POSTGRES_DB:-app_db}" > "$DB_BACKUP_FILE"
 fi
 
 if [ -f "$DB_BACKUP_FILE" ] && [ -s "$DB_BACKUP_FILE" ]; then
@@ -66,14 +73,21 @@ fi
 echo -e "${BLUE}[2/3]${NC} Backing up uploads..."
 
 UPLOADS_BACKUP_FILE="$BACKUP_DIR/uploads_$TIMESTAMP.tar.gz"
+BACKUP_DIR_ABS="$(cd "$BACKUP_DIR" && pwd)"
 
-# Use a temporary Alpine container to access the uploads_data volume
-# This works regardless of whether uploads is a bind mount or named volume
-docker run --rm \
-    -v uploads_data:/data:ro \
-    -v "$BACKUP_DIR:/backup" \
-    alpine:latest \
-    tar -czf "/backup/$(basename $UPLOADS_BACKUP_FILE)" -C /data .
+if docker ps --format '{{.Names}}' | grep -qx "$APP_CONTAINER"; then
+    docker run --rm \
+        --volumes-from "$APP_CONTAINER":ro \
+        -v "$BACKUP_DIR_ABS:/backup" \
+        alpine:latest \
+        tar -czf "/backup/$(basename $UPLOADS_BACKUP_FILE)" -C /app/public/uploads .
+else
+    docker run --rm \
+        -v uploads_data:/data:ro \
+        -v "$BACKUP_DIR_ABS:/backup" \
+        alpine:latest \
+        tar -czf "/backup/$(basename $UPLOADS_BACKUP_FILE)" -C /data .
+fi
 
 if [ -f "$UPLOADS_BACKUP_FILE" ] && [ -s "$UPLOADS_BACKUP_FILE" ]; then
     echo -e "${GREEN}✓ Uploads backed up: $UPLOADS_BACKUP_FILE${NC}"
