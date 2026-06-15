@@ -59,11 +59,26 @@ export async function writeEnvBackupAtomically({
 
 export function createPrompt() {
   const rl = createInterface({ input, output })
+  const lines = rl[Symbol.asyncIterator]()
+  let closed = false
+
   return {
     async ask(question) {
-      return (await rl.question(question)).trim()
+      if (closed) {
+        throw new Error('Input stream closed before a response was provided')
+      }
+
+      output.write(question)
+      const nextLine = await lines.next()
+      if (nextLine.done) {
+        closed = true
+        throw new Error('Input stream closed before a response was provided')
+      }
+
+      return String(nextLine.value).trim()
     },
     close() {
+      closed = true
       rl.close()
     },
   }
