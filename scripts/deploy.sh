@@ -38,10 +38,21 @@ fi
 
 # Step 1: Pull latest changes
 echo -e "${BLUE}[1/4]${NC} Pulling latest changes from git..."
-git pull origin main || git pull origin master || {
-    echo -e "${YELLOW}⚠ Git pull failed or not a git repo${NC}"
-    echo "Continuing with deployment anyway..."
-}
+if git rev-parse --is-inside-work-tree &>/dev/null; then
+    CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+    CURRENT_COMMIT="$(git rev-parse --short HEAD)"
+
+    echo "Current branch: $CURRENT_BRANCH"
+    echo "Current commit: $CURRENT_COMMIT"
+
+    if [ "$CURRENT_BRANCH" = "HEAD" ] || [ -z "$CURRENT_BRANCH" ]; then
+        echo -e "${YELLOW}⚠ Detached HEAD detected; skipping git pull${NC}"
+    else
+        git pull --ff-only origin "$CURRENT_BRANCH"
+    fi
+else
+    echo -e "${YELLOW}⚠ Not a git checkout; skipping git pull${NC}"
+fi
 
 # Step 2: Rebuild Docker images
 echo -e "${BLUE}[2/4]${NC} Rebuilding Docker images..."
@@ -67,6 +78,19 @@ echo "============================================"
 echo "  Service Status"
 echo "============================================"
 "${COMPOSE[@]}" ps
+
+USERS_AFTER_DEPLOY="unknown"
+if docker ps --format '{{.Names}}' | grep -qx approval-db; then
+    USERS_AFTER_DEPLOY="$(docker exec approval-db psql -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-app_db}" -tAc "select count(*) from users;" 2>/dev/null || echo unknown)"
+else
+    USERS_AFTER_DEPLOY="$("${COMPOSE[@]}" exec -T db psql -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-app_db}" -tAc "select count(*) from users;" 2>/dev/null || echo unknown)"
+fi
+
+echo "Users after deploy: $USERS_AFTER_DEPLOY"
+if [ "$USERS_AFTER_DEPLOY" = "0" ]; then
+    echo -e "${YELLOW}⚠ WARNING: Database has 0 users after deploy${NC}"
+    echo "Check backups before trying to log in or creating new data."
+fi
 
 echo ""
 echo "============================================"

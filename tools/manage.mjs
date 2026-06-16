@@ -104,6 +104,32 @@ export function logEnvironmentReport(report, log = console.log) {
   }
 }
 
+export function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes < 0) {
+    return 'unknown size'
+  }
+
+  if (bytes < 1024) {
+    return `${bytes} B`
+  }
+
+  const units = ['KB', 'MB', 'GB']
+  let value = bytes / 1024
+  let unit = units[0]
+
+  for (let index = 1; value >= 1024 && index < units.length; index += 1) {
+    value /= 1024
+    unit = units[index]
+  }
+
+  return `${Math.round(value)} ${unit}`
+}
+
+export function formatBackupChoice({ path, sizeBytes, userRows }) {
+  const users = Number.isFinite(userRows) ? userRows : 'unknown'
+  return `${path} (${formatBytes(sizeBytes)}, users: ${users})`
+}
+
 export async function envDoctor({
   paths = defaultPaths,
   ask = async () => '',
@@ -182,7 +208,7 @@ export async function updateExistingInstall({
   log = console.log,
 } = {}) {
   log('\nUpdate source')
-  log('1. Git pull using existing deploy script')
+  log('1. Git update from current branch')
   log('2. Offline package / flash drive folder')
   const choice = await ask('Choose update source: ')
 

@@ -17,7 +17,7 @@ NC='\033[0m' # No Color
 
 # Configuration
 BACKUP_DIR="./backups"
-RETENTION_COUNT=5  # Keep last 5 backups
+RETENTION_COUNT=10  # Keep last 10 non-empty backups
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 DB_CONTAINER="${DB_CONTAINER:-approval-db}"
 APP_CONTAINER="${APP_CONTAINER:-approval-app}"
@@ -67,6 +67,21 @@ else
     exit 1
 fi
 
+USERS_COUNT="unknown"
+if docker ps --format '{{.Names}}' | grep -qx "$DB_CONTAINER"; then
+    USERS_COUNT="$(docker exec "$DB_CONTAINER" psql -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-app_db}" -tAc "select count(*) from users;" 2>/dev/null || echo unknown)"
+elif command -v docker-compose &>/dev/null; then
+    USERS_COUNT="$(docker-compose exec -T db psql -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-app_db}" -tAc "select count(*) from users;" 2>/dev/null || echo unknown)"
+else
+    USERS_COUNT="$(docker compose exec -T db psql -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-app_db}" -tAc "select count(*) from users;" 2>/dev/null || echo unknown)"
+fi
+
+echo "Users in database: $USERS_COUNT"
+if [ "$USERS_COUNT" = "0" ]; then
+    echo -e "${YELLOW}⚠ WARNING: Database backup contains 0 users${NC}"
+    echo "Do not use this backup for account recovery unless you expect an empty user table."
+fi
+
 # ==============================================
 # 2. Backup Uploads Volume
 # ==============================================
@@ -100,8 +115,13 @@ fi
 # ==============================================
 echo -e "${BLUE}[3/3]${NC} Applying retention policy (keep last $RETENTION_COUNT)..."
 
-# Remove old database backups (keep last RETENTION_COUNT)
-ls -1t "$BACKUP_DIR"/db_*.sql 2>/dev/null | tail -n +$((RETENTION_COUNT + 1)) | xargs -r rm -f
+# Remove old non-empty database backups (keep last RETENTION_COUNT).
+# Zero-byte failed backups are ignored by the retention count and removed separately.
+find "$BACKUP_DIR" -maxdepth 1 -name 'db_*.sql' -type f -size +0 -print 2>/dev/null \
+    | xargs -r ls -1t \
+    | tail -n +$((RETENTION_COUNT + 1)) \
+    | xargs -r rm -f
+find "$BACKUP_DIR" -maxdepth 1 -name 'db_*.sql' -type f -size 0 -print -delete 2>/dev/null || true
 echo -e "${GREEN}✓ Cleaned old database backups${NC}"
 
 # Remove old uploads backups (keep last RETENTION_COUNT)

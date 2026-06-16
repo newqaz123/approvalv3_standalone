@@ -114,6 +114,50 @@ test('restoreBackup cancels when the database backup path is blank', async () =>
   assert.deepEqual(prompts, ['Database backup path: '])
 })
 
+test('formatBackupChoice shows size and user rows for restore selection', async () => {
+  const { formatBackupChoice } = await import('../../tools/manage.mjs')
+
+  const result = formatBackupChoice({
+    path: 'backups/db_20260615_155300.sql',
+    sizeBytes: 69632,
+    userRows: 6,
+  })
+
+  assert.equal(result, 'backups/db_20260615_155300.sql (68 KB, users: 6)')
+})
+
+test('deploy script pulls the current branch instead of hardcoded main', async () => {
+  const deployScript = await readFile('scripts/deploy.sh', 'utf8')
+
+  assert.match(deployScript, /CURRENT_BRANCH=/)
+  assert.match(deployScript, /git pull --ff-only origin "\$CURRENT_BRANCH"/)
+  assert.doesNotMatch(deployScript, /git pull origin main/)
+})
+
+test('deploy script warns when post-deploy user count is zero', async () => {
+  const deployScript = await readFile('scripts/deploy.sh', 'utf8')
+
+  assert.match(deployScript, /USERS_AFTER_DEPLOY=/)
+  assert.match(deployScript, /WARNING: Database has 0 users after deploy/)
+})
+
+test('backup script keeps more backups and warns about empty user data', async () => {
+  const backupScript = await readFile('scripts/backup.sh', 'utf8')
+
+  assert.match(backupScript, /RETENTION_COUNT=10/)
+  assert.match(backupScript, /USERS_COUNT=/)
+  assert.match(backupScript, /WARNING: Database backup contains 0 users/)
+  assert.match(backupScript, /-size \+0/)
+})
+
+test('restore script performs a clean schema restore through named container support', async () => {
+  const restoreScript = await readFile('scripts/restore.sh', 'utf8')
+
+  assert.match(restoreScript, /DB_CONTAINER="\$\{DB_CONTAINER:-approval-db\}"/)
+  assert.match(restoreScript, /drop schema public cascade; create schema public;/)
+  assert.match(restoreScript, /Restored users:/)
+})
+
 test('manage cli renders menu and exits on option 8', async () => {
   const stdout = await new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ['tools/manage.mjs'], {
