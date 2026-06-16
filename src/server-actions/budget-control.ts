@@ -9,6 +9,7 @@ import {
   buildBudgetCodeGroups,
   buildBudgetExportRows,
   fuzzyMatchBudgetCode,
+  matchesBudgetMonitorSearch,
   normalizeBudgetCode,
 } from '@/lib/budget-control'
 import type { BudgetMonitorData, BudgetMonitorFilters, BudgetRequestRecord } from '@/types/budget'
@@ -238,11 +239,7 @@ export async function getBudgetMonitorData(input: BudgetMonitorFilters = {}): Pr
     budgetRequests = budgetRequests.filter((request) => request.budgetCode?.department?.id === filters.departmentId)
   }
   if (filters.budgetCodeSearch) {
-    budgetRequests = budgetRequests.filter((request) =>
-      request.budgetCode
-        ? fuzzyMatchBudgetCode(request.budgetCode.displayCode, filters.budgetCodeSearch!)
-        : false
-    )
+    budgetRequests = budgetRequests.filter((request) => matchesBudgetMonitorSearch(request, filters.budgetCodeSearch!))
   }
 
   let remainingRequests = mapped.filter((request) => !request.budgetCode)

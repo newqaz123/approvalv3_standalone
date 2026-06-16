@@ -10,6 +10,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "manage": "node tools/manage.mjs",
+    "test:manage": "node --test tests/tools/command.test.mjs tests/tools/env.test.mjs tests/tools/manage.test.mjs",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",

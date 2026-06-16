@@ -38,6 +38,28 @@ describe('budget control wiring', () => {
     assert.doesNotMatch(remainingPanel, /translate3d/)
   })
 
+  it('uses one top search for budget codes and request names', () => {
+    const page = readFileSync('src/components/budget/budget-monitor-page.tsx', 'utf8')
+    const serverAction = readFileSync('src/server-actions/budget-control.ts', 'utf8')
+
+    assert.match(page, /placeholder="Search budget code or request"/)
+    assert.match(page, /budgetCodeSearch/)
+    assert.doesNotMatch(page, /placeholder="Filter budget code"/)
+    assert.match(serverAction, /matchesBudgetMonitorSearch/)
+  })
+
+  it('removes the duplicate remaining budget column from budget code request rows', () => {
+    const budgetBox = readFileSync('src/components/budget/budget-code-box.tsx', 'utf8')
+    const requestTable = budgetBox.slice(
+      budgetBox.indexOf('min-w-[960px]'),
+      budgetBox.indexOf('Drop remaining request here')
+    )
+
+    assert.doesNotMatch(requestTable, /<div className="text-right">Remaining budget<\/div>/)
+    assert.doesNotMatch(requestTable, /group\.remainingBudget\?\.toLocaleString\(\) \?\? '-'/)
+    assert.match(requestTable, /grid-cols-\[minmax\(320px,1\.8fr\)_150px_220px_150px_64px\]/)
+  })
+
   it('keeps budget search suggestions closed until text is entered', () => {
     const searchInput = readFileSync('src/components/budget/budget-search-input.tsx', 'utf8')
 
@@ -55,5 +77,19 @@ describe('budget control wiring', () => {
     assert.match(remainingPanel, /fixed bottom-4 right-4/)
     assert.match(remainingPanel, /max-h-\[min\(620px,calc\(100vh-7rem\)\)\]/)
     assert.doesNotMatch(page, /lg:pr-\[22rem\]/)
+  })
+
+  it('keeps the remaining request filter inside the floating remaining request list', () => {
+    const remainingPanel = readFileSync('src/components/budget/remaining-request-panel.tsx', 'utf8')
+    const page = readFileSync('src/components/budget/budget-monitor-page.tsx', 'utf8')
+
+    assert.match(remainingPanel, /useState\(''\)/)
+    assert.match(remainingPanel, /placeholder="Filter remaining request"/)
+    assert.match(remainingPanel, /filteredRequests/)
+    assert.match(remainingPanel, /requestSearch\.trim\(\)/)
+    assert.doesNotMatch(page, /placeholder="Filter remaining request"/)
+    assert.doesNotMatch(page, /remainingRequestOptions/)
+    assert.doesNotMatch(page, /requestSearch/)
+    assert.match(page, /lg:grid-cols-\[1\.2fr_1fr_1fr\]/)
   })
 })

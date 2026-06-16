@@ -5,6 +5,8 @@ import {
   buildBudgetCodeGroups,
   buildBudgetExportRows,
   fuzzyMatchBudgetCode,
+  matchesBudgetMonitorSearch,
+  getBudgetProjectEstimateAmount,
   getBudgetUsageAmount,
   normalizeBudgetCode,
 } from '../../src/lib/budget-control'
@@ -20,10 +22,37 @@ describe('budget control helpers', () => {
     assert.equal(fuzzyMatchBudgetCode('OPEX-FAC-042', 'it'), false)
   })
 
+  it('matches the combined budget monitor search by budget code or request details', () => {
+    const request = {
+      title: 'Replace chilled water pump',
+      status: 'Completed',
+      department: { id: 'd1', name: 'Production 1' },
+      budgetCode: {
+        id: 'b1',
+        code: 'AYT-PD1-CX-400',
+        displayCode: 'AYT-PD1-CX-400',
+        budgetAmount: 10000000,
+        department: { id: 'd1', name: 'Production 1' },
+      },
+    }
+
+    assert.equal(matchesBudgetMonitorSearch(request, 'pd1cx'), true)
+    assert.equal(matchesBudgetMonitorSearch(request, 'water pump'), true)
+    assert.equal(matchesBudgetMonitorSearch(request, 'production completed'), true)
+    assert.equal(matchesBudgetMonitorSearch(request, 'warehouse'), false)
+  })
+
   it('prefers engineering estimate over project estimate for usage', () => {
     assert.equal(getBudgetUsageAmount({ projectEstimateCost: 100, engineeringEstimateCost: 250 }), 250)
     assert.equal(getBudgetUsageAmount({ projectEstimateCost: 100, engineeringEstimateCost: null }), 100)
     assert.equal(getBudgetUsageAmount({ projectEstimateCost: null, engineeringEstimateCost: null }), 0)
+  })
+
+  it('displays approved engineering estimates in the project estimate column', () => {
+    assert.equal(getBudgetProjectEstimateAmount({ projectEstimateCost: null, engineeringEstimateCost: 250 }), 250)
+    assert.equal(getBudgetProjectEstimateAmount({ projectEstimateCost: 100, engineeringEstimateCost: 250 }), 250)
+    assert.equal(getBudgetProjectEstimateAmount({ projectEstimateCost: 100, engineeringEstimateCost: null }), 100)
+    assert.equal(getBudgetProjectEstimateAmount({ projectEstimateCost: null, engineeringEstimateCost: null }), null)
   })
 
   it('groups assigned requests and calculates remaining budget', () => {
@@ -246,5 +275,34 @@ describe('budget monitor server actions', () => {
     assert.match(assignSchemaBody, /budgetCodeId/)
     assert.match(assignSchemaBody, /budgetCode/)
     assert.match(assignSchemaBody, /exactly one/i)
+  })
+
+  it('renders budget monitor project estimate cells from the approved display amount', () => {
+    const box = readFileSync('src/components/budget/budget-code-box.tsx', 'utf8')
+    const remainingPanel = readFileSync('src/components/budget/remaining-request-panel.tsx', 'utf8')
+
+    assert.match(box, /getBudgetProjectEstimateAmount/)
+    assert.match(box, /projectEstimateAmount\?\.toLocaleString\(\) \?\? '-'/)
+    assert.match(box, /const hasApprovedEstimate = request\.engineeringEstimateCost !== null/)
+    assert.match(box, /hasApprovedEstimate \? \(/)
+    assert.match(box, /onClick=\{\(\) => onEditProjectEstimate\(request\.id, request\.projectEstimateCost\)\}/)
+    assert.match(remainingPanel, /getBudgetProjectEstimateAmount/)
+    assert.match(remainingPanel, /Project estimate: \{projectEstimateAmount\?\.toLocaleString\(\) \?\? '-'\}/)
+    assert.match(remainingPanel, /const hasApprovedEstimate = request\.engineeringEstimateCost !== null/)
+    assert.match(remainingPanel, /!hasApprovedEstimate && onEditProjectEstimate/)
+  })
+
+  it('syncs approved engineering solution estimates into the editable project estimate field', () => {
+    const source = readFileSync('src/server-actions/solutions.ts', 'utf8')
+    const approveBody = source.slice(
+      source.indexOf('export async function approveSolution'),
+      source.indexOf('export async function rejectSolution')
+    )
+
+    assert.match(approveBody, /select:\s*\{[\s\S]*requestId:\s*true,[\s\S]*title:\s*true,[\s\S]*costEstimate:\s*true/)
+    assert.match(approveBody, /projectEstimateCost:\s*solutionData\.costEstimate/)
+
+    const autoApproveUpdates = source.match(/projectEstimateCost:\s*(validated\.costEstimate|input\.cost)/g) ?? []
+    assert.ok(autoApproveUpdates.length >= 2, 'submit and resubmit auto-approval paths should sync the approved estimate')
   })
 })

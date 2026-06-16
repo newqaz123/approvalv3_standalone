@@ -34,35 +34,21 @@ HEALTH_CHECK_URL="http://localhost:$APP_PORT/api/health"
 ALL_HEALTHY=true
 
 # ==============================================
-# 1. Check if Docker Compose is available
+# 1. Check if Docker is available
 # ==============================================
 if ! command -v docker &>/dev/null; then
     echo -e "${RED}✗ Docker not found${NC}"
     exit 1
 fi
 
-if ! docker compose ps &>/dev/null && ! docker-compose ps &>/dev/null; then
-    echo -e "${RED}✗ Docker Compose not available${NC}"
-    exit 1
-fi
-
-# Use appropriate docker compose command
-if command -v docker-compose &>/dev/null; then
-    DOCKER_COMPOSE="docker-compose"
-else
-    DOCKER_COMPOSE="docker compose"
-fi
-
 # ==============================================
 # 2. Check if services are running
 # ==============================================
-echo "Checking Docker Compose services..."
+echo "Checking Docker containers..."
 
-# Get container status
-CONTAINER_STATUS=$($DOCKER_COMPOSE ps --format json 2>/dev/null)
-
-# Check database container
-DB_STATUS=$(echo "$CONTAINER_STATUS" | jq -r '.[] | select(.Name=="'$DB_CONTAINER'") | .State' 2>/dev/null || echo "not_found")
+# Check database container by name. Some existing VPS installs are not visible
+# as Compose services from the current checkout, but the named containers exist.
+DB_STATUS=$(docker inspect -f '{{.State.Status}}' "$DB_CONTAINER" 2>/dev/null || echo "not_found")
 
 if [ "$DB_STATUS" = "running" ]; then
     echo -e "${GREEN}✓${NC} Database ($DB_CONTAINER): running"
@@ -71,8 +57,7 @@ else
     ALL_HEALTHY=false
 fi
 
-# Check application container
-APP_STATUS=$(echo "$CONTAINER_STATUS" | jq -r '.[] | select(.Name=="'$APP_CONTAINER'") | .State' 2>/dev/null || echo "not_found")
+APP_STATUS=$(docker inspect -f '{{.State.Status}}' "$APP_CONTAINER" 2>/dev/null || echo "not_found")
 
 if [ "$APP_STATUS" = "running" ]; then
     echo -e "${GREEN}✓${NC} Application ($APP_CONTAINER): running"
@@ -88,7 +73,7 @@ echo ""
 echo "Checking container health status..."
 
 # Check database health
-DB_HEALTH=$(echo "$CONTAINER_STATUS" | jq -r '.[] | select(.Name=="'$DB_CONTAINER'") | .Health' 2>/dev/null || echo "unknown")
+DB_HEALTH=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}unknown{{end}}' "$DB_CONTAINER" 2>/dev/null || echo "unknown")
 
 case "$DB_HEALTH" in
     "healthy")
@@ -107,7 +92,7 @@ case "$DB_HEALTH" in
 esac
 
 # Check application health
-APP_HEALTH=$(echo "$CONTAINER_STATUS" | jq -r '.[] | select(.Name=="'$APP_CONTAINER'") | .Health' 2>/dev/null || echo "unknown")
+APP_HEALTH=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}unknown{{end}}' "$APP_CONTAINER" 2>/dev/null || echo "unknown")
 
 case "$APP_HEALTH" in
     "healthy")

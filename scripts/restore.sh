@@ -18,6 +18,11 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+DB_CONTAINER="${DB_CONTAINER:-approval-db}"
+APP_CONTAINER="${APP_CONTAINER:-approval-app}"
+POSTGRES_USER_VALUE="${POSTGRES_USER:-postgres}"
+POSTGRES_DB_VALUE="${POSTGRES_DB:-app_db}"
+
 # Check arguments
 if [ $# -eq 0 ]; then
     echo "============================================"
@@ -35,7 +40,7 @@ if [ $# -eq 0 ]; then
     echo "Available backups:"
     echo ""
     echo "Database backups:"
-    ls -1ht backups/db_*.sql 2>/dev/null || echo "  (none found)"
+    find backups -maxdepth 1 -name 'db_*.sql' -type f -size +0 -print 2>/dev/null | xargs -r ls -1ht || echo "  (none found)"
     echo ""
     echo "Uploads backups:"
     ls -1ht backups/uploads_*.tar.gz 2>/dev/null || echo "  (none found)"
@@ -65,7 +70,7 @@ fi
 echo -e "${GREEN}✓ Database backup valid${NC}"
 
 # Check if Docker Compose is running
-if ! docker compose ps &>/dev/null && ! docker-compose ps &>/dev/null; then
+if ! docker ps --format '{{.Names}}' | grep -qx "$DB_CONTAINER" && ! docker compose ps &>/dev/null && ! docker-compose ps &>/dev/null; then
     echo -e "${YELLOW}⚠ WARNING: Docker Compose services are not running${NC}"
     echo "Starting services for restore..."
     docker compose up -d || docker-compose up -d
@@ -91,11 +96,15 @@ fi
 # ==============================================
 echo -e "${BLUE}[2/4]${NC} Restoring database..."
 
-# Use docker compose exec or docker-compose exec (for compatibility)
-if command -v docker-compose &>/dev/null; then
-    docker-compose exec -T db psql -U postgres -d app_db < "$DB_BACKUP"
+if docker ps --format '{{.Names}}' | grep -qx "$DB_CONTAINER"; then
+    docker exec -i "$DB_CONTAINER" psql -U "$POSTGRES_USER_VALUE" -d "$POSTGRES_DB_VALUE" -c 'drop schema public cascade; create schema public;'
+    docker exec -i "$DB_CONTAINER" psql -U "$POSTGRES_USER_VALUE" -d "$POSTGRES_DB_VALUE" < "$DB_BACKUP"
+elif command -v docker-compose &>/dev/null; then
+    docker-compose exec -T db psql -U "$POSTGRES_USER_VALUE" -d "$POSTGRES_DB_VALUE" -c 'drop schema public cascade; create schema public;'
+    docker-compose exec -T db psql -U "$POSTGRES_USER_VALUE" -d "$POSTGRES_DB_VALUE" < "$DB_BACKUP"
 else
-    docker compose exec -T db psql -U postgres -d app_db < "$DB_BACKUP"
+    docker compose exec -T db psql -U "$POSTGRES_USER_VALUE" -d "$POSTGRES_DB_VALUE" -c 'drop schema public cascade; create schema public;'
+    docker compose exec -T db psql -U "$POSTGRES_USER_VALUE" -d "$POSTGRES_DB_VALUE" < "$DB_BACKUP"
 fi
 
 if [ $? -eq 0 ]; then
@@ -103,6 +112,20 @@ if [ $? -eq 0 ]; then
 else
     echo -e "${RED}✗ ERROR: Database restore failed${NC}"
     exit 1
+fi
+
+RESTORED_USERS="unknown"
+if docker ps --format '{{.Names}}' | grep -qx "$DB_CONTAINER"; then
+    RESTORED_USERS="$(docker exec "$DB_CONTAINER" psql -U "$POSTGRES_USER_VALUE" -d "$POSTGRES_DB_VALUE" -tAc "select count(*) from users;" 2>/dev/null || echo unknown)"
+elif command -v docker-compose &>/dev/null; then
+    RESTORED_USERS="$(docker-compose exec -T db psql -U "$POSTGRES_USER_VALUE" -d "$POSTGRES_DB_VALUE" -tAc "select count(*) from users;" 2>/dev/null || echo unknown)"
+else
+    RESTORED_USERS="$(docker compose exec -T db psql -U "$POSTGRES_USER_VALUE" -d "$POSTGRES_DB_VALUE" -tAc "select count(*) from users;" 2>/dev/null || echo unknown)"
+fi
+
+echo "Restored users: $RESTORED_USERS"
+if [ "$RESTORED_USERS" = "0" ]; then
+    echo -e "${YELLOW}⚠ WARNING: Restored database has 0 users${NC}"
 fi
 
 # ==============================================
@@ -118,11 +141,20 @@ if [ -n "$UPLOADS_BACKUP" ]; then
 
     # Use a temporary Alpine container to restore to the uploads_data volume
     # This will overwrite existing files in the volume
-    docker run --rm \
-        -v uploads_data:/data \
-        -v "$(pwd)/backups:/backup:ro" \
-        alpine:latest \
-        sh -c "rm -rf /data/* && tar -xzf '/backup/$(basename $UPLOADS_BACKUP)' -C /data"
+    BACKUP_DIR_ABS="$(cd "$(dirname "$UPLOADS_BACKUP")" && pwd)"
+    if docker ps --format '{{.Names}}' | grep -qx "$APP_CONTAINER"; then
+        docker run --rm \
+            --volumes-from "$APP_CONTAINER" \
+            -v "$BACKUP_DIR_ABS:/backup:ro" \
+            alpine:latest \
+            sh -c "rm -rf /app/public/uploads/* && tar -xzf '/backup/$(basename $UPLOADS_BACKUP)' -C /app/public/uploads"
+    else
+        docker run --rm \
+            -v uploads_data:/data \
+            -v "$BACKUP_DIR_ABS:/backup:ro" \
+            alpine:latest \
+            sh -c "rm -rf /data/* && tar -xzf '/backup/$(basename $UPLOADS_BACKUP)' -C /data"
+    fi
 
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}✓ Uploads restored successfully${NC}"
@@ -140,7 +172,9 @@ fi
 echo -e "${BLUE}[4/4]${NC} Restarting application services..."
 
 # Restart app container to ensure clean state
-if command -v docker-compose &>/dev/null; then
+if docker ps --format '{{.Names}}' | grep -qx "$APP_CONTAINER"; then
+    docker restart "$APP_CONTAINER" >/dev/null
+elif command -v docker-compose &>/dev/null; then
     docker-compose restart app
 else
     docker compose restart app

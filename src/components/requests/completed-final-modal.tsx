@@ -35,7 +35,7 @@ import { Separator } from '@/components/ui/separator'
 import { CompletedApprovalExportBuilder } from '@/components/reports/completed-approval-export-builder'
 import type { ExportPackageRequestItem } from '@/lib/export-package'
 import { cn } from '@/lib/utils'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 
 // Types
 interface ApprovalStep {
@@ -217,8 +217,31 @@ export function CompletedFinalModal({
   onExportPackage,
   subTasksElement,
 }: CompletedFinalModalProps) {
+  const [showExportBuilder, setShowExportBuilder] = useState(false)
+  const exportBuilderRef = useRef<HTMLDivElement | null>(null)
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) setShowExportBuilder(false)
+    onOpenChange(nextOpen)
+  }
+
+  const handleExportClick = () => {
+    if (onExportPackage) {
+      setShowExportBuilder(true)
+      window.requestAnimationFrame(() => {
+        exportBuilderRef.current?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'start',
+        })
+      })
+      return
+    }
+
+    onExport?.()
+  }
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-5xl w-full max-h-[90vh] p-0 gap-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl rounded-xl overflow-hidden">
         {/* Header */}
         <DialogHeader className="flex-shrink-0 px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 sticky top-0 z-20">
@@ -250,7 +273,7 @@ export function CompletedFinalModal({
                 </div>
               </div>
               <button
-                onClick={() => onOpenChange(false)}
+                onClick={() => handleOpenChange(false)}
                 className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors text-slate-400 hover:text-slate-600"
               >
                 <X className="w-5 h-5" />
@@ -438,12 +461,14 @@ export function CompletedFinalModal({
 
           <Separator className="bg-slate-200 dark:bg-slate-700" />
 
-          {onExportPackage && (
-            <CompletedApprovalExportBuilder
-              requestAttachments={data.requestFiles}
-              solutionAttachments={data.solution.files}
-              onExportPackage={onExportPackage}
-            />
+          {showExportBuilder && onExportPackage && (
+            <div ref={exportBuilderRef}>
+              <CompletedApprovalExportBuilder
+                requestAttachments={data.requestFiles}
+                solutionAttachments={data.solution.files}
+                onExportPackage={onExportPackage}
+              />
+            </div>
           )}
 
           <Separator className="bg-slate-200 dark:bg-slate-700" />
@@ -549,12 +574,12 @@ export function CompletedFinalModal({
             </span>
           </div>
           <Button
-            onClick={onExport}
-            disabled={!onExport}
+            onClick={handleExportClick}
+            disabled={!onExport && !onExportPackage}
             className="bg-emerald-600 hover:bg-emerald-700 text-white"
           >
             <Printer className="w-4 h-4 mr-1.5" />
-            Export Report Only
+            Export Report
           </Button>
         </div>
       </DialogContent>

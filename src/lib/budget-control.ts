@@ -26,11 +26,40 @@ export function fuzzyMatchBudgetCode(code: string, query: string): boolean {
   return false
 }
 
+export function matchesBudgetMonitorSearch(
+  request: Pick<BudgetRequestRecord, 'title' | 'status' | 'department' | 'budgetCode'>,
+  query: string
+): boolean {
+  const normalizedQuery = query.trim()
+  if (!normalizedQuery) return true
+
+  if (request.budgetCode && fuzzyMatchBudgetCode(request.budgetCode.displayCode, normalizedQuery)) {
+    return true
+  }
+
+  const searchableRequestText = [
+    request.title,
+    request.department?.name ?? '',
+    request.status,
+  ].join(' ').toLowerCase()
+  const queryTerms = normalizedQuery.toLowerCase().split(/\s+/).filter(Boolean)
+
+  return queryTerms.every((term) => searchableRequestText.includes(term))
+}
+
 export function getBudgetUsageAmount(input: {
   projectEstimateCost: number | null
   engineeringEstimateCost: number | null
 }): number {
   return roundMoneyAmount(input.engineeringEstimateCost ?? input.projectEstimateCost ?? 0)
+}
+
+export function getBudgetProjectEstimateAmount(input: {
+  projectEstimateCost: number | null
+  engineeringEstimateCost: number | null
+}): number | null {
+  const amount = input.engineeringEstimateCost ?? input.projectEstimateCost
+  return amount === null ? null : roundMoneyAmount(amount)
 }
 
 export function buildBudgetCodeGroups(requests: BudgetRequestRecord[]): BudgetCodeGroup[] {
