@@ -1,8 +1,13 @@
 node_modules
 .next
 .worktrees/
+.DS_Store
+*.tsbuildinfo
+
 # Keep environment variables out of version control
 .env
+.env.local
+.env.*.local
 
 /src/generated/prisma
 .env.test
@@ -12,3 +17,12 @@ node_modules
 .env.production.backup.*
 backups/
 deploy/
+
+# Local agent/tool output
+.planning/
+.superpowers/
+.windsurf/
+graphify-out/
+playwright-report/
+test-results/
+image*.png
