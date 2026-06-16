@@ -54,9 +54,28 @@ Use this before updating a live installation. The manager checks `.env.productio
 
 Supported update sources:
 
-- Existing Git checkout
+- Current Git branch on the VPS
 - Extracted GitHub zip/package
 - Flash drive or local package folder
+
+### Updating a VPS install from GitHub
+
+If you want the VPS to track a GitHub branch, switch the VPS checkout to that branch first, then use the manager update flow.
+
+```bash
+cd /opt/approval-app
+git fetch origin
+git checkout <branch-name>
+git pull --ff-only origin <branch-name>
+npm run manage
+```
+
+Then choose:
+
+- `2` Update existing installation
+- `1` Git update from current branch
+
+The manager will back up the current database and uploads before updating, then run a health check after the deploy finishes.
 
 Persistent data is kept outside source updates:
 
