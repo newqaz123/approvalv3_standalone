@@ -30,7 +30,7 @@
 ### Required Software
 
 | Tool | Minimum Version | How to Install |
-|-------|-----------------|-----------------|
+| ------- | ----------------- | ----------------- |
 | Docker | 20.10+ | `curl -fsSL https://get.docker.com -o get-docker.sh && sh get-docker.sh` |
 | Docker Compose | v2 | Included with Docker v20.10+ or install separately |
 | Git | 2.x | `sudo apt install git` (Ubuntu) or `sudo yum install git` (CentOS) |
@@ -70,6 +70,7 @@ chmod +x scripts/setup.sh
 ```
 
 **What setup.sh does:**
+
 - Creates `.env.production` from `.env.production.example` template
 - Creates `uploads/` directory for file uploads
 - Creates `backups/` directory for backup storage
@@ -87,12 +88,15 @@ nano .env.production
 **Required variables:**
 
 | Variable | Description | Where to Get |
-|----------|-------------|---------------|
+| ---------- | ------------- | --------------- |
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk public key for frontend auth | [Clerk Dashboard → Apps → API Keys](https://dashboard.clerk.com) |
 | `CLERK_SECRET_KEY` | Clerk secret key for backend auth | Same as above (Secret key) |
 | `CLERK_WEBHOOK_SECRET` | Webhook signing secret | Clerk Dashboard → Webhooks (after deployment) |
 | `POSTGRES_PASSWORD` | Database password | Choose a secure password |
 | `NEXTAUTH_URL` | Your application's public URL | e.g., `https://approval.yourdomain.com` |
+| `AUTH_URL` | Canonical Auth.js v5 origin | Same public HTTPS origin as `NEXTAUTH_URL` |
+| `NEXT_PUBLIC_APP_URL` | App API base | Must match `AUTH_URL` / `NEXTAUTH_URL` |
+| `AUTH_TRUST_HOST` | Trust forwarded proxy headers | Set to `true` (required behind Nginx) |
 | `NEXTAUTH_SECRET` | JWT encryption secret | Generate with: `openssl rand -base64 32` |
 | `CRON_SECRET` | Cron job security secret | Generate with: `openssl rand -base64 32` |
 
@@ -119,6 +123,7 @@ Deploy the application with a single command:
 ```
 
 **What deploy.sh does:**
+
 1. Pulls latest changes from Git (if in a Git repository)
 2. Rebuilds Docker images from source
 3. Stops and removes old containers
@@ -151,6 +156,7 @@ After deployment, verify the application is running:
 ```
 
 Expected output:
+
 ```
 ✓ Database (approval-db): running
 ✓ Application (approval-app): running
@@ -180,6 +186,7 @@ To update the application with zero downtime:
 ```
 
 **Update process:**
+
 1. Pulls latest code from Git
 2. Rebuilds Docker images
 3. Gracefully stops old containers
@@ -223,6 +230,7 @@ Run the backup script manually or schedule via cron:
 ```
 
 **What backup.sh does:**
+
 1. Dumps PostgreSQL database to SQL file
 2. Archives uploads directory as tar.gz
 3. Stores backups in `./backups/`
@@ -230,6 +238,7 @@ Run the backup script manually or schedule via cron:
 5. Reports backup file sizes
 
 **Backup files created:**
+
 - `backups/db_YYYYMMDD_HHMMSS.sql` - Database dump
 - `backups/uploads_YYYYMMDD_HHMMSS.tar.gz` - Uploads archive
 
@@ -258,6 +267,7 @@ To restore from a backup:
 ```
 
 **What restore.sh does:**
+
 1. Validates backup file format
 2. Confirms restore operation (safety check)
 3. Restores database from SQL dump
@@ -279,12 +289,14 @@ Monitor system health at any time:
 ```
 
 **Health checks performed:**
+
 1. Docker Compose availability
 2. Container running status (db, app)
 3. Docker health status (internal healthcheck)
 4. HTTP API endpoint response
 
 **Exit codes:**
+
 - `0` = All systems healthy
 - `1` = One or more systems unhealthy
 
@@ -303,6 +315,7 @@ docker compose logs -f db
 
 **Log rotation:**
 Docker Compose is configured to rotate logs automatically:
+
 - Maximum file size: 10MB per log file
 - Maximum files: 3 per service
 
@@ -327,6 +340,7 @@ docker compose logs
 ```
 
 **Common causes:**
+
 1. Missing `.env.production` → Run `./scripts/setup.sh`
 2. Invalid environment variables → Check `.env.production` syntax
 3. Port 3000 already in use → Stop other services or change port mapping
@@ -338,11 +352,13 @@ docker compose logs
 **Solutions:**
 
 1. Check database health:
+
 ```bash
 docker compose logs db
 ```
 
-2. Verify DATABASE_URL format:
+1. Verify DATABASE_URL format:
+
 ```bash
 # Correct (Docker internal networking)
 DATABASE_URL=postgresql://postgres:password@db:5432/app_db
@@ -351,7 +367,8 @@ DATABASE_URL=postgresql://postgres:password@db:5432/app_db
 DATABASE_URL=postgresql://postgres:password@localhost:5432/app_db
 ```
 
-3. Check database health status:
+1. Check database health status:
+
 ```bash
 docker compose exec db pg_isready -U postgres
 ```
@@ -383,16 +400,19 @@ docker compose ps
 If health status shows "unhealthy":
 
 1. Check healthcheck logs:
+
 ```bash
 docker compose logs app | grep "healthcheck"
 ```
 
-2. Restart the service:
+1. Restart the service:
+
 ```bash
 docker compose restart app
 ```
 
-3. If persistent, rebuild:
+1. If persistent, rebuild:
+
 ```bash
 docker compose down
 docker compose build --no-cache
@@ -452,6 +472,7 @@ docker compose logs migrate
 
 2. **Schema conflict**
    - Solution: Manual database reset (WARNING: data loss):
+
      ```bash
      docker compose down -v
      docker compose up -d
@@ -459,9 +480,36 @@ docker compose logs migrate
 
 3. **Prisma client not generated**
    - Solution: Rebuild image (Prisma generation happens during build):
+
      ```bash
      docker compose build --no-cache
      ```
+
+### Auth.js Origin and Logout Issues
+
+**Symptoms:** Sign out redirects to `http://localhost:3000`, sign-in redirects
+to the wrong host, or sessions appear to switch origins between pages.
+
+**Cause:** The app runs behind a reverse proxy, so Auth.js must be told which
+public origin to use. The three URL variables — `AUTH_URL`, `NEXTAUTH_URL`,
+and `NEXT_PUBLIC_APP_URL` — must all match the public HTTPS origin
+(e.g. `https://approval.yourdomain.com`). A mismatch between the Auth.js
+callback base and the app API base causes cookie/session mismatches.
+
+**Fix:**
+
+1. Set all three URL variables to the same public HTTPS origin in
+   `.env.production`.
+2. Confirm `AUTH_TRUST_HOST=true` is set. This permits Auth.js to trust the
+   `Host` / `X-Forwarded-Host` and `X-Forwarded-Proto` headers forwarded by
+   the controlled Nginx proxy; without it Auth.js derives `http://localhost`
+   from the internal container host.
+3. Verify the reverse proxy forwards the headers shown in
+   [Reverse Proxy (Production Nginx)](#reverse-proxy-production-nginx).
+4. Restart the app container and retry sign out.
+
+Sign out itself uses the relative `/sign-in` callback, so the browser stays on
+an origin it is already talking to — no absolute URL is baked into the client.
 
 ### Reset Application (Data Loss Warning)
 
@@ -482,7 +530,7 @@ docker compose up -d
 ### Docker Services
 
 | Service | Image | Purpose | Ports | Volumes |
-|---------|--------|---------|--------|----------|
+| --------- | -------- | --------- | -------- | ---------- |
 | `db` | postgres:15-alpine | PostgreSQL database | 5432 (internal) | db_data |
 | `migrate` | Custom (builder stage) | Run migrations | - | - |
 | `app` | Custom (runner stage) | Next.js application | 3000 | uploads_data |
@@ -526,6 +574,7 @@ server {
         proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
         proxy_set_header Host              $host;
+        proxy_set_header X-Forwarded-Host  $host;
         proxy_set_header X-Real-IP         $remote_addr;
         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
@@ -556,6 +605,7 @@ rejects oversized uploads.
 ### Default Setup
 
 Hostinger VPS provides:
+
 - Ubuntu 20.04 or 22.04
 - SSH access
 - 1-4GB RAM options
@@ -636,7 +686,7 @@ vmware-toolbox-cmd -v
 ### Resource Allocation
 
 | Component | Minimum | Recommended |
-|------------|-----------|--------------|
+| ------------ | ----------- | -------------- |
 | vCPU | 2 | 4 |
 | RAM | 2GB | 4GB |
 | Disk | 20GB | 50GB+ |

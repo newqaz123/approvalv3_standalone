@@ -59,6 +59,19 @@ export function Navbar() {
     }
   }, [user?.id])
 
+  // Sign out always redirects to the relative /sign-in route so the browser
+  // stays on the configured trusted origin — no absolute environment URL is
+  // baked into client code. Errors are logged without inventing a fallback
+  // origin.
+  const handleSignOut = async () => {
+    setMenuOpen(false)
+    try {
+      await signOut({ callbackUrl: '/sign-in' })
+    } catch (error) {
+      console.error('Sign out failed:', error)
+    }
+  }
+
   return (
     <nav className="border-b bg-white">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
@@ -220,10 +233,7 @@ export function Navbar() {
                       Change Password
                     </Link>
                     <button
-                      onClick={() => {
-                        setMenuOpen(false)
-                        signOut({ callbackUrl: '/sign-in' })
-                      }}
+                      onClick={handleSignOut}
                       className="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left"
                     >
                       <LogOut className="h-4 w-4" />
