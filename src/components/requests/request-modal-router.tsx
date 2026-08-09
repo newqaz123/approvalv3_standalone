@@ -21,7 +21,7 @@ import { getModalTypeForStatus, canUserSubmitSolution, canUserSubmitFinalApprova
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { FilePreviewDialog } from '@/components/requests/file-preview-dialog'
-import { getFilePreviewUrl, normalizeStoredFilePath } from '@/lib/file-preview'
+import { getFileDownloadUrl, getFilePreviewUrl } from '@/lib/file-preview'
 import type { ExportPackageRequestItem } from '@/lib/export-package'
 import { SubTasksSection } from './sub-tasks-section'
 
@@ -237,13 +237,13 @@ export function RequestModalRouter({
         return
       }
 
-      const normalizedPath = normalizeStoredFilePath(file.filePath)
-      if (!normalizedPath) {
+      const downloadUrl = getFileDownloadUrl(file.id)
+      if (!downloadUrl) {
         toast.error('File is no longer available')
         return
       }
 
-      const res = await fetch(`/api/files/download?path=${encodeURIComponent(normalizedPath)}`)
+      const res = await fetch(downloadUrl)
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
@@ -276,13 +276,13 @@ export function RequestModalRouter({
         return
       }
 
-      const normalizedPath = normalizeStoredFilePath(file.filePath)
-      if (!normalizedPath) {
+      const downloadUrl = getFileDownloadUrl(file.id)
+      if (!downloadUrl) {
         toast.error('File is no longer available')
         return
       }
 
-      const res = await fetch(`/api/files/download?path=${encodeURIComponent(normalizedPath)}`)
+      const res = await fetch(downloadUrl)
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
@@ -305,11 +305,6 @@ export function RequestModalRouter({
     }
   }
 
-  const getFileUrl = (file: any) => {
-    if (!file?.filePath) return null
-    return getFilePreviewUrl(file.filePath)
-  }
-
   const handlePreviewFile = (fileId: string) => {
     const file = requestData.fileAttachments?.find((f: any) => f.id === fileId)
 
@@ -319,7 +314,7 @@ export function RequestModalRouter({
     }
 
     setPreviewFile(file)
-    setPreviewUrl(getFileUrl(file))
+    setPreviewUrl(getFilePreviewUrl(file.id))
     setPreviewOpen(true)
   }
 
@@ -333,7 +328,7 @@ export function RequestModalRouter({
     }
 
     setPreviewFile(file)
-    setPreviewUrl(getFileUrl(file))
+    setPreviewUrl(getFilePreviewUrl(file.id))
     setPreviewOpen(true)
   }
 

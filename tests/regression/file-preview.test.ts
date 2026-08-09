@@ -2,10 +2,10 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
+  getFileDownloadUrl,
   getFilePreviewKind,
   getFilePreviewUrl,
   isPreviewableFile,
-  normalizeStoredFilePath,
 } from '../../src/lib/file-preview'
 
 describe('file preview type detection', () => {
@@ -30,15 +30,10 @@ describe('file preview type detection', () => {
     assert.equal(isPreviewableFile({ fileName: 'manual.docx', fileType: '' }), true)
   })
 
-  it('builds API preview URLs from normalized stored file paths', () => {
-    assert.equal(
-      normalizeStoredFilePath('/public/uploads/request-1/spec sheet.pdf'),
-      'uploads/request-1/spec sheet.pdf'
-    )
-    assert.equal(
-      getFilePreviewUrl('/public/uploads/request-1/spec sheet.pdf'),
-      '/api/files/download?path=uploads%2Frequest-1%2Fspec%20sheet.pdf&disposition=inline'
-    )
+  it('builds API preview URLs from attachment IDs', () => {
+    const id = '11111111-1111-1111-1111-111111111111'
+    assert.equal(getFilePreviewUrl(id), `/api/files/download?id=${id}&disposition=inline`)
+    assert.equal(getFileDownloadUrl(id), `/api/files/download?id=${id}&disposition=attachment`)
     assert.equal(getFilePreviewUrl(null), null)
   })
 

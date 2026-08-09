@@ -201,8 +201,8 @@ export function RequestDetailModal({
       if (data?.fileAttachments) {
         const urls: Record<string, string> = {}
         for (const file of data.fileAttachments) {
-          // Use the stored filePath which includes UUID prefix
-          const url = getFileDownloadUrl(file.filePath)
+          // Authorized download URLs are keyed by the attachment id
+          const url = getFileDownloadUrl(file.id)
           if (url) urls[file.id] = url
         }
         setDownloadUrls(urls)
@@ -319,8 +319,8 @@ export function RequestDetailModal({
   }
 
   const getAttachmentUrl = (file: any) => {
-    if (file?.filePath) {
-      return getFilePreviewUrl(file.filePath)
+    if (file?.id) {
+      return getFilePreviewUrl(file.id)
     }
 
     return downloadUrls[file.id] || null
@@ -333,7 +333,7 @@ export function RequestDetailModal({
   }
 
   const handleDownload = async (file: any) => {
-    const url = getFileDownloadUrl(file?.filePath) ?? downloadUrls[file.id]
+    const url = getFileDownloadUrl(file?.id)
     if (url) {
       // Create hidden anchor and trigger download
       const a = document.createElement('a')
