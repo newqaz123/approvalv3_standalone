@@ -7,6 +7,7 @@ import prisma from '@/lib/prisma'
 import { getFileDownloadUrl } from '@/lib/file-preview'
 import { StatusBadge } from '@/components/requests/status-badge'
 import { Button } from '@/components/ui/button'
+import { FormattedText } from '@/components/ui/formatted-text'
 import { Separator } from '@/components/ui/separator'
 
 interface RequestDetailPageProps {
@@ -158,7 +159,9 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
         {/* Description */}
         <div className="bg-white rounded-lg border p-6">
           <h2 className="text-lg font-semibold mb-3">Description</h2>
-          <p className="text-gray-700 whitespace-pre-wrap">{request.description}</p>
+          <p className="text-gray-700">
+            <FormattedText source={request.description} />
+          </p>
         </div>
 
         {/* Requester Info */}
@@ -201,7 +204,9 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
 
               <div>
                 <p className="text-sm text-gray-500">Description</p>
-                <p className="text-gray-700 mt-1">{solution.description}</p>
+                <p className="text-gray-700 mt-1">
+                  <FormattedText source={solution.description} />
+                </p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { FormattedText } from '@/components/ui/formatted-text'
 import { Separator } from '@/components/ui/separator'
 import { StatusBadge } from './status-badge'
 import { RejectedBadge } from './rejected-badge'
@@ -562,8 +563,8 @@ export function RequestDetailModal({
                 <FileText className="h-4 w-4 text-indigo-500" />
                 Description
               </h3>
-              <p className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">
-                {request.description}
+              <p className="text-sm text-slate-700 leading-relaxed">
+                <FormattedText source={request.description} />
               </p>
             </div>
 
@@ -691,7 +692,9 @@ export function RequestDetailModal({
                   <div className="space-y-3">
                     <div>
                       <p className="text-sm font-medium">{solution.title}</p>
-                      <p className="text-sm text-gray-600 mt-1">{solution.description}</p>
+                      <p className="text-sm text-gray-600 mt-1">
+                        <FormattedText source={solution.description} />
+                      </p>
                     </div>
 
                     {/* Cost Estimate */}
@@ -1090,8 +1093,8 @@ export function RequestDetailModal({
                 <FileText className="h-4 w-4 text-indigo-500" />
                 Description
               </h3>
-              <p className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">
-                {request.description}
+              <p className="text-sm text-slate-700 leading-relaxed">
+                <FormattedText source={request.description} />
               </p>
             </div>
 
@@ -1219,7 +1222,9 @@ export function RequestDetailModal({
                   <div className="space-y-3">
                     <div>
                       <p className="text-sm font-medium">{solution.title}</p>
-                      <p className="text-sm text-gray-600 mt-1">{solution.description}</p>
+                      <p className="text-sm text-gray-600 mt-1">
+                        <FormattedText source={solution.description} />
+                      </p>
                     </div>
 
                     {/* Cost Estimate */}

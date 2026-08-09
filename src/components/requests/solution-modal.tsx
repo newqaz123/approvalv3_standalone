@@ -41,6 +41,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { FormattedText } from '@/components/ui/formatted-text'
 import { Separator } from '@/components/ui/separator'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
@@ -630,7 +631,7 @@ export function SolutionModal({
               </div>
             </div>
             <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed mb-3">
-              {data.solution.description}
+              <FormattedText source={data.solution.description} />
             </p>
             <div className="flex items-center justify-between text-xs text-slate-500">
               <span>Submitted by {data.solution.submittedBy}</span>
@@ -645,7 +646,7 @@ export function SolutionModal({
               Request Description
             </h3>
             <div className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed bg-slate-50/70 dark:bg-slate-800/30 rounded-xl p-4 border border-slate-100 dark:border-slate-800">
-              <p>{data.requestDescription}</p>
+              <p><FormattedText source={data.requestDescription} /></p>
             </div>
           </section>
 
