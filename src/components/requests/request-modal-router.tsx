@@ -488,7 +488,7 @@ export function RequestModalRouter({
         conceptDesign: data.conceptDesign,
         useCustomApprovals: data.useCustomApprovals || false,
         customApproverIds: data.customApproverIds,
-        fileIds: data.fileIds,
+        fileIds: data.fileIds ?? [],
       })
       
       if (result.success) {

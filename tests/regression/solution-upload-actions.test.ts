@@ -1,6 +1,8 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
+import { submitSolutionSchema } from '../../src/lib/schemas/solution-schemas'
 
 // Security-sensitive server-action contract tests. These follow the established
 // `private-storage-wiring.test.ts` pattern: read the action module source and
@@ -95,5 +97,72 @@ describe('cleanupSolutionDraftAttachments is owner-only and transactional', () =
     // are surfaced individually as warnings.
     assert.match(source, /warnings/)
     assert.match(source, /status === 'rejected'/)
+  })
+})
+
+describe('submitSolutionSchema validates attachment IDs (Task 3 brief)', () => {
+  const validInput = {
+    requestId: randomUUID(),
+    title: 'Solution title',
+    description: 'Solution description',
+  }
+
+  it('rejects a non-UUID attachment id', () => {
+    assert.throws(() =>
+      submitSolutionSchema.parse({ ...validInput, fileIds: ['not-a-uuid'] })
+    )
+  })
+
+  it('rejects more than 10 attachment ids', () => {
+    assert.throws(() =>
+      submitSolutionSchema.parse({
+        ...validInput,
+        fileIds: Array.from({ length: 11 }, () => randomUUID()),
+      })
+    )
+  })
+
+  it('rejects duplicate attachment ids', () => {
+    const id = randomUUID()
+    assert.throws(() => submitSolutionSchema.parse({ ...validInput, fileIds: [id, id] }))
+  })
+
+  it('accepts up to 10 unique UUIDs and defaults to an empty array', () => {
+    const withIds = submitSolutionSchema.parse({
+      ...validInput,
+      fileIds: Array.from({ length: 10 }, () => randomUUID()),
+    })
+    assert.equal(withIds.fileIds.length, 10)
+
+    const defaulted = submitSolutionSchema.parse(validInput)
+    assert.deepEqual(defaulted.fileIds, [])
+  })
+})
+
+describe('submitSolution transfers only owned staged attachments (Task 3 brief)', () => {
+  const solutionsSource = readFileSync('src/server-actions/solutions.ts', 'utf8')
+  const submitBody = solutionsSource.slice(
+    solutionsSource.indexOf('export async function submitSolution'),
+    solutionsSource.indexOf('export async function createCustomApprovalChain')
+  )
+
+  it('queries staged attachments scoped to the current user inside the transaction', () => {
+    // The staged-attachment query must intersect ALL of: these ids, this request,
+    // still unlinked (solutionId null), and owned by the submitting user.
+    assert.match(submitBody, /file_attachments\.findMany/)
+    assert.match(submitBody, /id:\s*\{\s*in:\s*validated\.fileIds\s*\}/)
+    assert.match(submitBody, /requestId:\s*validated\.requestId/)
+    assert.match(submitBody, /solutionId:\s*null/)
+    assert.match(submitBody, /uploadedById:\s*user\.id/)
+  })
+
+  it('compares the found count to the unique id count and throws before linking', () => {
+    assert.match(submitBody, /stagedAttachments\.length !== validated\.fileIds\.length/)
+    assert.match(submitBody, /One or more attachments are invalid or no longer available/)
+  })
+
+  it('verifies the updateMany count before continuing', () => {
+    assert.match(submitBody, /file_attachments\.updateMany/)
+    assert.match(submitBody, /\.count !== validated\.fileIds\.length/)
   })
 })

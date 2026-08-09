@@ -120,20 +120,44 @@ export async function submitSolution(input: SubmitSolutionInput) {
       },
     })
 
-    // Link specific files uploaded during solution submission to solution
-    // Only transfer files that were explicitly uploaded as part of this solution (via fileIds)
-    if (validated.fileIds && validated.fileIds.length > 0) {
-      await tx.file_attachments.updateMany({
+    // Link only attachments the current user owns and staged on this request,
+    // still unlinked (solutionId null). The candidate IDs were already validated
+    // as <= MAX_ATTACHMENTS_PER_FORM unique UUIDs by submitSolutionSchema; here
+    // we re-scope them to rows the submitting user actually owns before any
+    // write. The transfer is all-or-nothing: an exact count match is required
+    // up front and the updateMany result is verified, so nothing is linked
+    // unless every ID resolves to a valid, owned, staged row.
+    if (validated.fileIds.length > 0) {
+      const stagedAttachments = await tx.file_attachments.findMany({
         where: {
           id: { in: validated.fileIds },
           requestId: validated.requestId,
           solutionId: null,
+          uploadedById: user.id,
+        },
+        select: { id: true },
+      })
+
+      if (stagedAttachments.length !== validated.fileIds.length) {
+        throw new Error('One or more attachments are invalid or no longer available')
+      }
+
+      const linked = await tx.file_attachments.updateMany({
+        where: {
+          id: { in: validated.fileIds },
+          requestId: validated.requestId,
+          solutionId: null,
+          uploadedById: user.id,
         },
         data: {
           solutionId: solution.id,
           requestId: null,
         },
       })
+
+      if (linked.count !== validated.fileIds.length) {
+        throw new Error('One or more attachments are invalid or no longer available')
+      }
     }
 
     // Check if submitter is top-level in engineering (for auto-approval)

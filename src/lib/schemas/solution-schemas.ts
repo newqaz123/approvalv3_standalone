@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { MAX_ATTACHMENTS_PER_FORM } from '@/lib/attachments/policy'
 
 /**
  * Zod schema for solution submission
@@ -17,7 +18,10 @@ export const submitSolutionSchema = z.object({
   conceptDesign: z.string().max(2000).optional(),
   useCustomApprovals: z.boolean().default(false),
   customApproverIds: z.array(z.string()).optional(),
-  fileIds: z.array(z.string()).optional(),
+  fileIds: z.array(z.string().uuid()).max(MAX_ATTACHMENTS_PER_FORM).refine(
+    (ids) => new Set(ids).size === ids.length,
+    'Attachment IDs must be unique'
+  ).default([]),
 })
 
 /**
