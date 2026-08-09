@@ -15,6 +15,10 @@ describe('formatted description editors', () => {
     const source = read('src/components/requests/request-resubmit-modal.tsx')
     assert.match(source, /FormattedTextarea/)
     assert.match(source, /id="description"/)
+
+    const liveDialog = read('src/components/requests/resubmit-request-dialog.tsx')
+    assert.match(liveDialog, /FormattedTextarea/)
+    assert.match(liveDialog, /name="description"/)
   })
 
   it('uses the formatted textarea for solution submission and resubmission', () => {
