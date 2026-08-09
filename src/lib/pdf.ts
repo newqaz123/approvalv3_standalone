@@ -6,6 +6,7 @@
  */
 
 import puppeteer from 'puppeteer'
+import { renderFormattedTextHtml } from '@/lib/formatted-text'
 
 export interface RequestPDFData {
   id?: string
@@ -357,7 +358,7 @@ export function renderRequestEvidenceHTML(data: RequestPDFData): string {
     <div class="solution-grid">
       <div>
         <strong>${escapeHtml(data.solution.title)}</strong>
-        <div class="description">${escapeHtml(data.solution.description)}</div>
+        <div class="description">${renderFormattedTextHtml(data.solution.description)}</div>
       </div>
       <div class="solution-meta">
         <p><strong>Approved Cost</strong><br>${escapeHtml(formatCurrency(data.solution.costEstimate, data.solution.currency))}</p>
@@ -371,7 +372,7 @@ export function renderRequestEvidenceHTML(data: RequestPDFData): string {
 
   <div class="section">
     <h2>Original Request</h2>
-    <div class="description">${escapeHtml(data.description)}</div>
+    <div class="description">${renderFormattedTextHtml(data.description)}</div>
   </div>
 
   <div class="section">

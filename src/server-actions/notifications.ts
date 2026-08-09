@@ -1,6 +1,10 @@
 'use server'
 
 import { auth } from '@/lib/auth-config'
+import {
+  renderFormattedTextHtml,
+  renderFormattedTextPlainText,
+} from '@/lib/formatted-text'
 import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 import nodemailer from 'nodemailer'
@@ -91,14 +95,6 @@ function formatDate(value: Date) {
   }).format(new Date(value))
 }
 
-function truncateText(value: string, maxLength: number) {
-  if (value.length <= maxLength) {
-    return value
-  }
-
-  return `${value.slice(0, maxLength - 1)}...`
-}
-
 async function getNotificationRequestDetails(requestId?: string): Promise<RequestEmailDetails | null> {
   if (!requestId) {
     return null
@@ -169,6 +165,15 @@ function buildDetailRow(label: string, value: string) {
   `
 }
 
+function buildFormattedDescriptionRow(safeHtml: string) {
+  return `
+    <tr>
+      <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; color: #6b7280; font-size: 13px; width: 38%;">${escapeHtml('Description')}</td>
+      <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; color: #111827; font-size: 13px; font-weight: 600;">${safeHtml}</td>
+    </tr>
+  `
+}
+
 function resolveEmailCostEstimate(details: RequestEmailDetails) {
   if (details.latestSolutionEstimate !== null) {
     return formatMoney(details.latestSolutionEstimate, details.latestSolutionCurrency ?? 'THB')
@@ -193,7 +198,7 @@ function buildRequestDetailsHtml(details: RequestEmailDetails | null) {
     buildDetailRow('Status', formatRequestStatus(details.status)),
     buildDetailRow('Created', formatDate(details.createdAt)),
     buildDetailRow('Cost estimate', resolveEmailCostEstimate(details)),
-    buildDetailRow('Description', truncateText(details.description, 280)),
+    buildFormattedDescriptionRow(renderFormattedTextHtml(details.description, 280)),
   ]
 
   return `
@@ -221,7 +226,7 @@ Request details
 - Status: ${formatRequestStatus(details.status)}
 - Created: ${formatDate(details.createdAt)}
 - Cost estimate: ${resolveEmailCostEstimate(details)}
-- Description: ${truncateText(details.description, 280)}
+- Description: ${renderFormattedTextPlainText(details.description, 280)}
 `
 }
 
