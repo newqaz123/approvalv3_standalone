@@ -71,11 +71,8 @@ function findBoldCloseIndex(source: string, contentStart: number): number {
       return -1
     }
 
-    // Closing ** must not be preceded by whitespace (keeps "**open ** close" literal).
-    if (isWhitespace(source[index - 1]!)) {
-      continue
-    }
-
+    // Allow trailing whitespace inside a non-empty bold span so already-stored
+    // values like "**Topic : ** test" still render as bold rather than raw markers.
     return index
   }
 

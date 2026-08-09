@@ -37,7 +37,25 @@ describe('formatted description tokenizer', () => {
   it('leaves unmatched and malformed markers literal', () => {
     assert.deepEqual(tokenizeFormattedText('before **unmatched'), [{ type: 'text', value: 'before **unmatched' }])
     assert.deepEqual(tokenizeFormattedText('****'), [{ type: 'text', value: '****' }])
-    assert.equal(visibleFormattedText('**open ** close'), '**open ** close')
+    assert.deepEqual(tokenizeFormattedText('**  **'), [{ type: 'text', value: '**  **' }])
+    assert.deepEqual(tokenizeFormattedText('****text'), [{ type: 'text', value: '****text' }])
+  })
+
+  it('renders non-empty bold spans that include trailing whitespace before the closer', () => {
+    // Stored values from the selection-wrap bug: "**Topic : ** test"
+    assert.deepEqual(tokenizeFormattedText('**Topic : ** test'), [
+      { type: 'bold', value: 'Topic : ' },
+      { type: 'text', value: ' test' },
+    ])
+    assert.equal(
+      renderFormattedTextHtml('**Topic : ** test'),
+      '<strong>Topic : </strong> test',
+    )
+    assert.deepEqual(tokenizeFormattedText('**open ** close'), [
+      { type: 'bold', value: 'open ' },
+      { type: 'text', value: ' close' },
+    ])
+    assert.equal(visibleFormattedText('**open ** close'), 'open  close')
   })
 
   it('treats HTML and script-looking input as text and escapes HTML output', () => {

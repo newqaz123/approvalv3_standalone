@@ -6,6 +6,10 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 
+function isSelectionWhitespace(char: string): boolean {
+  return char === ' ' || char === '\t' || char === '\n' || char === '\r' || char === '\f' || char === '\v'
+}
+
 export function wrapSelectionWithBold(
   value: string,
   selectionStart: number,
@@ -25,10 +29,35 @@ export function wrapSelectionWithBold(
     }
   }
 
+  // Keep leading/trailing whitespace outside bold delimiters so the closer is not
+  // glued to a trailing space (avoids "**Topic : **" tokenizer rejection).
+  let leadingEnd = 0
+  while (leadingEnd < selected.length && isSelectionWhitespace(selected[leadingEnd]!)) {
+    leadingEnd += 1
+  }
+
+  let trailingStart = selected.length
+  while (trailingStart > leadingEnd && isSelectionWhitespace(selected[trailingStart - 1]!)) {
+    trailingStart -= 1
+  }
+
+  const leading = selected.slice(0, leadingEnd)
+  const core = selected.slice(leadingEnd, trailingStart)
+  const trailing = selected.slice(trailingStart)
+
+  if (core.length === 0) {
+    return {
+      value,
+      selectionStart: start,
+      selectionEnd: end,
+    }
+  }
+
+  const coreStart = start + leading.length
   return {
-    value: `${before}**${selected}**${after}`,
-    selectionStart: start + 2,
-    selectionEnd: end + 2,
+    value: `${before}${leading}**${core}**${trailing}${after}`,
+    selectionStart: coreStart + 2,
+    selectionEnd: coreStart + 2 + core.length,
   }
 }
 

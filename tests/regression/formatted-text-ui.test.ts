@@ -14,6 +14,31 @@ describe('formatted text UI contracts', () => {
     })
   })
 
+  it('keeps trailing whitespace outside bold markers when wrapping Topic : ', () => {
+    // Selecting "Topic : " (including the trailing space) before "test".
+    assert.deepEqual(wrapSelectionWithBold('Topic : test', 0, 8), {
+      value: '**Topic :** test',
+      selectionStart: 2,
+      selectionEnd: 9,
+    })
+  })
+
+  it('keeps leading and trailing selection whitespace outside bold delimiters', () => {
+    assert.deepEqual(wrapSelectionWithBold('xx  core  yy', 2, 10), {
+      value: 'xx  **core**  yy',
+      selectionStart: 6,
+      selectionEnd: 10,
+    })
+  })
+
+  it('leaves whitespace-only selections unchanged', () => {
+    assert.deepEqual(wrapSelectionWithBold('a   b', 1, 4), {
+      value: 'a   b',
+      selectionStart: 1,
+      selectionEnd: 4,
+    })
+  })
+
   it('inserts an empty bold pair and places the caret between markers', () => {
     assert.deepEqual(wrapSelectionWithBold('hello', 5, 5), {
       value: 'hello****',
