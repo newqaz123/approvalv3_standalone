@@ -28,7 +28,9 @@ describe('approval level policy', () => {
 
   it('allows null only when validating an optional internal-user level', () => {
     assert.equal(validateApprovalLevel(null, { allowNull: true }), null)
+    assert.equal(validateApprovalLevel(undefined, { allowNull: true }), null)
     assert.throws(() => validateApprovalLevel(null), /1.*10/)
+    assert.throws(() => validateApprovalLevel(undefined), /1.*10/)
   })
 
   it('strictly validates sparse level-name maps and rejects malformed entries', () => {

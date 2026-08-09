@@ -247,7 +247,7 @@ export function UserForm({ departments, initialData, onSuccess, onCancel }: User
                   <p className="text-xs text-muted-foreground">
                     {hasLevelNames
                       ? 'Select the approval hierarchy level for this user'
-                      : 'Approval hierarchy level (1 = lowest, higher = more authority). Leave blank if not applicable.'}
+                      : 'Select the approval hierarchy level (1 = lowest, higher = more authority), or None if not applicable.'}
                   </p>
                   <FormMessage />
                 </FormItem>

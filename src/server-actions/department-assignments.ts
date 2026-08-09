@@ -93,7 +93,7 @@ export async function addUserToDepartment(
     data: {
       departmentId,
       approverId: userId,
-      approverLevel: validatedLevel as number,
+      approverLevel: validatedLevel,
     },
   })
 

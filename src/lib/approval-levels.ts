@@ -40,6 +40,14 @@ function isApprovalLevel(value: unknown): value is number {
 
 export function validateApprovalLevel(
   value: unknown,
+  options: { allowNull: true },
+): number | null
+export function validateApprovalLevel(
+  value: unknown,
+  options?: { allowNull?: false },
+): number
+export function validateApprovalLevel(
+  value: unknown,
   options: { allowNull?: boolean } = {},
 ): number | null {
   const { allowNull = false } = options
