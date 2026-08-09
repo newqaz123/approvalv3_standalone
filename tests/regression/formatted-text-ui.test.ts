@@ -1,0 +1,39 @@
+import { describe, it } from 'node:test'
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { wrapSelectionWithBold } from '@/components/ui/formatted-textarea'
+
+const read = (path: string) => readFileSync(path, 'utf8')
+
+describe('formatted text UI contracts', () => {
+  it('wraps a selection in bold markers', () => {
+    assert.deepEqual(wrapSelectionWithBold('hello world', 6, 11), {
+      value: 'hello **world**',
+      selectionStart: 8,
+      selectionEnd: 13,
+    })
+  })
+
+  it('inserts an empty bold pair and places the caret between markers', () => {
+    assert.deepEqual(wrapSelectionWithBold('hello', 5, 5), {
+      value: 'hello****',
+      selectionStart: 7,
+      selectionEnd: 7,
+    })
+  })
+
+  it('renders only safe React elements', () => {
+    const source = read('src/components/ui/formatted-text.tsx')
+    assert.match(source, /tokenizeFormattedText/)
+    assert.match(source, /<strong/)
+    assert.match(source, /<br/)
+    assert.doesNotMatch(source, /dangerouslySetInnerHTML/)
+  })
+
+  it('exposes an accessible Bold control', () => {
+    const source = read('src/components/ui/formatted-textarea.tsx')
+    assert.match(source, /aria-label=["']Bold["']/)
+    assert.match(source, /data-testid=["']formatted-text-bold["']/)
+    assert.match(source, /wrapSelectionWithBold/)
+  })
+})
