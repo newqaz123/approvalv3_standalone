@@ -7,6 +7,7 @@ import { Separator } from '@/components/ui/separator'
 import { SolutionApprovalActions } from '@/components/approvals/solution-approval-actions'
 import { CheckCircle, XCircle, Clock, FileText } from 'lucide-react'
 import { format } from 'date-fns'
+import { getFileDownloadUrl } from '@/lib/file-preview'
 
 interface SolutionDetailProps {
   solution: {
@@ -135,7 +136,7 @@ export function SolutionDetail({
               {files.map((file) => (
                 <a
                   key={file.id}
-                  href={`/${file.filePath}`}
+                  href={getFileDownloadUrl(file.id) ?? '#'}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center justify-between rounded-lg border p-3 hover:bg-gray-50 transition-colors"

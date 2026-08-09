@@ -4,6 +4,7 @@ import { format } from 'date-fns'
 import { ArrowLeft, Download, Calendar, User, Building2, FileText, History, CheckCircle2, Wrench } from 'lucide-react'
 import Link from 'next/link'
 import prisma from '@/lib/prisma'
+import { getFileDownloadUrl } from '@/lib/file-preview'
 import { StatusBadge } from '@/components/requests/status-badge'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -102,12 +103,6 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
   const solution = request.solutions[0] || null
   const hasRejection = request.approvals.some((a) => a.status === 'rejected')
   const hasApprovedApprovals = request.approvals.some((a) => a.status === 'approved')
-
-  const handleDownload = (filePath: string, fileName: string) => {
-    // For server components, we'll return the direct link
-    // The browser will handle the download
-    return `/${filePath}`
-  }
 
   const formatFileSize = (bytes: number) => {
     if (bytes < 1024) return bytes + ' B'
@@ -262,7 +257,7 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
                           </p>
                         </div>
                         <Button size="sm" variant="outline" asChild>
-                          <a href={handleDownload(file.filePath, file.fileName)} download={file.fileName}>
+                          <a href={getFileDownloadUrl(file.id) ?? '#'} download={file.fileName}>
                             <Download className="h-4 w-4 mr-1" />
                             Download
                           </a>
@@ -401,7 +396,7 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
                     </p>
                   </div>
                   <Button size="sm" variant="outline" asChild>
-                    <a href={handleDownload(file.filePath, file.fileName)} download={file.fileName}>
+                    <a href={getFileDownloadUrl(file.id) ?? '#'} download={file.fileName}>
                       <Download className="h-4 w-4 mr-1" />
                       Download
                     </a>
