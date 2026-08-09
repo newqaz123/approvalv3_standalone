@@ -44,7 +44,7 @@ export function validateApprovalLevel(
 ): number | null {
   const { allowNull = false } = options
 
-  if (value === null) {
+  if (value === null || value === undefined) {
     if (allowNull) return null
     throw new Error(APPROVAL_LEVEL_ERROR)
   }

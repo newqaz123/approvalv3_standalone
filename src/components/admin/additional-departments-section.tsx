@@ -13,16 +13,21 @@ import {
 } from '@/components/ui/select'
 import { Trash2 } from 'lucide-react'
 import type { departments as Department } from '@prisma/client'
-
-// Extended Department type with levelNames
-type DepartmentWithLevelNames = Department & {
-  levelNames: Record<string, string> | null
-}
+import {
+  APPROVAL_LEVELS,
+  MAX_APPROVAL_LEVEL,
+  MIN_APPROVAL_LEVEL,
+} from '@/lib/approval-levels'
 import {
   getUserAdditionalDepartments,
   addUserToDepartment,
   removeUserFromDepartment,
 } from '@/server-actions/department-assignments'
+
+// Extended Department type with levelNames
+type DepartmentWithLevelNames = Department & {
+  levelNames: Record<string, string> | null
+}
 
 interface AdditionalDepartmentsSectionProps {
   userId: string
@@ -84,7 +89,12 @@ export function AdditionalDepartmentsSection({
   // Get selected department's level names
   const selectedDept = departments.find(d => d.id === selectedDeptId)
   const levelNames = selectedDept?.levelNames
-  const hasLevelNames = levelNames && Object.keys(levelNames).length > 0
+  const configuredLevels = levelNames
+    ? Object.entries(levelNames)
+        .filter(([key]) => APPROVAL_LEVELS.includes(Number(key)))
+        .sort(([a], [b]) => Number(a) - Number(b))
+    : []
+  const hasLevelNames = configuredLevels.length > 0
 
   const handleAdd = () => {
     if (!selectedDeptId || !selectedLevel) return
@@ -190,20 +200,31 @@ export function AdditionalDepartmentsSection({
                   <SelectValue placeholder="Select level" />
                 </SelectTrigger>
                 <SelectContent>
-                  {Object.entries(levelNames)
-                    .sort(([a], [b]) => Number(a) - Number(b))
-                    .map(([key, value]) => (
+                  {configuredLevels.map(([key, value]) => (
                       <SelectItem key={key} value={key}>
                         {key} - {String(value)}
                       </SelectItem>
                     ))}
                 </SelectContent>
               </Select>
+            ) : selectedDeptId ? (
+              <Select value={selectedLevel} onValueChange={setSelectedLevel}>
+                <SelectTrigger className="h-9">
+                  <SelectValue placeholder="Select level" />
+                </SelectTrigger>
+                <SelectContent>
+                  {APPROVAL_LEVELS.map((level) => (
+                    <SelectItem key={level} value={String(level)}>
+                      Level {level}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             ) : (
               <Input
                 type="number"
-                min={1}
-                max={10}
+                min={MIN_APPROVAL_LEVEL}
+                max={MAX_APPROVAL_LEVEL}
                 value={selectedLevel}
                 onChange={(e) => setSelectedLevel(e.target.value)}
                 className="h-9"

@@ -5,6 +5,7 @@ import prisma from '@/lib/prisma'
 import { requireAdmin } from '@/lib/auth'
 import { revalidatePath } from 'next/cache'
 import { auth } from '@/lib/auth-config'
+import { validateApprovalLevel } from '@/lib/approval-levels'
 
 export type UserRole = 'admin' | 'general_dept' | 'engineering'
 
@@ -95,6 +96,7 @@ export async function getUser(id: string) {
  */
 export async function createUser(input: CreateUserInput) {
   const adminUserId = await requireAdmin()
+  const level = validateApprovalLevel(input.level, { allowNull: true })
 
   // Check if department exists
   const department = await prisma.departments.findUnique({
@@ -127,7 +129,7 @@ export async function createUser(input: CreateUserInput) {
       passwordHash,
       departmentId: input.departmentId,
       role: autoRole,
-      level: input.level ?? null,
+      level,
       isActive: true,
       forcePasswordChange: true,
       updatedAt: new Date(),
@@ -145,6 +147,7 @@ export async function createUser(input: CreateUserInput) {
  */
 export async function updateUser(input: UpdateUserInput) {
   const adminUserId = await requireAdmin()
+  const level = validateApprovalLevel(input.level, { allowNull: true })
 
   // Verify admin authentication
   if (!adminUserId) {
@@ -214,7 +217,7 @@ export async function updateUser(input: UpdateUserInput) {
       email: input.email,
       departmentId: input.departmentId,
       role: finalRole,
-      level: input.level ?? null,
+      level,
       updatedAt: new Date(),
     },
   })
@@ -225,7 +228,7 @@ export async function updateUser(input: UpdateUserInput) {
   if (input.email !== originalEmail) changes.push(`email: "${originalEmail}" → "${input.email}"`)
   if (finalRole !== originalRole) changes.push(`role: "${originalRole}" → "${finalRole}"`)
   if (input.departmentId !== originalDepartmentId) changes.push(`departmentId: "${originalDepartmentId}" → "${input.departmentId}"`)
-  if ((input.level ?? null) !== originalLevel) changes.push(`level: "${String(originalLevel ?? 'null')}" → "${String(input.level ?? 'null')}"`)
+  if (level !== originalLevel) changes.push(`level: "${String(originalLevel ?? 'null')}" → "${String(level ?? 'null')}"`)
 
   if (changes.length > 0) {
     await prisma.request_activities.create({

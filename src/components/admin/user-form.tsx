@@ -22,6 +22,11 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { createUser, updateUser, type UserRole } from '@/server-actions/users'
+import {
+  APPROVAL_LEVELS,
+  MAX_APPROVAL_LEVEL,
+  MIN_APPROVAL_LEVEL,
+} from '@/lib/approval-levels'
 import type { departments as Department } from '@prisma/client'
 
 // Extended Department type with levelNames
@@ -34,7 +39,7 @@ const userFormSchema = z.object({
   email: z.string().email('Invalid email address'),
   departmentId: z.string().min(1, 'Department is required'),
   role: z.enum(['admin', 'general_dept', 'engineering'] as const).optional(),
-  level: z.number().int().min(1).max(10).optional().nullable(),
+  level: z.number().int().min(MIN_APPROVAL_LEVEL).max(MAX_APPROVAL_LEVEL).optional().nullable(),
   password: z.union([z.string().min(8, 'Password must be at least 8 characters'), z.literal('')]).optional(),
 })
 
@@ -192,7 +197,12 @@ export function UserForm({ departments, initialData, onSuccess, onCancel }: User
             render={({ field }) => {
               const selectedDept = departments.find(d => d.id === selectedDepartmentId)
               const levelNames = selectedDept?.levelNames
-              const hasLevelNames = levelNames && Object.keys(levelNames).length > 0
+              const configuredLevels = levelNames
+                ? Object.entries(levelNames)
+                    .filter(([key]) => APPROVAL_LEVELS.includes(Number(key)))
+                    .sort(([a], [b]) => Number(a) - Number(b))
+                : []
+              const hasLevelNames = configuredLevels.length > 0
 
               return (
                 <FormItem>
@@ -208,9 +218,7 @@ export function UserForm({ departments, initialData, onSuccess, onCancel }: User
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="none">None</SelectItem>
-                          {Object.entries(levelNames)
-                            .sort(([a], [b]) => Number(a) - Number(b))
-                            .map(([key, value]) => (
+                          {configuredLevels.map(([key, value]) => (
                               <SelectItem key={key} value={key}>
                                 Level {key} - {String(value)}
                               </SelectItem>
@@ -218,18 +226,22 @@ export function UserForm({ departments, initialData, onSuccess, onCancel }: User
                         </SelectContent>
                       </Select>
                     ) : (
-                      <Input
-                        type="number"
-                        min={1}
-                        max={10}
-                        placeholder="e.g., 1"
-                        {...field}
-                        value={field.value ?? ''}
-                        onChange={(e) => {
-                          const val = e.target.value
-                          field.onChange(val === '' ? null : Number(val))
-                        }}
-                      />
+                      <Select
+                        onValueChange={(val) => field.onChange(val === 'none' ? null : Number(val))}
+                        value={field.value?.toString() || 'none'}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select approval level" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">None</SelectItem>
+                          {APPROVAL_LEVELS.map((level) => (
+                            <SelectItem key={level} value={String(level)}>
+                              Level {level}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     )}
                   </FormControl>
                   <p className="text-xs text-muted-foreground">
