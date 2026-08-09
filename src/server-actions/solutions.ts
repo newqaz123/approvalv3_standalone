@@ -257,19 +257,25 @@ export async function submitSolution(input: SubmitSolutionInput) {
       })
     } else {
       // Default hierarchy-based approval chain
-      await createHierarchyApprovalChain(tx, solution.id, engineeringDept.id, submitterLevel, user.id)
+      const hierarchyApprovals = await createHierarchyApprovalChain(
+        tx,
+        solution.id,
+        engineeringDept.id,
+        submitterLevel,
+        user.id,
+      )
       // Update request status to DesignCostEstimationApproval
       await tx.requests.update({
         where: { id: validated.requestId },
         data: { status: RequestStatus.DesignCostEstimationApproval },
       })
 
-      // Notify engineering department approvers about the solution submission
+      // Notify engineering department approvers at the first *actual* pending level.
+      // Chain creation skips empty levels, so this must not use arithmetic submitter+1.
       const { getApproversAtLevel } = await import('./approvals')
-      // Get the first level of approvers that have pending approvals (submitter's level + 1)
-      const levelsAbove = getApprovalLevelsAboveSubmitter(submitterLevel, maxLevel)
-      const firstPendingLevel = levelsAbove[0]
-      if (firstPendingLevel !== undefined) {
+      const firstPendingApproval = hierarchyApprovals.find((a) => a.status === 'pending')
+      const firstPendingLevel = firstPendingApproval?.requiredLevel
+      if (firstPendingLevel !== undefined && firstPendingLevel !== null) {
         const firstLevelApprovers = await getApproversAtLevel(engineeringDept.id, firstPendingLevel)
 
         // Notify each approver
@@ -2090,7 +2096,17 @@ export async function resubmitSolution(input: ResubmitSolutionInput) {
       )
     }
 
-    return { updatedSolution, deletedAttachments: deletableAttachments }
+    const firstPendingApproval = approvalData.find((a) => a.status === 'pending')
+    const firstPendingLevel =
+      firstPendingApproval && 'requiredLevel' in firstPendingApproval
+        ? firstPendingApproval.requiredLevel ?? null
+        : null
+
+    return {
+      updatedSolution,
+      deletedAttachments: deletableAttachments,
+      firstPendingLevel,
+    }
   })
 
   // AFTER the transaction commits: physically delete each removed attachment's
@@ -2142,33 +2158,29 @@ export async function resubmitSolution(input: ResubmitSolutionInput) {
         })
       }
     } else {
-      // Notify engineering department approvers at the first pending level
+      // Notify engineering department approvers at the first *actual* pending level
+      // from the chain just created (empty levels are skipped during creation).
       const engineeringDept = await prisma.departments.findFirst({
         where: { type: 'ENGINEERING' },
         select: { id: true },
       })
 
-      if (engineeringDept) {
+      if (engineeringDept && result.firstPendingLevel != null) {
         const { getApproversAtLevel } = await import('./approvals')
-        const maxLevel = validateApprovalLevel(
-          await getMaxValidLevelInDepartment(prisma, engineeringDept.id),
+        const firstLevelApprovers = await getApproversAtLevel(
+          engineeringDept.id,
+          result.firstPendingLevel,
         )
-        const submitterLevel = normalizeSubmitterLevel(user.level)
-        const firstPendingLevel = getApprovalLevelsAboveSubmitter(submitterLevel, maxLevel)[0]
 
-        if (firstPendingLevel !== undefined) {
-          const firstLevelApprovers = await getApproversAtLevel(engineeringDept.id, firstPendingLevel)
-
-          // Notify each approver
-          for (const approver of firstLevelApprovers) {
-            await createNotification({
-              userId: approver.id,
-              type: 'approval_needed',
-              title: 'Solution Resubmitted',
-              message: `📤 Solution resubmitted for "${request.title}". Please review the updated solution.`,
-              requestId: request.id,
-            })
-          }
+        // Notify each approver
+        for (const approver of firstLevelApprovers) {
+          await createNotification({
+            userId: approver.id,
+            type: 'approval_needed',
+            title: 'Solution Resubmitted',
+            message: `📤 Solution resubmitted for "${request.title}". Please review the updated solution.`,
+            requestId: request.id,
+          })
         }
       }
     }

@@ -40,4 +40,44 @@ describe('approval-chain level generation contracts', () => {
     const view = read('src/components/admin/hierarchy-view.tsx')
     assert.match(view, /getApprovalLevelLabel/)
   })
+
+  it('targets solution submit/resubmit notifications from first pending approval data, not arithmetic [0]', () => {
+    const solutions = read('src/server-actions/solutions.ts')
+    const requests = read('src/server-actions/requests.ts')
+
+    // Request path already derives the first notify level from returned pending approvals.
+    assert.match(
+      requests,
+      /pendingApprovals\s*=\s*approvals\.filter\([\s\S]*?status\s*===\s*['"]pending['"][\s\S]*?pendingApprovals\[0\]\.requiredLevel/,
+    )
+
+    // Regression: arithmetic getApprovalLevelsAboveSubmitter(...)[0] (or levelsAbove[0]
+    // populated only from that helper) must not drive solution first-approver notifications.
+    // Sparse hierarchies skip empty levels when creating the chain, so submitter+1 can be empty.
+    assert.equal(
+      (solutions.match(/getApprovalLevelsAboveSubmitter\([\s\S]*?\)\s*\[\s*0\s*\]/g) || []).length,
+      0,
+      'solution notifications must not use getApprovalLevelsAboveSubmitter(...)[0]',
+    )
+    assert.doesNotMatch(
+      solutions,
+      /const\s+levelsAbove\s*=\s*getApprovalLevelsAboveSubmitter/,
+    )
+
+    // Submit path: capture returned hierarchy chain and take first pending requiredLevel.
+    assert.match(
+      solutions,
+      /const\s+hierarchyApprovals\s*=\s*await\s+createHierarchyApprovalChain/,
+    )
+    assert.match(
+      solutions,
+      /hierarchyApprovals\.find\([\s\S]{0,80}?status\s*===\s*['"]pending['"][\s\S]{0,80}?requiredLevel/,
+    )
+
+    // Resubmit path: first notify level comes from created approvalData pending records.
+    assert.match(
+      solutions,
+      /approvalData\.find\([\s\S]{0,80}?status\s*===\s*['"]pending['"][\s\S]{0,160}?requiredLevel/,
+    )
+  })
 })
