@@ -3,20 +3,21 @@
 import prisma from '@/lib/prisma'
 import { requireAdmin } from '@/lib/auth'
 import { revalidatePath } from 'next/cache'
-import { DepartmentType } from '@prisma/client'
+import { DepartmentType, Prisma } from '@prisma/client'
+import { validateLevelNames } from '@/lib/approval-levels'
 
 export interface CreateDepartmentInput {
   id: string
   name: string
   type: DepartmentType
-  levelNames?: Record<string, string>
+  levelNames?: unknown
 }
 
 export interface UpdateDepartmentInput {
   id: string
   name: string
   type: DepartmentType
-  levelNames?: Record<string, string>
+  levelNames?: unknown
 }
 
 /**
@@ -73,6 +74,8 @@ export async function getDepartment(id: string) {
 export async function createDepartment(input: CreateDepartmentInput) {
   await requireAdmin()
 
+  const validatedLevelNames = validateLevelNames(input.levelNames)
+
   // Check if department ID already exists
   const existingId = await prisma.departments.findUnique({
     where: { id: input.id },
@@ -101,7 +104,7 @@ export async function createDepartment(input: CreateDepartmentInput) {
       id: input.id,
       name: input.name,
       type: input.type,
-      levelNames: input.levelNames ?? undefined,
+      levelNames: validatedLevelNames ?? Prisma.DbNull,
     },
   })
 
@@ -114,6 +117,8 @@ export async function createDepartment(input: CreateDepartmentInput) {
  */
 export async function updateDepartment(input: UpdateDepartmentInput) {
   await requireAdmin()
+
+  const validatedLevelNames = validateLevelNames(input.levelNames)
 
   // Get existing department
   const existingDepartment = await prisma.departments.findUnique({
@@ -148,7 +153,7 @@ export async function updateDepartment(input: UpdateDepartmentInput) {
     data: {
       name: input.name,
       type: input.type,
-      levelNames: input.levelNames ?? undefined,
+      levelNames: validatedLevelNames ?? Prisma.DbNull,
     },
   })
 

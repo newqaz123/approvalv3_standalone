@@ -22,14 +22,19 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { createDepartment, updateDepartment } from '@/server-actions/departments'
-import { DepartmentType } from '@prisma/client'
+import {
+  APPROVAL_LEVELS,
+  MAX_APPROVAL_LEVEL,
+  levelNamesSchema,
+  validateLevelNames,
+} from '@/lib/approval-levels'
 import { Plus, Trash2 } from 'lucide-react'
 
 const departmentFormSchema = z.object({
   id: z.string().min(1, 'ID is required').max(10, 'ID must be 10 characters or less'),
   name: z.string().min(2, 'Name must be at least 2 characters'),
   type: z.enum(['GENERAL', 'ENGINEERING']),
-  levelNames: z.record(z.string(), z.string()).optional(),
+  levelNames: levelNamesSchema.optional(),
 })
 
 export type DepartmentFormValues = z.infer<typeof departmentFormSchema>
@@ -74,9 +79,37 @@ export function DepartmentForm({ initialData, onSuccess, onCancel }: DepartmentF
   })
 
   function addLevel() {
-    if (levelEntries.length >= 5) return
-    const nextKey = String(levelEntries.length + 1)
-    setLevelEntries((prev) => [...prev, { key: nextKey, value: '' }])
+    if (levelEntries.length >= MAX_APPROVAL_LEVEL) return
+
+    const usedKeys = new Set(levelEntries.map((entry) => entry.key))
+    const highestValidKey = levelEntries.reduce((highest, entry) => {
+      const key = Number(entry.key)
+      if (!Number.isInteger(key) || key < 1 || key > MAX_APPROVAL_LEVEL) {
+        return highest
+      }
+      return Math.max(highest, key)
+    }, 0)
+
+    let nextKey: number | null = null
+    for (let candidate = highestValidKey + 1; candidate <= MAX_APPROVAL_LEVEL; candidate += 1) {
+      if (!usedKeys.has(String(candidate))) {
+        nextKey = candidate
+        break
+      }
+    }
+
+    if (nextKey === null) {
+      for (const level of APPROVAL_LEVELS) {
+        if (!usedKeys.has(String(level))) {
+          nextKey = level
+          break
+        }
+      }
+    }
+
+    if (nextKey === null) return
+
+    setLevelEntries((prev) => [...prev, { key: String(nextKey), value: '' }])
   }
 
   function removeLevel(index: number) {
@@ -106,9 +139,23 @@ export function DepartmentForm({ initialData, onSuccess, onCancel }: DepartmentF
         }
       })
 
+      let validatedLevelNames
+      try {
+        validatedLevelNames = validateLevelNames(
+          Object.keys(levelNames).length > 0 ? levelNames : null,
+        )
+      } catch (validationError) {
+        setError(
+          validationError instanceof Error
+            ? validationError.message
+            : 'Invalid approval level names',
+        )
+        return
+      }
+
       const submitData = {
         ...data,
-        levelNames: Object.keys(levelNames).length > 0 ? levelNames : undefined,
+        levelNames: validatedLevelNames,
       }
 
       if (initialData?.id) {
@@ -193,7 +240,7 @@ export function DepartmentForm({ initialData, onSuccess, onCancel }: DepartmentF
             <label className="text-sm font-medium leading-none">
               Approval Level Names
             </label>
-            {levelEntries.length < 5 && (
+            {levelEntries.length < MAX_APPROVAL_LEVEL && (
               <Button
                 type="button"
                 variant="outline"
@@ -207,6 +254,9 @@ export function DepartmentForm({ initialData, onSuccess, onCancel }: DepartmentF
           </div>
           <p className="text-xs text-muted-foreground">
             Configure names for each approval level (e.g., Level 1 = Supervisor)
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Maximum 10 approval levels.
           </p>
 
           {levelEntries.length === 0 && (
