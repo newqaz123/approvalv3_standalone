@@ -312,3 +312,33 @@ describe('resubmitSolution transfers staged IDs and deletes files after commit (
     assert.match(resubmitBody, /deletedAttachmentIds|deletedAttachments/)
   })
 })
+
+// Task 6: the shared upload flow is wired through the dedicated SolutionForm
+// and the SubmitterModal solution/resubmit modes, and the modal router passes
+// attachment IDs (never raw File[]) across the server boundary. These
+// source-wiring assertions pin the integration the brief describes in Step 1;
+// they fail until the duplicated upload loops are removed and the hook is wired
+// through both components.
+describe('Task 6 source-wiring: hook integration and ID-only server boundary', () => {
+  const solutionForm = readFileSync('src/components/solutions/solution-form.tsx', 'utf8')
+  const submitterModal = readFileSync('src/components/requests/submitter-modal.tsx', 'utf8')
+  const router = readFileSync('src/components/requests/request-modal-router.tsx', 'utf8')
+
+  it('SolutionForm consumes useSolutionAttachments', () => {
+    assert.match(solutionForm, /useSolutionAttachments/)
+  })
+
+  it('SubmitterModal consumes useSolutionAttachments', () => {
+    assert.match(submitterModal, /useSolutionAttachments/)
+  })
+
+  it('router contains no dynamic raw-file upload loop or import', () => {
+    assert.doesNotMatch(router, /formData\.append\('file'/)
+    assert.doesNotMatch(router, /uploadFileAction/)
+    assert.doesNotMatch(router, /files: data\.files/)
+  })
+
+  it('router passes IDs (fileIds / newFileIds) directly', () => {
+    assert.match(router, /newFileIds: data\.fileIds/)
+  })
+})

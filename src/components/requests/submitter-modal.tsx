@@ -53,6 +53,7 @@ import {
   ATTACHMENT_EXTENSIONS,
   validateAttachmentMetadata,
 } from '@/lib/attachments/policy'
+import { useSolutionAttachments } from '@/hooks/use-solution-attachments'
 
 const ACCEPTED_UPLOAD_TYPES = 'PDF, Word, Excel, PowerPoint, Images'
 
@@ -107,23 +108,21 @@ interface SubmitterModalProps {
     cost: number
     currency: string
     timeline: string
-    files: File[]
-    deletedFileIds?: string[]
+    fileIds: string[]
     useCustomHierarchy: boolean
     customApprovers: string[]
-  }) => void
+  }) => Promise<{ success: boolean; error?: string }>
   onResubmit?: (data: {
     title?: string
     description: string
-    templateId?: string
     cost: number
     currency: string
     timeline: string
-    files: File[]
-    deletedFileIds?: string[]
+    fileIds: string[]
+    deletedFileIds: string[]
     useCustomHierarchy: boolean
     customApprovers: string[]
-  }) => void
+  }) => Promise<{ success: boolean; error?: string }>
 }
 
 // File icon helper
@@ -347,6 +346,23 @@ export function SubmitterModal({
   const [useCustomHierarchy, setUseCustomHierarchy] = useState(false)
   const [customApprovers, setCustomApprovers] = useState<string[]>([])
 
+  // Shared upload hook for solution/resubmit modes (request mode keeps its own
+  // post-request file flow unchanged). The hook owns draft attachment state;
+  // ensureUploaded() is the authoritative upload gate before metadata submit.
+  const requestId = initialData?.requestId || ''
+  const {
+    items: attachmentItems,
+    addFiles,
+    removeItem,
+    ensureUploaded,
+    reset,
+    clear,
+  } = useSolutionAttachments({ requestId })
+  const [isBusy, setIsBusy] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
+
+  const isSolutionMode = mode === 'solution' || mode === 'resubmit'
+
   // Update solution data when initialData changes (for resubmit mode)
   useEffect(() => {
     if (mode === 'resubmit' && initialData?.solution) {
@@ -355,9 +371,6 @@ export function SubmitterModal({
       setCost(initialData.solution.cost?.toString() || '')
       setCurrency(initialData.solution.currency || 'THB')
       setTimeline(initialData.solution.timeline || '')
-      
-      // Debug: Log existing files
-      console.log('🔍 Resubmit modal - existingFiles:', initialData?.existingFiles?.map(f => ({ id: f.id, name: f.fileName })))
     }
   }, [mode, initialData?.solution, initialData?.existingFiles])
 
@@ -383,19 +396,26 @@ export function SubmitterModal({
       }
 
       setFileUploadError(null)
-      const newFiles = selectedFiles
-      console.log('🔍 Adding new files:', newFiles.map(f => ({ name: f.name, size: f.size })))
-      setFiles((prev: File[]) => {
-        console.log('🔍 Previous files:', prev.map(f => ({ name: f.name, size: f.size })))
-        const updated = [...prev, ...newFiles]
-        console.log('🔍 Updated files:', updated.map(f => ({ name: f.name, size: f.size })))
-        return updated
-      })
+      // Solution/resubmit modes route through the shared upload hook; request
+      // mode keeps its own post-request file flow unchanged.
+      if (isSolutionMode) {
+        addFiles(selectedFiles)
+      } else {
+        setFiles((prev: File[]) => [...prev, ...selectedFiles])
+      }
     }
   }
 
   const removeFile = (index: number) => {
     setFiles((prev: File[]) => prev.filter((_: File, i: number) => i !== index))
+  }
+
+  const handleRemoveAttachment = async (id: string) => {
+    try {
+      await removeItem(id)
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : 'Failed to remove file')
+    }
   }
 
   const removeExistingFile = (fileId: string) => {
@@ -408,7 +428,9 @@ export function SubmitterModal({
   }
 
   // Handle submission
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
+    setSubmitError(null)
+
     if (mode === 'request' && onSubmitRequest) {
       onSubmitRequest({
         title,
@@ -417,33 +439,86 @@ export function SubmitterModal({
         files,
       })
       onOpenChange(false)
-    } else if (mode === 'solution' && onSubmitSolution) {
-      console.log('Submitting solution with custom hierarchy:', { useCustomHierarchy, customApprovers })
-      onSubmitSolution({
-        title: solutionTitle,
-        description: solutionDescription,
-        cost: parseFloat(cost) || 0,
-        currency,
-        timeline,
-        files,
-        deletedFileIds,
-        useCustomHierarchy,
-        customApprovers,
-      })
-      // Don't close modal here - let parent handler close it after async work completes
-    } else if (mode === 'resubmit' && onResubmit) {
-      onResubmit({
-        title: mode === 'resubmit' ? undefined : title,
-        description: solutionDescription,
-        cost: parseFloat(cost) || 0,
-        currency,
-        timeline,
-        files,
-        deletedFileIds,
-        useCustomHierarchy,
-        customApprovers,
-      })
-      // Don't close modal here - let parent handler close it after async work completes
+      return
+    }
+
+    if (isSolutionMode) {
+      setIsBusy(true)
+      try {
+        // ensureUploaded() is authoritative: uploads pending/errored items,
+        // reuses prior successes, and returns the final batch result.
+        const result = await ensureUploaded()
+        if (!result.success) {
+          setSubmitError('Some files failed to upload')
+          return
+        }
+
+        if (mode === 'solution' && onSubmitSolution) {
+          const res = await onSubmitSolution({
+            title: solutionTitle,
+            description: solutionDescription,
+            cost: parseFloat(cost) || 0,
+            currency,
+            timeline,
+            fileIds: result.attachmentIds,
+            useCustomHierarchy,
+            customApprovers,
+          })
+          if (res.success) {
+            // Drafts are now linked — clear without invoking cleanup.
+            clear()
+            onOpenChange(false)
+          } else {
+            setSubmitError(res.error || 'Failed to submit solution')
+          }
+        } else if (mode === 'resubmit' && onResubmit) {
+          const res = await onResubmit({
+            title: undefined,
+            description: solutionDescription,
+            cost: parseFloat(cost) || 0,
+            currency,
+            timeline,
+            fileIds: result.attachmentIds,
+            deletedFileIds,
+            useCustomHierarchy,
+            customApprovers,
+          })
+          if (res.success) {
+            clear()
+            onOpenChange(false)
+          } else {
+            setSubmitError(res.error || 'Failed to resubmit solution')
+          }
+        }
+      } catch (error) {
+        setSubmitError(error instanceof Error ? error.message : 'An error occurred')
+      } finally {
+        setIsBusy(false)
+      }
+    }
+  }
+
+  // On close/cancel for solution/resubmit modes, await cleanupDrafts (via
+  // reset, which cleans unlinked drafts then clears local state) before
+  // clearing/closing. Cleanup errors are surfaced and the modal stays open.
+  const requestClose = () => {
+    if (isSolutionMode) {
+      void handleCloseWithCleanup()
+    } else {
+      onOpenChange(false)
+    }
+  }
+
+  const handleCloseWithCleanup = async () => {
+    setIsBusy(true)
+    setSubmitError(null)
+    try {
+      await reset()
+      onOpenChange(false)
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : 'Failed to clean up draft files')
+    } finally {
+      setIsBusy(false)
     }
   }
 
@@ -455,7 +530,7 @@ export function SubmitterModal({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen) requestClose() }}>
       <DialogContent className="max-w-5xl w-full max-h-[90vh] p-0 gap-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl rounded-xl overflow-hidden">
         {/* Header */}
         <DialogHeader className="flex-shrink-0 px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 sticky top-0 z-20">
@@ -476,7 +551,7 @@ export function SubmitterModal({
               {mode === 'resubmit' && 'Update and resubmit your solution'}
             </DialogDescription>
             <button
-              onClick={() => onOpenChange(false)}
+              onClick={requestClose}
               className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors text-slate-400 hover:text-slate-600"
             >
               <X className="w-5 h-5" />
@@ -704,7 +779,6 @@ export function SubmitterModal({
                 </h4>
                 <div className="space-y-2">
                   {existingFiles.map((file) => {
-                    console.log('🔍 Rendering existing file:', { id: file.id, name: file.fileName })
                     return (
                     <div
                       key={file.id}
@@ -764,10 +838,44 @@ export function SubmitterModal({
             </div>
 
             {/* File List */}
-            {files.length > 0 && (
+            {isSolutionMode && attachmentItems.length > 0 && (
+              <div className="space-y-2">
+                {attachmentItems.map((item) => (
+                  <div
+                    key={item.id}
+                    className="flex items-start gap-3 p-3 border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900"
+                  >
+                    {getFileIcon(item.file.name.split('.').pop()?.toLowerCase() || '')}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">
+                          {item.file.name}
+                        </p>
+                        <button
+                          onClick={() => handleRemoveAttachment(item.id)}
+                          disabled={isBusy || item.status === 'uploading'}
+                          className="p-1 text-slate-400 hover:text-red-500 transition-colors disabled:opacity-30"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                      {item.status === 'uploading' && (
+                        <p className="text-xs text-slate-500 mt-1">Uploading...</p>
+                      )}
+                      {item.status === 'success' && (
+                        <p className="text-xs text-green-600 mt-1">Uploaded</p>
+                      )}
+                      {item.status === 'error' && item.error && (
+                        <p className="text-xs text-red-600 mt-1">{item.error}</p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {!isSolutionMode && files.length > 0 && (
               <div className="space-y-2">
                 {files.map((file: File, index: number) => {
-                  console.log('🔍 Rendering new file:', { name: file.name, index, key: `new-${file.name}-${index}-${file.lastModified || Date.now()}` })
                   return (
                   <div
                     key={`new-${file.name}-${index}-${file.lastModified || Date.now()}`}
@@ -804,17 +912,22 @@ export function SubmitterModal({
 
         {/* Footer Actions */}
         <div className="px-6 py-4 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0">
+          {submitError && (
+            <p className="text-sm text-red-600 flex-1 pr-4">{submitError}</p>
+          )}
           <Button
             variant="outline"
-            onClick={() => onOpenChange(false)}
+            onClick={requestClose}
+            disabled={isBusy}
+            className={submitError ? '' : 'ml-auto'}
           >
-            Cancel
+            {isBusy ? 'Cleaning up...' : 'Cancel'}
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={isSubmitDisabled()}
+            disabled={isSubmitDisabled() || isBusy}
             className={cn(
-              "text-white",
+              "text-white ml-3",
               mode === 'resubmit'
                 ? "bg-amber-600 hover:bg-amber-700"
                 : "bg-emerald-600 hover:bg-emerald-700"

@@ -4,7 +4,6 @@ import { useState, useCallback } from 'react'
 import { Upload, File, FileImage, FileText, X, RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Progress } from '@/components/ui/progress'
 import { cn } from '@/lib/utils'
 import type { AttachmentUploadItem } from '@/lib/attachments/upload-batch'
 import {
@@ -14,47 +13,17 @@ import {
   validateAttachmentMetadata,
 } from '@/lib/attachments/policy'
 
-/** Legacy display shape with numeric progress (deprecated). */
-interface FileWithProgress {
-  file: File
-  id: string
-  status: 'pending' | 'uploading' | 'success' | 'error'
-  progress: number
-  error?: string
-}
-
 /**
- * Normalized display item used internally regardless of which API the caller
- * uses. `progress` is only present for the legacy `filesWithProgress` API;
- * the items API has no numeric progress.
+ * Items-first solution attachment uploader. The sole caller
+ * (SolutionForm) drives this through the `useSolutionAttachments` hook,
+ * passing `items` + add/remove/retry callbacks. The legacy parallel
+ * File[]-based API was removed in Task 6 after the caller migration.
  */
-interface DisplayItem {
-  id: string
-  file: File
-  status: 'pending' | 'uploading' | 'success' | 'error'
-  progress?: number
-  error?: string
-}
-
 interface SolutionFileUploadProps {
-  // ── New primary API (Task 5+): items-first rendering with per-item server
-  //     errors and retry. When `items` is provided, the component renders from
-  //     it and routes add/remove/retry through the callbacks below. ──
-  items?: AttachmentUploadItem[]
+  items: AttachmentUploadItem[]
   onAddFiles?: (files: File[]) => void
   onRemoveItem?: (id: string) => void
   onRetryItem?: (id: string) => void
-
-  // ── Legacy API (DEPRECATED). Task 6 must migrate the sole caller in
-  //     solution-form.tsx to `items` and remove these props. ──
-  /** @deprecated Use `items` + `onAddFiles` instead. */
-  files?: File[]
-  /** @deprecated Use `items` instead. */
-  filesWithProgress?: FileWithProgress[]
-  /** @deprecated Use `onAddFiles` instead. */
-  onFilesChange?: (files: File[]) => void
-  /** @deprecated Use `onRemoveItem` instead. */
-  onRemoveFile?: (fileId: string) => void
 
   disabled?: boolean
   maxFiles?: number
@@ -64,16 +33,10 @@ interface SolutionFileUploadProps {
 }
 
 export function SolutionFileUpload({
-  // New primary API (items-first)
   items,
   onAddFiles,
   onRemoveItem,
   onRetryItem,
-  // Legacy API (deprecated — Task 6 removes these)
-  files,
-  filesWithProgress,
-  onFilesChange,
-  onRemoveFile,
   disabled = false,
   maxFiles = MAX_ATTACHMENTS_PER_FORM,
   maxSizeBytes = MAX_ATTACHMENT_BYTES,
@@ -83,26 +46,7 @@ export function SolutionFileUpload({
   const [dragActive, setDragActive] = useState(false)
   const [errors, setErrors] = useState<string[]>([])
 
-  // Items-first: when the new `items` API is provided it takes precedence over
-  // the deprecated `files` / `filesWithProgress` props.
-  const usingItemsApi = items !== undefined
-
-  // Normalize the current items into a common display shape.
-  const displayFiles: DisplayItem[] = usingItemsApi
-    ? items.map((entry) => ({
-        id: entry.id,
-        file: entry.file,
-        status: entry.status,
-        error: entry.error,
-      }))
-    : (filesWithProgress || (files || []).map((file, index) => ({
-        file,
-        id: `file-${index}`,
-        status: 'pending' as const,
-        progress: 0,
-      })))
-
-  const currentCount = usingItemsApi ? items.length : (files || []).length
+  const currentCount = items.length
   const totalFileCount = existingFiles.length + currentCount
 
   const getFileExtension = (filename: string): string => {
@@ -182,17 +126,11 @@ export function SolutionFileUpload({
       }
 
       if (validFiles.length > 0) {
-        // Route to the items-first callback when the new API is in use; the
-        // hook owns state and handles the append. Legacy callers go through
-        // `onFilesChange` with the full new array.
-        if (usingItemsApi) {
-          onAddFiles?.(validFiles)
-        } else {
-          onFilesChange?.([...(files || []), ...validFiles])
-        }
+        // The hook owns state and handles the append via addFiles.
+        onAddFiles?.(validFiles)
       }
     },
-    [usingItemsApi, onAddFiles, files, onFilesChange, maxFiles, totalFileCount, existingFiles.length]
+    [onAddFiles, maxFiles, totalFileCount, existingFiles.length]
   )
 
   const handleDrag = useCallback((e: React.DragEvent) => {
@@ -230,11 +168,6 @@ export function SolutionFileUpload({
     },
     [disabled, handleFiles]
   )
-
-  const removeFile = (index: number) => {
-    const newFiles = (files || []).filter((_, i) => i !== index)
-    onFilesChange?.(newFiles)
-  }
 
   const formatFileSize = (bytes: number) => {
     if (bytes < 1024) return bytes + ' B'
@@ -350,9 +283,9 @@ export function SolutionFileUpload({
         </div>
 
         {/* Selected files list */}
-        {displayFiles.length > 0 && (
+        {items.length > 0 && (
           <div className="space-y-3">
-            {displayFiles.map((item, index) => {
+            {items.map((item) => {
               const file = item.file
               const showProgress = item.status === 'uploading'
               const isSuccess = item.status === 'success'
@@ -369,16 +302,9 @@ export function SolutionFileUpload({
                       <p className="text-sm font-medium truncate">{file.name}</p>
                       <span className="text-xs text-gray-500">{formatFileSize(file.size)}</span>
                     </div>
-                    {showProgress &&
-                      (item.progress !== undefined ? (
-                        <div className="mt-2">
-                          <Progress value={item.progress} className="h-2" />
-                          <p className="text-xs text-gray-500 mt-1">Uploading... {item.progress}%</p>
-                        </div>
-                      ) : (
-                        <p className="text-xs text-gray-500 mt-1">Uploading...</p>
-                      ))
-                    }
+                    {showProgress && (
+                      <p className="text-xs text-gray-500 mt-1">Uploading...</p>
+                    )}
                     {isError && item.error && (
                       <p className="text-xs text-red-600 mt-1">{item.error}</p>
                     )}
@@ -388,7 +314,7 @@ export function SolutionFileUpload({
                   </div>
                   {/* Retry action: error items stay in the list and remain
                       retryable via the items-first API. */}
-                  {usingItemsApi && isError && onRetryItem && (
+                  {isError && onRetryItem && (
                     <Button
                       type="button"
                       variant="ghost"
@@ -406,15 +332,7 @@ export function SolutionFileUpload({
                       type="button"
                       variant="ghost"
                       size="sm"
-                      onClick={() => {
-                        if (usingItemsApi) {
-                          onRemoveItem?.(item.id)
-                        } else if (onRemoveFile) {
-                          onRemoveFile(item.id)
-                        } else {
-                          removeFile(index)
-                        }
-                      }}
+                      onClick={() => onRemoveItem?.(item.id)}
                       disabled={disabled}
                       className="h-8 w-8 p-0 text-destructive hover:text-destructive"
                     >

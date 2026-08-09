@@ -148,6 +148,7 @@ describe('useSolutionAttachments hook contract', () => {
     assert.match(hookSource, /ensureUploaded/)
     assert.match(hookSource, /cleanupDrafts/)
     assert.match(hookSource, /reset/)
+    assert.match(hookSource, /clear/)
   })
 
   it('uses a ref to avoid stale closures in async callbacks', () => {
@@ -190,19 +191,37 @@ describe('useSolutionAttachments hook contract', () => {
     // The cleanup await must precede the clear
     assert.ok(resetSlice.indexOf('await') < resetSlice.indexOf("setItems([])"))
   })
+
+  it('clear drops local state without server cleanup and nulls the ref first', () => {
+    // clear is for the post-success path: linked drafts must not be sent to
+    // cleanupSolutionDraftAttachments (which scopes to solutionId:null).
+    const clearSlice = hookSource.slice(hookSource.indexOf('const clear ='))
+    assert.match(clearSlice, /setItems\(\[\]\)/)
+    // The ref is nulled synchronously before the state update so same-tick
+    // callbacks cannot observe the now-linked IDs.
+    assert.match(clearSlice, /itemsRef\.current = \[\]/)
+    assert.ok(
+      clearSlice.indexOf('itemsRef.current = []') <
+        clearSlice.indexOf('setItems([])')
+    )
+    // clear must never invoke server cleanup
+    assert.doesNotMatch(clearSlice, /cleanupSolutionDraftAttachments/)
+  })
 })
 
 describe('SolutionFileUpload items-first API', () => {
   it('accepts items: AttachmentUploadItem[] with add/remove/retry callbacks', () => {
-    assert.match(componentSource, /items\?: AttachmentUploadItem\[\]/)
+    assert.match(componentSource, /items: AttachmentUploadItem\[\]/)
     assert.match(componentSource, /onAddFiles/)
     assert.match(componentSource, /onRemoveItem/)
     assert.match(componentSource, /onRetryItem/)
   })
 
-  it('renders items-first when the items API is provided', () => {
-    assert.match(componentSource, /usingItemsApi/)
-    assert.match(componentSource, /items !== undefined/)
+  it('renders items-first as the sole API (no legacy dual-normalization)', () => {
+    assert.match(componentSource, /items: AttachmentUploadItem\[\]/)
+    // No deprecated parallel API remains after the Task 6 caller migration.
+    assert.doesNotMatch(componentSource, /usingItemsApi/)
+    assert.doesNotMatch(componentSource, /items !== undefined/)
   })
 
   it('shows per-item server error text beside failed files', () => {
@@ -215,9 +234,11 @@ describe('SolutionFileUpload items-first API', () => {
     assert.match(componentSource, /RotateCcw/)
   })
 
-  it('keeps legacy props as deprecated optional for Task 6 migration', () => {
-    assert.match(componentSource, /files\?: File\[\]/)
-    assert.match(componentSource, /filesWithProgress\?: FileWithProgress\[\]/)
-    assert.match(componentSource, /@deprecated/)
+  it('removed the legacy deprecated props after the Task 6 caller migration', () => {
+    assert.doesNotMatch(componentSource, /files\?: File\[\]/)
+    assert.doesNotMatch(componentSource, /filesWithProgress/)
+    assert.doesNotMatch(componentSource, /onFilesChange/)
+    assert.doesNotMatch(componentSource, /onRemoveFile/)
+    assert.doesNotMatch(componentSource, /@deprecated/)
   })
 })

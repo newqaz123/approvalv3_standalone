@@ -66,10 +66,6 @@ export function RequestModalRouter({
     subcontractors: Array<{ id: string; name: string }>
   } | null>(null)
 
-  // Debug: Log when resubmit modal state changes
-  useEffect(() => {
-    console.log('🔵 showResubmitSolutionModal changed to:', showResubmitSolutionModal)
-  }, [showResubmitSolutionModal])
   const [availableUsers, setAvailableUsers] = useState<Array<{ id: string; name: string; email: string; level: number | undefined; role: string }>>([])
 
   useEffect(() => {
@@ -660,8 +656,6 @@ export function RequestModalRouter({
           onApprove={canApprove ? () => handleApprove('') : undefined}
           onReject={canApprove ? (reason: string) => handleReject(reason) : undefined}
           onResubmit={(!canApprove && requestData.status === 'SentToEngineer' && isEngineering && (hasSolutionRejection || hasFinalRejection || hasFinalRejectionInEngineering)) ? () => {
-            console.log('🔴 Resubmit button clicked!')
-            console.log('Setting showResubmitSolutionModal to true')
             setShowResubmitSolutionModal(true)
           } : undefined}
           onSubmitFinalApproval={!canApprove && isRequesterDepartment ? () => setShowSubmitFinalApprovalModal(true) : undefined}
@@ -694,21 +688,18 @@ export function RequestModalRouter({
             requestDescription: requestData?.description,
           }}
           availableUsers={availableUsers}
-          onSubmitSolution={async (data) => {
+          onResubmit={async (data) => {
             setIsSubmitting(true)
             try {
               const result = await resubmitSolution({
                 requestId: requestData.id,
                 title: data.title || modalData.solution?.title || '',
                 description: data.description,
-                cost: typeof data.cost === 'string' ? parseFloat(data.cost) : (data.cost || 0),
+                cost: data.cost,
                 currency: (data.currency as 'THB' | 'USD' | 'EUR') || 'THB',
                 timeline: data.timeline,
-                // New attachments are added via staged uploads (Task 6 owns
-                // useSolutionAttachments + data.fileIds); resubmit passes staged
-                // IDs only, never raw File[] across the server boundary.
-                newFileIds: [],
-                deletedFileIds: data.deletedFileIds || [],
+                newFileIds: data.fileIds,
+                deletedFileIds: data.deletedFileIds,
                 useCustomHierarchy: data.useCustomHierarchy || false,
                 customApprovers: data.customApprovers || [],
               })
@@ -719,10 +710,11 @@ export function RequestModalRouter({
                 window.dispatchEvent(new Event('approvalapp:request-data-changed'))
                 onActionComplete?.()
                 router.refresh()
+                return { success: true }
               }
+              return { success: false, error: 'Failed to resubmit solution' }
             } catch (error) {
-              console.error('Failed to resubmit solution:', error)
-              toast.error(error instanceof Error ? error.message : 'Failed to resubmit solution')
+              return { success: false, error: error instanceof Error ? error.message : 'Failed to resubmit solution' }
             } finally {
               setIsSubmitting(false)
             }
@@ -893,32 +885,8 @@ export function RequestModalRouter({
         }}
         availableUsers={availableUsers}
         onSubmitSolution={async (data) => {
-          console.log('Modal received data:', data)
           setIsSubmitting(true)
           try {
-            // Upload files first if any
-            let fileIds: string[] = []
-            if (data.files && data.files.length > 0) {
-              const { uploadFileAction } = await import('@/server-actions/files')
-
-              for (const file of data.files) {
-                const formData = new FormData()
-                formData.append('file', file)
-                formData.append('requestId', requestData.id)
-
-                const result = await uploadFileAction(null, formData)
-
-                if (result.success && result.fileAttachment) {
-                  fileIds.push(result.fileAttachment.id)
-                }
-              }
-            }
-            
-            console.log('Submitting to server with:', {
-              useCustomApprovals: data.useCustomHierarchy,
-              customApproverIds: data.customApprovers,
-            })
-            
             const result = await submitSolution({
               requestId: requestData.id,
               title: data.title,
@@ -926,22 +894,22 @@ export function RequestModalRouter({
               costEstimate: data.cost,
               currency: data.currency as 'THB' | 'USD' | 'EUR',
               timeline: data.timeline,
-              fileIds,
+              fileIds: data.fileIds,
               useCustomApprovals: data.useCustomHierarchy,
               customApproverIds: data.customApprovers,
             })
             
             if (result.success) {
               toast.success('Solution submitted successfully')
-              setShowSolutionModal(false)
               onOpenChange(false)
               window.dispatchEvent(new Event('approvalapp:request-data-changed'))
               onActionComplete?.()
               router.refresh()
+              return { success: true }
             }
+            return { success: false, error: 'Failed to submit solution' }
           } catch (error) {
-            console.error('Failed to submit solution:', error)
-            toast.error(error instanceof Error ? error.message : 'Failed to submit solution')
+            return { success: false, error: error instanceof Error ? error.message : 'Failed to submit solution' }
           } finally {
             setIsSubmitting(false)
           }
@@ -951,10 +919,7 @@ export function RequestModalRouter({
         <SubmitterModal
           mode="resubmit"
           open={showResubmitSolutionModal}
-          onOpenChange={(open) => {
-            console.log('🟢 Resubmit modal onOpenChange called with:', open)
-            setShowResubmitSolutionModal(open)
-          }}
+          onOpenChange={setShowResubmitSolutionModal}
           initialData={{
             solution: modalData.solution,
             existingFiles: modalData.solution?.files,
@@ -967,36 +932,32 @@ export function RequestModalRouter({
           }}
           availableUsers={availableUsers}
           onResubmit={async (data) => {
-            console.log('🟢 onResubmit called with data:', data)
             setIsSubmitting(true)
             try {
               const result = await resubmitSolution({
                 requestId: requestData.id,
                 title: data.title || modalData.solution?.title || '',
                 description: data.description,
-                cost: typeof data.cost === 'string' ? parseFloat(data.cost) : (data.cost || 0),
+                cost: data.cost,
                 currency: (data.currency as 'THB' | 'USD' | 'EUR') || 'THB',
                 timeline: data.timeline,
-                // New attachments are added via staged uploads (Task 6 owns
-                // useSolutionAttachments + data.fileIds); resubmit passes staged
-                // IDs only, never raw File[] across the server boundary.
-                newFileIds: [],
-                deletedFileIds: data.deletedFileIds || [],
+                newFileIds: data.fileIds,
+                deletedFileIds: data.deletedFileIds,
                 useCustomHierarchy: data.useCustomHierarchy || false,
                 customApprovers: data.customApprovers || [],
               })
               
               if (result.success) {
                 toast.success('Solution resubmitted successfully')
-                setShowResubmitSolutionModal(false)
                 onOpenChange(false)
                 window.dispatchEvent(new Event('approvalapp:request-data-changed'))
                 onActionComplete?.()
                 router.refresh()
+                return { success: true }
               }
+              return { success: false, error: 'Failed to resubmit solution' }
             } catch (error) {
-              console.error('Failed to resubmit solution:', error)
-              toast.error(error instanceof Error ? error.message : 'Failed to resubmit solution')
+              return { success: false, error: error instanceof Error ? error.message : 'Failed to resubmit solution' }
             } finally {
               setIsSubmitting(false)
             }

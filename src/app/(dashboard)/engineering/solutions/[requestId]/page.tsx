@@ -87,15 +87,6 @@ export default async function SolutionSubmissionPage({
         currency: true,
         timeline: true,
         conceptDesign: true,
-        fileAttachments: {
-          select: {
-            id: true,
-            fileName: true,
-            fileType: true,
-            fileSize: true,
-            filePath: true,
-          },
-        },
       },
     }),
   ])
@@ -138,7 +129,6 @@ export default async function SolutionSubmissionPage({
         currentUserId={userId}
         allUsers={allUsers}
         previousSolution={previousSolutionData}
-        previousFiles={previousSolution?.fileAttachments || []}
       />
     </div>
   )

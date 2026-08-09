@@ -19,6 +19,19 @@ export interface UseSolutionAttachmentsResult {
   ensureUploaded: () => Promise<AttachmentUploadBatchResult>
   cleanupDrafts: () => Promise<void>
   reset: () => Promise<void>
+  /**
+   * Clears local item state **without** invoking server cleanup.
+   *
+   * Use this only after a successful `submitSolution`/`resubmitSolution` has
+   * linked the draft rows to a committed solution (`solutionId` set). At that
+   * point the drafts are no longer deletable via `cleanupSolutionDraftAttachments`
+   * (which scopes to `solutionId: null`), so `reset()`/`cleanupDrafts()` would
+   * throw a count-mismatch error. `clear()` drops the local references safely.
+   *
+   * `itemsRef.current` is nulled synchronously **before** `setItems([])` so any
+   * same-tick callback reading the ref cannot observe the now-linked IDs.
+   */
+  clear: () => void
 }
 
 /**
@@ -53,7 +66,13 @@ export interface UseSolutionAttachmentsResult {
  *
  * - **`reset` clears local state only after cleanup returns.** Any remaining
  *   staged drafts are removed server-side first; only then does local state
- *   reset to `[]`.
+ *   reset to `[]`. Use `reset` on cancel/close, when drafts are still unlinked.
+ *
+ * - **`clear` drops local state without server cleanup.** Use `clear` only
+ *   after a successful submit/resubmit has linked the drafts to a committed
+ *   solution. At that point the rows are `solutionId`-scoped, so
+ *   `reset`/`cleanupDrafts` would throw a count-mismatch; `clear` avoids that
+ *   by nulling both the ref and state synchronously.
  *
  * - **Live progress.** While `uploadAttachmentBatch` runs, `onItemChange`
  *   updates each item's status (`uploading` → terminal) so the UI renders
@@ -156,5 +175,14 @@ export function useSolutionAttachments({
     setItems([])
   }, [requestId])
 
-  return { items, addFiles, removeItem, ensureUploaded, cleanupDrafts, reset }
+  const clear = useCallback(() => {
+    // Drop local references to drafts that are now linked to a committed
+    // solution WITHOUT invoking server cleanup (which would fail on
+    // solutionId-scoped rows). The ref is nulled synchronously before the
+    // state update so no same-tick callback can observe the linked IDs.
+    itemsRef.current = []
+    setItems([])
+  }, [])
+
+  return { items, addFiles, removeItem, ensureUploaded, cleanupDrafts, reset, clear }
 }
