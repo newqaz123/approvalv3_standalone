@@ -66,4 +66,3 @@ it('deletes the legacy public/uploads file helper module', () => {
   // src/lib/files.ts was rooted at public/uploads and had no callers.
   assert.equal(existsSync('src/lib/files.ts'), false)
 })
-
