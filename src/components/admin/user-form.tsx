@@ -21,7 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { createUser, updateUser, type UserRole } from '@/server-actions/users'
+import { createUser, updateUser } from '@/server-actions/users'
 import {
   APPROVAL_LEVELS,
   MAX_APPROVAL_LEVEL,
