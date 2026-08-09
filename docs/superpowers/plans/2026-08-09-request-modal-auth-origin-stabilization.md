@@ -35,68 +35,10 @@
 - `tools/manage.mjs` — display actionable origin problems.
 - `tests/tools/env.test.mjs` — canonical-origin validation.
 - `.env.example`, `README.md`, `DEPLOY.md`, `docs/DEPLOY.md` — production DNS and proxy variables.
-- `tests/regression/engineering-sub-tasks.test.ts` — repair the stale quote assertion blocking the suite.
 
 ---
 
-### Task 1: Restore the Green Regression Baseline
-
-**Files:**
-
-- Modify: `tests/regression/engineering-sub-tasks.test.ts:618`
-
-**Interfaces:**
-
-- Consumes: current JSX rendering in `src/components/requests/sub-task-form-dialog.tsx`.
-- Produces: zero baseline regression failures before new behavior is added.
-
-- [ ] **Step 1: Reproduce the existing failure**
-
-Run:
-
-```bash
-npx tsx --test tests/regression/engineering-sub-tasks.test.ts
-```
-
-Expected: FAIL because the test expects raw quotes while JSX contains `&quot;`.
-
-- [ ] **Step 2: Correct the exact source assertion**
-
-Replace:
-
-```ts
-assert.match(component, /Add "\{subContractorSearch\.trim\(\)\}"/)
-```
-
-with:
-
-```ts
-assert.match(component, /Add &quot;\{subContractorSearch\.trim\(\)\}&quot;/)
-```
-
-Do not change production markup; the HTML entity is valid JSX and avoids lint/parser problems.
-
-- [ ] **Step 3: Run the focused and full baseline suites**
-
-Run:
-
-```bash
-npx tsx --test tests/regression/engineering-sub-tasks.test.ts
-npx tsx --test tests/regression/*.test.ts
-```
-
-Expected: all 93 current regression tests pass before adding new tests.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add tests/regression/engineering-sub-tasks.test.ts
-git commit -m "test: align subcontractor quote assertion"
-```
-
----
-
-### Task 2: Reset New Request State on Every Open
+### Task 1: Reset New Request State on Every Open
 
 **Files:**
 
@@ -137,7 +79,7 @@ it('resets every New Request field whenever request mode opens', () => {
 
 - [ ] **Step 2: Run the test and confirm reset boundary is absent**
 
-Run: `npx tsx --test tests/regression/request-modal-reset.test.ts`  
+Run: `npx tsx --test tests/regression/request-modal-reset.test.ts`
 Expected: FAIL because request fields are initialized only at mount.
 
 - [ ] **Step 3: Add the request-only reset callback**
@@ -169,7 +111,7 @@ Keep the template-fetch effect, but never set `selectedTemplate` from the previo
 
 - [ ] **Step 5: Run focused tests and typecheck**
 
-Run: `npx tsx --test tests/regression/request-modal-reset.test.ts && npx tsc --noEmit`  
+Run: `npx tsx --test tests/regression/request-modal-reset.test.ts && npx tsc --noEmit`
 Expected: PASS.
 
 - [ ] **Step 6: Commit**
@@ -181,7 +123,7 @@ git commit -m "fix: reset new request dialog on open"
 
 ---
 
-### Task 3: Validate the Canonical Auth.js Origin
+### Task 2: Validate the Canonical Auth.js Origin
 
 **Files:**
 
@@ -229,7 +171,7 @@ test('createOriginReport rejects localhost and conflicting production origins', 
 
 - [ ] **Step 2: Run env tests and confirm missing helper**
 
-Run: `npm run test:manage`  
+Run: `npm run test:manage`
 Expected: FAIL because `createOriginReport` is not exported.
 
 - [ ] **Step 3: Add Auth.js keys and origin normalization**
@@ -279,7 +221,7 @@ if (report.originIssues.length > 0) {
 
 - [ ] **Step 5: Run manager tests**
 
-Run: `npm run test:manage`  
+Run: `npm run test:manage`
 Expected: PASS.
 
 - [ ] **Step 6: Commit**
@@ -291,7 +233,7 @@ git commit -m "fix: validate production auth origin"
 
 ---
 
-### Task 4: Lock Logout to the Configured DNS Contract
+### Task 3: Lock Logout to the Configured DNS Contract
 
 **Files:**
 
@@ -330,7 +272,7 @@ it('uses configured production origins and a relative logout callback', () => {
 
 - [ ] **Step 2: Run the test and confirm the template still uses localhost**
 
-Run: `npx tsx --test tests/regression/auth-origin.test.ts`  
+Run: `npx tsx --test tests/regression/auth-origin.test.ts`
 Expected: FAIL on `.env.example` and documentation.
 
 - [ ] **Step 3: Update the environment template**
@@ -365,7 +307,7 @@ No absolute environment URL belongs in the client callback. Retain `signOut({ ca
 
 - [ ] **Step 6: Run focused tests and build**
 
-Run: `npx tsx --test tests/regression/auth-origin.test.ts && npm run test:manage && npm run build`  
+Run: `npx tsx --test tests/regression/auth-origin.test.ts && npm run test:manage && npm run build`
 Expected: PASS; build must not emit an Auth.js localhost redirect configuration warning.
 
 - [ ] **Step 7: Commit**
@@ -377,7 +319,7 @@ git commit -m "fix: use configured origin for logout"
 
 ---
 
-### Task 5: Full Stabilization Verification and Graph Refresh
+### Task 4: Full Stabilization Verification and Graph Refresh
 
 **Files:**
 
@@ -421,7 +363,7 @@ Expected: zero failures.
 
 - [ ] **Step 4: Refresh Graphify**
 
-Run: `graphify update .`  
+Run: `graphify update .`
 Expected: graph updated without corruption warnings.
 
 - [ ] **Step 5: Commit graph changes if tracked**

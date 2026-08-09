@@ -52,7 +52,53 @@
 
 ---
 
-### Task 1: Shared Attachment Policy and Filename Safety
+### Task 1: Restore the Green Regression Baseline
+
+**Files:**
+
+- Modify: `tests/regression/engineering-sub-tasks.test.ts:618`
+
+**Interfaces:**
+
+- Consumes: current JSX in `src/components/requests/sub-task-form-dialog.tsx`.
+- Produces: a green pre-existing regression baseline for every later task gate.
+
+- [ ] **Step 1: Reproduce the existing failure**
+
+Run: `npx tsx --test tests/regression/engineering-sub-tasks.test.ts`
+Expected: FAIL because the test expects raw quotes while JSX contains `&quot;`.
+
+- [ ] **Step 2: Correct the exact source assertion**
+
+Replace the raw-quote expression with:
+
+```ts
+assert.match(component, /Add &quot;\{subContractorSearch\.trim\(\)\}&quot;/)
+```
+
+Do not change production markup.
+
+- [ ] **Step 3: Verify the baseline**
+
+Run:
+
+```bash
+npx tsx --test tests/regression/engineering-sub-tasks.test.ts
+npx tsx --test tests/regression/*.test.ts
+```
+
+Expected: all 93 current regression tests pass.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add tests/regression/engineering-sub-tasks.test.ts
+git commit -m "test: align subcontractor quote assertion"
+```
+
+---
+
+### Task 2: Shared Attachment Policy and Filename Safety
 
 **Files:**
 
@@ -104,7 +150,7 @@ describe('attachment policy', () => {
 
 - [ ] **Step 2: Run tests and confirm the module is missing**
 
-Run: `npx tsx --test tests/regression/attachment-policy.test.ts`  
+Run: `npx tsx --test tests/regression/attachment-policy.test.ts`
 Expected: FAIL with `Cannot find module '../../src/lib/attachments/policy'`.
 
 - [ ] **Step 3: Implement the policy module**
@@ -168,7 +214,7 @@ Import the shared constants and validator into `solution-file-upload.tsx`, `subm
 
 - [ ] **Step 5: Run focused tests and typecheck**
 
-Run: `npx tsx --test tests/regression/attachment-policy.test.ts && npx tsc --noEmit`  
+Run: `npx tsx --test tests/regression/attachment-policy.test.ts && npx tsc --noEmit`
 Expected: PASS.
 
 - [ ] **Step 6: Commit**
@@ -180,7 +226,7 @@ git commit -m "feat: centralize attachment policy"
 
 ---
 
-### Task 2: Private Storage Resolver and Legacy Migration
+### Task 3: Private Storage Resolver and Legacy Migration
 
 **Files:**
 
@@ -230,7 +276,7 @@ describe('private attachment storage', () => {
 
 - [ ] **Step 2: Run tests and confirm failure**
 
-Run: `npx tsx --test tests/regression/attachment-storage.test.ts`  
+Run: `npx tsx --test tests/regression/attachment-storage.test.ts`
 Expected: FAIL because `storage.ts` does not exist.
 
 - [ ] **Step 3: Implement containment-checked storage**
@@ -301,7 +347,7 @@ Extend `attachment-storage.test.ts` to invoke the exported `migrateUploads({ sou
 
 - [ ] **Step 7: Run focused tests and typecheck**
 
-Run: `npx tsx --test tests/regression/attachment-storage.test.ts && npx tsc --noEmit`  
+Run: `npx tsx --test tests/regression/attachment-storage.test.ts && npx tsc --noEmit`
 Expected: PASS.
 
 - [ ] **Step 8: Commit**
@@ -313,7 +359,7 @@ git commit -m "feat: add private attachment storage"
 
 ---
 
-### Task 3: Migrate Every Server-Side File Consumer
+### Task 4: Migrate Every Server-Side File Consumer
 
 **Files:**
 
@@ -351,7 +397,7 @@ it('routes every attachment filesystem operation through private storage', () =>
 
 - [ ] **Step 2: Run the test and confirm legacy joins fail it**
 
-Run: `npx tsx --test tests/regression/private-storage-wiring.test.ts`  
+Run: `npx tsx --test tests/regression/private-storage-wiring.test.ts`
 Expected: FAIL on `public` path joins.
 
 - [ ] **Step 3: Replace upload and deletion calls**
@@ -377,7 +423,7 @@ Expected: no callers outside their defining files. Delete `src/lib/local-storage
 
 - [ ] **Step 6: Run storage and PDF tests**
 
-Run: `npx tsx --test tests/regression/private-storage-wiring.test.ts tests/regression/attachment-storage.test.ts tests/regression/pdf-package.test.ts`  
+Run: `npx tsx --test tests/regression/private-storage-wiring.test.ts tests/regression/attachment-storage.test.ts tests/regression/pdf-package.test.ts`
 Expected: PASS.
 
 - [ ] **Step 7: Commit**
@@ -389,7 +435,7 @@ git commit -m "refactor: route attachments through private storage"
 
 ---
 
-### Task 4: Request-Visibility Authorization and Thai Download Headers
+### Task 5: Request-Visibility Authorization and Thai Download Headers
 
 **Files:**
 
@@ -429,7 +475,7 @@ describe('Content-Disposition', () => {
 
 - [ ] **Step 2: Run tests and confirm missing module**
 
-Run: `npx tsx --test tests/regression/content-disposition.test.ts`  
+Run: `npx tsx --test tests/regression/content-disposition.test.ts`
 Expected: FAIL because the helper does not exist.
 
 - [ ] **Step 3: Implement the header helper**
@@ -462,7 +508,7 @@ Validate `id` with Zod UUID. Load attachment fields plus `requestId` and `soluti
 
 - [ ] **Step 7: Run focused tests**
 
-Run: `npx tsx --test tests/regression/content-disposition.test.ts tests/regression/private-file-access.test.ts && npx tsc --noEmit`  
+Run: `npx tsx --test tests/regression/content-disposition.test.ts tests/regression/private-file-access.test.ts && npx tsc --noEmit`
 Expected: PASS.
 
 - [ ] **Step 8: Commit**
@@ -474,7 +520,7 @@ git commit -m "fix: authorize private attachment downloads"
 
 ---
 
-### Task 5: Convert Preview and Download Callers to Attachment IDs
+### Task 6: Convert Preview and Download Callers to Attachment IDs
 
 **Files:**
 
@@ -505,7 +551,7 @@ Remove the old path-normalization expectation.
 
 - [ ] **Step 2: Run the preview test and confirm failure**
 
-Run: `npx tsx --test tests/regression/file-preview.test.ts`  
+Run: `npx tsx --test tests/regression/file-preview.test.ts`
 Expected: FAIL because helpers still accept paths.
 
 - [ ] **Step 3: Implement ID-based helpers**
@@ -528,7 +574,7 @@ Expected: no matches.
 
 - [ ] **Step 6: Run preview and export tests**
 
-Run: `npx tsx --test tests/regression/file-preview.test.ts tests/regression/export-package.test.ts tests/regression/pdf-package.test.ts`  
+Run: `npx tsx --test tests/regression/file-preview.test.ts tests/regression/export-package.test.ts tests/regression/pdf-package.test.ts`
 Expected: PASS.
 
 - [ ] **Step 7: Commit**
@@ -540,7 +586,7 @@ git commit -m "refactor: use attachment ids for file access"
 
 ---
 
-### Task 6: Preserve the Docker Volume and Operational Backups
+### Task 7: Preserve the Docker Volume and Operational Backups
 
 **Files:**
 
@@ -575,7 +621,7 @@ assert.match(restore, /\/app\/uploads/)
 
 - [ ] **Step 2: Run the test and confirm public mounts fail it**
 
-Run: `npx tsx --test tests/regression/upload-runtime-config.test.ts`  
+Run: `npx tsx --test tests/regression/upload-runtime-config.test.ts`
 Expected: FAIL on Dockerfile and Compose paths.
 
 - [ ] **Step 3: Change the image and Compose mounts**
@@ -588,7 +634,7 @@ When `approval-app` exists, use `--volumes-from` and archive `/app/uploads`. Dur
 
 - [ ] **Step 5: Run shell and configuration tests**
 
-Run: `bash -n scripts/backup.sh scripts/restore.sh && npx tsx --test tests/regression/upload-runtime-config.test.ts`  
+Run: `bash -n scripts/backup.sh scripts/restore.sh && npx tsx --test tests/regression/upload-runtime-config.test.ts`
 Expected: PASS.
 
 - [ ] **Step 6: Commit**
@@ -600,7 +646,7 @@ git commit -m "fix: persist attachments in private volume"
 
 ---
 
-### Task 7: Align Next.js, Runtime Config, and Proxy Documentation
+### Task 8: Align Next.js, Runtime Config, and Proxy Documentation
 
 **Files:**
 
@@ -624,7 +670,7 @@ Assert `next.config.mjs` contains nested `experimental.serverActions.bodySizeLim
 
 - [ ] **Step 2: Run the test and confirm failure**
 
-Run: `npx tsx --test tests/regression/upload-runtime-config.test.ts`  
+Run: `npx tsx --test tests/regression/upload-runtime-config.test.ts`
 Expected: FAIL because the MJS config and Docker copy are absent.
 
 - [ ] **Step 3: Replace the runtime config**
@@ -648,7 +694,7 @@ Delete `next.config.ts`. Add `COPY --from=builder /app/next.config.mjs ./` in th
 
 - [ ] **Step 4: Align Next and SWC**
 
-Run: `npm install --save-exact next@15.5.23`  
+Run: `npm install --save-exact next@15.5.23`
 Expected: package.json pins `15.5.23`, lockfile Next and all `@next/swc-*` entries use `15.5.23`.
 
 Add the canonical repository check required after code changes:
@@ -667,7 +713,7 @@ Add an Nginx production example with `client_max_body_size 15m;`, forwarded host
 
 - [ ] **Step 6: Run runtime test and production build**
 
-Run: `npx tsx --test tests/regression/upload-runtime-config.test.ts && npm run build`  
+Run: `npx tsx --test tests/regression/upload-runtime-config.test.ts && npm run build`
 Expected: PASS and no `Mismatching @next/swc version` warning.
 
 - [ ] **Step 7: Commit**
@@ -679,7 +725,7 @@ git commit -m "fix: align upload transport limits"
 
 ---
 
-### Task 8: Full Storage Verification and Graph Refresh
+### Task 9: Full Storage Verification and Graph Refresh
 
 **Files:**
 
@@ -740,7 +786,7 @@ Expected: all commands exit 0, proving the non-root app user can write and a rec
 
 - [ ] **Step 4: Refresh Graphify**
 
-Run: `graphify update .`  
+Run: `graphify update .`
 Expected: graph updated without shrinking/corruption warnings.
 
 - [ ] **Step 5: Commit generated graph updates if tracked**
