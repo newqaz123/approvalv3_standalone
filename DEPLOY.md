@@ -59,12 +59,18 @@ docker compose -f docker-compose.prod.yml ps
 curl -s -o /dev/null -w "%{http_code}" http://localhost:3000
 ```
 
+`http://localhost:3000` is a host-local health check only — it confirms the
+container is up on the server itself and is not the Auth.js public origin.
+
 ### 5. Login
 
-- URL: `http://your-server-ip:3000`
+- URL: the configured public HTTPS origin (e.g. `https://approval.example.com`)
 - Email: `admin@example.com`
 - Password: `changeme`
 - **Change the password immediately after first login**
+
+Once the DNS proxy contract is enabled, browse the app through the public
+HTTPS origin only — direct IP/container port access is unsupported.
 
 ---
 
@@ -102,7 +108,7 @@ docker compose -f docker-compose.prod.yml ps
 
 ```bash
 docker compose --env-file .env.production -f docker-compose.prod.yml --profile tools up -d studio
-# Access at http://your-server-ip:5555
+# Access at http://your-server-ip:5555 (host-local admin tool — not the app origin)
 # To stop: docker compose -f docker-compose.prod.yml --profile tools stop studio
 ```
 
@@ -124,25 +130,25 @@ bash rollback.sh
 
 1. Transfer new package to server:
 
-```bash
-scp deploy/approval-app-*.tar.gz root@server:/opt/approval-app/
-```
+    ```bash
+    scp deploy/approval-app-*.tar.gz root@server:/opt/approval-app/
+    ```
 
-1. On server:
+2. On server:
 
-```bash
-cd /opt/approval-app
-tar -xzf approval-app-v1.0-NEWDATE.tar.gz
-cd approval-app-v1.0-NEWDATE/
+    ```bash
+    cd /opt/approval-app
+    tar -xzf approval-app-v1.0-NEWDATE.tar.gz
+    cd approval-app-v1.0-NEWDATE/
 
-# Copy config from previous deploy
-cp /opt/approval-app/approval-app-v1.0-OLDDATE/.env.production .
+    # Copy config from previous deploy
+    cp /opt/approval-app/approval-app-v1.0-OLDDATE/.env.production .
 
-# Load new images and deploy
-docker load -i images/approval-app.tar
-docker load -i images/approval-migrate.tar
-docker compose --env-file .env.production -f docker-compose.prod.yml up -d
-```
+    # Load new images and deploy
+    docker load -i images/approval-app.tar
+    docker load -i images/approval-migrate.tar
+    docker compose --env-file .env.production -f docker-compose.prod.yml up -d
+    ```
 
 Database and uploads are preserved in Docker volumes — they persist across updates.
 

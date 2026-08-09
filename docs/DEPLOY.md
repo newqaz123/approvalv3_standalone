@@ -93,7 +93,7 @@ nano .env.production
 | `CLERK_SECRET_KEY` | Clerk secret key for backend auth | Same as above (Secret key) |
 | `CLERK_WEBHOOK_SECRET` | Webhook signing secret | Clerk Dashboard → Webhooks (after deployment) |
 | `POSTGRES_PASSWORD` | Database password | Choose a secure password |
-| `NEXTAUTH_URL` | Your application's public URL | e.g., `https://approval.yourdomain.com` |
+| `NEXTAUTH_URL` | Your application's public URL | e.g., `https://approval.example.com` |
 | `AUTH_URL` | Canonical Auth.js v5 origin | Same public HTTPS origin as `NEXTAUTH_URL` |
 | `NEXT_PUBLIC_APP_URL` | App API base | Must match `AUTH_URL` / `NEXTAUTH_URL` |
 | `AUTH_TRUST_HOST` | Trust forwarded proxy headers | Set to `true` (required behind Nginx) |
@@ -169,7 +169,11 @@ Expected output:
 ============================================
 ```
 
-Access the application at: `http://your-server-ip:3000`
+Access the application through the configured public HTTPS origin
+(e.g. `https://approval.example.com`). `http://localhost:3000` is a
+host-local health check only — it confirms the container is up on the server
+itself and is not the Auth.js public origin. Once the DNS proxy contract is
+enabled, direct IP/container port access is unsupported.
 
 **Note:** If deploying to a production domain, configure a reverse proxy (Nginx) to forward HTTP/HTTPS traffic to port 3000. See [Reverse Proxy (Nginx)](#reverse-proxy-nginx) for a production example including the upload body-size limit.
 
@@ -353,25 +357,25 @@ docker compose logs
 
 1. Check database health:
 
-```bash
-docker compose logs db
-```
+    ```bash
+    docker compose logs db
+    ```
 
-1. Verify DATABASE_URL format:
+2. Verify DATABASE_URL format:
 
-```bash
-# Correct (Docker internal networking)
-DATABASE_URL=postgresql://postgres:password@db:5432/app_db
+    ```bash
+    # Correct (Docker internal networking)
+    DATABASE_URL=postgresql://postgres:password@db:5432/app_db
 
-# Incorrect (localhost won't work in Docker)
-DATABASE_URL=postgresql://postgres:password@localhost:5432/app_db
-```
+    # Incorrect (localhost won't work in Docker)
+    DATABASE_URL=postgresql://postgres:password@localhost:5432/app_db
+    ```
 
-1. Check database health status:
+3. Check database health status:
 
-```bash
-docker compose exec db pg_isready -U postgres
-```
+    ```bash
+    docker compose exec db pg_isready -U postgres
+    ```
 
 ### File Upload Permission Errors
 
@@ -401,23 +405,23 @@ If health status shows "unhealthy":
 
 1. Check healthcheck logs:
 
-```bash
-docker compose logs app | grep "healthcheck"
-```
+    ```bash
+    docker compose logs app | grep "healthcheck"
+    ```
 
-1. Restart the service:
+2. Restart the service:
 
-```bash
-docker compose restart app
-```
+    ```bash
+    docker compose restart app
+    ```
 
-1. If persistent, rebuild:
+3. If persistent, rebuild:
 
-```bash
-docker compose down
-docker compose build --no-cache
-docker compose up -d
-```
+    ```bash
+    docker compose down
+    docker compose build --no-cache
+    docker compose up -d
+    ```
 
 ### Disk Space Issues
 
@@ -493,7 +497,7 @@ to the wrong host, or sessions appear to switch origins between pages.
 **Cause:** The app runs behind a reverse proxy, so Auth.js must be told which
 public origin to use. The three URL variables — `AUTH_URL`, `NEXTAUTH_URL`,
 and `NEXT_PUBLIC_APP_URL` — must all match the public HTTPS origin
-(e.g. `https://approval.yourdomain.com`). A mismatch between the Auth.js
+(e.g. `https://approval.example.com`). A mismatch between the Auth.js
 callback base and the app API base causes cookie/session mismatches.
 
 **Fix:**
