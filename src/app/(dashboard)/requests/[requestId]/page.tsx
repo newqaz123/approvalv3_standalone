@@ -1,14 +1,13 @@
 import { auth } from '@/lib/auth-config'
 import { redirect, notFound } from 'next/navigation'
 import { format } from 'date-fns'
-import { ArrowLeft, Download, Calendar, User, Building2, FileText, History, CheckCircle2, Wrench } from 'lucide-react'
+import { ArrowLeft, Download, User, Building2, FileText, History, CheckCircle2, Wrench } from 'lucide-react'
 import Link from 'next/link'
 import prisma from '@/lib/prisma'
 import { getFileDownloadUrl } from '@/lib/file-preview'
 import { StatusBadge } from '@/components/requests/status-badge'
 import { Button } from '@/components/ui/button'
 import { FormattedText } from '@/components/ui/formatted-text'
-import { Separator } from '@/components/ui/separator'
 
 interface RequestDetailPageProps {
   params: Promise<{
@@ -23,7 +22,6 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
   if (!session?.user?.id) {
     redirect('/sign-in')
   }
-  const userId = session.user.id
 
   // Single comprehensive query with includes - optimal for fetching all related data
   // Prisma handles joins efficiently, avoiding N+1 query problems
@@ -103,7 +101,6 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
 
   const solution = request.solutions[0] || null
   const hasRejection = request.approvals.some((a) => a.status === 'rejected')
-  const hasApprovedApprovals = request.approvals.some((a) => a.status === 'approved')
 
   const formatFileSize = (bytes: number) => {
     if (bytes < 1024) return bytes + ' B'
