@@ -145,10 +145,14 @@ test.describe('Logged-in solution attachment upload (release gate)', () => {
     // metadata submit, exactly as the brief requires.
     type UploadOutcome = { kind: 'pass' | 'forced-500'; status: number }
     const uploadOutcomes: UploadOutcome[] = []
+    // Metadata submits (submitSolution) are POSTs whose body is JSON-serializable
+    // (no File) → serialized as text/plain, never multipart. Counting them lets
+    // the spec assert that Retry never submits metadata and that exactly one
+    // real submission happens on the final Confirm.
+    let metadataPostCount = 0
     const routeState = {
       uploadSeq: 0,
       failSecondUpload: false,
-      blockMetadataSubmit: false,
     }
 
     await page.route(`**/engineering/solutions/${requestId}`, async (route) => {
@@ -160,10 +164,7 @@ test.describe('Logged-in solution attachment upload (release gate)', () => {
       const contentType = request.headers()['content-type'] ?? ''
       if (!contentType.includes('multipart/form-data')) {
         // Metadata submit (submitSolution).
-        if (routeState.blockMetadataSubmit) {
-          await route.abort()
-          return
-        }
+        metadataPostCount += 1
         await route.continue()
         return
       }
@@ -205,35 +206,58 @@ test.describe('Logged-in solution attachment upload (release gate)', () => {
     routeState.failSecondUpload = true
     await page.getByRole('button', { name: 'Review & Submit' }).click()
     await expect(page.getByRole('button', { name: 'Confirm & Submit' })).toBeVisible()
+    // Snapshot the upload count before the confirm so we can assert the batch
+    // continued past the forced 500 (later items still uploaded).
+    const uploadCountBeforeConfirm = uploadOutcomes.length
     await page.getByRole('button', { name: 'Confirm & Submit' }).click()
-    // ensureUploaded throws on the forced 500; the solution form must stay
-    // open and the failed filename must remain visible.
-    await expect(page).toHaveURL((url) =>
-      url.pathname.startsWith('/engineering/solutions/')
-    )
+    // The batch catches the forced 500: the failed item reaches a terminal
+    // `error` state (never stuck `uploading`), the later items still upload, and
+    // the batch returns { success:false }. No metadata submit is attempted.
+    expect(metadataPostCount, 'no metadata submit on upload failure').toBe(0)
+    // The form returns to the edit view so the failed item is visibly errored
+    // with its Retry action. The failed filename stays in the list.
     await expect(page.getByText(FIXTURES.medium.name)).toBeVisible()
+    // The errored item exposes a Retry action (distinct from Confirm).
+    await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible()
     expect(
       uploadOutcomes.some((outcome) => outcome.kind === 'forced-500'),
       'the second upload request was answered with a 500'
     ).toBeTruthy()
+    // The batch continued past the failure: all four uploads were attempted
+    // during the confirm (3 passed + 1 forced-500), not aborted at item two.
+    expect(
+      uploadOutcomes.length - uploadCountBeforeConfirm,
+      'the batch attempted all four uploads despite the mid-batch 500'
+    ).toBe(4)
 
-    // ── PHASE 4: retry the failed item — re-upload succeeds, no commit ──
-    // blockMetadataSubmit keeps the request in SentToEngineer so the retry can
-    // be observed distinctly from the final committed submission.
+    // ── PHASE 4: retry the failed item — only it is re-uploaded, no commit ─
+    // Retry calls ensureUploaded(), which reuses the three prior successes and
+    // re-uploads ONLY the errored item — exactly one upload POST, no metadata.
     routeState.failSecondUpload = false
-    routeState.blockMetadataSubmit = true
-    await page.getByRole('button', { name: 'Confirm & Submit' }).click()
-    // All four accepted fixtures now reach the success / Ready state.
-    await expect(page.getByText('Ready', { exact: true })).toHaveCount(4, {
-      timeout: 60_000,
-    })
+    const uploadCountBeforeRetry = uploadOutcomes.length
+    await page.getByRole('button', { name: 'Retry' }).click()
+    await expect.poll(
+      () => uploadOutcomes.length,
+      { timeout: 30_000, message: 'only the failed item was re-uploaded by Retry' }
+    ).toBe(uploadCountBeforeRetry + 1)
+    expect(metadataPostCount, 'no metadata submit during retry').toBe(0)
 
-    // ── PHASE 5: final real submission ─────────────────────────────────
-    routeState.blockMetadataSubmit = false
+    // ── PHASE 5: return to preview — all items Ready, still no commit ──
+    await expect(page.getByRole('button', { name: 'Review & Submit' })).toBeEnabled()
+    await page.getByRole('button', { name: 'Review & Submit' }).click()
+    await expect(page.getByRole('button', { name: 'Confirm & Submit' })).toBeVisible()
+    // All four accepted fixtures now show the Ready badge on the preview.
+    await expect(page.getByText('Ready', { exact: true })).toHaveCount(4, {
+      timeout: 30_000,
+    })
+    expect(metadataPostCount, 'no metadata submit before the final confirm').toBe(0)
+
+    // ── PHASE 6: final real submission — exactly one metadata submit ──
     await page.getByRole('button', { name: 'Confirm & Submit' }).click()
     await expect(page).toHaveURL((url) => url.pathname === '/engineering', {
       timeout: 60_000,
     })
+    expect(metadataPostCount, 'exactly one metadata submit on the final confirm').toBe(1)
 
     // Global upload assertions: no 413, and the only 500 was the intentional
     // partial-failure one (no passing upload returned a server error).
@@ -250,7 +274,7 @@ test.describe('Logged-in solution attachment upload (release gate)', () => {
       'exactly one intentional partial-failure 500'
     ).toHaveLength(1)
 
-    // ── PHASE 6: capture the Thai attachment id from the request detail ──
+    // ── PHASE 7: capture the Thai attachment id from the request detail ──
     await page.goto(`/requests/${requestId}`)
     await expect(page.getByText('Solution Attachments')).toBeVisible()
     const thaiFilename = FIXTURES.thai.name
@@ -273,7 +297,7 @@ test.describe('Logged-in solution attachment upload (release gate)', () => {
     const previewUrl = `/api/files/download?id=${encodeURIComponent(attachmentId)}&disposition=inline`
     const downloadUrl = `/api/files/download?id=${encodeURIComponent(attachmentId)}&disposition=attachment`
 
-    // ── PHASE 7: Thai filename Content-Disposition (preview + download) ──
+    // ── PHASE 8: Thai filename Content-Disposition (preview + download) ──
     const previewResponse = await page.request.get(previewUrl)
     expect(previewResponse.status()).toBe(200)
     expect(
@@ -286,12 +310,12 @@ test.describe('Logged-in solution attachment upload (release gate)', () => {
       (downloadResponse.headers()['content-disposition'] ?? '').toLowerCase()
     ).toContain("filename*=utf-8''")
 
-    // ── PHASE 8: signed-out denial (401) ───────────────────────────────
+    // ── PHASE 9: signed-out denial (401) ──────────────────────────────
     await page.context().clearCookies()
     const deniedResponse = await page.request.get(downloadUrl)
     expect(deniedResponse.status()).toBe(401)
 
-    // ── PHASE 9: unrelated general-department user denial (403) ────────
+    // ── PHASE 10: unrelated general-department user denial (403) ─────
     await login(page, unrelatedEmail, unrelatedPassword)
     const forbiddenResponse = await page.request.get(downloadUrl)
     expect(forbiddenResponse.status()).toBe(403)

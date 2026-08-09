@@ -104,6 +104,32 @@ export function SolutionForm({
     }
   }
 
+  // Retry is upload-only: it re-runs the authoritative coordinator for the
+  // remaining non-success (errored/pending) items and reuses prior successes,
+  // so a failed file can be retried in isolation without re-uploading the rest
+  // or touching metadata. The metadata submit happens only via Confirm.
+  const handleRetryItem = async () => {
+    if (isSubmitting) return
+    setIsSubmitting(true)
+    try {
+      const result = await ensureUploaded()
+      if (!result.success) {
+        const remaining = result.items.filter((entry) => entry.status === 'error')
+        toast.error(
+          remaining.length === 1
+            ? '1 file still failed to upload'
+            : `${remaining.length} files still failed to upload`
+        )
+        return
+      }
+      toast.success('All files uploaded successfully')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'An error occurred')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
   const handleCancel = async () => {
     // Await hook reset() (cleanup unlinked drafts + clear local state) before
     // navigating away. Surface cleanup failure and do NOT navigate on error —
@@ -134,6 +160,10 @@ export function SolutionForm({
       const result = await ensureUploaded()
       if (!result.success) {
         toast.error('Some files failed to upload')
+        // Surface the file list so the failed item is visibly errored with its
+        // Retry action (SolutionFileUpload). The user retries in isolation,
+        // then returns to preview + Confirm for the single metadata submit.
+        setShowPreview(false)
         setIsSubmitting(false)
         return
       }
@@ -390,6 +420,7 @@ export function SolutionForm({
             items={items}
             onAddFiles={addFiles}
             onRemoveItem={handleRemoveItem}
+            onRetryItem={handleRetryItem}
             disabled={isSubmitting}
           />
 

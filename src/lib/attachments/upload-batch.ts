@@ -66,7 +66,25 @@ export async function uploadAttachmentBatch(
     items[index] = uploading
     onItemChange?.(uploading)
 
-    const result = await uploadOne(uploading)
+    // A transport-level failure (e.g. HTTP 500) rejects `uploadOne` instead of
+    // returning an explicit `{ success:false }`. Catch it so the item reaches a
+    // terminal `error` state (and emits its snapshot), the rest of the batch
+    // keeps running, and the caller can retry just this item later. The message
+    // is normalized to a stable fallback when the rejection carries nothing
+    // usable, so the UI always has something to render.
+    let result
+    try {
+      result = await uploadOne(uploading)
+    } catch (thrown) {
+      const message =
+        thrown instanceof Error && thrown.message
+          ? thrown.message
+          : 'Upload failed'
+      const errored: AttachmentUploadItem = { ...uploading, status: 'error', error: message }
+      items[index] = errored
+      onItemChange?.(errored)
+      continue
+    }
     items[index] = result.success
       ? { ...uploading, status: 'success', attachmentId: result.attachmentId }
       : { ...uploading, status: 'error', error: result.error }

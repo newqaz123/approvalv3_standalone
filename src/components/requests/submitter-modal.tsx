@@ -418,6 +418,30 @@ export function SubmitterModal({
     }
   }
 
+  // Retry is upload-only: it re-runs the coordinator for the remaining
+  // non-success items (reusing prior successes) so a failed file is retried in
+  // isolation — never invoking the metadata submit.
+  const handleRetryAttachment = async () => {
+    if (isBusy) return
+    setIsBusy(true)
+    setSubmitError(null)
+    try {
+      const result = await ensureUploaded()
+      if (!result.success) {
+        const remaining = result.items.filter((entry) => entry.status === 'error')
+        setSubmitError(
+          remaining.length === 1
+            ? '1 file still failed to upload'
+            : `${remaining.length} files still failed to upload`
+        )
+      }
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : 'An error occurred')
+    } finally {
+      setIsBusy(false)
+    }
+  }
+
   const removeExistingFile = (fileId: string) => {
     setExistingFiles((prev) => prev.filter((f) => f.id !== fileId))
     setDeletedFileIds((prev) => [...prev, fileId])
@@ -869,6 +893,18 @@ export function SubmitterModal({
                         <p className="text-xs text-red-600 mt-1">{item.error}</p>
                       )}
                     </div>
+                    {/* Retry action beside errored items: re-upload via the
+                        coordinator without touching metadata. */}
+                    {item.status === 'error' && (
+                      <button
+                        onClick={handleRetryAttachment}
+                        disabled={isBusy}
+                        className="p-1 text-blue-600 hover:text-blue-700 transition-colors disabled:opacity-30 flex items-center gap-1 text-xs"
+                      >
+                        <RotateCcw className="w-4 h-4" />
+                        Retry
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>

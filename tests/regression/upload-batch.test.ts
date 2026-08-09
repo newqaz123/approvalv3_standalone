@@ -127,6 +127,90 @@ describe('uploadAttachmentBatch', () => {
     assert.equal(result.success, false)
     assert.equal(result.items[0].error, 'Server error')
   })
+
+  it('catches a thrown uploadOne error, marks the item error, and continues later items', async () => {
+    // A transport-level failure (HTTP 500) makes uploadOne reject instead of
+    // returning an explicit { success:false }. The batch must catch the throw,
+    // record a terminal error state + snapshot, and keep processing the rest of
+    // the batch — never aborting it and never leaving the item stuck at
+    // 'uploading'.
+    const calls: string[] = []
+    const snapshots: { id: string; status: string; error?: string }[] = []
+    const result = await uploadAttachmentBatch(
+      [item('a', 'ok.pdf'), item('b', 'throws.pdf'), item('c', 'later.pdf')],
+      async (candidate) => {
+        calls.push(candidate.id)
+        if (candidate.id === 'b') throw new Error('Network 500')
+        return {
+          success: true,
+          attachmentId:
+            candidate.id === 'a'
+              ? 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+              : 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+        }
+      },
+      (changed) => { snapshots.push({ id: changed.id, status: changed.status, error: changed.error }) }
+    )
+    // The throw did NOT abort the batch — every item was attempted in order.
+    assert.deepEqual(calls, ['a', 'b', 'c'])
+    // The thrown item is marked terminal error with the Error message.
+    const thrown = result.items.find((entry) => entry.id === 'b')
+    assert.equal(thrown?.status, 'error')
+    assert.equal(thrown?.error, 'Network 500')
+    // A terminal error snapshot was emitted for the thrown item.
+    assert.ok(
+      snapshots.some((s) => s.id === 'b' && s.status === 'error' && s.error === 'Network 500'),
+      'emitted a terminal error snapshot for the thrown item'
+    )
+    // The later item continued and succeeded despite the earlier throw.
+    assert.equal(result.items.find((entry) => entry.id === 'c')?.status, 'success')
+    assert.equal(result.success, false)
+    // Successful IDs are returned in item order, skipping the failed one.
+    assert.deepEqual(result.attachmentIds, [
+      'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      'cccccccc-cccc-cccc-cccc-cccccccccccc',
+    ])
+  })
+
+  it('normalizes a thrown non-Error uploadOne failure to the fallback message', async () => {
+    // When uploadOne rejects with a non-Error value (or a value without a
+    // usable message), the batch must still record a terminal error with a
+    // stable fallback rather than propagating the raw rejection.
+    const snapshots: { id: string; status: string; error?: string }[] = []
+    const result = await uploadAttachmentBatch(
+      [item('a', 'throws.pdf')],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      async () => { throw 'boom' },
+      (changed) => { snapshots.push({ id: changed.id, status: changed.status, error: changed.error }) }
+    )
+    assert.equal(result.success, false)
+    assert.equal(result.items[0].status, 'error')
+    assert.equal(result.items[0].error, 'Upload failed')
+    assert.equal(snapshots.at(-1)?.error, 'Upload failed')
+  })
+
+  it('retries only the item left in error after a transport throw (successes are not re-uploaded)', async () => {
+    // End-to-end retry contract: after a batch where one item threw and left
+    // the rest successful, feeding result.items back must re-upload ONLY the
+    // errored item. Prior successes are reused verbatim.
+    const first = await uploadAttachmentBatch(
+      [item('a', 'ok.pdf'), item('b', 'throws.pdf')],
+      async (candidate) => {
+        if (candidate.id === 'b') throw new Error('Server down')
+        return { success: true, attachmentId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' }
+      }
+    )
+    assert.equal(first.success, false)
+
+    const retryCalls: string[] = []
+    const retry = await uploadAttachmentBatch(first.items, async (candidate) => {
+      retryCalls.push(candidate.id)
+      return { success: true, attachmentId: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb' }
+    })
+    // Only the errored item is re-uploaded; the prior success is skipped.
+    assert.deepEqual(retryCalls, ['b'])
+    assert.equal(retry.success, true)
+  })
 })
 
 // ── Hook + component contract tests (Task 5). These follow the established

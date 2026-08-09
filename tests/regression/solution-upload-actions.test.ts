@@ -353,3 +353,66 @@ describe('Task 6 source-wiring: hook integration and ID-only server boundary', (
     assert.match(solutionForm, /onClick={handleCancel}/)
   })
 })
+
+// Task 7 follow-up: a transport-level upload failure (HTTP 500) must leave the
+// item in a terminal `error` state (not stuck at `uploading`), be visibly
+// failed, block metadata submission, and be retryable without re-uploading the
+// successes. The batch coordinator catches a thrown uploadOne and records a
+// terminal error (covered in upload-batch.test.ts); these assertions pin that
+// both submitter surfaces wire a Retry affordance to ensureUploaded() — never
+// to the metadata submit — so a failed item can be retried in isolation.
+describe('Task 7 follow-up: per-item retry wiring (transport-error resilience)', () => {
+  const solutionForm = readFileSync('src/components/solutions/solution-form.tsx', 'utf8')
+  const submitterModal = readFileSync('src/components/requests/submitter-modal.tsx', 'utf8')
+
+  it('SolutionForm binds onRetryItem to an async retry handler', () => {
+    // The file-upload card exposes a Retry action per errored item, and the
+    // form must wire it to a handler (not leave it unbound).
+    assert.match(solutionForm, /const handleRetryItem = async/)
+    assert.match(solutionForm, /onRetryItem=\{handleRetryItem\}/)
+  })
+
+  it('SolutionForm retry handler calls ensureUploaded only and never submits metadata', () => {
+    // Scope to the retry handler body: from its declaration to the next handler
+    // declaration, so the metadata submit in handleSubmit cannot leak in.
+    const start = solutionForm.indexOf('const handleRetryItem')
+    const next = solutionForm.indexOf('const handle', start + 1)
+    const retrySlice = solutionForm.slice(start, next === -1 ? undefined : next)
+    // Respects the in-flight submit/upload guard.
+    assert.match(retrySlice, /if \(isSubmitting\) return/)
+    // Re-uploads via the authoritative coordinator; never the metadata action.
+    assert.match(retrySlice, /await ensureUploaded\(\)/)
+    assert.doesNotMatch(retrySlice, /submitSolution/)
+  })
+
+  it('SolutionForm retry handler reports remaining failure or success', () => {
+    const start = solutionForm.indexOf('const handleRetryItem')
+    const next = solutionForm.indexOf('const handle', start + 1)
+    const retrySlice = solutionForm.slice(start, next === -1 ? undefined : next)
+    // Branches on the coordinator result and surfaces either outcome.
+    assert.match(retrySlice, /!result\.success/)
+    assert.match(retrySlice, /entry\.status === 'error'/)
+    assert.match(retrySlice, /toast\.success|toast\.error/)
+  })
+
+  it('SubmitterModal exposes a Retry action beside errored attachment items', () => {
+    // A retry affordance is rendered for items in the error state and is wired
+    // to a dedicated handler (distinct from the submit button).
+    assert.match(submitterModal, /const handleRetryAttachment = async/)
+    assert.match(submitterModal, /onClick=\{handleRetryAttachment\}/)
+  })
+
+  it('SubmitterModal retry calls ensureUploaded only, gated on isBusy, no metadata', () => {
+    const start = submitterModal.indexOf('const handleRetryAttachment')
+    const next = submitterModal.indexOf('const handleSubmit', start + 1)
+    const retrySlice = submitterModal.slice(start, next === -1 ? undefined : next)
+    // Uses the modal's busy guard, not the form's.
+    assert.match(retrySlice, /if \(isBusy\) return/)
+    assert.match(retrySlice, /await ensureUploaded\(\)/)
+    // Surfaces remaining failures through the modal's error channel.
+    assert.match(retrySlice, /setSubmitError/)
+    // Retry must never invoke the metadata submit.
+    assert.doesNotMatch(retrySlice, /onSubmitSolution/)
+    assert.doesNotMatch(retrySlice, /onResubmit/)
+  })
+})
