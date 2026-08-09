@@ -18,7 +18,8 @@
     "test:e2e:debug": "playwright test --debug",
     "test:phase7": "TEST_BASE_URL=http://localhost:3000 playwright test tests/e2e/phase7/",
     "test:phase7:headed": "TEST_BASE_URL=http://localhost:3000 playwright test tests/e2e/phase7/ --headed",
-    "test:phase7:report": "TEST_BASE_URL=http://localhost:3000 playwright test tests/e2e/phase7/ --reporter=html && playwright show-report"
+    "test:phase7:report": "TEST_BASE_URL=http://localhost:3000 playwright test tests/e2e/phase7/ --reporter=html && playwright show-report",
+    "migrate:uploads": "tsx scripts/migrate-uploads.ts"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.1",
