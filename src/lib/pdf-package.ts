@@ -1,9 +1,9 @@
-import { readFile } from 'fs/promises'
-import { extname, resolve, sep } from 'path'
+import { extname } from 'path'
 import mammoth from 'mammoth'
 import { PDFDocument } from 'pdf-lib'
 import * as XLSX from 'xlsx'
 import { getExportPackageFileKind, type ExportPackageFileKind } from '@/lib/export-package'
+import { readAttachmentFile } from './attachments/storage'
 
 export type ExportPackageRequestItem =
   | { type: 'approval-report'; attachmentId?: undefined }
@@ -33,25 +33,6 @@ function escapeHtml(text: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;')
-}
-
-function normalizeStoredPath(filePath: string): string {
-  return filePath.trim().replace(/^\/+/, '').replace(/^public\/+/, '')
-}
-
-function resolvePublicFilePath(filePath: string): string {
-  const normalizedPath = normalizeStoredPath(filePath)
-  if (!normalizedPath || normalizedPath.includes('..')) {
-    throw new Error(`Invalid file path: ${filePath}`)
-  }
-
-  const publicRoot = resolve(process.cwd(), 'public')
-  const resolvedPath = resolve(publicRoot, normalizedPath)
-  if (resolvedPath !== publicRoot && !resolvedPath.startsWith(`${publicRoot}${sep}`)) {
-    throw new Error(`Invalid file path: ${filePath}`)
-  }
-
-  return resolvedPath
 }
 
 async function generateAttachmentPdfFromHTML(html: string): Promise<Buffer> {
@@ -122,16 +103,15 @@ function renderAttachmentTextHTML(title: string, body: string): string {
 </html>`
 }
 
-async function convertDocxToPdf(filePath: string, fileName: string): Promise<Buffer> {
-  const buffer = await readFile(filePath)
-  const result = await mammoth.extractRawText({ buffer })
+async function convertDocxToPdf(bytes: Buffer, fileName: string): Promise<Buffer> {
+  const result = await mammoth.extractRawText({ buffer: bytes })
   const text = result.value.trim() || 'No text content found.'
 
   return generateAttachmentPdfFromHTML(renderAttachmentTextHTML(fileName, `<pre>${escapeHtml(text)}</pre>`))
 }
 
-async function convertXlsxToPdf(filePath: string, fileName: string): Promise<Buffer> {
-  const workbook = XLSX.read(await readFile(filePath), { type: 'buffer' })
+async function convertXlsxToPdf(bytes: Buffer, fileName: string): Promise<Buffer> {
+  const workbook = XLSX.read(bytes, { type: 'buffer' })
   const sections = workbook.SheetNames.map((sheetName) => {
     const rows = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[sheetName], {
       header: 1,
@@ -175,8 +155,7 @@ async function renderImagePdfFromHTML(filePath: string, imageBytes: Buffer): Pro
 </html>`)
 }
 
-async function convertImageToPdf(filePath: string): Promise<Buffer> {
-  const imageBytes = await readFile(filePath)
+async function convertImageToPdf(filePath: string, imageBytes: Buffer): Promise<Buffer> {
   const extension = extname(filePath).toLowerCase()
 
   if (extension !== '.png' && extension !== '.jpg' && extension !== '.jpeg') {
@@ -217,22 +196,26 @@ export async function convertAttachmentToPdf({ attachment }: ConvertAttachmentTo
     throw new Error(`${attachment.fileName} is not mergeable.`)
   }
 
-  const fullPath = resolvePublicFilePath(attachment.filePath)
+  // Read the attachment once through the private storage layer so the legacy
+  // public/ root resolver is no longer reconstructed here. The raw bytes are
+  // forwarded to the format-specific converters; `attachment.filePath`/`fileName`
+  // still drive extension-based decisions, preserving caller-order behavior.
+  const bytes = await readAttachmentFile(attachment.filePath)
 
   if (kind === 'pdf') {
-    return readFile(fullPath)
+    return bytes
   }
 
   if (kind === 'image') {
-    return convertImageToPdf(fullPath)
+    return convertImageToPdf(attachment.filePath, bytes)
   }
 
   if (kind === 'docx') {
-    return convertDocxToPdf(fullPath, attachment.fileName)
+    return convertDocxToPdf(bytes, attachment.fileName)
   }
 
   if (kind === 'xlsx') {
-    return convertXlsxToPdf(fullPath, attachment.fileName)
+    return convertXlsxToPdf(bytes, attachment.fileName)
   }
 
   throw new Error(`${attachment.fileName} is not mergeable.`)

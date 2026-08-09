@@ -615,7 +615,7 @@ describe('admin sub-task stage management wiring', () => {
     assert.match(component, /aria-label="Subcontractor"/)
     assert.match(component, /subContractorSearch/)
     assert.match(component, /filteredSubContractors/)
-    assert.match(component, /Add "\{subContractorSearch\.trim\(\)\}"/)
+    assert.match(component, /Add &quot;\{subContractorSearch\.trim\(\)\}&quot;/)
     assert.match(component, /handleSubContractorKeyDown/)
     assert.match(component, /onKeyDown=\{handleSubContractorKeyDown\}/)
     assert.match(component, /setSubContractorId\(result\.data\.id\)/)

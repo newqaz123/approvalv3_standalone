@@ -721,7 +721,7 @@ export default function SequentialStagesPreview() {
           requestId: 'req-001',
           requestTitle: 'Structural Integrity Report - Project X',
         }}
-        onSubmitSolution={(data) => alert(`Solution submitted: ${data.title}\nCustom: ${data.useCustomHierarchy}`)}
+        onSubmitSolution={async (data) => { alert(`Solution submitted: ${data.title}\nCustom: ${data.useCustomHierarchy}`); return { success: true } }}
       />
 
       {/* 2.2 Review Solution */}
@@ -754,7 +754,7 @@ export default function SequentialStagesPreview() {
           rejectedBy: 'John Hammond',
           rejectedAt: '2023-10-29T10:30:00',
         }}
-        onResubmit={(data) => alert(`Solution resubmitted with ${data.useCustomHierarchy ? 'custom' : 'default'} hierarchy\nDeleted files: ${data.deletedFileIds?.length || 0}`)}
+        onResubmit={async (data) => { alert(`Solution resubmitted with ${data.useCustomHierarchy ? 'custom' : 'default'} hierarchy\nDeleted files: ${data.deletedFileIds.length}`); return { success: true } }}
       />
 
       {/* 2.3 Completed Solution */}

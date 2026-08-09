@@ -14,7 +14,9 @@ npm install
 
 # 2. Configure environment
 cp .env.example .env.local
-# Edit .env.local — set DATABASE_URL and NEXTAUTH_SECRET
+# Edit .env.local — set DATABASE_URL and NEXTAUTH_SECRET, and override the
+# application URL variables (AUTH_URL, NEXTAUTH_URL, NEXT_PUBLIC_APP_URL)
+# with http://localhost:3000 for local development
 
 # 3. Set up database
 npx prisma migrate deploy
@@ -25,6 +27,7 @@ npm run dev
 ```
 
 Open `http://localhost:3000` and sign in:
+
 - **Email:** `admin@example.com`
 - **Password:** `changeme`
 
@@ -102,7 +105,7 @@ Persistent data is kept outside source updates:
 ## Tech Stack
 
 | Layer | Technology |
-|-------|-----------|
+| ------- | ----------- |
 | **Framework** | Next.js 15 (App Router) |
 | **Language** | TypeScript |
 | **Authentication** | NextAuth.js v5 (Credentials + JWT) |
@@ -120,9 +123,12 @@ Persistent data is kept outside source updates:
 ## Environment Variables
 
 | Variable | Required | Description |
-|----------|----------|-------------|
+| ---------- | ---------- | ------------- |
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
-| `NEXTAUTH_URL` | Yes | App URL (e.g., `http://localhost:3000`) |
+| `AUTH_URL` | Yes | Canonical Auth.js v5 origin — must match `NEXTAUTH_URL` (e.g., `https://approval.example.com`; `http://localhost:3000` in `.env.local`) |
+| `NEXTAUTH_URL` | Yes | App URL — must match `AUTH_URL` (e.g., `https://approval.example.com`; `http://localhost:3000` in `.env.local`) |
+| `NEXT_PUBLIC_APP_URL` | Yes | App API base — must match `AUTH_URL` / `NEXTAUTH_URL` |
+| `AUTH_TRUST_HOST` | Yes (production) | `true` so Auth.js trusts the host/protocol forwarded by the Nginx proxy |
 | `NEXTAUTH_SECRET` | Yes | JWT secret — generate with `openssl rand -base64 32` |
 | `UPLOAD_DIR` | No | File upload directory (default: `public/uploads`) |
 | `CRON_SECRET` | No | Secret for cron job endpoints |
@@ -132,10 +138,32 @@ Persistent data is kept outside source updates:
 | `SMTP_PASS` | No | SMTP password |
 | `SMTP_FROM` | No | Sender email address |
 
+### Authentication Origin and Logout
+
+In production the app runs behind a controlled Nginx reverse proxy that
+forwards the public host and protocol to the app container:
+
+```nginx
+proxy_set_header Host              $host;
+proxy_set_header X-Forwarded-Host  $host;
+proxy_set_header X-Forwarded-Proto $scheme;
+proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+```
+
+All three URL variables (`AUTH_URL`, `NEXTAUTH_URL`, `NEXT_PUBLIC_APP_URL`)
+must match the public HTTPS origin, and `AUTH_TRUST_HOST=true` permits Auth.js
+to trust the forwarded host/protocol. Local development overrides the three
+URL variables to `http://localhost:3000` in `.env.local`; the production
+template keeps the HTTPS origin. Sign out uses a relative `/sign-in` callback
+so the browser stays on the trusted origin — no absolute URL is baked into
+the client. If sign out redirects to `localhost`, check that the three URL
+variables match the public origin and that the forwarded headers above are
+present. See [docs/DEPLOY.md](docs/DEPLOY.md) for the full deployment guide.
+
 ## User Roles
 
 | Role | Capabilities |
-|------|-------------|
+| ------ | ------------- |
 | **Admin** | System configuration, user/department management, hierarchy builder, audit export |
 | **General Department** | Create requests, approve within hierarchy, view dashboards |
 | **Engineering** | Submit solutions with cost estimates, approve within hierarchy |
@@ -193,6 +221,7 @@ npx prisma db seed       # Seed database
 ## Docker Deployment
 
 The Docker setup includes:
+
 - **PostgreSQL 15** with persistent volume
 - **Next.js** standalone build (~110MB image)
 - **Auto-migrations** via migration service

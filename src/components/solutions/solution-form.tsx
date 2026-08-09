@@ -31,7 +31,7 @@ import { CustomApprovalPicker } from './custom-approval-picker'
 import { SolutionFileUpload } from './solution-file-upload'
 import { SolutionPreview } from './solution-preview'
 import { submitSolution } from '@/server-actions/solutions'
-import { uploadFileAction, deleteFileAttachment } from '@/server-actions/files'
+import { useSolutionAttachments } from '@/hooks/use-solution-attachments'
 
 const solutionFormSchema = z.object({
   title: z.string().min(1, 'Title is required').max(200),
@@ -63,16 +63,6 @@ interface SolutionFormProps {
     timeline?: string | null
     conceptDesign?: string | null
   }
-  previousFiles?: Array<{ id: string; fileName: string; fileType: string; fileSize: number; filePath: string }>
-}
-
-interface SelectedFile {
-  id: string
-  file: File
-  status: 'pending' | 'uploading' | 'success' | 'error'
-  progress: number
-  error?: string
-  fileId?: string  // The actual file ID from prepareFileUpload
 }
 
 export function SolutionForm({
@@ -81,13 +71,13 @@ export function SolutionForm({
   currentUserId,
   allUsers,
   previousSolution,
-  previousFiles = [],
 }: SolutionFormProps) {
   const router = useRouter()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [showPreview, setShowPreview] = useState(false)
-  const [selectedFiles, setSelectedFiles] = useState<SelectedFile[]>([])
-  const [existingFiles, setExistingFiles] = useState(previousFiles)
+  const { items, addFiles, removeItem, ensureUploaded, clear, reset } = useSolutionAttachments({
+    requestId,
+  })
 
   const form = useForm<SolutionFormValues>({
     resolver: zodResolver(solutionFormSchema),
@@ -106,68 +96,52 @@ export function SolutionForm({
 
   const useCustomApprovals = form.watch('useCustomApprovals')
 
-  const uploadFile = async (selectedFile: SelectedFile) => {
+  const handleRemoveItem = async (id: string) => {
     try {
-      // Update status to uploading
-      setSelectedFiles((prev) =>
-        prev.map((f) => (f.id === selectedFile.id ? { ...f, status: 'uploading' as const, progress: 10 } : f))
-      )
-
-      // Simulate progress while upload runs
-      let currentProgress = 10
-      const progressInterval = setInterval(() => {
-        currentProgress = Math.min(currentProgress + Math.random() * 15, 90)
-        setSelectedFiles((prev) =>
-          prev.map((f) => (f.id === selectedFile.id ? { ...f, progress: Math.round(currentProgress) } : f))
-        )
-      }, 300)
-
-      try {
-        const formData = new FormData()
-        formData.append('file', selectedFile.file)
-        formData.append('requestId', requestId)
-
-        const result = await uploadFileAction(null, formData)
-
-        clearInterval(progressInterval)
-
-        if (result.success && result.fileAttachment) {
-          setSelectedFiles((prev) =>
-            prev.map((f) => (f.id === selectedFile.id ? { ...f, status: 'success' as const, progress: 100, fileId: result.fileAttachment!.id } : f))
-          )
-          return result.fileAttachment!.id
-        } else {
-          setSelectedFiles((prev) =>
-            prev.map((f) => (f.id === selectedFile.id ? { ...f, status: 'error' as const, error: result.error || 'Upload failed' } : f))
-          )
-          throw new Error(result.error || 'Upload failed')
-        }
-      } catch (err) {
-        clearInterval(progressInterval)
-        throw err
-      }
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Upload failed'
-      setSelectedFiles((prev) =>
-        prev.map((f) => (f.id === selectedFile.id ? { ...f, status: 'error' as const, error: errorMessage } : f))
-      )
-      throw err
-    }
-  }
-
-  const handleRemoveExistingFile = async (fileId: string) => {
-    try {
-      await deleteFileAttachment({ fileId })
-      setExistingFiles((prev) => prev.filter((f) => f.id !== fileId))
-      toast.success('File removed')
+      await removeItem(id)
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to remove file'
-      toast.error(errorMessage)
+      toast.error(error instanceof Error ? error.message : 'Failed to remove file')
     }
   }
 
-  const handleRemoveNewFile = (fileId: string) => {
-    setSelectedFiles((prev) => prev.filter((f) => f.id !== fileId))
+  // Retry is upload-only: it re-runs the authoritative coordinator for the
+  // remaining non-success (errored/pending) items and reuses prior successes,
+  // so a failed file can be retried in isolation without re-uploading the rest
+  // or touching metadata. The metadata submit happens only via Confirm.
+  const handleRetryItem = async () => {
+    if (isSubmitting) return
+    setIsSubmitting(true)
+    try {
+      const result = await ensureUploaded()
+      if (!result.success) {
+        const remaining = result.items.filter((entry) => entry.status === 'error')
+        toast.error(
+          remaining.length === 1
+            ? '1 file still failed to upload'
+            : `${remaining.length} files still failed to upload`
+        )
+        return
+      }
+      toast.success('All files uploaded successfully')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'An error occurred')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleCancel = async () => {
+    // Await hook reset() (cleanup unlinked drafts + clear local state) before
+    // navigating away. Surface cleanup failure and do NOT navigate on error —
+    // the user can retry. After reset succeeds the unmount safety net sees an
+    // empty ref, so there is no double-cleanup.
+    try {
+      await reset()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to clean up draft files')
+      return
+    }
+    router.back()
   }
 
   const handleSubmit = async (values: SolutionFormValues, isConfirmed: boolean = false) => {
@@ -180,37 +154,21 @@ export function SolutionForm({
     setIsSubmitting(true)
 
     try {
-      // Upload files first and collect file IDs
-      const pendingFiles = selectedFiles.filter((f) => f.status === 'pending' || f.status === 'error')
-      const uploadedFileIds: string[] = []
-
-      if (pendingFiles.length > 0) {
-        for (const file of pendingFiles) {
-          try {
-            const fileId = await uploadFile(file)
-            if (fileId) {
-              uploadedFileIds.push(fileId)
-            }
-          } catch {
-            // uploadFile already sets error state, continue to check failed files below
-          }
-        }
-      }
-
-      // Check for any failed uploads
-      const failedFiles = selectedFiles.filter((f) => f.status === 'error')
-      if (failedFiles.length > 0) {
-        toast.error('Some files failed to upload. Please try again or remove them.')
+      // ensureUploaded() is authoritative: it uploads pending/errored items,
+      // reuses prior successes, and returns the final batch result. Branch on
+      // its result — never on pre-call UI state.
+      const result = await ensureUploaded()
+      if (!result.success) {
+        toast.error('Some files failed to upload')
+        // Surface the file list so the failed item is visibly errored with its
+        // Retry action (SolutionFileUpload). The user retries in isolation,
+        // then returns to preview + Confirm for the single metadata submit.
+        setShowPreview(false)
         setIsSubmitting(false)
         return
       }
 
-      // Submit solution with file IDs
-      // Combine newly uploaded files with existing files that are already attached
-      const existingFileIds = existingFiles.map((f) => f.id)
-      const fileIds = [...existingFileIds, ...uploadedFileIds]
-
-      const result = await submitSolution({
+      const submitResult = await submitSolution({
         requestId,
         title: values.title,
         description: values.description,
@@ -220,16 +178,23 @@ export function SolutionForm({
         conceptDesign: values.conceptDesign || undefined,
         useCustomApprovals: values.useCustomApprovals,
         customApproverIds: values.customApproverIds,
-        fileIds,
+        fileIds: result.attachmentIds,
       }) as { success: boolean; solutionId?: string; error?: string }
 
-      if (!result.success) {
-        toast.error(result.error || 'Failed to submit solution')
+      if (!submitResult.success) {
+        // Metadata submission failed — retain the successfully uploaded items
+        // so the user can retry without re-uploading.
+        toast.error(submitResult.error || 'Failed to submit solution')
         setIsSubmitting(false)
         return
       }
 
       toast.success('Solution submitted successfully')
+
+      // The drafts are now linked to the committed solution. Clear local
+      // references WITHOUT invoking cleanup (reset/cleanupDrafts would fail on
+      // the now solutionId-scoped rows).
+      clear()
 
       // Redirect to engineering dashboard
       router.push('/engineering')
@@ -265,8 +230,15 @@ export function SolutionForm({
     conceptDesign: form.watch('conceptDesign'),
     useCustomApprovals: form.watch('useCustomApprovals'),
     customApprovers,
-    files: selectedFiles.filter((f) => f.status !== 'error'),
-    existingFilesCount: existingFiles.length,
+    files: items
+      .filter((item) => item.status !== 'error')
+      .map((item) => ({
+        file: item.file,
+        id: item.id,
+        status: item.status,
+        progress: item.status === 'success' ? 100 : 0,
+        error: item.error,
+      })),
   }
 
   if (showPreview) {
@@ -445,39 +417,11 @@ export function SolutionForm({
 
           {/* File Attachments */}
           <SolutionFileUpload
-            files={selectedFiles.filter((f) => f.status !== 'error').map((f) => f.file)}
-            filesWithProgress={selectedFiles}
-            onFilesChange={(files) => {
-              // Preserve existing file state (id, status, fileId, progress)
-              // Only add new files as 'pending'
-              const existingFileMap = new Map(
-                selectedFiles.map((sf) => [
-                  `${sf.file.name}-${sf.file.size}-${sf.file.lastModified}`,
-                  sf,
-                ]),
-              )
-
-              const updatedFiles = files.map((file) => {
-                const key = `${file.name}-${file.size}-${file.lastModified}`
-                const existing = existingFileMap.get(key)
-
-                // Preserve existing file state, or create new pending entry
-                return (
-                  existing || {
-                    id: Math.random().toString(36).substring(7),
-                    file,
-                    status: 'pending' as const,
-                    progress: 0,
-                  }
-                )
-              })
-
-              setSelectedFiles(updatedFiles)
-            }}
-            onRemoveFile={handleRemoveNewFile}
+            items={items}
+            onAddFiles={addFiles}
+            onRemoveItem={handleRemoveItem}
+            onRetryItem={handleRetryItem}
             disabled={isSubmitting}
-            existingFiles={existingFiles}
-            onRemoveExistingFile={handleRemoveExistingFile}
           />
 
           {/* Custom Approvals Toggle */}
@@ -533,7 +477,7 @@ export function SolutionForm({
             <Button
               type="button"
               variant="outline"
-              onClick={() => router.back()}
+              onClick={handleCancel}
               disabled={isSubmitting}
             >
               Cancel

@@ -302,7 +302,7 @@ describe('budget monitor server actions', () => {
     assert.match(approveBody, /select:\s*\{[\s\S]*requestId:\s*true,[\s\S]*title:\s*true,[\s\S]*costEstimate:\s*true/)
     assert.match(approveBody, /projectEstimateCost:\s*solutionData\.costEstimate/)
 
-    const autoApproveUpdates = source.match(/projectEstimateCost:\s*(validated\.costEstimate|input\.cost)/g) ?? []
+    const autoApproveUpdates = source.match(/projectEstimateCost:\s*(validated\.costEstimate|validated\.cost|input\.cost)/g) ?? []
     assert.ok(autoApproveUpdates.length >= 2, 'submit and resubmit auto-approval paths should sync the approved estimate')
   })
 })

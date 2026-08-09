@@ -58,31 +58,19 @@ export function isPreviewableFile(file: PreviewableFileMetadata): boolean {
   return getFilePreviewKind(file) !== 'unsupported'
 }
 
-export function normalizeStoredFilePath(filePath: string | null | undefined): string | null {
-  if (!filePath) return null
-
-  const normalized = filePath
-    .trim()
-    .replace(/^\/+/, '')
-    .replace(/^public\/+/, '')
-
-  return normalized || null
-}
-
 export function getFileAccessUrl(
-  filePath: string | null | undefined,
+  fileId: string | null | undefined,
   disposition: FileDisposition = 'attachment'
 ): string | null {
-  const normalizedPath = normalizeStoredFilePath(filePath)
-  if (!normalizedPath) return null
+  if (!fileId) return null
 
-  return `/api/files/download?path=${encodeURIComponent(normalizedPath)}&disposition=${disposition}`
+  return `/api/files/download?id=${encodeURIComponent(fileId)}&disposition=${disposition}`
 }
 
-export function getFilePreviewUrl(filePath: string | null | undefined): string | null {
-  return getFileAccessUrl(filePath, 'inline')
+export function getFilePreviewUrl(fileId: string | null | undefined): string | null {
+  return getFileAccessUrl(fileId, 'inline')
 }
 
-export function getFileDownloadUrl(filePath: string | null | undefined): string | null {
-  return getFileAccessUrl(filePath, 'attachment')
+export function getFileDownloadUrl(fileId: string | null | undefined): string | null {
+  return getFileAccessUrl(fileId, 'attachment')
 }

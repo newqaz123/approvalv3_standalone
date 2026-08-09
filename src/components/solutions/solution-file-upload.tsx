@@ -1,25 +1,30 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import { Upload, File, FileImage, FileText, X } from 'lucide-react'
+import { Upload, File, FileImage, FileText, X, RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Progress } from '@/components/ui/progress'
 import { cn } from '@/lib/utils'
+import type { AttachmentUploadItem } from '@/lib/attachments/upload-batch'
+import {
+  MAX_ATTACHMENT_BYTES,
+  MAX_ATTACHMENTS_PER_FORM,
+  ATTACHMENT_EXTENSIONS,
+  validateAttachmentMetadata,
+} from '@/lib/attachments/policy'
 
-interface FileWithProgress {
-  file: File
-  id: string
-  status: 'pending' | 'uploading' | 'success' | 'error'
-  progress: number
-  error?: string
-}
-
+/**
+ * Items-first solution attachment uploader. The sole caller
+ * (SolutionForm) drives this through the `useSolutionAttachments` hook,
+ * passing `items` + add/remove/retry callbacks. The legacy parallel
+ * File[]-based API was removed in Task 6 after the caller migration.
+ */
 interface SolutionFileUploadProps {
-  files: File[]  // Keep for backward compatibility
-  filesWithProgress?: FileWithProgress[]  // New prop with progress data
-  onFilesChange: (files: File[]) => void
-  onRemoveFile?: (fileId: string) => void  // New prop for ID-based removal
+  items: AttachmentUploadItem[]
+  onAddFiles?: (files: File[]) => void
+  onRemoveItem?: (id: string) => void
+  onRetryItem?: (id: string) => void
+
   disabled?: boolean
   maxFiles?: number
   maxSizeBytes?: number
@@ -27,64 +32,22 @@ interface SolutionFileUploadProps {
   onRemoveExistingFile?: (fileId: string) => void
 }
 
-const ALLOWED_EXTENSIONS = [
-  'pdf',
-  'jpg',
-  'jpeg',
-  'png',
-  'gif',
-  'webp',
-  'dwg',
-  'dxf',
-  'step',
-  'stp',
-  'iges',
-  'igs',
-  'doc',
-  'docx',
-  'xls',
-  'xlsx',
-  'ppt',
-  'pptx',
-]
-
-const ALLOWED_MIME_TYPES = [
-  'application/pdf',
-  'image/jpeg',
-  'image/png',
-  'image/gif',
-  'image/webp',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'application/vnd.ms-excel',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  'application/vnd.ms-powerpoint',
-  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-]
-
 export function SolutionFileUpload({
-  files,
-  filesWithProgress,
-  onFilesChange,
-  onRemoveFile,
+  items,
+  onAddFiles,
+  onRemoveItem,
+  onRetryItem,
   disabled = false,
-  maxFiles = 10,
-  maxSizeBytes = 10 * 1024 * 1024, // 10MB default
+  maxFiles = MAX_ATTACHMENTS_PER_FORM,
+  maxSizeBytes = MAX_ATTACHMENT_BYTES,
   existingFiles = [],
   onRemoveExistingFile,
 }: SolutionFileUploadProps) {
   const [dragActive, setDragActive] = useState(false)
   const [errors, setErrors] = useState<string[]>([])
 
-  // Create a helper to determine which array to use for display
-  const displayFiles = filesWithProgress || files.map((file, index) => ({
-    file,
-    id: `file-${index}`,
-    status: 'pending' as const,
-    progress: 0,
-  }))
-
-  const totalFileCount = existingFiles.length + files.length
+  const currentCount = items.length
+  const totalFileCount = existingFiles.length + currentCount
 
   const getFileExtension = (filename: string): string => {
     return filename.slice(((filename.lastIndexOf('.') - 1) >>> 0) + 2).toLowerCase()
@@ -127,26 +90,11 @@ export function SolutionFileUpload({
   }
 
   const validateFile = (file: File): string | null => {
-    // Check file size
-    if (file.size > maxSizeBytes) {
-      return `${file.name}: File size exceeds ${Math.round(maxSizeBytes / 1024 / 1024)}MB limit`
-    }
-
-    // Check file extension
-    const extension = getFileExtension(file.name)
-    if (!ALLOWED_EXTENSIONS.includes(extension)) {
-      return `${file.name}: File type not supported`
-    }
-
-    // For files with MIME types, validate those too
-    if (file.type && !ALLOWED_MIME_TYPES.includes(file.type)) {
-      // CAD files often have generic MIME type, so we rely on extension check
-      if (!['dwg', 'dxf', 'step', 'stp', 'iges', 'igs'].includes(extension)) {
-        return `${file.name}: File type not supported`
-      }
-    }
-
-    return null
+    return validateAttachmentMetadata({
+      name: file.name,
+      type: file.type,
+      size: file.size,
+    })
   }
 
   const handleFiles = useCallback(
@@ -178,10 +126,11 @@ export function SolutionFileUpload({
       }
 
       if (validFiles.length > 0) {
-        onFilesChange([...files, ...validFiles])
+        // The hook owns state and handles the append via addFiles.
+        onAddFiles?.(validFiles)
       }
     },
-    [files, onFilesChange, maxFiles, maxSizeBytes, totalFileCount, existingFiles.length]
+    [onAddFiles, maxFiles, totalFileCount, existingFiles.length]
   )
 
   const handleDrag = useCallback((e: React.DragEvent) => {
@@ -219,11 +168,6 @@ export function SolutionFileUpload({
     },
     [disabled, handleFiles]
   )
-
-  const removeFile = (index: number) => {
-    const newFiles = files.filter((_, i) => i !== index)
-    onFilesChange(newFiles)
-  }
 
   const formatFileSize = (bytes: number) => {
     if (bytes < 1024) return bytes + ' B'
@@ -306,8 +250,8 @@ export function SolutionFileUpload({
             id="solution-file-upload"
             multiple
             onChange={handleChange}
-            disabled={disabled || files.length >= maxFiles}
-            accept={ALLOWED_EXTENSIONS.map((ext) => `.${ext}`).join(',')}
+            disabled={disabled || currentCount >= maxFiles}
+            accept={ATTACHMENT_EXTENSIONS.map((ext) => `.${ext}`).join(',')}
             className="hidden"
           />
           <label
@@ -331,17 +275,17 @@ export function SolutionFileUpload({
             </p>
             <p className="text-xs text-muted-foreground mt-1">
               {existingFiles.length > 0
-                ? `${existingFiles.length} existing + ${files.length} new / ${maxFiles} files`
-                : `${files.length} / ${maxFiles} files`
+                ? `${existingFiles.length} existing + ${currentCount} new / ${maxFiles} files`
+                : `${currentCount} / ${maxFiles} files`
               }
             </p>
           </label>
         </div>
 
         {/* Selected files list */}
-        {displayFiles.length > 0 && (
+        {items.length > 0 && (
           <div className="space-y-3">
-            {displayFiles.map((item, index) => {
+            {items.map((item) => {
               const file = item.file
               const showProgress = item.status === 'uploading'
               const isSuccess = item.status === 'success'
@@ -349,7 +293,7 @@ export function SolutionFileUpload({
 
               return (
                 <div
-                  key={`${file.name}-${index}`}
+                  key={item.id}
                   className="flex items-center gap-3 p-3 border rounded-lg bg-white"
                 >
                   {getFileIcon(file)}
@@ -359,10 +303,7 @@ export function SolutionFileUpload({
                       <span className="text-xs text-gray-500">{formatFileSize(file.size)}</span>
                     </div>
                     {showProgress && (
-                      <div className="mt-2">
-                        <Progress value={item.progress} className="h-2" />
-                        <p className="text-xs text-gray-500 mt-1">Uploading... {item.progress}%</p>
-                      </div>
+                      <p className="text-xs text-gray-500 mt-1">Uploading...</p>
                     )}
                     {isError && item.error && (
                       <p className="text-xs text-red-600 mt-1">{item.error}</p>
@@ -371,19 +312,27 @@ export function SolutionFileUpload({
                       <p className="text-xs text-green-600 mt-1">Uploaded</p>
                     )}
                   </div>
+                  {/* Retry action: error items stay in the list and remain
+                      retryable via the items-first API. */}
+                  {isError && onRetryItem && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => onRetryItem(item.id)}
+                      disabled={disabled}
+                      className="h-8 px-2 text-blue-600 hover:text-blue-700"
+                    >
+                      <RotateCcw className="h-4 w-4" />
+                      <span className="text-xs ml-1">Retry</span>
+                    </Button>
+                  )}
                   {!showProgress && !isSuccess && (
                     <Button
                       type="button"
                       variant="ghost"
                       size="sm"
-                      onClick={() => {
-                        // Prefer onRemoveFile if available (ID-based removal), fallback to index-based
-                        if (onRemoveFile) {
-                          onRemoveFile(item.id)
-                        } else {
-                          removeFile(index)
-                        }
-                      }}
+                      onClick={() => onRemoveItem?.(item.id)}
                       disabled={disabled}
                       className="h-8 w-8 p-0 text-destructive hover:text-destructive"
                     >

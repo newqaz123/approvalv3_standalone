@@ -3,8 +3,8 @@
 import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
 import { RequestStatus, UserRole } from '@prisma/client'
-import { submitSolutionSchema, SubmitSolutionInput } from '@/lib/schemas/solution-schemas'
-import { saveFile, generateFilePath } from '@/lib/files'
+import { submitSolutionSchema, SubmitSolutionInput, resubmitSolutionSchema, ResubmitSolutionInput } from '@/lib/schemas/solution-schemas'
+import { deleteAttachmentFile } from '@/lib/attachments/storage'
 import { revalidateRequestViews } from './request-view-invalidation'
 
 /**
@@ -119,20 +119,44 @@ export async function submitSolution(input: SubmitSolutionInput) {
       },
     })
 
-    // Link specific files uploaded during solution submission to solution
-    // Only transfer files that were explicitly uploaded as part of this solution (via fileIds)
-    if (validated.fileIds && validated.fileIds.length > 0) {
-      await tx.file_attachments.updateMany({
+    // Link only attachments the current user owns and staged on this request,
+    // still unlinked (solutionId null). The candidate IDs were already validated
+    // as <= MAX_ATTACHMENTS_PER_FORM unique UUIDs by submitSolutionSchema; here
+    // we re-scope them to rows the submitting user actually owns before any
+    // write. The transfer is all-or-nothing: an exact count match is required
+    // up front and the updateMany result is verified, so nothing is linked
+    // unless every ID resolves to a valid, owned, staged row.
+    if (validated.fileIds.length > 0) {
+      const stagedAttachments = await tx.file_attachments.findMany({
         where: {
           id: { in: validated.fileIds },
           requestId: validated.requestId,
           solutionId: null,
+          uploadedById: user.id,
+        },
+        select: { id: true },
+      })
+
+      if (stagedAttachments.length !== validated.fileIds.length) {
+        throw new Error('One or more attachments are invalid or no longer available')
+      }
+
+      const linked = await tx.file_attachments.updateMany({
+        where: {
+          id: { in: validated.fileIds },
+          requestId: validated.requestId,
+          solutionId: null,
+          uploadedById: user.id,
         },
         data: {
           solutionId: solution.id,
           requestId: null,
         },
       })
+
+      if (linked.count !== validated.fileIds.length) {
+        throw new Error('One or more attachments are invalid or no longer available')
+      }
     }
 
     // Check if submitter is top-level in engineering (for auto-approval)
@@ -1757,20 +1781,16 @@ export async function rejectFinalApproval(requestId: string, comments: string, e
 
 /**
  * Resubmit an engineering solution after rejection
- * Updates the existing solution with new details and resets the approval chain
+ * Updates the existing solution with new details and resets the approval chain.
+ *
+ * Attachments are handled purely via IDs: `newFileIds` reference staged rows
+ * (uploaded through the authorized draft upload action) that get linked to the
+ * solution, and `deletedFileIds` reference existing solution attachments to
+ * remove. Raw File objects never cross this boundary. Physical file deletion
+ * for removed attachments runs ONLY after the DB transaction commits, so a
+ * cleanup failure can never roll back a successful resubmission.
  */
-export async function resubmitSolution(input: {
-  requestId: string
-  title: string
-  description: string
-  cost: number
-  currency: string
-  timeline: string
-  files: File[]
-  deletedFileIds?: string[]
-  useCustomHierarchy: boolean
-  customApprovers: string[]
-}) {
+export async function resubmitSolution(input: ResubmitSolutionInput) {
   const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
   if (!userId) {
     throw new Error('Unauthorized')
@@ -1794,9 +1814,14 @@ export async function resubmitSolution(input: {
     throw new Error('Only engineering users can resubmit solutions')
   }
 
+  // Validate input. newFileIds / deletedFileIds / customApprovers are <= 10
+  // unique UUID arrays with [] defaults; cost is positive; currency is the
+  // scoped enum.
+  const validated = resubmitSolutionSchema.parse(input)
+
   // Validate request exists and has a rejected solution
   const request = await prisma.requests.findUnique({
-    where: { id: input.requestId },
+    where: { id: validated.requestId },
     include: {
       solutions: {
         include: {
@@ -1835,51 +1860,96 @@ export async function resubmitSolution(input: {
     throw new Error('Can only resubmit rejected solutions')
   }
 
-  // Save new files to disk before transaction (avoid holding DB connection during I/O)
-  const savedFileData: Array<{ fileName: string; fileType: string; fileSize: number; filePath: string }> = []
-  for (const file of input.files) {
-    const filePath = generateFilePath(solution.id, file.name)
-    const bytes = await file.arrayBuffer()
-    await saveFile(filePath, Buffer.from(bytes))
-    savedFileData.push({ fileName: file.name, fileType: file.type, fileSize: file.size, filePath })
-  }
-
-  // Start transaction
+  // Single transaction: update solution, validate + link staged attachments,
+  // delete selected attachments, reset the approval chain, and transition
+  // status. Physical file cleanup for deleted attachments runs only AFTER this
+  // commits, so an I/O failure there never rolls back a successful resubmit.
   const result = await prisma.$transaction(async (tx) => {
     // Update solution details
     const updatedSolution = await tx.solutions.update({
       where: { id: solution.id },
       data: {
-        title: input.title,
-        description: input.description,
-        costEstimate: input.cost,
-        currency: input.currency,
-        timeline: input.timeline,
+        title: validated.title,
+        description: validated.description,
+        costEstimate: validated.cost,
+        currency: validated.currency,
+        timeline: validated.timeline,
         updatedAt: new Date(),
       },
     })
 
-    // Handle file attachments
-    if (input.deletedFileIds && input.deletedFileIds.length > 0) {
-      await tx.file_attachments.deleteMany({
-        where: {
-          id: { in: input.deletedFileIds },
-          solutionId: solution.id,
-        },
-      })
+    // Reject overlap between new and deleted id sets: a single id cannot be
+    // both a newly staged upload and an existing attachment marked for removal.
+    if (validated.newFileIds.length > 0 && validated.deletedFileIds.length > 0) {
+      const deletedSet = new Set(validated.deletedFileIds)
+      const hasOverlap = validated.newFileIds.some(id => deletedSet.has(id))
+      if (hasOverlap) {
+        throw new Error('An attachment cannot be both newly added and deleted in the same resubmission (overlap)')
+      }
     }
 
-    // Add new files using disk-saved paths
-    if (savedFileData.length > 0) {
-      await tx.file_attachments.createMany({
-        data: savedFileData.map(f => ({
+    // Query staged rows owned by the current user on this request that are
+    // still unlinked (solutionId null). An exact count match means every
+    // newFileId resolved to one valid, owned, staged row before any write.
+    const stagedAttachments = await tx.file_attachments.findMany({
+      where: {
+        id: { in: validated.newFileIds },
+        requestId: validated.requestId,
+        solutionId: null,
+        uploadedById: user.id,
+      },
+      select: { id: true },
+    })
+
+    if (stagedAttachments.length !== validated.newFileIds.length) {
+      throw new Error('One or more new attachments are invalid or no longer available')
+    }
+
+    // Query deletable rows scoped to the current solution. An exact count match
+    // means every deletedFileId resolved to one attachment actually owned by
+    // this solution. The filePath is captured now so post-commit cleanup can
+    // remove the physical file without re-reading the (soon-deleted) row.
+    const deletableAttachments = await tx.file_attachments.findMany({
+      where: {
+        id: { in: validated.deletedFileIds },
+        solutionId: solution.id,
+      },
+      select: { id: true, filePath: true },
+    })
+
+    if (deletableAttachments.length !== validated.deletedFileIds.length) {
+      throw new Error('One or more deleted attachments are invalid or no longer available')
+    }
+
+    // Link staged rows to the solution (solutionId set, requestId cleared) with
+    // an updateMany count re-check that guards against concurrent mutation
+    // between the read above and this write (TOCTOU under READ COMMITTED).
+    if (validated.newFileIds.length > 0) {
+      const linked = await tx.file_attachments.updateMany({
+        where: {
+          id: { in: validated.newFileIds },
+          requestId: validated.requestId,
+          solutionId: null,
+          uploadedById: user.id,
+        },
+        data: {
           solutionId: solution.id,
-          fileName: f.fileName,
-          fileType: f.fileType,
-          fileSize: f.fileSize,
-          filePath: f.filePath,
-          uploadedById: userId,
-        })),
+          requestId: null,
+        },
+      })
+
+      if (linked.count !== validated.newFileIds.length) {
+        throw new Error('One or more new attachments are invalid or no longer available')
+      }
+    }
+
+    // Delete the selected existing attachment rows inside the transaction.
+    if (validated.deletedFileIds.length > 0) {
+      await tx.file_attachments.deleteMany({
+        where: {
+          id: { in: validated.deletedFileIds },
+          solutionId: solution.id,
+        },
       })
     }
 
@@ -1893,9 +1963,9 @@ export async function resubmitSolution(input: {
     // Create new approval chain
     const approvalData = []
     
-    if (input.useCustomHierarchy && input.customApprovers.length > 0) {
+    if (validated.useCustomHierarchy && validated.customApprovers.length > 0) {
       // Custom approval chain
-      input.customApprovers.forEach((approverId, index) => {
+      validated.customApprovers.forEach((approverId, index) => {
         approvalData.push({
           solutionId: solution.id,
           requiredApproverId: approverId,
@@ -1981,10 +2051,10 @@ export async function resubmitSolution(input: {
       : RequestStatus.DesignCostEstimationApproval
 
     await tx.requests.update({
-      where: { id: input.requestId },
+      where: { id: validated.requestId },
       data: {
         status: newStatus,
-        ...(isAutoApproved ? { projectEstimateCost: input.cost } : {}),
+        ...(isAutoApproved ? { projectEstimateCost: validated.cost } : {}),
         updatedAt: new Date(),
       },
     })
@@ -1992,12 +2062,12 @@ export async function resubmitSolution(input: {
     // Add activity log
     await tx.request_activities.create({
       data: {
-        requestId: input.requestId,
+        requestId: validated.requestId,
         userId,
         action: 'solution_resubmitted',
         comments: isAutoApproved 
-          ? `Solution resubmitted and auto-approved (top-level submitter): "${input.title}"`
-          : `Solution resubmitted: "${input.title}"`,
+          ? `Solution resubmitted and auto-approved (top-level submitter): "${validated.title}"`
+          : `Solution resubmitted: "${validated.title}"`,
       },
     })
 
@@ -2005,12 +2075,12 @@ export async function resubmitSolution(input: {
     if (isAutoApproved) {
       await tx.request_activities.create({
         data: {
-          requestId: input.requestId,
+          requestId: validated.requestId,
           userId: request.requesterId,
           action: 'status_changed',
           fromStatus: RequestStatus.SentToEngineer,
           toStatus: RequestStatus.SendBackToRequester,
-          comments: `Solution "${input.title}" resubmitted and auto-approved (top-level submitter). Request sent back to requester for final review.`,
+          comments: `Solution "${validated.title}" resubmitted and auto-approved (top-level submitter). Request sent back to requester for final review.`,
         },
       })
 
@@ -2022,16 +2092,42 @@ export async function resubmitSolution(input: {
           type: 'solution_ready',
           title: 'Solution Ready for Review',
           message: `📤 Ready for Review: "${request.title}" solution has been updated and is ready for your department's final review.`,
-          requestId: input.requestId,
+          requestId: validated.requestId,
         }
       )
     }
 
-    return updatedSolution
+    return { updatedSolution, deletedAttachments: deletableAttachments }
   })
 
+  // AFTER the transaction commits: physically delete each removed attachment's
+  // file. This runs outside the DB transaction, so a failed or slow unlink can
+  // never roll back the committed resubmission. Promise.allSettled ensures one
+  // rejected delete does not abort the remaining deletes; per-attachment
+  // failures are surfaced individually as cleanup warnings.
+  const deletedAttachments = result.deletedAttachments
+  const cleanupWarnings: string[] = []
+  if (deletedAttachments.length > 0) {
+    const cleanupResults = await Promise.allSettled(
+      deletedAttachments.map(async (attachment) => {
+        await deleteAttachmentFile(attachment.filePath)
+        return attachment.id
+      })
+    )
+    cleanupResults.forEach((outcome, index) => {
+      if (outcome.status === 'rejected') {
+        const attachment = deletedAttachments[index]
+        cleanupWarnings.push(`Attachment ${attachment.id} file could not be deleted`)
+        console.warn(
+          `[resubmitSolution] Failed to clean up attachment ${attachment.id} at ${attachment.filePath}`,
+          outcome.reason
+        )
+      }
+    })
+  }
+
   // Send notifications to approvers only if NOT auto-approved
-  const isAutoApproved = result && await prisma.solution_approvals.findFirst({
+  const isAutoApproved = await prisma.solution_approvals.findFirst({
     where: {
       solutionId: solution.id,
       status: 'approved',
@@ -2041,15 +2137,15 @@ export async function resubmitSolution(input: {
   if (!isAutoApproved) {
     const { createNotification } = await import('./notifications')
     
-    if (input.useCustomHierarchy && input.customApprovers.length > 0) {
+    if (validated.useCustomHierarchy && validated.customApprovers.length > 0) {
       // Notify custom approvers
-      for (const approverId of input.customApprovers) {
+      for (const approverId of validated.customApprovers) {
         await createNotification({
           userId: approverId,
           type: 'approval_needed',
           title: 'Solution Resubmitted',
           message: `📤 Solution resubmitted for "${request.title}". Please review the updated solution.`,
-          requestId: input.requestId,
+          requestId: validated.requestId,
         })
       }
     } else {
@@ -2079,7 +2175,12 @@ export async function resubmitSolution(input: {
     }
   }
 
-  revalidateRequestViews(input.requestId)
+  revalidateRequestViews(validated.requestId)
 
-  return { success: true, solutionId: result.id }
+  return {
+    success: true,
+    solutionId: result.updatedSolution.id,
+    deletedAttachmentIds: deletedAttachments.map(a => a.id),
+    cleanupWarnings,
+  }
 }

@@ -10,15 +10,18 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "check": "npx tsc --noEmit && npm run test:manage && npx tsx --test tests/regression/*.test.ts",
     "manage": "node tools/manage.mjs",
     "test:manage": "node --test tests/tools/command.test.mjs tests/tools/env.test.mjs tests/tools/manage.test.mjs",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:debug": "playwright test --debug",
+    "test:e2e:upload": "playwright test tests/e2e/solution-attachment-upload.spec.ts",
     "test:phase7": "TEST_BASE_URL=http://localhost:3000 playwright test tests/e2e/phase7/",
     "test:phase7:headed": "TEST_BASE_URL=http://localhost:3000 playwright test tests/e2e/phase7/ --headed",
-    "test:phase7:report": "TEST_BASE_URL=http://localhost:3000 playwright test tests/e2e/phase7/ --reporter=html && playwright show-report"
+    "test:phase7:report": "TEST_BASE_URL=http://localhost:3000 playwright test tests/e2e/phase7/ --reporter=html && playwright show-report",
+    "migrate:uploads": "tsx scripts/migrate-uploads.ts"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.1",
@@ -52,7 +55,7 @@
     "json2csv": "^6.0.0-alpha.2",
     "lucide-react": "^0.563.0",
     "mammoth": "^1.12.0",
-    "next": "^15.1.4",
+    "next": "15.5.23",
     "next-auth": "^5.0.0-beta.30",
     "nodemailer": "^7.0.13",
     "pdf-lib": "^1.17.1",

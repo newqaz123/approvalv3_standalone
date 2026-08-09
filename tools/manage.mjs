@@ -102,6 +102,11 @@ export function logEnvironmentReport(report, log = console.log) {
   if (report.unknownKeys.length > 0) {
     log(`Unknown keys: ${report.unknownKeys.join(', ')}`)
   }
+
+  if (report.originIssues.length > 0) {
+    log('Application origin issues:')
+    for (const issue of report.originIssues) log(`  - ${issue}`)
+  }
 }
 
 export function formatBytes(bytes) {
@@ -159,7 +164,11 @@ export async function envDoctor({
   logEnvironmentReport(report, log)
 
   if (report.missingRequired.length === 0 && report.missingOptional.length === 0) {
-    log('Environment file has all template keys.')
+    if (report.originIssues.length === 0) {
+      log('Environment file has all template keys.')
+    } else {
+      log('Environment file has all template keys but auth origin issues. Fix the issues above before deploying.')
+    }
     return
   }
 

@@ -15,7 +15,7 @@ async function makePdf(text: string, size: [number, number] = [240, 120]): Promi
 
 describe('pdf package helpers', () => {
   it('falls back to browser rendering when direct PNG embedding fails', async () => {
-    const uploadDir = join(process.cwd(), 'public', 'uploads', 'test-pdf-package')
+    const uploadDir = join(process.cwd(), 'uploads', 'test-pdf-package')
     const filePath = join(uploadDir, 'browser-renderable.png')
     mkdirSync(uploadDir, { recursive: true })
     writeFileSync(filePath, Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="80" height="40"><rect width="80" height="40" fill="red"/></svg>'))

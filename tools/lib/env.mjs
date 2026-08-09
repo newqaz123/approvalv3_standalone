@@ -1,5 +1,7 @@
 export const REQUIRED_PRODUCTION_KEYS = [
   'DATABASE_URL',
+  'AUTH_URL',
+  'AUTH_TRUST_HOST',
   'NEXTAUTH_URL',
   'NEXTAUTH_SECRET',
   'NEXT_PUBLIC_APP_URL',
@@ -46,6 +48,30 @@ export function parseEnvText(text) {
   return result
 }
 
+export function normalizeOrigin(value) {
+  if (!value) return null
+  try {
+    const url = new URL(value)
+    return `${url.protocol}//${url.host}`
+  } catch {
+    return null
+  }
+}
+
+export function createOriginReport(current) {
+  const entries = ['AUTH_URL', 'NEXTAUTH_URL', 'NEXT_PUBLIC_APP_URL']
+    .map((key) => [key, normalizeOrigin(current[key])])
+  const issues = []
+  for (const [key, origin] of entries) {
+    if (!origin) issues.push(`${key} must be a valid absolute URL`)
+    else if (/^http:\/\/(localhost|127\.0\.0\.1)(:|$)/.test(origin)) issues.push(`${key} must not use localhost in production`)
+  }
+  const distinct = new Set(entries.map(([, origin]) => origin).filter(Boolean))
+  if (distinct.size > 1) issues.push('AUTH_URL, NEXTAUTH_URL, and NEXT_PUBLIC_APP_URL must use the same origin')
+  if (current.AUTH_TRUST_HOST !== 'true') issues.push('AUTH_TRUST_HOST=true is required behind the production reverse proxy')
+  return { origin: distinct.size === 1 ? [...distinct][0] : null, issues }
+}
+
 export function createEnvReport({ current, template }) {
   const templateKeys = Object.keys(template)
   const missingRequired = REQUIRED_PRODUCTION_KEYS.filter((key) => !current[key])
@@ -58,6 +84,7 @@ export function createEnvReport({ current, template }) {
     missingOptional,
     unknownKeys: Object.keys(current).filter((key) => !templateKeys.includes(key)),
     presentRequired: REQUIRED_PRODUCTION_KEYS.filter((key) => current[key]),
+    originIssues: createOriginReport(current).issues,
   }
 }
 
