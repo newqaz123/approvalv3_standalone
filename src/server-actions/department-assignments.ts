@@ -3,6 +3,7 @@
 import prisma from '@/lib/prisma'
 import { requireAdmin } from '@/lib/auth'
 import { revalidatePath } from 'next/cache'
+import { validateApprovalLevel } from '@/lib/approval-levels'
 
 /**
  * Get all additional department assignments for a user (DepartmentApprover records)
@@ -44,6 +45,8 @@ export async function addUserToDepartment(
 ) {
   const adminId = await requireAdmin()
   if (!adminId) throw new Error('Admin access required')
+
+  const validatedLevel = validateApprovalLevel(level)
 
   // Fetch user to get their home department and role
   const user = await prisma.user.findUnique({
@@ -90,7 +93,7 @@ export async function addUserToDepartment(
     data: {
       departmentId,
       approverId: userId,
-      approverLevel: level,
+      approverLevel: validatedLevel,
     },
   })
 

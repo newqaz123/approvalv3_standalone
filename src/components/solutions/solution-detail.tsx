@@ -2,6 +2,7 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { FormattedText } from '@/components/ui/formatted-text'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { SolutionApprovalActions } from '@/components/approvals/solution-approval-actions'
@@ -102,8 +103,8 @@ export function SolutionDetail({
           <div>
             <h4 className="mb-2 text-sm font-medium">Description</h4>
             <ScrollArea className="h-40 rounded-md border p-3">
-              <p className="whitespace-pre-wrap text-sm text-gray-700">
-                {solution.description}
+              <p className="text-sm text-gray-700">
+                <FormattedText source={solution.description} />
               </p>
             </ScrollArea>
           </div>

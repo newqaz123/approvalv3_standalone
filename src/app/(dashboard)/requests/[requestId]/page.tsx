@@ -1,13 +1,13 @@
 import { auth } from '@/lib/auth-config'
 import { redirect, notFound } from 'next/navigation'
 import { format } from 'date-fns'
-import { ArrowLeft, Download, Calendar, User, Building2, FileText, History, CheckCircle2, Wrench } from 'lucide-react'
+import { ArrowLeft, Download, User, Building2, FileText, History, CheckCircle2, Wrench } from 'lucide-react'
 import Link from 'next/link'
 import prisma from '@/lib/prisma'
 import { getFileDownloadUrl } from '@/lib/file-preview'
 import { StatusBadge } from '@/components/requests/status-badge'
 import { Button } from '@/components/ui/button'
-import { Separator } from '@/components/ui/separator'
+import { FormattedText } from '@/components/ui/formatted-text'
 
 interface RequestDetailPageProps {
   params: Promise<{
@@ -22,7 +22,6 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
   if (!session?.user?.id) {
     redirect('/sign-in')
   }
-  const userId = session.user.id
 
   // Single comprehensive query with includes - optimal for fetching all related data
   // Prisma handles joins efficiently, avoiding N+1 query problems
@@ -102,7 +101,6 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
 
   const solution = request.solutions[0] || null
   const hasRejection = request.approvals.some((a) => a.status === 'rejected')
-  const hasApprovedApprovals = request.approvals.some((a) => a.status === 'approved')
 
   const formatFileSize = (bytes: number) => {
     if (bytes < 1024) return bytes + ' B'
@@ -158,7 +156,9 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
         {/* Description */}
         <div className="bg-white rounded-lg border p-6">
           <h2 className="text-lg font-semibold mb-3">Description</h2>
-          <p className="text-gray-700 whitespace-pre-wrap">{request.description}</p>
+          <p className="text-gray-700">
+            <FormattedText source={request.description} />
+          </p>
         </div>
 
         {/* Requester Info */}
@@ -201,7 +201,9 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
 
               <div>
                 <p className="text-sm text-gray-500">Description</p>
-                <p className="text-gray-700 mt-1">{solution.description}</p>
+                <p className="text-gray-700 mt-1">
+                  <FormattedText source={solution.description} />
+                </p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

@@ -17,7 +17,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
+import { FormattedTextarea } from '@/components/ui/formatted-textarea'
 import {
   Form,
   FormControl,
@@ -168,7 +168,7 @@ export function ResubmitRequestDialog({
                 <FormItem>
                   <FormLabel>Description</FormLabel>
                   <FormControl>
-                    <Textarea
+                    <FormattedTextarea
                       {...field}
                       placeholder="Describe the improvement you're requesting and why it's needed..."
                       rows={6}

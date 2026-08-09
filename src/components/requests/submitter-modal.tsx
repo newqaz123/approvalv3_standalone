@@ -35,7 +35,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
-import { Textarea } from '@/components/ui/textarea'
+import { FormattedTextarea } from '@/components/ui/formatted-textarea'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
@@ -671,7 +671,7 @@ export function SubmitterModal({
                 <Label htmlFor="description" className="text-sm font-bold">
                   Description <span className="text-red-500">*</span>
                 </Label>
-                <Textarea
+                <FormattedTextarea
                   id="description"
                   value={description}
                   onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setDescription(e.target.value)}
@@ -721,7 +721,7 @@ export function SubmitterModal({
                 <Label htmlFor="solutionDescription" className="text-sm font-bold">
                   Solution Description <span className="text-red-500">*</span>
                 </Label>
-                <Textarea
+                <FormattedTextarea
                   id="solutionDescription"
                   value={solutionDescription}
                   onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setSolutionDescription(e.target.value)}
