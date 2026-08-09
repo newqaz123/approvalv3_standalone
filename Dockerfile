@@ -59,6 +59,8 @@ COPY --from=builder /app/.next ./.next
 # Copy only production node_modules (exclude devDependencies)
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./
+# Copy the runtime config so `next start` reads the 15 MB Server Action limit.
+COPY --from=builder /app/next.config.mjs ./
 # Create the private uploads directory (outside the public web root) and
 # chown it to the runtime user so the app can write the uploads_data volume.
 RUN mkdir -p /app/uploads && chown nextjs:nodejs /app/uploads

@@ -1,6 +1,6 @@
 import { it } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 
 const read = (path: string): string => readFileSync(path, 'utf8')
 
@@ -46,4 +46,62 @@ it('archives and restores the private uploads path', () => {
   const restore = read('scripts/restore.sh')
   assert.match(backup, /\/app\/uploads/)
   assert.match(restore, /\/app\/uploads/)
+})
+
+// Guards the Server Action transport limit (Task 8): the 15 MB proxy limit
+// stays above the 10 MB application policy (Task 1) so legitimate uploads are
+// never clipped by the transport before the app's own validation runs.
+
+it('pins next to an exact 15.5.23 in package.json', () => {
+  const pkg = JSON.parse(read('package.json'))
+  assert.equal(
+    pkg.dependencies.next,
+    '15.5.23',
+    'package.json must pin next to exactly 15.5.23 (no caret) so @next/swc matches',
+  )
+})
+
+it('uses the MJS runtime config with the 15mb Server Action body limit', () => {
+  assert.ok(!existsSync('next.config.ts'), 'next.config.ts must be absent')
+  assert.ok(existsSync('next.config.mjs'), 'next.config.mjs must exist')
+  const config = read('next.config.mjs')
+  assert.match(
+    config,
+    /serverActions:\s*\{\s*bodySizeLimit:\s*['"]15mb['"]\s*\}/,
+    'next.config.mjs must set experimental.serverActions.bodySizeLimit to 15mb',
+  )
+  assert.match(
+    config,
+    /optimizePackageImports:\s*\[['"]lucide-react['"]\]/,
+  )
+})
+
+it('copies next.config.mjs into the runner image', () => {
+  const dockerfile = read('Dockerfile')
+  assert.match(
+    dockerfile,
+    /COPY --from=builder \/app\/next\.config\.mjs \.\//,
+    'runner stage must copy next.config.mjs so next start reads the 15mb limit',
+  )
+})
+
+it('documents the 15m reverse-proxy body limit and the 10/15 MB split', () => {
+  for (const doc of ['DEPLOY.md', 'docs/DEPLOY.md']) {
+    const text = read(doc)
+    assert.match(
+      text,
+      /client_max_body_size\s+15m;/,
+      `${doc} must include the Nginx client_max_body_size 15m; directive`,
+    )
+    assert.match(
+      text,
+      /10\s*MB/i,
+      `${doc} must explain the 10 MB application attachment limit`,
+    )
+    assert.match(
+      text,
+      /15\s*MB/i,
+      `${doc} must explain the 15 MB Server Action transport limit`,
+    )
+  }
 })

@@ -165,7 +165,7 @@ Expected output:
 
 Access the application at: `http://your-server-ip:3000`
 
-**Note:** If deploying to a production domain, configure a reverse proxy (Nginx/Apache) to forward HTTP/HTTPS traffic to port 3000. This is outside the scope of this Docker deployment guide.
+**Note:** If deploying to a production domain, configure a reverse proxy (Nginx) to forward HTTP/HTTPS traffic to port 3000. See [Reverse Proxy (Nginx)](#reverse-proxy-nginx) for a production example including the upload body-size limit.
 
 ---
 
@@ -504,6 +504,50 @@ The Dockerfile uses three stages:
 4. **runner:** Minimal production image with built artifacts
 
 This results in a smaller final image (~110MB vs 300MB+ without stages).
+
+---
+
+## Reverse Proxy (Production Nginx)
+
+Put Nginx (or another reverse proxy) in front of the container on production
+domains and forward traffic to the host port the app publishes (3000).
+
+```nginx
+server {
+    listen 80;
+    server_name approval.example.com;
+
+    # Server Action transport limit. The app itself rejects attachments over
+    # 10 MB (see below); 15 MB here keeps the transport from clipping a valid
+    # upload before the app's own validation runs.
+    client_max_body_size 15m;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade           $http_upgrade;
+        proxy_set_header Connection        "upgrade";
+    }
+
+    # Attachments now live in the private /app/uploads volume and are streamed
+    # only by the authenticated app route. Direct serving from /uploads/ is
+    # obsolete — deny it so files are never exposed without authorization.
+    location /uploads/ {
+        deny all;
+        return 404;
+    }
+}
+```
+
+**Upload limits — 10 MB app / 15 MB transport:** The application rejects any
+attachment larger than **10 MB** (its own policy). The Next.js Server Action
+transport and this reverse proxy both allow up to **15 MB**, so the
+application's validation — not the network layer — is the gatekeeper that
+rejects oversized uploads.
 
 ---
 
