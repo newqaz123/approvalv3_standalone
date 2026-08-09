@@ -25,7 +25,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
-import { Textarea } from '@/components/ui/textarea'
+import { FormattedTextarea } from '@/components/ui/formatted-textarea'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
@@ -190,7 +190,7 @@ export function RequestResubmitModal({
               <Label htmlFor="description" className="text-sm font-bold">
                 Description <span className="text-red-500">*</span>
               </Label>
-              <Textarea
+              <FormattedTextarea
                 id="description"
                 value={description}
                 onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setDescription(e.target.value)}

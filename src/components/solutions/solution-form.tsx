@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { FormattedTextarea } from '@/components/ui/formatted-textarea'
 import {
   Select,
   SelectContent,
@@ -309,7 +310,7 @@ export function SolutionForm({
               <FormItem>
                 <FormLabel>Description *</FormLabel>
                 <FormControl>
-                  <Textarea
+                  <FormattedTextarea
                     placeholder="Provide detailed information about your solution..."
                     rows={6}
                     {...field}

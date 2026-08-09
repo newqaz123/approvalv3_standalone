@@ -19,6 +19,7 @@ import {
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { FormattedTextarea } from '@/components/ui/formatted-textarea'
 import {
   Select,
   SelectContent,
@@ -331,7 +332,7 @@ export function RequestForm({ templates = [], defaultTemplateId, onSuccess }: Re
             <FormItem>
               <FormLabel className="text-base md:text-sm">Description *</FormLabel>
               <FormControl>
-                <Textarea
+                <FormattedTextarea
                   placeholder="Provide detailed information about your request..."
                   rows={6}
                   {...field}
