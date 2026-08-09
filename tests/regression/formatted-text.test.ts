@@ -63,4 +63,37 @@ describe('formatted description tokenizer', () => {
     assert.equal(renderFormattedTextPlainText('before **bold words** after', 12), 'before bold...')
     assert.doesNotMatch(renderFormattedTextHtml('before **bold words** after', 12), /\*\*/)
   })
+
+  it('truncates by Unicode code points so non-BMP characters are not split', () => {
+    const tokens = truncateFormattedText('👍extra', 1)
+    const visible = tokens.map(token => (token.type === 'lineBreak' ? '\n' : token.value)).join('')
+    assert.equal(visible, '👍...')
+    for (const token of tokens) {
+      if (token.type === 'lineBreak') continue
+      // Reject lone UTF-16 surrogates from code-unit slicing.
+      assert.doesNotMatch(token.value, /[\uD800-\uDBFF](?![\uDC00-\uDFFF])/u)
+      assert.doesNotMatch(token.value, /(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u)
+    }
+    assert.equal(renderFormattedTextPlainText('👍extra', 1), '👍...')
+    assert.equal(renderFormattedTextHtml('👍extra', 1), '👍...')
+  })
+
+  it('preserves a counted trailing newline when truncating and only trims horizontal whitespace', () => {
+    const tokens = truncateFormattedText('ab\ncd', 3)
+    assert.deepEqual(tokens, [
+      { type: 'text', value: 'ab' },
+      { type: 'lineBreak' },
+      { type: 'text', value: '...' },
+    ])
+    assert.equal(renderFormattedTextPlainText('ab\ncd', 3), 'ab\n...')
+    assert.equal(renderFormattedTextHtml('ab\ncd', 3), 'ab<br />...')
+
+    const spaced = truncateFormattedText('ab \ncd', 4)
+    assert.deepEqual(spaced, [
+      { type: 'text', value: 'ab' },
+      { type: 'lineBreak' },
+      { type: 'text', value: '...' },
+    ])
+    assert.equal(renderFormattedTextPlainText('ab \ncd', 4), 'ab\n...')
+  })
 })

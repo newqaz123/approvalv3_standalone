@@ -138,8 +138,20 @@ export function tokenizeFormattedText(source: string): FormattedTextToken[] {
   return tokens
 }
 
+function codePointLength(value: string): number {
+  return Array.from(value).length
+}
+
+function sliceByCodePoints(value: string, maxCodePoints: number): string {
+  if (maxCodePoints <= 0) {
+    return ''
+  }
+
+  return Array.from(value).slice(0, maxCodePoints).join('')
+}
+
 function tokenVisibleLength(token: FormattedTextToken): number {
-  return token.type === 'lineBreak' ? 1 : token.value.length
+  return token.type === 'lineBreak' ? 1 : codePointLength(token.value)
 }
 
 function tokensToVisibleString(tokens: FormattedTextToken[]): string {
@@ -158,22 +170,26 @@ export function visibleFormattedText(source: string): string {
   return tokensToVisibleString(tokenizeFormattedText(source))
 }
 
-function trimTrailingWhitespaceTokens(tokens: FormattedTextToken[]): void {
-  while (tokens.length > 0) {
-    const last = tokens[tokens.length - 1]!
-    if (last.type === 'lineBreak') {
-      tokens.pop()
+function trimTrailingHorizontalWhitespaceTokens(tokens: FormattedTextToken[]): void {
+  // Preserve counted lineBreak tokens. Only strip trailing horizontal whitespace before ellipsis,
+  // including horizontal whitespace that sits immediately before a preserved trailing newline.
+  let index = tokens.length - 1
+  while (index >= 0) {
+    const token = tokens[index]!
+    if (token.type === 'lineBreak') {
+      index -= 1
       continue
     }
 
-    const trimmed = last.value.replace(/[ \t\f\v]+$/u, '')
+    const trimmed = token.value.replace(/[ \t\f\v]+$/u, '')
     if (trimmed.length === 0) {
-      tokens.pop()
+      tokens.splice(index, 1)
+      index -= 1
       continue
     }
 
-    if (trimmed !== last.value) {
-      last.value = trimmed
+    if (trimmed !== token.value) {
+      token.value = trimmed
     }
     break
   }
@@ -208,18 +224,19 @@ export function truncateFormattedText(
     }
 
     const remaining = maxVisibleCharacters - used
-    if (token.value.length <= remaining) {
+    const valueLength = codePointLength(token.value)
+    if (valueLength <= remaining) {
       appendValue(truncated, token.type, token.value)
-      used += token.value.length
+      used += valueLength
       continue
     }
 
-    appendValue(truncated, token.type, token.value.slice(0, remaining))
+    appendValue(truncated, token.type, sliceByCodePoints(token.value, remaining))
     used = maxVisibleCharacters
     break
   }
 
-  trimTrailingWhitespaceTokens(truncated)
+  trimTrailingHorizontalWhitespaceTokens(truncated)
   appendValue(truncated, 'text', '...')
   return truncated
 }
