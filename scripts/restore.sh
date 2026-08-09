@@ -23,6 +23,39 @@ APP_CONTAINER="${APP_CONTAINER:-approval-app}"
 POSTGRES_USER_VALUE="${POSTGRES_USER:-postgres}"
 POSTGRES_DB_VALUE="${POSTGRES_DB:-app_db}"
 
+# Resolve the actual Docker volume name that backs the uploads mount. Prefers
+# the declared `uploads_data` name; otherwise falls back to the project-prefixed
+# volume (e.g. <project>_uploads_data) discovered through `docker compose
+# config --volumes` and `docker volume ls`. The existing volume is never
+# recreated or renamed.
+resolve_uploads_volume() {
+    local declared resolved
+    declared="$(docker compose config --volumes 2>/dev/null | grep -x 'uploads_data' | head -n1)"
+    if [ -n "$declared" ] && docker volume ls --format '{{.Name}}' 2>/dev/null | grep -qx "$declared"; then
+        printf '%s\n' "$declared"
+        return 0
+    fi
+    resolved="$(docker volume ls --format '{{.Name}}' 2>/dev/null | grep -Ex '([A-Za-z0-9][A-Za-z0-9_.-]*_)?uploads_data' | head -n1)"
+    if [ -n "$resolved" ]; then
+        printf '%s\n' "$resolved"
+    else
+        printf '%s\n' 'uploads_data'
+    fi
+}
+
+# Resolve the uploads path inside a running app container. Prefers the private
+# /app/uploads mount and falls back to the legacy public path only while a
+# pre-migration image is still running (transition period).
+resolve_uploads_path_in_container() {
+    if docker exec "$APP_CONTAINER" test -d /app/uploads 2>/dev/null; then
+        printf '%s\n' '/app/uploads'
+    elif docker exec "$APP_CONTAINER" test -d /app/public/uploads 2>/dev/null; then
+        printf '%s\n' '/app/public/uploads'
+    else
+        printf '%s\n' '/app/uploads'
+    fi
+}
+
 # Check arguments
 if [ $# -eq 0 ]; then
     echo "============================================"
@@ -143,14 +176,16 @@ if [ -n "$UPLOADS_BACKUP" ]; then
     # This will overwrite existing files in the volume
     BACKUP_DIR_ABS="$(cd "$(dirname "$UPLOADS_BACKUP")" && pwd)"
     if docker ps --format '{{.Names}}' | grep -qx "$APP_CONTAINER"; then
+        UPLOADS_PATH="$(resolve_uploads_path_in_container)"
         docker run --rm \
             --volumes-from "$APP_CONTAINER" \
             -v "$BACKUP_DIR_ABS:/backup:ro" \
             alpine:latest \
-            sh -c "rm -rf /app/public/uploads/* && tar -xzf '/backup/$(basename $UPLOADS_BACKUP)' -C /app/public/uploads"
+            sh -c "rm -rf ${UPLOADS_PATH}/* && tar -xzf '/backup/$(basename $UPLOADS_BACKUP)' -C ${UPLOADS_PATH}"
     else
+        UPLOADS_VOLUME="$(resolve_uploads_volume)"
         docker run --rm \
-            -v uploads_data:/data \
+            -v "$UPLOADS_VOLUME:/data" \
             -v "$BACKUP_DIR_ABS:/backup:ro" \
             alpine:latest \
             sh -c "rm -rf /data/* && tar -xzf '/backup/$(basename $UPLOADS_BACKUP)' -C /data"
