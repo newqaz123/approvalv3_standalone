@@ -702,9 +702,12 @@ export function RequestModalRouter({
                 title: data.title || modalData.solution?.title || '',
                 description: data.description,
                 cost: typeof data.cost === 'string' ? parseFloat(data.cost) : (data.cost || 0),
-                currency: data.currency || 'THB',
+                currency: (data.currency as 'THB' | 'USD' | 'EUR') || 'THB',
                 timeline: data.timeline,
-                files: data.files || [],
+                // New attachments are added via staged uploads (Task 6 owns
+                // useSolutionAttachments + data.fileIds); resubmit passes staged
+                // IDs only, never raw File[] across the server boundary.
+                newFileIds: [],
                 deletedFileIds: data.deletedFileIds || [],
                 useCustomHierarchy: data.useCustomHierarchy || false,
                 customApprovers: data.customApprovers || [],
@@ -972,9 +975,12 @@ export function RequestModalRouter({
                 title: data.title || modalData.solution?.title || '',
                 description: data.description,
                 cost: typeof data.cost === 'string' ? parseFloat(data.cost) : (data.cost || 0),
-                currency: data.currency || 'THB',
+                currency: (data.currency as 'THB' | 'USD' | 'EUR') || 'THB',
                 timeline: data.timeline,
-                files: data.files || [],
+                // New attachments are added via staged uploads (Task 6 owns
+                // useSolutionAttachments + data.fileIds); resubmit passes staged
+                // IDs only, never raw File[] across the server boundary.
+                newFileIds: [],
                 deletedFileIds: data.deletedFileIds || [],
                 useCustomHierarchy: data.useCustomHierarchy || false,
                 customApprovers: data.customApprovers || [],

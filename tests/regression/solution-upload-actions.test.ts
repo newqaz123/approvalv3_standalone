@@ -2,7 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
-import { submitSolutionSchema } from '../../src/lib/schemas/solution-schemas'
+import { submitSolutionSchema, resubmitSolutionSchema } from '../../src/lib/schemas/solution-schemas'
 
 // Security-sensitive server-action contract tests. These follow the established
 // `private-storage-wiring.test.ts` pattern: read the action module source and
@@ -164,5 +164,151 @@ describe('submitSolution transfers only owned staged attachments (Task 3 brief)'
   it('verifies the updateMany count before continuing', () => {
     assert.match(submitBody, /file_attachments\.updateMany/)
     assert.match(submitBody, /\.count !== validated\.fileIds\.length/)
+  })
+})
+
+describe('resubmitSolutionSchema validates resubmission attachment IDs (Task 4 brief)', () => {
+  const validInput = {
+    requestId: randomUUID(),
+    title: 'Updated solution title',
+    description: 'Updated solution description',
+    cost: 1500,
+    currency: 'THB' as const,
+    timeline: '3 weeks',
+    useCustomHierarchy: false,
+  }
+
+  it('rejects a non-UUID newFileId', () => {
+    assert.throws(() =>
+      resubmitSolutionSchema.parse({ ...validInput, newFileIds: ['not-a-uuid'] })
+    )
+  })
+
+  it('rejects more than 10 newFileIds', () => {
+    assert.throws(() =>
+      resubmitSolutionSchema.parse({
+        ...validInput,
+        newFileIds: Array.from({ length: 11 }, () => randomUUID()),
+      })
+    )
+  })
+
+  it('rejects duplicate newFileIds', () => {
+    const id = randomUUID()
+    assert.throws(() => resubmitSolutionSchema.parse({ ...validInput, newFileIds: [id, id] }))
+  })
+
+  it('rejects a non-UUID deletedFileId', () => {
+    assert.throws(() =>
+      resubmitSolutionSchema.parse({ ...validInput, deletedFileIds: ['not-a-uuid'] })
+    )
+  })
+
+  it('rejects more than 10 deletedFileIds', () => {
+    assert.throws(() =>
+      resubmitSolutionSchema.parse({
+        ...validInput,
+        deletedFileIds: Array.from({ length: 11 }, () => randomUUID()),
+      })
+    )
+  })
+
+  it('rejects duplicate deletedFileIds', () => {
+    const id = randomUUID()
+    assert.throws(() => resubmitSolutionSchema.parse({ ...validInput, deletedFileIds: [id, id] }))
+  })
+
+  it('rejects a non-UUID customApprover', () => {
+    assert.throws(() =>
+      resubmitSolutionSchema.parse({
+        ...validInput,
+        useCustomHierarchy: true,
+        customApprovers: ['not-a-uuid'],
+      })
+    )
+  })
+
+  it('rejects a non-positive cost', () => {
+    assert.throws(() => resubmitSolutionSchema.parse({ ...validInput, cost: -5 }))
+    assert.throws(() => resubmitSolutionSchema.parse({ ...validInput, cost: 0 }))
+  })
+
+  it('accepts up to 10 unique UUIDs and defaults arrays to empty', () => {
+    const withIds = resubmitSolutionSchema.parse({
+      ...validInput,
+      newFileIds: Array.from({ length: 10 }, () => randomUUID()),
+      deletedFileIds: Array.from({ length: 10 }, () => randomUUID()),
+      customApprovers: Array.from({ length: 5 }, () => randomUUID()),
+    })
+    assert.equal(withIds.newFileIds.length, 10)
+    assert.equal(withIds.deletedFileIds.length, 10)
+    assert.equal(withIds.customApprovers.length, 5)
+
+    const defaulted = resubmitSolutionSchema.parse(validInput)
+    assert.deepEqual(defaulted.newFileIds, [])
+    assert.deepEqual(defaulted.deletedFileIds, [])
+    assert.deepEqual(defaulted.customApprovers, [])
+  })
+})
+
+describe('resubmitSolution transfers staged IDs and deletes files after commit (Task 4 brief)', () => {
+  const solutionsSource = readFileSync('src/server-actions/solutions.ts', 'utf8')
+  // resubmitSolution is the final export in the file, so slice from its start to
+  // the end of the module to capture its full body.
+  const resubmitStart = solutionsSource.indexOf('export async function resubmitSolution')
+  const resubmitBody = solutionsSource.slice(resubmitStart)
+
+  it('no longer accepts raw File[] inputs or does disk writes / arrayBuffer reads', () => {
+    // The signature must carry inferred staged-id input, never File[].
+    assert.match(resubmitBody, /resubmitSolution\(input: ResubmitSolutionInput\)/)
+    assert.doesNotMatch(resubmitBody, /files:\s*File\[\]/)
+    assert.doesNotMatch(resubmitBody, /\.arrayBuffer\(\)/)
+    assert.doesNotMatch(resubmitBody, /writeAttachmentFile/)
+    // No private write happens before the transaction commits.
+    assert.doesNotMatch(resubmitBody, /createStoredAttachmentPath/)
+  })
+
+  it('validates input through resubmitSolutionSchema', () => {
+    assert.match(resubmitBody, /resubmitSolutionSchema\.parse/)
+  })
+
+  it('rejects overlap between new and deleted file id sets inside the transaction', () => {
+    assert.match(resubmitBody, /overlap/i)
+  })
+
+  it('queries staged attachments scoped to requestId / solutionId:null / uploadedById', () => {
+    assert.match(resubmitBody, /file_attachments\.findMany/)
+    assert.match(resubmitBody, /id:\s*\{\s*in:\s*validated\.newFileIds\s*\}/)
+    assert.match(resubmitBody, /requestId:\s*validated\.requestId/)
+    assert.match(resubmitBody, /solutionId:\s*null/)
+    assert.match(resubmitBody, /uploadedById:\s*user\.id/)
+  })
+
+  it('requires an exact staged-count match before linking', () => {
+    assert.match(resubmitBody, /stagedAttachments\.length !== validated\.newFileIds\.length/)
+  })
+
+  it('queries deletable attachments scoped to the current solution and exact-counts them', () => {
+    assert.match(resubmitBody, /deletableAttachments\.length !== validated\.deletedFileIds\.length/)
+  })
+
+  it('links staged rows with an updateMany count re-check', () => {
+    assert.match(resubmitBody, /file_attachments\.updateMany/)
+    assert.match(resubmitBody, /\.count !== validated\.newFileIds\.length/)
+  })
+
+  it('deletes the selected existing attachment rows inside the transaction', () => {
+    assert.match(resubmitBody, /file_attachments\.deleteMany/)
+  })
+
+  it('deletes physical files only after the transaction commits via Promise.allSettled', () => {
+    assert.match(resubmitBody, /Promise\.allSettled/)
+    assert.match(resubmitBody, /deleteAttachmentFile/)
+    // A single rejected physical delete must not abort the others or the commit.
+    assert.match(resubmitBody, /status === 'rejected'/)
+  })
+
+  it('returns the deleted attachment ids with the updated result', () => {
+    assert.match(resubmitBody, /deletedAttachmentIds|deletedAttachments/)
   })
 })

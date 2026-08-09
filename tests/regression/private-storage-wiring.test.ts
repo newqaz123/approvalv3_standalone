@@ -17,15 +17,21 @@ it('routes every attachment filesystem operation through private storage', () =>
 
 it('routes resubmitSolution attachments through private storage', () => {
   const solutions = readFileSync('src/server-actions/solutions.ts', 'utf8')
+  const filesAction = readFileSync('src/server-actions/files.ts', 'utf8')
   // The live solution writer must not use the legacy public/uploads helpers.
   assert.doesNotMatch(solutions, /\bgenerateFilePath\b/)
   assert.doesNotMatch(solutions, /\bsaveFile\b/)
-  // New solution attachments are written through the private storage layer with
-  // a sanitized filename so exports (pdf-package/readAttachmentFile) resolve
-  // them under the private root instead of ENOENT on public/uploads.
-  assert.match(solutions, /createStoredAttachmentPath/)
-  assert.match(solutions, /writeAttachmentFile/)
-  assert.match(solutions, /sanitizeAttachmentFileName/)
+  // resubmitSolution consumes staged attachment IDs only (Task 4): it never
+  // creates stored paths, writes files, or sanitizes raw filenames itself. New
+  // attachments are staged through the authorized draft upload action in
+  // files.ts, which owns the private write path. resubmitSolution only deletes
+  // physical files (post-commit cleanup) through the private storage layer.
+  assert.doesNotMatch(solutions, /createStoredAttachmentPath/)
+  assert.doesNotMatch(solutions, /writeAttachmentFile/)
+  assert.doesNotMatch(solutions, /sanitizeAttachmentFileName/)
+  assert.match(solutions, /deleteAttachmentFile/)
+  assert.match(filesAction, /createStoredAttachmentPath/)
+  assert.match(filesAction, /writeAttachmentFile/)
 })
 
 // Path-based download hrefs (e.g. `/${filePath}`) bypass the authorized
