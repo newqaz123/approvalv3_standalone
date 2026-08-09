@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { format } from 'date-fns'
 import {
   X,
@@ -338,6 +338,26 @@ export function SubmitterModal({
       }
     }
   }, [selectedTemplate, templates])
+
+  // Reset every New Request field whenever request mode opens, so stale state
+  // from a previous open never leaks into a fresh request. Solution/resubmit
+  // fields are intentionally untouched here.
+  const resetRequestDraft = useCallback(() => {
+    setTitle('')
+    setDescription('')
+    setSelectedTemplate('')
+    setFiles([])
+    setFileDescriptions({})
+    setFileUploadError(null)
+    setUseCustomHierarchy(false)
+    setCustomApprovers([])
+    setDeletedFileIds([])
+  }, [])
+
+  useEffect(() => {
+    if (mode !== 'request' || !open) return
+    resetRequestDraft()
+  }, [mode, open, resetRequestDraft])
 
   // Existing files state (for resubmit mode)
   const [existingFiles, setExistingFiles] = useState<FileAttachment[]>(initialData?.existingFiles || [])
