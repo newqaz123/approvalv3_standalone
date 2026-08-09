@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
+import { FormattedText } from '@/components/ui/formatted-text'
+import { visibleFormattedText } from '@/lib/formatted-text'
 
 interface FileWithProgress {
   file: File
@@ -41,7 +43,8 @@ export function SolutionPreview({
   isSubmitting,
 }: SolutionPreviewProps) {
   const [showFullDescription, setShowFullDescription] = useState(false)
-  const descriptionTooLong = data.description.length > 300
+  const descriptionTooLong =
+    Array.from(visibleFormattedText(data.description)).length > 300
 
   const formatCost = (amount: number, currency: string) => {
     try {
@@ -53,10 +56,6 @@ export function SolutionPreview({
       return `${currency} ${amount.toFixed(2)}`
     }
   }
-
-  const displayDescription = showFullDescription
-    ? data.description
-    : data.description.slice(0, 300) + (descriptionTooLong ? '...' : '')
 
   return (
     <div className="space-y-6">
@@ -103,7 +102,12 @@ export function SolutionPreview({
             <h3 className="text-sm font-medium text-muted-foreground mb-2">
               Description
             </h3>
-            <p className="text-base whitespace-pre-wrap">{displayDescription}</p>
+            <p className="text-base whitespace-pre-wrap">
+              <FormattedText
+                source={data.description}
+                maxVisibleCharacters={showFullDescription ? undefined : 300}
+              />
+            </p>
             {descriptionTooLong && (
               <button
                 type="button"

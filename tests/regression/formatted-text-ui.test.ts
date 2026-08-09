@@ -25,6 +25,8 @@ describe('formatted text UI contracts', () => {
   it('renders only safe React elements', () => {
     const source = read('src/components/ui/formatted-text.tsx')
     assert.match(source, /tokenizeFormattedText/)
+    assert.match(source, /truncateFormattedText/)
+    assert.match(source, /maxVisibleCharacters/)
     assert.match(source, /<strong/)
     assert.match(source, /<br/)
     assert.doesNotMatch(source, /dangerouslySetInnerHTML/)

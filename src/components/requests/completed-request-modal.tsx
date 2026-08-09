@@ -30,6 +30,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Separator } from '@/components/ui/separator'
+import { FormattedText } from '@/components/ui/formatted-text'
 import { cn } from '@/lib/utils'
 import { useState } from 'react'
 
@@ -273,7 +274,7 @@ export function CompletedRequestModal({
               Request Description
             </h3>
             <div className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed bg-slate-50/70 dark:bg-slate-800/30 rounded-xl p-4 border border-slate-100 dark:border-slate-800">
-              <p>{data.requestDescription}</p>
+              <p><FormattedText source={data.requestDescription} /></p>
             </div>
           </section>
 
