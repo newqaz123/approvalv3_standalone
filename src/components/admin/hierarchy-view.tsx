@@ -16,6 +16,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
+import { getApprovalLevelLabel } from '@/lib/approval-levels'
 import { updateHierarchy } from '@/server-actions/hierarchy'
 import { format } from 'date-fns'
 import { Loader2 } from 'lucide-react'
@@ -222,9 +223,6 @@ export function HierarchyView({
   // Generate level columns (1 to maxLevel)
   const levels = Array.from({ length: maxLevel }, (_, i) => i + 1)
 
-  // Parse levelNames from department prop (JSON field from Prisma)
-  const levelNames = department.levelNames as Record<string, string> | null | undefined
-
   const content = (
     <div className="space-y-4">
       <div className="flex gap-4 overflow-x-auto pb-4">
@@ -234,7 +232,7 @@ export function HierarchyView({
             level={level}
             users={usersByLevel[level] || []}
             isDragDisabled={readOnly}
-            customLabel={levelNames ? (levelNames[level.toString()] ?? levelNames[level as unknown as string]) : undefined}
+            customLabel={getApprovalLevelLabel(department.levelNames, level)}
           />
         ))}
       </div>

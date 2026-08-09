@@ -1,8 +1,40 @@
 'use server'
 
 import { auth } from '@/lib/auth-config'
+import {
+  getDisplayApprovalLevels,
+  MAX_APPROVAL_LEVEL,
+  MIN_APPROVAL_LEVEL,
+  normalizePersistedApprovalLevel,
+  normalizePersistedLevelNames,
+  validateApprovalLevel,
+  type LevelNames,
+} from '@/lib/approval-levels'
 import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
+
+const VALID_LEVEL_FILTER = {
+  gte: MIN_APPROVAL_LEVEL,
+  lte: MAX_APPROVAL_LEVEL,
+} as const
+
+function emptyUsersByLevel(displayLevels: number[]): Record<number, HierarchyUser[]> {
+  const usersByLevel: Record<number, HierarchyUser[]> = {}
+  for (const level of displayLevels) {
+    usersByLevel[level] = []
+  }
+  return usersByLevel
+}
+
+function resolveDisplayMaxLevel(
+  levelNames: LevelNames | null,
+  assignedLevels: Array<number | null | undefined>,
+): { levelNames: LevelNames | null; displayLevels: number[]; maxLevel: number } {
+  const normalizedNames = normalizePersistedLevelNames(levelNames)
+  const displayLevels = getDisplayApprovalLevels(normalizedNames, assignedLevels)
+  const maxLevel = displayLevels[displayLevels.length - 1] ?? 3
+  return { levelNames: normalizedNames, displayLevels, maxLevel }
+}
 
 /**
  * Unified representation of a hierarchy member (internal or external approver)
@@ -43,11 +75,12 @@ export async function getDepartmentHierarchy(departmentId: string): Promise<{
     where: { id: departmentId },
     include: {
       users: {
-        where: { isActive: true, level: { not: null } },
+        where: { isActive: true, level: VALID_LEVEL_FILTER },
         select: { id: true, name: true, email: true, level: true },
         orderBy: { name: 'asc' },
       },
       departmentApprovers: {
+        where: { approverLevel: VALID_LEVEL_FILTER },
         include: {
           approver: {
             select: { id: true, name: true, email: true },
@@ -66,11 +99,14 @@ export async function getDepartmentHierarchy(departmentId: string): Promise<{
 
   // Add internal department users with levels
   for (const user of department.users) {
+    const level = normalizePersistedApprovalLevel(user.level)
+    if (level === null) continue
+
     members.push({
       userId: user.id,
       name: user.name,
       email: user.email,
-      level: user.level!,
+      level,
       isExternal: false,
     })
     processedUserIds.add(user.id)
@@ -82,28 +118,34 @@ export async function getDepartmentHierarchy(departmentId: string): Promise<{
     if (processedUserIds.has(da.approver.id)) {
       continue
     }
-    
+
+    const level = normalizePersistedApprovalLevel(da.approverLevel)
+    if (level === null) continue
+
     members.push({
       userId: da.approver.id,
       name: da.approver.name,
       email: da.approver.email,
-      level: da.approverLevel,
+      level,
       isExternal: true,
       departmentApproverId: da.id,
     })
   }
 
-  const maxLevel = members.reduce((max, m) => Math.max(max, m.level), 0)
+  const { levelNames, maxLevel } = resolveDisplayMaxLevel(
+    department.levelNames as Record<string, string> | null,
+    members.map((member) => member.level),
+  )
 
   return {
     department: {
       id: department.id,
       name: department.name,
       type: department.type,
-      levelNames: department.levelNames as Record<string, string> | null,
+      levelNames,
     },
     members,
-    maxLevel: Math.max(maxLevel, 3),
+    maxLevel,
   }
 }
 
@@ -168,6 +210,20 @@ export async function updateHierarchy(
   })
   if (admin?.role !== 'admin') throw new Error('Admin access required')
 
+  // Validate level bounds before any hierarchy or Prisma work
+  let validatedUpdates: Array<{ userId: string; level: number | null; isExternal?: boolean }>
+  try {
+    validatedUpdates = updates.map((update) => ({
+      ...update,
+      level: validateApprovalLevel(update.level, { allowNull: true }),
+    }))
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Invalid approval level',
+    }
+  }
+
   // Validate no pending approvals
   const validation = await validateHierarchyChange(departmentId)
   if (!validation.allowed) {
@@ -178,14 +234,14 @@ export async function updateHierarchy(
   const currentHierarchy = await getDepartmentHierarchy(departmentId)
 
   // Validate the proposed updates
-  const validationResult = validateHierarchyUpdates(updates, currentHierarchy.members)
+  const validationResult = validateHierarchyUpdates(validatedUpdates, currentHierarchy.members)
   if (!validationResult.valid) {
     return { success: false, error: validationResult.error }
   }
 
   // Process each update
   const operations = []
-  for (const update of updates) {
+  for (const update of validatedUpdates) {
     const currentMember = currentHierarchy.members.find(m => m.userId === update.userId)
 
     if (update.isExternal || currentMember?.isExternal) {
@@ -283,7 +339,10 @@ export async function getHierarchyData(departmentId: string) {
     where: { id: departmentId },
     include: {
       users: {
-        where: { isActive: true },
+        where: {
+          isActive: true,
+          OR: [{ level: null }, { level: VALID_LEVEL_FILTER }],
+        },
         select: {
           id: true,
           name: true,
@@ -293,6 +352,7 @@ export async function getHierarchyData(departmentId: string) {
         orderBy: { name: 'asc' },
       },
       departmentApprovers: {
+        where: { approverLevel: VALID_LEVEL_FILTER },
         include: {
           approver: {
             select: { id: true, name: true, email: true },
@@ -306,24 +366,24 @@ export async function getHierarchyData(departmentId: string) {
     throw new Error('Department not found')
   }
 
-  // Group users by level
-  const usersByLevel: Record<number, HierarchyUser[]> = {}
-  let maxLevel = 0
-
   // Track all user IDs to avoid duplicates
   const processedUserIds = new Set<string>()
+  const assignedLevels: number[] = []
+  const internalMembers: HierarchyUser[] = []
+  const externalMembers: HierarchyUser[] = []
 
-  // Internal department users
+  // Internal department users — skip invalid persisted levels
   for (const user of department.users) {
-    const level = user.level || 1
-    if (!usersByLevel[level]) {
-      usersByLevel[level] = []
-    }
-    usersByLevel[level].push({ ...user, isExternal: false })
+    const level = normalizePersistedApprovalLevel(user.level)
+    if (user.level !== null && level === null) continue
+    if (level !== null) assignedLevels.push(level)
+
+    internalMembers.push({
+      ...user,
+      level,
+      isExternal: false,
+    })
     processedUserIds.add(user.id)
-    if (level > maxLevel) {
-      maxLevel = level
-    }
   }
 
   // External DepartmentApprover users (only add if not already added as internal user)
@@ -332,28 +392,34 @@ export async function getHierarchyData(departmentId: string) {
     if (processedUserIds.has(da.approver.id)) {
       continue
     }
-    
-    const level = da.approverLevel
-    if (!usersByLevel[level]) {
-      usersByLevel[level] = []
-    }
-    usersByLevel[level].push({
+
+    const level = normalizePersistedApprovalLevel(da.approverLevel)
+    if (level === null) continue
+
+    assignedLevels.push(level)
+    externalMembers.push({
       id: da.approver.id,
       name: da.approver.name,
       email: da.approver.email,
       level,
       isExternal: true,
     })
-    if (level > maxLevel) {
-      maxLevel = level
-    }
   }
 
-  // Ensure all levels from 1 to max exist (even if empty)
-  for (let i = 1; i <= Math.max(maxLevel, 3); i++) {
-    if (!usersByLevel[i]) {
-      usersByLevel[i] = []
-    }
+  const { levelNames, displayLevels, maxLevel } = resolveDisplayMaxLevel(
+    department.levelNames as Record<string, string> | null,
+    assignedLevels,
+  )
+
+  const usersByLevel = emptyUsersByLevel(displayLevels)
+
+  for (const user of internalMembers) {
+    if (user.level === null) continue
+    usersByLevel[user.level].push(user)
+  }
+  for (const user of externalMembers) {
+    if (user.level === null) continue
+    usersByLevel[user.level].push(user)
   }
 
   return {
@@ -361,10 +427,10 @@ export async function getHierarchyData(departmentId: string) {
       id: department.id,
       name: department.name,
       type: department.type,
-      levelNames: department.levelNames as Record<string, string> | null,
+      levelNames,
     },
     usersByLevel,
-    maxLevel: Math.max(maxLevel, 3),
+    maxLevel,
   }
 }
 
@@ -436,6 +502,16 @@ export async function updateUserLevel(
     throw new Error('Unauthorized')
   }
 
+  let validatedLevel: number
+  try {
+    validatedLevel = validateApprovalLevel(newLevel)
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Invalid approval level',
+    }
+  }
+
   // Verify admin role
   const admin = await prisma.user.findUnique({
     where: { id: adminId },
@@ -480,10 +556,10 @@ export async function updateUserLevel(
     }
   }
 
-  const oldLevel = user.level || 1
+  const oldLevel = normalizePersistedApprovalLevel(user.level) ?? MIN_APPROVAL_LEVEL
 
   // Skip if no change
-  if (oldLevel === newLevel) {
+  if (oldLevel === validatedLevel) {
     return { success: true }
   }
 
@@ -492,7 +568,7 @@ export async function updateUserLevel(
     // Update user level
     prisma.user.update({
       where: { id: userId },
-      data: { level: newLevel },
+      data: { level: validatedLevel },
     }),
     // Log the hierarchy change
     prisma.hierarchy_change_logs.create({
@@ -501,8 +577,8 @@ export async function updateUserLevel(
         adminUserId: adminId,
         targetUserId: userId,
         oldLevel,
-        newLevel,
-        reason: `Changed ${user.name}'s approval level from ${oldLevel} to ${newLevel}`,
+        newLevel: validatedLevel,
+        reason: `Changed ${user.name}'s approval level from ${oldLevel} to ${validatedLevel}`,
       },
     }),
   ])
@@ -571,7 +647,10 @@ export async function getHierarchyDataForUser(departmentId: string) {
     where: { id: departmentId },
     include: {
       users: {
-        where: { isActive: true },
+        where: {
+          isActive: true,
+          OR: [{ level: null }, { level: VALID_LEVEL_FILTER }],
+        },
         select: {
           id: true,
           name: true,
@@ -587,26 +666,29 @@ export async function getHierarchyDataForUser(departmentId: string) {
     throw new Error('Department not found')
   }
 
-  // Group users by level
-  const usersByLevel: Record<number, typeof department.users> = {}
-  let maxLevel = 0
+  const assignedLevels: number[] = []
+  const normalizedUsers: Array<(typeof department.users)[number] & { level: number | null }> = []
 
   for (const user of department.users) {
-    const level = user.level || 1
-    if (!usersByLevel[level]) {
-      usersByLevel[level] = []
-    }
-    usersByLevel[level].push(user)
-    if (level > maxLevel) {
-      maxLevel = level
-    }
+    const level = normalizePersistedApprovalLevel(user.level)
+    if (user.level !== null && level === null) continue
+    if (level !== null) assignedLevels.push(level)
+    normalizedUsers.push({ ...user, level })
   }
 
-  // Ensure all levels from 1 to max exist (even if empty)
-  for (let i = 1; i <= Math.max(maxLevel, 3); i++) {
-    if (!usersByLevel[i]) {
-      usersByLevel[i] = []
-    }
+  const { levelNames, displayLevels, maxLevel } = resolveDisplayMaxLevel(
+    department.levelNames as Record<string, string> | null,
+    assignedLevels,
+  )
+
+  const usersByLevel: Record<number, typeof normalizedUsers> = {}
+  for (const level of displayLevels) {
+    usersByLevel[level] = []
+  }
+
+  for (const user of normalizedUsers) {
+    if (user.level === null) continue
+    usersByLevel[user.level].push(user)
   }
 
   return {
@@ -614,10 +696,10 @@ export async function getHierarchyDataForUser(departmentId: string) {
       id: department.id,
       name: department.name,
       type: department.type,
-      levelNames: department.levelNames as Record<string, string> | null,
+      levelNames,
     },
     usersByLevel,
-    maxLevel: Math.max(maxLevel, 3),
+    maxLevel,
   }
 }
 
@@ -651,7 +733,7 @@ export async function getCurrentUserApprovalChain() {
     where: { id: currentUser.departmentId },
     include: {
       users: {
-        where: { isActive: true, level: { not: null } },
+        where: { isActive: true, level: VALID_LEVEL_FILTER },
         select: {
           id: true,
           name: true,
@@ -661,6 +743,7 @@ export async function getCurrentUserApprovalChain() {
         orderBy: { name: 'asc' },
       },
       departmentApprovers: {
+        where: { approverLevel: VALID_LEVEL_FILTER },
         include: {
           approver: {
             select: {
@@ -678,18 +761,18 @@ export async function getCurrentUserApprovalChain() {
     throw new Error('Department not found')
   }
 
-  const usersByLevel: Record<number, HierarchyUser[]> = {}
   const processedUserIds = new Set<string>()
-  let maxLevel = 0
+  const assignedLevels: number[] = []
+  const internalMembers: HierarchyUser[] = []
+  const externalMembers: HierarchyUser[] = []
 
   for (const user of department.users) {
-    const level = user.level!
-    if (!usersByLevel[level]) {
-      usersByLevel[level] = []
-    }
-    usersByLevel[level].push({ ...user, isExternal: false })
+    const level = normalizePersistedApprovalLevel(user.level)
+    if (level === null) continue
+
+    assignedLevels.push(level)
+    internalMembers.push({ ...user, level, isExternal: false })
     processedUserIds.add(user.id)
-    maxLevel = Math.max(maxLevel, level)
   }
 
   for (const departmentApprover of department.departmentApprovers) {
@@ -697,24 +780,32 @@ export async function getCurrentUserApprovalChain() {
       continue
     }
 
-    const level = departmentApprover.approverLevel
-    if (!usersByLevel[level]) {
-      usersByLevel[level] = []
-    }
-    usersByLevel[level].push({
+    const level = normalizePersistedApprovalLevel(departmentApprover.approverLevel)
+    if (level === null) continue
+
+    assignedLevels.push(level)
+    externalMembers.push({
       id: departmentApprover.approver.id,
       name: departmentApprover.approver.name,
       email: departmentApprover.approver.email,
       level,
       isExternal: true,
     })
-    maxLevel = Math.max(maxLevel, level)
   }
 
-  for (let level = 1; level <= Math.max(maxLevel, 3); level += 1) {
-    if (!usersByLevel[level]) {
-      usersByLevel[level] = []
-    }
+  const { levelNames, displayLevels, maxLevel } = resolveDisplayMaxLevel(
+    department.levelNames as Record<string, string> | null,
+    assignedLevels,
+  )
+
+  const usersByLevel = emptyUsersByLevel(displayLevels)
+  for (const user of internalMembers) {
+    if (user.level === null) continue
+    usersByLevel[user.level].push(user)
+  }
+  for (const user of externalMembers) {
+    if (user.level === null) continue
+    usersByLevel[user.level].push(user)
   }
 
   return {
@@ -722,10 +813,10 @@ export async function getCurrentUserApprovalChain() {
       id: department.id,
       name: department.name,
       type: department.type,
-      levelNames: department.levelNames as Record<string, string> | null,
+      levelNames,
     },
     usersByLevel,
-    maxLevel: Math.max(maxLevel, 3),
+    maxLevel,
   }
 }
 

@@ -1,6 +1,13 @@
 'use server'
 
 import { auth } from '@/lib/auth-config'
+import {
+  getApprovalLevelsAboveSubmitter,
+  MAX_APPROVAL_LEVEL,
+  MIN_APPROVAL_LEVEL,
+  normalizePersistedApprovalLevel,
+  validateApprovalLevel,
+} from '@/lib/approval-levels'
 import prisma from '@/lib/prisma'
 import { revalidateRequestViews } from './request-view-invalidation'
 
@@ -23,21 +30,24 @@ async function getMaxLevelInDepartment(departmentId: string): Promise<number> {
       where: {
         departmentId,
         isActive: true,
-        level: { not: null },
+        level: { gte: MIN_APPROVAL_LEVEL, lte: MAX_APPROVAL_LEVEL },
       },
       orderBy: { level: 'desc' },
       select: { level: true },
     }),
     prisma.department_approvers.findFirst({
-      where: { departmentId },
+      where: {
+        departmentId,
+        approverLevel: { gte: MIN_APPROVAL_LEVEL, lte: MAX_APPROVAL_LEVEL },
+      },
       orderBy: { approverLevel: 'desc' },
       select: { approverLevel: true },
     }),
   ])
 
-  const internalMax = maxUser?.level || 0
-  const externalMax = maxExternal?.approverLevel || 0
-  return Math.max(internalMax, externalMax) || 1
+  const internalMax = normalizePersistedApprovalLevel(maxUser?.level) ?? 0
+  const externalMax = normalizePersistedApprovalLevel(maxExternal?.approverLevel) ?? 0
+  return Math.max(internalMax, externalMax, MIN_APPROVAL_LEVEL)
 }
 
 /**
@@ -54,13 +64,15 @@ export async function createApprovalChain(
   submitterLevel: number,
   submitterId?: string
 ) {
-  const maxLevel = await getMaxLevelInDepartment(departmentId)
+  const maxLevel = validateApprovalLevel(await getMaxLevelInDepartment(departmentId))
+  const normalizedSubmitter =
+    normalizePersistedApprovalLevel(submitterLevel) ?? MIN_APPROVAL_LEVEL
 
   const approvals = []
   let order = 1
 
   // If submitter is top-level, create auto-approved self-approval
-  if (submitterLevel >= maxLevel) {
+  if (normalizedSubmitter >= maxLevel) {
     approvals.push({
       requestId,
       requiredLevel: maxLevel,
@@ -73,16 +85,22 @@ export async function createApprovalChain(
   } else {
     // Create approvals for ALL levels between submitter's level and max level
     // Example: LV2 submitter → needs LV3, LV4, LV5 approvals (sequential)
-    for (let level = submitterLevel + 1; level <= maxLevel; level++) {
+    for (const level of getApprovalLevelsAboveSubmitter(normalizedSubmitter, maxLevel)) {
+      const requiredLevel = validateApprovalLevel(level)
+
       // Check if there are active approvers at this level (internal or external)
       // Also get one internal user ID to use as requiredApprover for display purposes
       const [internalUser, externalApprovers] = await Promise.all([
         prisma.user.findFirst({
-          where: { departmentId, level, isActive: true },
+          where: {
+            departmentId,
+            level: requiredLevel,
+            isActive: true,
+          },
           select: { id: true },
         }),
         prisma.department_approvers.findMany({
-          where: { departmentId, approverLevel: level },
+          where: { departmentId, approverLevel: requiredLevel },
           select: { id: true, approverId: true },
         }),
       ])
@@ -96,7 +114,7 @@ export async function createApprovalChain(
           for (const externalApprover of externalApprovers) {
             approvals.push({
               requestId,
-              requiredLevel: level,
+              requiredLevel,
               requiredApproverId: externalApprover.approverId,
               order: order++,
               status: 'pending' as const,
@@ -107,7 +125,7 @@ export async function createApprovalChain(
           // This enables displaying the approver name in the UI
           approvals.push({
             requestId,
-            requiredLevel: level,
+            requiredLevel,
             requiredApproverId: internalUser.id,
             order: order++,
             status: 'pending' as const,

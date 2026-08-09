@@ -1,11 +1,39 @@
 'use server'
 
 import { auth } from '@/lib/auth-config'
+import {
+  getApprovalLevelsAboveSubmitter,
+  MAX_APPROVAL_LEVEL,
+  MIN_APPROVAL_LEVEL,
+  normalizePersistedApprovalLevel,
+  validateApprovalLevel,
+} from '@/lib/approval-levels'
 import prisma from '@/lib/prisma'
 import { RequestStatus, UserRole } from '@prisma/client'
 import { submitSolutionSchema, SubmitSolutionInput, resubmitSolutionSchema, ResubmitSolutionInput } from '@/lib/schemas/solution-schemas'
 import { deleteAttachmentFile } from '@/lib/attachments/storage'
 import { revalidateRequestViews } from './request-view-invalidation'
+
+async function getMaxValidLevelInDepartment(
+  tx: { user: { findFirst: Function } },
+  departmentId: string,
+): Promise<number> {
+  const maxUser = await tx.user.findFirst({
+    where: {
+      departmentId,
+      isActive: true,
+      level: { gte: MIN_APPROVAL_LEVEL, lte: MAX_APPROVAL_LEVEL },
+    },
+    orderBy: { level: 'desc' },
+    select: { level: true },
+  })
+
+  return normalizePersistedApprovalLevel(maxUser?.level) ?? MIN_APPROVAL_LEVEL
+}
+
+function normalizeSubmitterLevel(level: number | null | undefined): number {
+  return normalizePersistedApprovalLevel(level) ?? MIN_APPROVAL_LEVEL
+}
 
 /**
  * Check if data is stale based on updatedAt timestamp
@@ -160,18 +188,11 @@ export async function submitSolution(input: SubmitSolutionInput) {
     }
 
     // Check if submitter is top-level in engineering (for auto-approval)
-    const maxUser = await tx.user.findFirst({
-      where: {
-        departmentId: engineeringDept.id,
-        isActive: true,
-        level: { not: null },
-      },
-      orderBy: { level: 'desc' },
-      select: { level: true },
-    })
-
-    const maxLevel = maxUser?.level || 1
-    const isTopLevelSubmitter = user.level && user.level >= maxLevel
+    const maxLevel = validateApprovalLevel(
+      await getMaxValidLevelInDepartment(tx, engineeringDept.id),
+    )
+    const submitterLevel = normalizeSubmitterLevel(user.level)
+    const isTopLevelSubmitter = submitterLevel >= maxLevel
 
     // Create approval chain based on selection
     if (validated.useCustomApprovals && validated.customApproverIds && validated.customApproverIds.length > 0) {
@@ -236,7 +257,7 @@ export async function submitSolution(input: SubmitSolutionInput) {
       })
     } else {
       // Default hierarchy-based approval chain
-      await createHierarchyApprovalChain(tx, solution.id, engineeringDept.id, user.level || 1, user.id)
+      await createHierarchyApprovalChain(tx, solution.id, engineeringDept.id, submitterLevel, user.id)
       // Update request status to DesignCostEstimationApproval
       await tx.requests.update({
         where: { id: validated.requestId },
@@ -246,18 +267,21 @@ export async function submitSolution(input: SubmitSolutionInput) {
       // Notify engineering department approvers about the solution submission
       const { getApproversAtLevel } = await import('./approvals')
       // Get the first level of approvers that have pending approvals (submitter's level + 1)
-      const firstPendingLevel = (user.level || 1) + 1
-      const firstLevelApprovers = await getApproversAtLevel(engineeringDept.id, firstPendingLevel)
-      
-      // Notify each approver
-      for (const approver of firstLevelApprovers) {
-        pendingNotifications.push({
-          userId: approver.id,
-          type: 'approval_needed',
-          title: 'Solution Submitted for Approval',
-          message: `📤 Solution Submitted: "${request.title}" has a new solution ready for your approval.`,
-          requestId: request.id,
-        })
+      const levelsAbove = getApprovalLevelsAboveSubmitter(submitterLevel, maxLevel)
+      const firstPendingLevel = levelsAbove[0]
+      if (firstPendingLevel !== undefined) {
+        const firstLevelApprovers = await getApproversAtLevel(engineeringDept.id, firstPendingLevel)
+
+        // Notify each approver
+        for (const approver of firstLevelApprovers) {
+          pendingNotifications.push({
+            userId: approver.id,
+            type: 'approval_needed',
+            title: 'Solution Submitted for Approval',
+            message: `📤 Solution Submitted: "${request.title}" has a new solution ready for your approval.`,
+            requestId: request.id,
+          })
+        }
       }
     }
 
@@ -344,24 +368,14 @@ async function createHierarchyApprovalChain(
   submitterLevel: number,
   submitterId: string
 ) {
-  // Get max level in department
-  const maxUser = await tx.user.findFirst({
-    where: {
-      departmentId,
-      isActive: true,
-      level: { not: null },
-    },
-    orderBy: { level: 'desc' },
-    select: { level: true },
-  })
-
-  const maxLevel = maxUser?.level || 1
+  const maxLevel = validateApprovalLevel(await getMaxValidLevelInDepartment(tx, departmentId))
+  const normalizedSubmitter = normalizeSubmitterLevel(submitterLevel)
 
   const approvals = []
   let order = 1
 
   // If submitter is top-level, create auto-approved record
-  if (submitterLevel >= maxLevel) {
+  if (normalizedSubmitter >= maxLevel) {
     approvals.push({
       solutionId,
       requiredLevel: maxLevel,
@@ -374,12 +388,14 @@ async function createHierarchyApprovalChain(
     })
   } else {
     // Create approvals for all levels between submitter and max level
-    for (let level = submitterLevel + 1; level <= maxLevel; level++) {
+    for (const level of getApprovalLevelsAboveSubmitter(normalizedSubmitter, maxLevel)) {
+      const requiredLevel = validateApprovalLevel(level)
+
       // Check if there are active users at this level
       const hasUsersAtLevel = await tx.user.findFirst({
         where: {
           departmentId,
-          level,
+          level: requiredLevel,
           isActive: true,
         },
         select: { id: true },
@@ -388,7 +404,7 @@ async function createHierarchyApprovalChain(
       if (hasUsersAtLevel) {
         approvals.push({
           solutionId,
-          requiredLevel: level,
+          requiredLevel,
           order: order++,
           status: 'pending' as const,
           isCustomChain: false,
@@ -1155,18 +1171,11 @@ export async function initiateFinalApproval(
   }
 
   // Get max level in department for top-level check
-  const maxUser = await prisma.user.findFirst({
-    where: {
-      departmentId: request.departmentId,
-      isActive: true,
-      level: { not: null },
-    },
-    orderBy: { level: 'desc' },
-    select: { level: true },
-  })
-
-  const maxLevel = maxUser?.level || 1
-  const isTopLevelInitiator = user.level && user.level >= maxLevel
+  const maxLevel = validateApprovalLevel(
+    await getMaxValidLevelInDepartment(prisma, request.departmentId),
+  )
+  const initiatorLevel = normalizeSubmitterLevel(user.level)
+  const isTopLevelInitiator = initiatorLevel >= maxLevel
 
   // Use transaction for atomicity
   await prisma.$transaction(async (tx) => {
@@ -1327,20 +1336,8 @@ async function createHierarchyFinalApprovalChain(
     select: { level: true },
   })
 
-  const initiatorLevel = initiator?.level || 1
-
-  // Get max level in department
-  const maxUser = await tx.user.findFirst({
-    where: {
-      departmentId,
-      isActive: true,
-      level: { not: null },
-    },
-    orderBy: { level: 'desc' },
-    select: { level: true },
-  })
-
-  const maxLevel = maxUser?.level || 1
+  const initiatorLevel = normalizeSubmitterLevel(initiator?.level)
+  const maxLevel = validateApprovalLevel(await getMaxValidLevelInDepartment(tx, departmentId))
 
   const approvals = []
   let order = 1
@@ -1360,11 +1357,13 @@ async function createHierarchyFinalApprovalChain(
     })
   } else {
     // Create approvals for all levels between initiator and max level
-    for (let level = initiatorLevel + 1; level <= maxLevel; level++) {
+    for (const level of getApprovalLevelsAboveSubmitter(initiatorLevel, maxLevel)) {
+      const requiredLevel = validateApprovalLevel(level)
+
       const hasUsersAtLevel = await tx.user.findFirst({
         where: {
           departmentId,
-          level,
+          level: requiredLevel,
           isActive: true,
         },
         select: { id: true },
@@ -1373,7 +1372,7 @@ async function createHierarchyFinalApprovalChain(
       if (hasUsersAtLevel) {
         approvals.push({
           requestId,
-          requiredLevel: level,
+          requiredLevel,
           order: order++,
           status: 'pending' as const,
           isCustomChain: false,
@@ -1986,18 +1985,10 @@ export async function resubmitSolution(input: ResubmitSolutionInput) {
       }
 
       // Create hierarchy-based approval chain directly (not using createHierarchyApprovalChain to avoid double creation)
-      const maxUser = await tx.user.findFirst({
-        where: {
-          departmentId: engineeringDept.id,
-          isActive: true,
-          level: { not: null },
-        },
-        orderBy: { level: 'desc' },
-        select: { level: true },
-      })
-
-      const maxLevel = maxUser?.level || 1
-      const submitterLevel = user.level || 1
+      const maxLevel = validateApprovalLevel(
+        await getMaxValidLevelInDepartment(tx, engineeringDept.id),
+      )
+      const submitterLevel = normalizeSubmitterLevel(user.level)
 
       // If submitter is top-level, create auto-approved record
       if (submitterLevel >= maxLevel) {
@@ -2014,12 +2005,14 @@ export async function resubmitSolution(input: ResubmitSolutionInput) {
       } else {
         // Create approvals for all levels between submitter and max level
         let order = 1
-        for (let level = submitterLevel + 1; level <= maxLevel; level++) {
+        for (const level of getApprovalLevelsAboveSubmitter(submitterLevel, maxLevel)) {
+          const requiredLevel = validateApprovalLevel(level)
+
           // Check if there are active users at this level
           const hasUsersAtLevel = await tx.user.findFirst({
             where: {
               departmentId: engineeringDept.id,
-              level,
+              level: requiredLevel,
               isActive: true,
             },
             select: { id: true },
@@ -2028,7 +2021,7 @@ export async function resubmitSolution(input: ResubmitSolutionInput) {
           if (hasUsersAtLevel) {
             approvalData.push({
               solutionId: solution.id,
-              requiredLevel: level,
+              requiredLevel,
               order: order++,
               status: 'pending' as const,
               isCustomChain: false,
@@ -2157,19 +2150,25 @@ export async function resubmitSolution(input: ResubmitSolutionInput) {
 
       if (engineeringDept) {
         const { getApproversAtLevel } = await import('./approvals')
-        // Get the first level of approvers that have pending approvals (submitter's level + 1)
-        const firstPendingLevel = (user.level || 1) + 1
-        const firstLevelApprovers = await getApproversAtLevel(engineeringDept.id, firstPendingLevel)
-        
-        // Notify each approver
-        for (const approver of firstLevelApprovers) {
-          await createNotification({
-            userId: approver.id,
-            type: 'approval_needed',
-            title: 'Solution Resubmitted',
-            message: `📤 Solution resubmitted for "${request.title}". Please review the updated solution.`,
-            requestId: request.id,
-          })
+        const maxLevel = validateApprovalLevel(
+          await getMaxValidLevelInDepartment(prisma, engineeringDept.id),
+        )
+        const submitterLevel = normalizeSubmitterLevel(user.level)
+        const firstPendingLevel = getApprovalLevelsAboveSubmitter(submitterLevel, maxLevel)[0]
+
+        if (firstPendingLevel !== undefined) {
+          const firstLevelApprovers = await getApproversAtLevel(engineeringDept.id, firstPendingLevel)
+
+          // Notify each approver
+          for (const approver of firstLevelApprovers) {
+            await createNotification({
+              userId: approver.id,
+              type: 'approval_needed',
+              title: 'Solution Resubmitted',
+              message: `📤 Solution resubmitted for "${request.title}". Please review the updated solution.`,
+              requestId: request.id,
+            })
+          }
         }
       }
     }
