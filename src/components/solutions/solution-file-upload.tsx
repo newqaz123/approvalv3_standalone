@@ -6,6 +6,12 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { cn } from '@/lib/utils'
+import {
+  MAX_ATTACHMENT_BYTES,
+  MAX_ATTACHMENTS_PER_FORM,
+  ATTACHMENT_EXTENSIONS,
+  validateAttachmentMetadata,
+} from '@/lib/attachments/policy'
 
 interface FileWithProgress {
   file: File
@@ -27,49 +33,14 @@ interface SolutionFileUploadProps {
   onRemoveExistingFile?: (fileId: string) => void
 }
 
-const ALLOWED_EXTENSIONS = [
-  'pdf',
-  'jpg',
-  'jpeg',
-  'png',
-  'gif',
-  'webp',
-  'dwg',
-  'dxf',
-  'step',
-  'stp',
-  'iges',
-  'igs',
-  'doc',
-  'docx',
-  'xls',
-  'xlsx',
-  'ppt',
-  'pptx',
-]
-
-const ALLOWED_MIME_TYPES = [
-  'application/pdf',
-  'image/jpeg',
-  'image/png',
-  'image/gif',
-  'image/webp',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'application/vnd.ms-excel',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  'application/vnd.ms-powerpoint',
-  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-]
-
 export function SolutionFileUpload({
   files,
   filesWithProgress,
   onFilesChange,
   onRemoveFile,
   disabled = false,
-  maxFiles = 10,
-  maxSizeBytes = 10 * 1024 * 1024, // 10MB default
+  maxFiles = MAX_ATTACHMENTS_PER_FORM,
+  maxSizeBytes = MAX_ATTACHMENT_BYTES,
   existingFiles = [],
   onRemoveExistingFile,
 }: SolutionFileUploadProps) {
@@ -127,26 +98,11 @@ export function SolutionFileUpload({
   }
 
   const validateFile = (file: File): string | null => {
-    // Check file size
-    if (file.size > maxSizeBytes) {
-      return `${file.name}: File size exceeds ${Math.round(maxSizeBytes / 1024 / 1024)}MB limit`
-    }
-
-    // Check file extension
-    const extension = getFileExtension(file.name)
-    if (!ALLOWED_EXTENSIONS.includes(extension)) {
-      return `${file.name}: File type not supported`
-    }
-
-    // For files with MIME types, validate those too
-    if (file.type && !ALLOWED_MIME_TYPES.includes(file.type)) {
-      // CAD files often have generic MIME type, so we rely on extension check
-      if (!['dwg', 'dxf', 'step', 'stp', 'iges', 'igs'].includes(extension)) {
-        return `${file.name}: File type not supported`
-      }
-    }
-
-    return null
+    return validateAttachmentMetadata({
+      name: file.name,
+      type: file.type,
+      size: file.size,
+    })
   }
 
   const handleFiles = useCallback(
@@ -307,7 +263,7 @@ export function SolutionFileUpload({
             multiple
             onChange={handleChange}
             disabled={disabled || files.length >= maxFiles}
-            accept={ALLOWED_EXTENSIONS.map((ext) => `.${ext}`).join(',')}
+            accept={ATTACHMENT_EXTENSIONS.map((ext) => `.${ext}`).join(',')}
             className="hidden"
           />
           <label

@@ -6,14 +6,14 @@ const read = (path: string) => readFileSync(path, 'utf8')
 
 describe('Gapforimprove regressions', () => {
   it('request upload validation allows PowerPoint files and tells users supported types', () => {
-    const filesAction = read('src/server-actions/files.ts')
+    const policy = read('src/lib/attachments/policy.ts')
     const requestForm = read('src/components/requests/submitter-modal.tsx')
 
-    assert.match(filesAction, /application\/vnd\.ms-powerpoint/)
-    assert.match(filesAction, /application\/vnd\.openxmlformats-officedocument\.presentationml\.presentation/)
-    assert.match(filesAction, /PowerPoint/)
-    assert.match(requestForm, /\.pptx/)
-    assert.match(requestForm, /10MB/)
+    assert.match(policy, /application\/vnd\.ms-powerpoint/)
+    assert.match(policy, /application\/vnd\.openxmlformats-officedocument\.presentationml\.presentation/)
+    assert.match(policy, /pptx/)
+    assert.match(requestForm, /PowerPoint/)
+    assert.match(requestForm, /MB per file/)
   })
 
   it('/requests status filter exposes every RequestStatus option used by dashboard', () => {

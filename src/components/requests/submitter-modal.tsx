@@ -48,15 +48,13 @@ import {
 } from '@/components/ui/select'
 import { ExternalLink } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import {
+  MAX_ATTACHMENT_BYTES,
+  ATTACHMENT_EXTENSIONS,
+  validateAttachmentMetadata,
+} from '@/lib/attachments/policy'
 
-const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
-const ACCEPTED_UPLOAD_EXTENSIONS = '.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.gif'
 const ACCEPTED_UPLOAD_TYPES = 'PDF, Word, Excel, PowerPoint, Images'
-
-const isAllowedUploadFile = (file: File) => {
-  const extension = file.name.split('.').pop()?.toLowerCase()
-  return Boolean(extension && ACCEPTED_UPLOAD_EXTENSIONS.includes(`.${extension}`))
-}
 
 interface FileAttachment {
   id: string
@@ -374,17 +372,12 @@ export function SubmitterModal({
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       const selectedFiles = Array.from(e.target.files)
-      const invalidFile = selectedFiles.find(file => !isAllowedUploadFile(file))
-      const oversizedFile = selectedFiles.find(file => file.size > MAX_UPLOAD_SIZE_BYTES)
+      const firstValidationError = selectedFiles
+        .map(file => validateAttachmentMetadata({ name: file.name, type: file.type, size: file.size }))
+        .find(msg => msg !== null)
 
-      if (invalidFile) {
-        setFileUploadError(`${invalidFile.name} is not supported. Upload ${ACCEPTED_UPLOAD_TYPES}.`)
-        e.target.value = ''
-        return
-      }
-
-      if (oversizedFile) {
-        setFileUploadError(`${oversizedFile.name} is too large. Maximum file size is 10MB.`)
+      if (firstValidationError) {
+        setFileUploadError(firstValidationError)
         e.target.value = ''
         return
       }
@@ -756,12 +749,12 @@ export function SubmitterModal({
                   type="file"
                   multiple
                   onChange={handleFileChange}
-                  accept={ACCEPTED_UPLOAD_EXTENSIONS}
+                  accept={ATTACHMENT_EXTENSIONS.map((ext) => `.${ext}`).join(',')}
                   className="hidden"
                 />
               </label>
               <p className="mt-2 text-xs text-slate-500">
-                Allowed: {ACCEPTED_UPLOAD_TYPES}. Maximum size: 10MB per file.
+                Allowed: {ACCEPTED_UPLOAD_TYPES}. Maximum size: {Math.round(MAX_ATTACHMENT_BYTES / 1024 / 1024)}MB per file.
               </p>
               {fileUploadError && (
                 <p className="mt-2 text-xs text-red-600">

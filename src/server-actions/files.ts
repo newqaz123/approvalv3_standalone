@@ -7,22 +7,7 @@ import { revalidatePath } from 'next/cache'
 import { unlink } from 'fs/promises'
 import { join } from 'path'
 import { z } from 'zod'
-
-const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
-const ALLOWED_FILE_TYPES = [
-  'application/pdf',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'application/vnd.ms-excel',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  'application/vnd.ms-powerpoint',
-  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  'image/jpeg',
-  'image/png',
-  'image/gif',
-]
-
-const ALLOWED_FILE_TYPES_LABEL = 'PDF, Word, Excel, PowerPoint, Images'
+import { validateAttachmentMetadata } from '@/lib/attachments/policy'
 
 interface PrepareFileUploadInput {
   fileName: string
@@ -54,7 +39,7 @@ interface ConfirmSolutionFileUploadInput {
 const prepareFileUploadSchema = z.object({
   fileName: z.string().min(1, 'File name is required'),
   fileType: z.string().min(1, 'File type is required'),
-  fileSize: z.number().max(MAX_FILE_SIZE, `File size exceeds ${MAX_FILE_SIZE / 1024 / 1024}MB limit`),
+  fileSize: z.number(),
   requestId: z.string().min(1, 'Request ID is required'),
 })
 
@@ -79,12 +64,14 @@ export async function prepareFileUpload(input: PrepareFileUploadInput) {
     }
   }
 
-  // Validate file type
-  if (!ALLOWED_FILE_TYPES.includes(input.fileType)) {
-    return {
-      success: false,
-      error: `File type not allowed. Allowed types: ${ALLOWED_FILE_TYPES_LABEL}`,
-    }
+  // Validate file size and type using the shared attachment policy
+  const policyError = validateAttachmentMetadata({
+    name: input.fileName,
+    type: input.fileType,
+    size: input.fileSize,
+  })
+  if (policyError) {
+    return { success: false, error: policyError }
   }
 
   // Verify request exists and user owns it or is an engineering user
@@ -383,14 +370,14 @@ export async function uploadFileAction(
     return { success: false, error: 'File and requestId are required' }
   }
 
-  // Validate file size
-  if (file.size > MAX_FILE_SIZE) {
-    return { success: false, error: `File size exceeds ${MAX_FILE_SIZE / 1024 / 1024}MB limit` }
-  }
-
-  // Validate file type
-  if (!ALLOWED_FILE_TYPES.includes(file.type)) {
-    return { success: false, error: `File type not allowed. Allowed types: ${ALLOWED_FILE_TYPES_LABEL}` }
+  // Validate file size and type using the shared attachment policy
+  const policyError = validateAttachmentMetadata({
+    name: file.name,
+    type: file.type,
+    size: file.size,
+  })
+  if (policyError) {
+    return { success: false, error: policyError }
   }
 
   // Verify request exists and user is authorized
@@ -477,14 +464,14 @@ export async function uploadSolutionFileAction(
     return { success: false, error: 'File and solutionId are required' }
   }
 
-  // Validate file size
-  if (file.size > MAX_FILE_SIZE) {
-    return { success: false, error: `File size exceeds ${MAX_FILE_SIZE / 1024 / 1024}MB limit` }
-  }
-
-  // Validate file type
-  if (!ALLOWED_FILE_TYPES.includes(file.type)) {
-    return { success: false, error: `File type not allowed. Allowed types: ${ALLOWED_FILE_TYPES_LABEL}` }
+  // Validate file size and type using the shared attachment policy
+  const policyError = validateAttachmentMetadata({
+    name: file.name,
+    type: file.type,
+    size: file.size,
+  })
+  if (policyError) {
+    return { success: false, error: policyError }
   }
 
   // Verify solution exists and get its requestId for file path + activity log
