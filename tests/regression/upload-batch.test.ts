@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { uploadAttachmentBatch, type AttachmentUploadItem } from '../../src/lib/attachments/upload-batch'
 
 const file = (name: string) => new File(['pdf'], name, { type: 'application/pdf' })
@@ -93,5 +94,130 @@ describe('uploadAttachmentBatch', () => {
     assert.equal(result.success, true)
     assert.deepEqual(result.items, [])
     assert.deepEqual(result.attachmentIds, [])
+  })
+
+  it('includes both prior successes and new successes in attachmentIds in item order', async () => {
+    const prior: AttachmentUploadItem = {
+      ...item('a', 'ok.pdf'),
+      status: 'success',
+      attachmentId: '11111111-1111-1111-1111-111111111111',
+    }
+    const result = await uploadAttachmentBatch(
+      [prior, item('b', 'new.pdf')],
+      async () => ({ success: true, attachmentId: '22222222-2222-2222-2222-222222222222' })
+    )
+    assert.equal(result.success, true)
+    assert.deepEqual(result.attachmentIds, [
+      '11111111-1111-1111-1111-111111111111',
+      '22222222-2222-2222-2222-222222222222',
+    ])
+  })
+
+  it('emits uploading then error terminal snapshots via onItemChange on upload failure', async () => {
+    const snapshots: { id: string; status: string; error?: string }[] = []
+    const result = await uploadAttachmentBatch(
+      [item('a', 'bad.pdf')],
+      async () => ({ success: false, error: 'Server error' }),
+      (changed) => { snapshots.push({ id: changed.id, status: changed.status, error: changed.error }) }
+    )
+    assert.deepEqual(snapshots, [
+      { id: 'a', status: 'uploading', error: undefined },
+      { id: 'a', status: 'error', error: 'Server error' },
+    ])
+    assert.equal(result.success, false)
+    assert.equal(result.items[0].error, 'Server error')
+  })
+})
+
+// ── Hook + component contract tests (Task 5). These follow the established
+//    source-regex pattern used throughout the regression suite: read the module
+//    source and assert the structural/behavioral invariants that the brief pins.
+//    React hooks cannot be rendered in the node:test runner (no DOM / RTL), so
+//    source-regex is the verification channel — same approach as the Task 2/3/4
+//    server-action contract tests. ──
+
+const hookSource = readFileSync('src/hooks/use-solution-attachments.ts', 'utf8')
+const componentSource = readFileSync('src/components/solutions/solution-file-upload.tsx', 'utf8')
+
+describe('useSolutionAttachments hook contract', () => {
+  it('exports the hook with the items-first return interface', () => {
+    assert.match(hookSource, /export function useSolutionAttachments/)
+    assert.match(hookSource, /items: AttachmentUploadItem\[\]/)
+    assert.match(hookSource, /addFiles/)
+    assert.match(hookSource, /removeItem/)
+    assert.match(hookSource, /ensureUploaded/)
+    assert.match(hookSource, /cleanupDrafts/)
+    assert.match(hookSource, /reset/)
+  })
+
+  it('uses a ref to avoid stale closures in async callbacks', () => {
+    assert.match(hookSource, /itemsRef/)
+    assert.match(hookSource, /itemsRef\.current/)
+  })
+
+  it('ensureUploaded returns the coordinator result directly', () => {
+    assert.match(hookSource, /const result = await uploadAttachmentBatch/)
+    assert.match(hookSource, /setItems\(result\.items\)/)
+    assert.match(hookSource, /return result/)
+  })
+
+  it('uploadOne builds FormData with file and requestId for the draft action', () => {
+    assert.match(hookSource, /formData\.append\('file'/)
+    assert.match(hookSource, /formData\.append\('requestId'/)
+    assert.match(hookSource, /uploadSolutionDraftAttachmentAction/)
+  })
+
+  it('removeItem cleans server-side before removing and never swallows failures', () => {
+    assert.match(hookSource, /cleanupSolutionDraftAttachments/)
+    // removeItem checks for staged attachmentId before cleanup
+    assert.match(hookSource, /current\?\.status === 'success' && current\.attachmentId/)
+    // Propagates the cleanup failure — never silently swallowed
+    assert.match(hookSource, /if \(!result\.success\)\s*\{[\s\S]*?throw new Error\(result\.error\)/m)
+  })
+
+  it('cleanupDrafts batches all successful staged ids', () => {
+    // The batching: filter all success+attachmentId items into one cleanup call
+    assert.match(hookSource, /stagedIds/)
+    assert.match(hookSource, /entry\.status === 'success' && entry\.attachmentId/)
+    assert.match(hookSource, /attachmentIds: stagedIds/)
+  })
+
+  it('reset clears local state only after cleanup returns', () => {
+    // reset calls cleanup before setItems([])
+    const resetSlice = hookSource.slice(hookSource.indexOf('const reset ='))
+    assert.match(resetSlice, /cleanupSolutionDraftAttachments/)
+    assert.match(resetSlice, /setItems\(\[\]\)/)
+    // The cleanup await must precede the clear
+    assert.ok(resetSlice.indexOf('await') < resetSlice.indexOf("setItems([])"))
+  })
+})
+
+describe('SolutionFileUpload items-first API', () => {
+  it('accepts items: AttachmentUploadItem[] with add/remove/retry callbacks', () => {
+    assert.match(componentSource, /items\?: AttachmentUploadItem\[\]/)
+    assert.match(componentSource, /onAddFiles/)
+    assert.match(componentSource, /onRemoveItem/)
+    assert.match(componentSource, /onRetryItem/)
+  })
+
+  it('renders items-first when the items API is provided', () => {
+    assert.match(componentSource, /usingItemsApi/)
+    assert.match(componentSource, /items !== undefined/)
+  })
+
+  it('shows per-item server error text beside failed files', () => {
+    assert.match(componentSource, /item\.error/)
+    assert.match(componentSource, /text-red-600/)
+  })
+
+  it('keeps failed items retryable with a retry action', () => {
+    assert.match(componentSource, /onRetryItem\(item\.id\)/)
+    assert.match(componentSource, /RotateCcw/)
+  })
+
+  it('keeps legacy props as deprecated optional for Task 6 migration', () => {
+    assert.match(componentSource, /files\?: File\[\]/)
+    assert.match(componentSource, /filesWithProgress\?: FileWithProgress\[\]/)
+    assert.match(componentSource, /@deprecated/)
   })
 })
