@@ -94,40 +94,67 @@ test.describe('Formatted description browser flow (release gate)', () => {
     await description.fill(DESCRIPTION_SEED)
     await expect(description).toHaveValue(DESCRIPTION_SEED)
 
-    // ── Select "bold", apply toolbar Bold, assert markers once ─────────
+    // ── Select "bold", apply toolbar Bold, assert non-vacuous change ──
+    // Seed already contains **bold** once; capture pre-click so a no-op
+    // toolbar click cannot pass. Required initial source string is unchanged.
+    const valueBeforeBold = await description.inputValue()
+    expect(valueBeforeBold).toBe(DESCRIPTION_SEED)
+    expect(countOccurrences(valueBeforeBold, '**bold**')).toBe(1)
+
     await selectTextInTextarea(description, 'bold')
     await resubmitDialog.getByTestId('formatted-text-bold').click()
 
     await expect
-      .poll(async () => countOccurrences(await description.inputValue(), '**bold**'), {
-        timeout: 5_000,
-        message: 'textarea value must contain **bold** exactly once after Bold',
-      })
-      .toBe(1)
+      .poll(
+        async () => {
+          const value = await description.inputValue()
+          return {
+            changed: value !== valueBeforeBold,
+            boldCount: countOccurrences(value, '**bold**'),
+            value,
+          }
+        },
+        {
+          timeout: 5_000,
+          message:
+            'Bold control must change the textarea value and leave **bold** exactly once',
+        },
+      )
+      .toEqual(
+        expect.objectContaining({
+          changed: true,
+          boldCount: 1,
+        }),
+      )
 
-    // ── Enter a newline, then resubmit (do not touch attachments) ──────
-    await description.focus()
-    await description.press('End')
+    // ── Enter a newline beyond the seed newline, then resubmit ─────────
+    // Seed already has one \n; place caret at true end-of-text (not just
+    // end-of-line) and press Enter so the value gains a second newline.
+    const newlinesBeforeEnter = countOccurrences(await description.inputValue(), '\n')
+    expect(newlinesBeforeEnter).toBeGreaterThanOrEqual(1)
+
+    await description.evaluate((el) => {
+      const node = el as HTMLTextAreaElement
+      node.focus()
+      const end = node.value.length
+      node.setSelectionRange(end, end)
+    })
     await description.press('Enter')
 
     const valueBeforeSubmit = await description.inputValue()
-    expect(valueBeforeSubmit.includes('\n')).toBeTruthy()
+    expect(countOccurrences(valueBeforeSubmit, '\n')).toBeGreaterThanOrEqual(2)
+    expect(countOccurrences(valueBeforeSubmit, '\n')).toBeGreaterThan(newlinesBeforeEnter)
     expect(countOccurrences(valueBeforeSubmit, '**bold**')).toBe(1)
     expect(valueBeforeSubmit).toContain('<script>alert(1)</script>')
 
     await resubmitDialog.getByRole('button', { name: /Resubmit Request/i }).click()
 
-    await expect
-      .poll(
-        async () => {
-          const toast = page.getByText(/Request resubmitted successfully/i)
-          if (await toast.isVisible().catch(() => false)) return true
-          // Modal closes on success; deep-link router also replaces URL.
-          return !(await resubmitDialog.isVisible().catch(() => false))
-        },
-        { timeout: 30_000, message: 'resubmit should succeed and close the resubmit dialog' },
-      )
-      .toBe(true)
+    // request-resubmit-modal closes synchronously in handleSubmit before the
+    // server action resolves — dialog dismissal is NOT success. Wait only for
+    // the real handler toast from request-modal-router onResubmit.
+    await expect(page.getByText('Request resubmitted successfully')).toBeVisible({
+      timeout: 30_000,
+    })
 
     // ── Reopen real request detail page and assert safe render ─────────
     await page.goto(`/requests/${encodeURIComponent(requestId)}`)
