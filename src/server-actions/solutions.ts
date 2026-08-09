@@ -4,7 +4,8 @@ import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
 import { RequestStatus, UserRole } from '@prisma/client'
 import { submitSolutionSchema, SubmitSolutionInput } from '@/lib/schemas/solution-schemas'
-import { saveFile, generateFilePath } from '@/lib/files'
+import { createStoredAttachmentPath, writeAttachmentFile, deleteAttachmentFile } from '@/lib/attachments/storage'
+import { sanitizeAttachmentFileName } from '@/lib/attachments/policy'
 import { revalidateRequestViews } from './request-view-invalidation'
 
 /**
@@ -1835,13 +1836,24 @@ export async function resubmitSolution(input: {
     throw new Error('Can only resubmit rejected solutions')
   }
 
-  // Save new files to disk before transaction (avoid holding DB connection during I/O)
+  // Save new files to disk through the private storage layer before the
+  // transaction (avoid holding the DB connection during I/O). The stored path
+  // is derived from the solutionId + a sanitized filename and persisted so
+  // exports (pdf-package/readAttachmentFile) resolve these attachments under the
+  // private root instead of ENOENT on the legacy public/uploads location.
   const savedFileData: Array<{ fileName: string; fileType: string; fileSize: number; filePath: string }> = []
+  const writtenStoredPaths: string[] = []
   for (const file of input.files) {
-    const filePath = generateFilePath(solution.id, file.name)
+    const storedPath = createStoredAttachmentPath(solution.id, file.name)
     const bytes = await file.arrayBuffer()
-    await saveFile(filePath, Buffer.from(bytes))
-    savedFileData.push({ fileName: file.name, fileType: file.type, fileSize: file.size, filePath })
+    await writeAttachmentFile(storedPath, Buffer.from(bytes))
+    writtenStoredPaths.push(storedPath)
+    savedFileData.push({
+      fileName: sanitizeAttachmentFileName(file.name),
+      fileType: file.type,
+      fileSize: file.size,
+      filePath: storedPath,
+    })
   }
 
   // Start transaction
@@ -2028,6 +2040,17 @@ export async function resubmitSolution(input: {
     }
 
     return updatedSolution
+  }).catch(async (txError) => {
+    // Best-effort: remove the files written above if the transaction failed so
+    // they are not orphaned outside the solution lifecycle.
+    for (const storedPath of writtenStoredPaths) {
+      try {
+        await deleteAttachmentFile(storedPath)
+      } catch (cleanupError) {
+        console.warn(`[resubmitSolution] Failed to clean up attachment ${storedPath}`, cleanupError)
+      }
+    }
+    throw txError
   })
 
   // Send notifications to approvers only if NOT auto-approved

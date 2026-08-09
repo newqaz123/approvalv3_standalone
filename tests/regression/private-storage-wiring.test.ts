@@ -14,3 +14,16 @@ it('routes every attachment filesystem operation through private storage', () =>
   assert.match(requestsAction, /deleteAttachmentFile/)
   assert.match(pdfPackage, /readAttachmentFile/)
 })
+
+it('routes resubmitSolution attachments through private storage', () => {
+  const solutions = readFileSync('src/server-actions/solutions.ts', 'utf8')
+  // The live solution writer must not use the legacy public/uploads helpers.
+  assert.doesNotMatch(solutions, /\bgenerateFilePath\b/)
+  assert.doesNotMatch(solutions, /\bsaveFile\b/)
+  // New solution attachments are written through the private storage layer with
+  // a sanitized filename so exports (pdf-package/readAttachmentFile) resolve
+  // them under the private root instead of ENOENT on public/uploads.
+  assert.match(solutions, /createStoredAttachmentPath/)
+  assert.match(solutions, /writeAttachmentFile/)
+  assert.match(solutions, /sanitizeAttachmentFileName/)
+})
