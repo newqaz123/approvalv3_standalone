@@ -7,9 +7,8 @@ import { revalidateRequestViews } from './request-view-invalidation'
 import { z } from 'zod'
 import { createApprovalChain, getApproversAtLevel } from './approvals'
 import { requireAdmin } from '@/lib/auth'
-import { promises as fs } from 'fs'
-import path from 'path'
 import { getCurrentUser, getUserById } from '@/lib/cache/user-cache'
+import { deleteAttachmentFile } from '@/lib/attachments/storage'
 
 // Zod schema for request validation
 const createRequestSchema = z.object({
@@ -1120,11 +1119,6 @@ export async function deleteRequest(input: { requestId: string; reason: string }
       }
     }
 
-    // Get file paths for cleanup
-    const filePaths = request.fileAttachments.map(f =>
-      path.join(process.cwd(), 'public', f.filePath.replace(/^\//, ''))
-    )
-
     // Perform soft delete and log activity in transaction
     await prisma.$transaction([
       // Soft delete the request
@@ -1149,13 +1143,14 @@ export async function deleteRequest(input: { requestId: string; reason: string }
       }),
     ])
 
-    // Clean up files from disk (after transaction succeeds)
-    for (const filePath of filePaths) {
+    // Clean up files from disk (after transaction succeeds) via the private
+    // storage layer so legacy public/ path joins are not reconstructed here.
+    for (const attachment of request.fileAttachments) {
       try {
-        await fs.unlink(filePath)
+        await deleteAttachmentFile(attachment.filePath)
       } catch (error) {
         // Log warning but don't fail the operation
-        console.warn(`Failed to delete file at ${filePath}:`, error)
+        console.warn(`Failed to delete attachment ${attachment.filePath}:`, error)
       }
     }
 

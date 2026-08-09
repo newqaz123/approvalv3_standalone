@@ -2,12 +2,14 @@
 
 import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
-import { getFileUrl, saveFile, generateFilePath } from '@/lib/files'
 import { revalidatePath } from 'next/cache'
-import { unlink } from 'fs/promises'
-import { join } from 'path'
 import { z } from 'zod'
-import { validateAttachmentMetadata } from '@/lib/attachments/policy'
+import { sanitizeAttachmentFileName, validateAttachmentMetadata } from '@/lib/attachments/policy'
+import {
+  createStoredAttachmentPath,
+  writeAttachmentFile,
+  deleteAttachmentFile,
+} from '@/lib/attachments/storage'
 
 interface PrepareFileUploadInput {
   fileName: string
@@ -313,10 +315,9 @@ export async function deleteFileAttachment({ fileId }: { fileId: string }) {
     where: { id: fileId },
   })
 
-  // Delete the physical file from disk
+  // Delete the physical file from disk via the private storage layer
   try {
-    const filePath = join(process.cwd(), 'public', fileAttachment.filePath.replace(/^\//, ''))
-    await unlink(filePath)
+    await deleteAttachmentFile(fileAttachment.filePath)
   } catch (err) {
     // Log warning but don't fail - file may already be gone
     console.warn(`[deleteFileAttachment] Failed to delete physical file: ${fileAttachment.filePath}`, err)
@@ -338,14 +339,6 @@ export async function deleteFileAttachment({ fileId }: { fileId: string }) {
   revalidatePath('/engineering')
 
   return { success: true }
-}
-
-/**
- * Get download URL for a file
- * Files are served directly by Next.js static file serving
- */
-export async function getDownloadUrl(filePath: string): Promise<string> {
-  return getFileUrl(filePath)
 }
 
 /**
@@ -405,26 +398,39 @@ export async function uploadFileAction(
     return { success: false, error: 'Not authorized to upload to this request' }
   }
 
-  // Save file to disk
-  const filePath = generateFilePath(requestId, file.name)
+  // Persist the attachment through the private storage layer. The stored path
+  // is derived from the requestId + a sanitized filename so it is stable across
+  // the write, the DB record, and any later compensation delete.
+  const storedPath = createStoredAttachmentPath(requestId, file.name)
   const bytes = await file.arrayBuffer()
-  const buffer = Buffer.from(bytes)
-  await saveFile(filePath, buffer)
+  await writeAttachmentFile(storedPath, Buffer.from(bytes))
 
-  // Create database record
+  // Create database record. If this fails, remove the file we just wrote so it
+  // is not orphaned outside the request lifecycle (best-effort compensation).
   const fileId = crypto.randomUUID()
-  const fileAttachment = await prisma.file_attachments.create({
-    data: {
-      id: fileId,
-      requestId,
-      fileName: file.name,
-      fileType: file.type,
-      fileSize: file.size,
-      filePath,
-      description: description || null,
-      uploadedById: userId,
-    },
-  })
+  const fileName = sanitizeAttachmentFileName(file.name)
+  let fileAttachment
+  try {
+    fileAttachment = await prisma.file_attachments.create({
+      data: {
+        id: fileId,
+        requestId,
+        fileName,
+        fileType: file.type,
+        fileSize: file.size,
+        filePath: storedPath,
+        description: description || null,
+        uploadedById: userId,
+      },
+    })
+  } catch (dbError) {
+    try {
+      await deleteAttachmentFile(storedPath)
+    } catch (cleanupError) {
+      console.warn(`[uploadFileAction] Failed to clean up attachment ${storedPath}`, cleanupError)
+    }
+    throw dbError
+  }
 
   // Log activity
   await prisma.request_activities.create({
@@ -484,27 +490,38 @@ export async function uploadSolutionFileAction(
     return { success: false, error: 'Solution not found' }
   }
 
-  // Save file to disk (organized by requestId for consistency)
-  const filePath = generateFilePath(solution.requestId, file.name)
+  // Persist the attachment through the private storage layer (organized by
+  // requestId for consistency). Compensate the write if the DB record fails.
+  const storedPath = createStoredAttachmentPath(solution.requestId, file.name)
   const bytes = await file.arrayBuffer()
-  const buffer = Buffer.from(bytes)
-  await saveFile(filePath, buffer)
+  await writeAttachmentFile(storedPath, Buffer.from(bytes))
 
   // Create database record with solutionId (NOT requestId)
   const fileId = crypto.randomUUID()
-  const fileAttachment = await prisma.file_attachments.create({
-    data: {
-      id: fileId,
-      solutionId,
-      requestId: null,
-      fileName: file.name,
-      fileType: file.type,
-      fileSize: file.size,
-      filePath,
-      description: description || null,
-      uploadedById: userId,
-    },
-  })
+  const fileName = sanitizeAttachmentFileName(file.name)
+  let fileAttachment
+  try {
+    fileAttachment = await prisma.file_attachments.create({
+      data: {
+        id: fileId,
+        solutionId,
+        requestId: null,
+        fileName,
+        fileType: file.type,
+        fileSize: file.size,
+        filePath: storedPath,
+        description: description || null,
+        uploadedById: userId,
+      },
+    })
+  } catch (dbError) {
+    try {
+      await deleteAttachmentFile(storedPath)
+    } catch (cleanupError) {
+      console.warn(`[uploadSolutionFileAction] Failed to clean up attachment ${storedPath}`, cleanupError)
+    }
+    throw dbError
+  }
 
   // Log activity
   await prisma.request_activities.create({

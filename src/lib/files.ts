@@ -42,17 +42,3 @@ export async function saveFile(filePath: string, file: Buffer): Promise<void> {
   await mkdir(dirname(fullPath), { recursive: true })
   await writeFile(fullPath, file)
 }
-
-/**
- * Get the public URL for a file
- * Files are served directly by Next.js static file serving
- *
- * @deprecated Public URL serving is being replaced by private attachment
- * storage. Prefer the private storage layer for new download flows instead of
- * this helper.
- */
-export function getFileUrl(filePath: string): string {
-  // Remove 'public/' prefix, strip any leading slash, then add exactly one
-  const normalized = filePath.replace(/^public\//, '').replace(/^\//, '')
-  return `/${normalized}`
-}
