@@ -192,6 +192,18 @@ describe('useSolutionAttachments hook contract', () => {
     assert.ok(resetSlice.indexOf('await') < resetSlice.indexOf("setItems([])"))
   })
 
+  it('reset nulls the ref synchronously to avoid double-cleanup on unmount', () => {
+    // reset must null itemsRef.current before setItems([]) so the unmount
+    // safety net (which reads itemsRef.current) does not double-clean drafts
+    // that reset already deleted via the deterministic Cancel button.
+    const resetSlice = hookSource.slice(hookSource.indexOf('const reset ='))
+    assert.match(resetSlice, /itemsRef\.current = \[\]/)
+    assert.ok(
+      resetSlice.indexOf('itemsRef.current = []') <
+        resetSlice.indexOf('setItems([])')
+    )
+  })
+
   it('clear drops local state without server cleanup and nulls the ref first', () => {
     // clear is for the post-success path: linked drafts must not be sent to
     // cleanupSolutionDraftAttachments (which scopes to solutionId:null).
@@ -206,6 +218,17 @@ describe('useSolutionAttachments hook contract', () => {
     )
     // clear must never invoke server cleanup
     assert.doesNotMatch(clearSlice, /cleanupSolutionDraftAttachments/)
+  })
+
+  it('fires best-effort cleanup on unmount for staged drafts (safety net)', () => {
+    // A useEffect cleanup snapshots itemsRef.current on unmount and fires
+    // owner-scoped cleanup for any remaining staged (unlinked) drafts. After a
+    // successful submit, clear() has already nulled itemsRef.current, so this
+    // is a no-op — cleanup never runs on linked attachments.
+    assert.match(hookSource, /useEffect/)
+    // Fire-and-forget (void) distinguishes the unmount safety net from the
+    // awaited cleanup in reset/cleanupDrafts/removeItem.
+    assert.match(hookSource, /void cleanupSolutionDraftAttachments/)
   })
 })
 

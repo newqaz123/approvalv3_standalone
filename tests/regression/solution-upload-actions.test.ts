@@ -341,4 +341,15 @@ describe('Task 6 source-wiring: hook integration and ID-only server boundary', (
   it('router passes IDs (fileIds / newFileIds) directly', () => {
     assert.match(router, /newFileIds: data\.fileIds/)
   })
+
+  it('SolutionForm cancel awaits hook reset() before navigating and surfaces cleanup failure', () => {
+    // The Cancel button must use an async handler, not direct router.back()
+    assert.match(solutionForm, /const handleCancel = async/)
+    // reset() must be awaited before router.back()
+    assert.match(solutionForm, /await reset\(\)/)
+    // Cleanup failure is surfaced (not silently swallowed)
+    assert.match(solutionForm, /Failed to clean up draft files/)
+    // The Cancel button delegates to the handler
+    assert.match(solutionForm, /onClick={handleCancel}/)
+  })
 })

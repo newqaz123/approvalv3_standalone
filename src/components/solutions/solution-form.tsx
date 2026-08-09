@@ -75,7 +75,7 @@ export function SolutionForm({
   const router = useRouter()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [showPreview, setShowPreview] = useState(false)
-  const { items, addFiles, removeItem, ensureUploaded, clear } = useSolutionAttachments({
+  const { items, addFiles, removeItem, ensureUploaded, clear, reset } = useSolutionAttachments({
     requestId,
   })
 
@@ -102,6 +102,20 @@ export function SolutionForm({
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to remove file')
     }
+  }
+
+  const handleCancel = async () => {
+    // Await hook reset() (cleanup unlinked drafts + clear local state) before
+    // navigating away. Surface cleanup failure and do NOT navigate on error —
+    // the user can retry. After reset succeeds the unmount safety net sees an
+    // empty ref, so there is no double-cleanup.
+    try {
+      await reset()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to clean up draft files')
+      return
+    }
+    router.back()
   }
 
   const handleSubmit = async (values: SolutionFormValues, isConfirmed: boolean = false) => {
@@ -432,7 +446,7 @@ export function SolutionForm({
             <Button
               type="button"
               variant="outline"
-              onClick={() => router.back()}
+              onClick={handleCancel}
               disabled={isSubmitting}
             >
               Cancel

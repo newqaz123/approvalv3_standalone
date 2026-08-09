@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   uploadAttachmentBatch,
   type AttachmentUploadItem,
@@ -74,6 +74,15 @@ export interface UseSolutionAttachmentsResult {
  *   `reset`/`cleanupDrafts` would throw a count-mismatch; `clear` avoids that
  *   by nulling both the ref and state synchronously.
  *
+ * - **Unmount safety net.** A `useEffect` cleanup snapshots `itemsRef.current`
+ *   on unmount and fires best-effort owner-scoped cleanup for any remaining
+ *   staged (unlinked) drafts — e.g. when the user navigates away via browser
+ *   back. After a successful submit `clear()` has already nulled the ref, so
+ *   the safety net is a no-op and cleanup never runs on linked attachments.
+ *   Hard-unload (tab close, refresh) may not fire this cleanup; the
+ *   deterministic Cancel button (which awaits `reset()`) is the primary
+ *   guarantee.
+ *
  * - **Live progress.** While `uploadAttachmentBatch` runs, `onItemChange`
  *   updates each item's status (`uploading` → terminal) so the UI renders
  *   progress incrementally; the final `setItems(result.items)` reconciles the
@@ -89,6 +98,29 @@ export function useSolutionAttachments({
   // Mirror the latest items so async callbacks never read a stale React closure.
   const itemsRef = useRef(items)
   itemsRef.current = items
+
+  // Unmount safety net: if the component unmounts while staged (unlinked)
+  // drafts remain in the ref — e.g. the user navigated away via browser back
+  // rather than the deterministic Cancel button — fire owner-scoped cleanup
+  // as best-effort. After a successful submit, clear() has already nulled
+  // itemsRef.current, so this is a no-op and cleanup never runs on linked
+  // attachments. This is a best-effort safety net; hard-unload (tab close,
+  // refresh) may not fire this cleanup — the deterministic Cancel button is
+  // the primary guarantee.
+  useEffect(() => {
+    return () => {
+      const stagedIds = itemsRef.current
+        .filter((entry) => entry.status === 'success' && entry.attachmentId)
+        .map((entry) => entry.attachmentId as string)
+      if (stagedIds.length === 0) return
+      void cleanupSolutionDraftAttachments({
+        requestId,
+        attachmentIds: stagedIds,
+      }).catch((error) => {
+        console.error('useSolutionAttachments unmount cleanup failed:', error)
+      })
+    }
+  }, [requestId])
 
   const addFiles = useCallback((files: File[]) => {
     const newItems: AttachmentUploadItem[] = files.map((file) => ({
@@ -172,6 +204,9 @@ export function useSolutionAttachments({
         throw new Error(result.error)
       }
     }
+    // Null the ref synchronously so the unmount safety net (which reads
+    // itemsRef.current) does not double-clean drafts that reset just deleted.
+    itemsRef.current = []
     setItems([])
   }, [requestId])
 
