@@ -360,7 +360,10 @@ wait_for_migration() {
     exit_code="$(docker inspect -f '{{.State.ExitCode}}' approval-migrate 2>/dev/null || true)"
     if [ "$status" = "exited" ]; then
       if [ "$exit_code" = "0" ]; then
-        record_migration_outcome applied "${OLD_VERSION:-unknown}" "${NEW_VERSION:-unknown}"
+        if ! record_migration_outcome applied "${OLD_VERSION:-unknown}" "${NEW_VERSION:-unknown}"; then
+          fail 'Migration completed but durable migration state could not be recorded safely'
+          return 1
+        fi
         return 0
       fi
       record_migration_outcome unknown "${OLD_VERSION:-unknown}" "${NEW_VERSION:-unknown}"

@@ -112,6 +112,24 @@ test('migration failure reaches the fake migration command and is terminal', asy
   assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /Migration succeeded|deployment succeeded/i)
 })
 
+test('successful migration cannot report success when durable state ownership fails', async () => {
+  const fixture = await fakeBin()
+  const result = runShell(
+    'source scripts/lib/deploy-common.sh; wait_for_migration',
+    {
+      PATH: `${fixture.bin}:${process.env.PATH}`,
+      COMMAND_LOG: fixture.log,
+      DEPLOY_STATE_FILE: join(fixture.dir, 'ownership-failure-state'),
+      MIGRATE_EXIT_CODE: '0',
+      MIGRATE_STATE: 'exited',
+      CHOWN_EXIT: '1',
+    },
+  )
+  assert.notEqual(result.status, 0)
+  assert.match(`${result.stdout}\n${result.stderr}`, /root-owned|root ownership/i)
+  assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /Migration succeeded|deployment succeeded/i)
+})
+
 test('backup containment rejects an existing artifact outside after canonicalization', async () => {
   const fixture = await fakeBin()
   const backup = join(fixture.dir, 'backups')
