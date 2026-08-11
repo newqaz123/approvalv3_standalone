@@ -73,12 +73,42 @@ backup_summary_value() {
   printf '%s\n' "$output" | sed -n "s/^${key}=//p" | tail -n 1
 }
 
+canonical_directory() {
+  [ -d "$1" ] || return 1
+  CDPATH= cd -P -- "$1" 2>/dev/null && pwd -P
+}
+
+canonical_existing_path() {
+  local path="$1" link dir base hops=0
+  [ -e "$path" ] || return 1
+  while [ -L "$path" ]; do
+    hops=$((hops + 1))
+    [ "$hops" -le 40 ] || return 1
+    link="$(readlink "$path" 2>/dev/null)" || return 1
+    case "$link" in
+      /*) path="$link" ;;
+      *) path="$(dirname "$path")/$link" ;;
+    esac
+    [ -e "$path" ] || return 1
+  done
+  dir="$(CDPATH= cd -P -- "$(dirname "$path")" 2>/dev/null)" || return 1
+  base="$(basename "$path")"
+  [ -f "$dir/$base" ] || return 1
+  printf '%s/%s\n' "$dir" "$base"
+}
+
 path_in_backup_dir() {
-  local path="$1" backup_root="$2"
+  local path="$1" backup_root="$2" canonical_root canonical_path
+  canonical_root="$(canonical_directory "$backup_root")" || return 1
   case "$path" in
-    "$backup_root"/*) [ -f "$path" ] && [ -s "$path" ] ;;
-    ./*) path="$DEPLOY_ROOT/${path#./}"; case "$path" in "$backup_root"/*) [ -f "$path" ] && [ -s "$path" ] ;; *) return 1 ;; esac ;;
-    *) path="$DEPLOY_ROOT/$path"; case "$path" in "$backup_root"/*) [ -f "$path" ] && [ -s "$path" ] ;; *) return 1 ;; esac ;;
+    /*) ;;
+    ./*) path="$DEPLOY_ROOT/${path#./}" ;;
+    *) path="$DEPLOY_ROOT/$path" ;;
+  esac
+  canonical_path="$(canonical_existing_path "$path")" || return 1
+  case "$canonical_path" in
+    "$canonical_root"/*) [ -s "$canonical_path" ] ;;
+    *) return 1 ;;
   esac
 }
 
@@ -133,11 +163,46 @@ state_value() {
   sed -n "s/^$1=//p" "$2" | tail -n 1
 }
 
+stat_owner_uid() {
+  local uid
+  uid="$(stat -c '%u' "$1" 2>/dev/null || true)"
+  case "$uid" in
+    ''|*[!0-9]*) uid="$(stat -f '%u' "$1" 2>/dev/null || true)" ;;
+  esac
+  printf '%s\n' "$uid"
+}
+
+ensure_root_owned() {
+  local path="$1" uid
+  chown root:root "$path" 2>/dev/null || { fail "Unable to make deployment state file root-owned: $path"; return 1; }
+  uid="$(stat_owner_uid "$path")"
+  [ "$uid" = "0" ] || { fail "Deployment state file is not root-owned: $path"; return 1; }
+}
+
 query_count() {
   local container="$1" query="$2" value
-  value="$(docker exec "$container" sh -c "psql -Atqc '$query'" 2>/dev/null || true)"
-  value="$(printf '%s\n' "$value" | tr -d '[:space:]')"
-  case "$value" in ''|*[!0-9]*) printf '%s\n' 0 ;; *) printf '%s\n' "$value" ;; esac
+  if ! value="$(docker exec "$container" sh -c "psql -Atqc '$query'" 2>/dev/null)"; then
+    fail "Database count query failed for $container"
+    return 1
+  fi
+  value="$(printf '%s\n' "$value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+  case "$value" in
+    ''|*[!0-9]*) fail "Database count query returned a non-negative integer: $value"; return 1 ;;
+    *) printf '%s\n' "$value" ;;
+  esac
+}
+
+query_file_count() {
+  local value
+  if ! value="$(docker exec approval-app sh -c 'find /app/uploads -type f -print | wc -l' 2>/dev/null)"; then
+    fail 'Uploads physical file-count probe failed'
+    return 1
+  fi
+  value="$(printf '%s\n' "$value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+  case "$value" in
+    ''|*[!0-9]*) fail "Uploads physical file-count probe returned a non-negative integer: $value"; return 1 ;;
+    *) printf '%s\n' "$value" ;;
+  esac
 }
 
 capture_deployment_state() {
@@ -151,10 +216,9 @@ capture_deployment_state() {
   [ -n "$uploads_volume" ] || { fail 'Unable to identify the named uploads volume'; return 1; }
   [ -n "$db_project" ] || { fail 'Unable to identify the database Compose project label'; return 1; }
   [ -n "$app_project" ] || { fail 'Unable to identify the app Compose project label'; return 1; }
-  users="$(query_count approval-db 'select count(*) from users;')"
-  attachments="$(query_count approval-db 'select count(*) from file_attachments;')"
-  files="$(docker exec approval-app sh -c 'find /app/uploads -type f -print | wc -l' 2>/dev/null | tr -d '[:space:]')"
-  case "$files" in ''|*[!0-9]*) files=0 ;; esac
+  users="$(query_count approval-db 'select count(*) from users;')" || return 1
+  attachments="$(query_count approval-db 'select count(*) from file_attachments;')" || return 1
+  files="$(query_file_count)" || return 1
   timestamp="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
   {
     printf 'PRE_DB_VOLUME=%s\n' "$db_volume"
@@ -168,7 +232,10 @@ capture_deployment_state() {
     printf 'MIGRATIONS_APPLIED=none\n'
   } >"$output" || return 1
   chmod 600 "$output"
-  chown root:root "$output" 2>/dev/null || true
+  if ! ensure_root_owned "$output"; then
+    rm -f "$output"
+    return 1
+  fi
 }
 
 capture_current_state() {
@@ -177,10 +244,9 @@ capture_current_state() {
   uploads_volume="$(mount_for_destination approval-app /app/uploads || true)"
   db_project="$(container_project_label approval-db)"
   app_project="$(container_project_label approval-app)"
-  users="$(query_count approval-db 'select count(*) from users;')"
-  attachments="$(query_count approval-db 'select count(*) from file_attachments;')"
-  files="$(docker exec approval-app sh -c 'find /app/uploads -type f -print | wc -l' 2>/dev/null | tr -d '[:space:]')"
-  case "$files" in ''|*[!0-9]*) files=0 ;; esac
+  users="$(query_count approval-db 'select count(*) from users;')" || return 1
+  attachments="$(query_count approval-db 'select count(*) from file_attachments;')" || return 1
+  files="$(query_file_count)" || return 1
   {
     printf 'POST_DB_VOLUME=%s\n' "$db_volume"
     printf 'POST_UPLOADS_VOLUME=%s\n' "$uploads_volume"
@@ -223,7 +289,10 @@ audit_attachment_integrity() {
   [ -n "$output" ] || { fail 'Attachment audit output file is required'; return 1; }
   mkdir -p "$(dirname "$output")" || return 1
   : >"$output" || return 1
-  rows="$(docker exec approval-db sh -c 'psql -Atqc "select id, \"filePath\" from file_attachments order by id;"' 2>/dev/null || true)"
+  if ! rows="$(docker exec approval-db sh -c 'psql -Atqc "select id, \"filePath\" from file_attachments order by id;"' 2>/dev/null)"; then
+    fail 'Attachment audit database query failed'
+    return 1
+  fi
   while IFS= read -r row; do
     [ -n "$row" ] || continue
     attachment_id="${row%%$'\t'*}"
@@ -281,7 +350,7 @@ record_migration_outcome() {
     printf 'MIGRATION_TIMESTAMP=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
   } >>"$DEPLOY_STATE_FILE"
   chmod 600 "$DEPLOY_STATE_FILE"
-  chown root:root "$DEPLOY_STATE_FILE" 2>/dev/null || true
+  ensure_root_owned "$DEPLOY_STATE_FILE" || return 1
 }
 
 wait_for_migration() {

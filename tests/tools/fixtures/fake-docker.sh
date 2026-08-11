@@ -11,6 +11,7 @@ case "$sub" in
 compose)
 	rest="$*"
 	if printf '%s\n' "$rest" | grep -q 'up -d db migrate app'; then
+		echo 'MIGRATION_COMMAND_REACHED' >>"$COMMAND_LOG"
 		exit "${COMPOSE_UP_EXIT:-0}"
 	fi
 	if printf '%s\n' "$rest" | grep -q 'config --volumes'; then
@@ -119,8 +120,12 @@ exec)
 			printf 'PG_DUMP dummy content\n'
 			exit 0
 		fi
+		if [ "${QUERY_FAILURE:-0}" = "1" ]; then
+			exit 1
+		fi
 		case "$query" in
 		*filePath*)
+			if [ "${ATTACHMENT_QUERY_FAILURE:-0}" = "1" ]; then exit 1; fi
 			if [ -n "$ATTACHMENT_ROWS_FILE" ] && [ -f "$ATTACHMENT_ROWS_FILE" ]; then cat "$ATTACHMENT_ROWS_FILE"; fi
 			exit 0
 			;;
@@ -143,6 +148,9 @@ exec)
 		esac
 	fi
 	if [ "$container" = "approval-app" ]; then
+		if [ "${FILES_FAILURE:-0}" = "1" ]; then
+			exit 1
+		fi
 		for a in "$@"; do
 			case "$a" in
 			*find\ /app/uploads*)
