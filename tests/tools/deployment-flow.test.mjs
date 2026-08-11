@@ -100,6 +100,65 @@ async function installValidGate(rootDir) {
   await writeFile(join(rootDir, 'docker-compose.prod.yml'), 'services: {}\n')
 }
 
+test('coordinator executes online stages in safety order through build and deploy', async () => {
+  const fixture = await fakeBin()
+  const source = await read('scripts/deploy.sh')
+  const result = runShell(
+    'DEPLOY_SOURCE_ONLY=1; source scripts/deploy.sh; tag_rollback_images(){ echo rollback >>"$COMMAND_LOG"; }; run_verified_backup(){ echo backup >>"$COMMAND_LOG"; }; deploy_production_services(){ echo compose >>"$COMMAND_LOG"; }; wait_for_migration(){ echo migrate >>"$COMMAND_LOG"; }; wait_for_health(){ echo health >>"$COMMAND_LOG"; }; DEPLOY_TEST_PLAN=online; run_test_plan',
+    { PATH: `${fixture.bin}:${process.env.PATH}`, COMMAND_LOG: fixture.log, DEPLOY_ROOT: fixture.dir },
+  )
+  assert.equal(result.status, 0, result.stderr)
+  const log = await readFile(fixture.log, 'utf8')
+  assert.match(log, /rollback.*backup.*build.*compose.*migrate.*health/s)
+  assert.doesNotMatch(log, /seed|down -v|volume prune/)
+  assert.match(source, /run_test_plan/)
+})
+
+test('offline checksum failure stops before docker load', async () => {
+  const fixture = await fakeBin()
+  const result = runShell(
+    'DEPLOY_SOURCE_ONLY=1; source scripts/deploy.sh; validate_offline_package; load_offline_images',
+    { PATH: `${fixture.bin}:${process.env.PATH}`, COMMAND_LOG: fixture.log, DEPLOY_ROOT: fixture.dir, SHA256SUMS: 'missing' },
+  )
+  assert.notEqual(result.status, 0)
+  const log = await readFile(fixture.log, 'utf8').catch(() => '')
+  assert.doesNotMatch(log, /load/)
+})
+
+test('offline mode never invokes Git or network commands', async () => {
+  const fixture = await fakeBin()
+  const result = runShell(
+    'DEPLOY_SOURCE_ONLY=1; source scripts/deploy.sh; tag_rollback_images(){ echo rollback >>"$COMMAND_LOG"; }; run_verified_backup(){ echo backup >>"$COMMAND_LOG"; }; deploy_production_services(){ echo compose >>"$COMMAND_LOG"; }; wait_for_migration(){ echo migrate >>"$COMMAND_LOG"; }; wait_for_health(){ echo health >>"$COMMAND_LOG"; }; DEPLOY_TEST_PLAN=offline; run_test_plan',
+    { PATH: `${fixture.bin}:${process.env.PATH}`, COMMAND_LOG: fixture.log, DEPLOY_ROOT: fixture.dir },
+  )
+  assert.equal(result.status, 0, result.stderr)
+  const log = await readFile(fixture.log, 'utf8')
+  assert.doesNotMatch(log, /git|curl|fetch|pull/)
+})
+
+test('missing app with partial or complete data volumes fails closed', async () => {
+  const fixture = await fakeBin()
+  for (const volumes of ['db_data', 'uploads_data', 'db_data\\nuploads_data']) {
+    const result = runShell(
+      'DEPLOY_SOURCE_ONLY=1; source scripts/deploy.sh; prepare_existing_state',
+      { PATH: `${fixture.bin}:${process.env.PATH}`, DOCKER_VOLUMES: volumes, APP_CONTAINER_MISSING: '1' },
+    )
+    assert.notEqual(result.status, 0, `volumes=${volumes}`)
+  }
+})
+
+test('online acquisition uses resolved deployment root from another cwd', async () => {
+  const fixture = await fakeBin()
+  const result = runShell(
+    `DEPLOY_SOURCE_ONLY=1; source "${join(root, 'scripts/deploy.sh')}"; online_git_prepare`,
+    { PATH: `${fixture.bin}:${process.env.PATH}`, COMMAND_LOG: fixture.log, DEPLOY_ROOT: fixture.dir, FAKE_GIT_BRANCH: 'main' },
+    { cwd: fixture.dir },
+  )
+  assert.equal(result.status, 0, result.stderr)
+  const log = await readFile(fixture.log, 'utf8')
+  assert.match(log, new RegExp(`git -C ${fixture.dir.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}`))
+})
+
 test('migration failure reaches the fake migration command and is terminal', async () => {
   const fixture = await fakeBin()
   const gateRoot = join(fixture.dir, 'deployment-root')

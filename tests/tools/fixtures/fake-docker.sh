@@ -8,6 +8,12 @@ sub="$1"
 shift || true
 
 case "$sub" in
+volume)
+  if [ "${1:-}" = ls ]; then
+    printf '%b\n' "${DOCKER_VOLUMES:-}"
+  fi
+  exit 0
+  ;;
 compose)
 	rest="$*"
 	if printf '%s\n' "$rest" | grep -q 'up -d db migrate app'; then

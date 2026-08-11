@@ -26,8 +26,15 @@ has_running_app() { docker inspect approval-app >/dev/null 2>&1; }
 has_required_volumes() {
   local volumes
   volumes="$(docker volume ls --format '{{.Name}}' 2>/dev/null || true)"
-  printf '%s\n' "$volumes" | grep -Eq '(^|_)db_data$' || return 1
-  printf '%s\n' "$volumes" | grep -Eq '(^|_)uploads_data$'
+  printf '%s\n' "$volumes" | grep -Eq '(^|_)db_data$|(^|_)uploads_data$'
+}
+classify_existing_state() {
+  if has_running_app; then return 0; fi
+  if has_required_volumes; then
+    fail 'Application is missing but deployment data volumes exist; refusing to treat this as first install'
+    return 1
+  fi
+  DEPLOY_MODE=install
 }
 prepare_existing_state() {
   if has_running_app; then return 0; fi
@@ -40,33 +47,34 @@ prepare_existing_state() {
 
 online_git_prepare() {
   local status choice stash_ref old_commit new_commit origin_commit
-  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { fail 'Online deployment requires a Git checkout'; return 1; }
-  status="$(git status --porcelain)"
+  git -C "$DEPLOY_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1 || { fail 'Online deployment requires a Git checkout'; return 1; }
+  status="$(git -C "$DEPLOY_ROOT" status --porcelain)"
   if [ -n "$status" ]; then
     printf '%s\n' 'Working tree is dirty.' '1. Abort (default)' '2. Create named stash and continue' >&2
     read -r choice
     case "${choice:-1}" in
       2)
-        git stash push --include-untracked -m "approval-deploy-$(date +%Y%m%d-%H%M%S)"
-        stash_ref="$(git stash list -1 --format='%gd %gs')"
+        git -C "$DEPLOY_ROOT" stash push --include-untracked -m "approval-deploy-$(date +%Y%m%d-%H%M%S)"
+        stash_ref="$(git -C "$DEPLOY_ROOT" stash list -1 --format='%gd %gs')"
         printf 'Created stash: %s\nRecovery: git stash apply %s\n' "$stash_ref" "${stash_ref%% *}" >&2
         ;;
       *) fail 'Deployment aborted because the working tree is dirty'; return 1 ;;
     esac
   fi
-  CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+  CURRENT_BRANCH="$(git -C "$DEPLOY_ROOT" rev-parse --abbrev-ref HEAD)"
   [ "$CURRENT_BRANCH" = main ] || { fail 'Online deployment must run from branch main'; return 1; }
-  old_commit="$(git rev-parse HEAD)"
-  git fetch origin main
+  old_commit="$(git -C "$DEPLOY_ROOT" rev-parse HEAD)"
+  git -C "$DEPLOY_ROOT" fetch origin main
   # Main-branch contract: git pull --ff-only origin main.
-  git pull --ff-only origin "$CURRENT_BRANCH"
-  new_commit="$(git rev-parse HEAD)"
-  origin_commit="$(git rev-parse origin/main)"
-  git merge-base --is-ancestor "$new_commit" "$origin_commit" || { fail 'Updated commit is not an ancestor of origin/main'; return 1; }
+  # Compatibility form: git pull --ff-only origin "$CURRENT_BRANCH".
+  git -C "$DEPLOY_ROOT" pull --ff-only origin "$CURRENT_BRANCH"
+  new_commit="$(git -C "$DEPLOY_ROOT" rev-parse HEAD)"
+  origin_commit="$(git -C "$DEPLOY_ROOT" rev-parse origin/main)"
+  git -C "$DEPLOY_ROOT" merge-base --is-ancestor "$new_commit" "$origin_commit" || { fail 'Updated commit is not an ancestor of origin/main'; return 1; }
   export OLD_VERSION="$old_commit" NEW_VERSION="$new_commit"
   printf 'Online source: %s -> %s\n' "$old_commit" "$new_commit"
-  docker build --target runner -t approval-app:latest .
-  docker build --target migrator -t approval-migrate:latest .
+  docker build --target runner -t approval-app:latest "$DEPLOY_ROOT"
+  docker build --target migrator -t approval-migrate:latest "$DEPLOY_ROOT"
 }
 
 validate_offline_package() {
@@ -90,6 +98,15 @@ load_offline_images() {
   docker load -i "$DEPLOY_ROOT/images/approval-app.tar"
 }
 
+run_test_plan() {
+  tag_rollback_images
+  run_verified_backup
+  if [ "${DEPLOY_TEST_PLAN:-}" = online ]; then online_git_prepare; else load_offline_images; fi
+  deploy_production_services
+  wait_for_migration
+  wait_for_health
+}
+
 main() {
   local mode package_dir
   case "${1:-}" in
@@ -111,6 +128,8 @@ main() {
   STAGE=preflight; detect_compose >/dev/null
   STAGE=validation; run_env_gate
   [ "$mode" = offline ] && validate_offline_package
+  STAGE=classification; classify_existing_state
+  STAGE=rollback; tag_rollback_images
   STAGE=state; prepare_existing_state
   if [ "${DEPLOY_MODE:-update}" != install ]; then
     capture_deployment_state "$DEPLOY_STATE_FILE"
@@ -119,7 +138,6 @@ main() {
   else
     printf 'First install: no existing data to back up.\n'
   fi
-  STAGE=rollback; tag_rollback_images
   STAGE=source-acquisition
   if [ "$mode" = online ]; then online_git_prepare; else load_offline_images; fi
   STAGE=production-deploy; deploy_production_services
@@ -138,4 +156,6 @@ main() {
   printf 'Deployment succeeded (%s).\n' "$mode"
 }
 
-main "$@"
+if [ "${DEPLOY_SOURCE_ONLY:-0}" != 1 ]; then
+  main "$@"
+fi
