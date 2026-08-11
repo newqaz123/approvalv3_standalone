@@ -107,6 +107,16 @@ export function logEnvironmentReport(report, log = console.log) {
     log('Application origin issues:')
     for (const issue of report.originIssues) log(`  - ${issue}`)
   }
+
+  if (report.runtimeIssues?.length > 0) {
+    log('Runtime issues:')
+    for (const issue of report.runtimeIssues) log(`  - ${issue}`)
+  }
+
+  if (report.runtimeWarnings?.length > 0) {
+    log('Runtime warnings:')
+    for (const warning of report.runtimeWarnings) log(`  - ${warning}`)
+  }
 }
 
 export function formatBytes(bytes) {

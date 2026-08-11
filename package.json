@@ -12,6 +12,7 @@
     "lint": "next lint",
     "check": "npx tsc --noEmit && npm run test:manage && npx tsx --test tests/regression/*.test.ts",
     "manage": "node tools/manage.mjs",
+    "env:check": "node tools/env-check.mjs",
     "test:manage": "node --test tests/tools/command.test.mjs tests/tools/env.test.mjs tests/tools/manage.test.mjs",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
