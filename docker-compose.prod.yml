@@ -1,6 +1,7 @@
 # Production docker-compose for offline/air-gapped deployment
 # Images are pre-built and loaded from .tar files — no build step needed
-# Usage: docker compose -f docker-compose.prod.yml up -d
+# Usage: docker compose -p approval-app --env-file .env.production -f docker-compose.prod.yml up -d db migrate app
+# First install only: add --profile first-install and run --rm seed
 
 services:
   db:
@@ -50,6 +51,8 @@ services:
     restart: "no"
 
   seed:
+    profiles:
+      - first-install
     image: approval-migrate:latest
     container_name: approval-seed
     command: npx tsx prisma/seed.ts

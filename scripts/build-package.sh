@@ -75,6 +75,7 @@ echo -e "${GREEN}✓ postgres:15-alpine exported${NC}"
 echo -e "${BLUE}[3/6]${NC} Creating package directory..."
 rm -rf "$PACKAGE_DIR"
 mkdir -p "$PACKAGE_DIR/images"
+mkdir -p "$PACKAGE_DIR/scripts"
 echo -e "${GREEN}✓ Package directory ready${NC}"
 
 # Step 3: Move exported images into package
@@ -91,6 +92,7 @@ cp "$PROJECT_DIR/.env.example" "$PACKAGE_DIR/.env.production.example"
 cp "$PROJECT_DIR/DEPLOY.md" "$PACKAGE_DIR/"
 cp "$PROJECT_DIR/scripts/deploy-offline.sh" "$PACKAGE_DIR/"
 cp "$PROJECT_DIR/scripts/rollback.sh" "$PACKAGE_DIR/"
+cp "$PROJECT_DIR/scripts/backup.sh" "$PACKAGE_DIR/scripts/backup.sh"
 cp "$PROJECT_DIR/scripts/db-backup.sh" "$PACKAGE_DIR/"
 cp "$PROJECT_DIR/scripts/setup.sh" "$PACKAGE_DIR/"
 cp "$PROJECT_DIR/scripts/health-check.sh" "$PACKAGE_DIR/"
@@ -119,6 +121,7 @@ EOF
 # Make scripts executable
 chmod +x "$PACKAGE_DIR/deploy-offline.sh" 2>/dev/null || true
 chmod +x "$PACKAGE_DIR/rollback.sh" 2>/dev/null || true
+chmod +x "$PACKAGE_DIR/scripts/backup.sh" 2>/dev/null || true
 chmod +x "$PACKAGE_DIR/db-backup.sh" 2>/dev/null || true
 chmod +x "$PACKAGE_DIR/health-check.sh" 2>/dev/null || true
 chmod +x "$PACKAGE_DIR/setup.sh" 2>/dev/null || true

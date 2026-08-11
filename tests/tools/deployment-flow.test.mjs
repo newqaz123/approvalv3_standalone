@@ -8,6 +8,27 @@ import { execFileSync, spawnSync } from 'node:child_process'
 const root = resolve('.')
 const read = (path) => readFile(path, 'utf8')
 
+test('production seed is first-install only', async () => {
+  const compose = await read('docker-compose.prod.yml')
+  const seedBlock = compose.slice(compose.indexOf('  seed:'), compose.indexOf('  app:'))
+  assert.match(seedBlock, /profiles:\s*\n\s*- first-install/)
+})
+
+test('rollback resolves the project root and explicit production compose contract', async () => {
+  const source = await read('scripts/rollback.sh')
+  assert.match(source, /PROJECT_ROOT=/)
+  assert.match(source, /ENV_FILE="\$PROJECT_ROOT\/\.env\.production"/)
+  assert.match(source, /PROD_COMPOSE_FILE="\$PROJECT_ROOT\/docker-compose\.prod\.yml"/)
+  assert.match(source, /-p approval-app --env-file "\$ENV_FILE" -f "\$PROD_COMPOSE_FILE"/)
+  assert.match(source, /--yes/)
+})
+
+test('offline package keeps the canonical backup script at scripts/backup.sh', async () => {
+  const source = await read('scripts/build-package.sh')
+  assert.match(source, /mkdir -p "\$PACKAGE_DIR\/scripts"/)
+  assert.match(source, /cp "\$PROJECT_DIR\/scripts\/backup\.sh" "\$PACKAGE_DIR\/scripts\/backup\.sh"/)
+})
+
 test('deploy entry point offers online and offline modes', async () => {
   const source = await read('scripts/deploy.sh')
   assert.match(source, /Ubuntu VPS \/ GitHub update/)
@@ -59,6 +80,189 @@ function runShell(script, env, options = {}) {
     ...options,
   })
 }
+
+async function installRollbackFixture(packageRoot = false) {
+  const fixture = await mkdtemp(join(tmpdir(), 'rollback-flow-'))
+  const project = join(fixture, 'package')
+  const scriptDir = packageRoot ? project : join(project, 'scripts')
+  await mkdir(join(project, 'scripts'), { recursive: true })
+  await mkdir(join(project, 'backups'))
+  await mkdir(join(fixture, 'elsewhere'))
+  await writeFile(join(project, '.env.production'), 'DATABASE_URL=postgresql://test\n')
+  await writeFile(join(project, 'docker-compose.prod.yml'), 'services: {}\n')
+  await copyFile(join(root, 'scripts/rollback.sh'), join(scriptDir, 'rollback.sh'))
+  await copyFile(join(root, 'scripts/restore.sh'), join(scriptDir, 'restore.sh'))
+  await writeFile(join(project, 'scripts', 'backup.sh'), '#!/bin/sh\nprintf \'backup\\n\' >>"$COMMAND_LOG"\nexit "${BACKUP_EXIT:-0}"\n')
+  await chmod(join(project, 'scripts', 'backup.sh'), 0o755)
+  const bin = join(fixture, 'bin')
+  await mkdir(bin)
+  await writeFile(join(bin, 'docker'), `#!/bin/sh
+printf 'docker %s\\n' "$*" >>"$COMMAND_LOG"
+case "$1" in
+  compose)
+    [ "\${2:-}" = version ] && exit 0
+    exit 0
+    ;;
+  image)
+    [ "\${2:-}" = inspect ] && [ "\${3:-}" = approval-app:rollback ] && exit 0
+    exit 0
+    ;;
+  images)
+    case "$2" in
+      approval-app:rollback) printf 'rollback-id\\n' ;;
+      approval-app:latest) printf 'latest-id\\n' ;;
+    esac
+    exit 0
+    ;;
+  tag|ps|restart|exec|run|volume)
+    exit 0
+    ;;
+esac
+exit 0
+`)
+  await chmod(join(bin, 'docker'), 0o755)
+  return { fixture, project, scriptDir, bin, log: join(fixture, 'commands.log') }
+}
+
+function runScript(script, args, env, cwd, input = '') {
+  return spawnSync('/bin/bash', [script, ...args], {
+    cwd,
+    env: { ...process.env, ...env },
+    input,
+    encoding: 'utf8',
+  })
+}
+
+test('rollback uses canonical backup before retagging and explicit production compose from repository scripts', async () => {
+  const fixture = await installRollbackFixture()
+  await writeFile(join(fixture.project, 'backups/last-deployment-state.env'), 'MIGRATIONS_APPLIED=none\n')
+  const result = runScript(join(fixture.scriptDir, 'rollback.sh'), ['--yes'], {
+    PATH: `${fixture.bin}:${process.env.PATH}`,
+    COMMAND_LOG: fixture.log,
+    ROLLBACK_WAIT_SECONDS: '0',
+  }, join(fixture.fixture, 'elsewhere'))
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
+  const log = await readFile(fixture.log, 'utf8')
+  assertLogSequence(log, [
+    'backup\n',
+    'docker tag approval-app:latest approval-app:failed\n',
+    'docker tag approval-app:rollback approval-app:latest\n',
+    'docker compose -p approval-app --env-file ',
+    ' -f ',
+  ])
+  const recreate = log.split('\n').find((line) => line.includes(' up -d '))
+  assert.ok(recreate, log)
+  assert.match(recreate, /-f .*docker-compose\.prod\.yml up -d --force-recreate app$/)
+  assert.doesNotMatch(recreate, /\b(db|migrate|seed)\b/)
+})
+
+test('rollback package-root invocation resolves compose and backup paths without changing cwd', async () => {
+  const fixture = await installRollbackFixture(true)
+  await writeFile(join(fixture.project, 'backups/last-deployment-state.env'), 'MIGRATIONS_APPLIED=none\n')
+  const result = runScript(join(fixture.scriptDir, 'rollback.sh'), ['--yes'], {
+    PATH: `${fixture.bin}:${process.env.PATH}`,
+    COMMAND_LOG: fixture.log,
+    ROLLBACK_WAIT_SECONDS: '0',
+  }, root)
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
+  const log = await readFile(fixture.log, 'utf8')
+  assert.match(log, new RegExp(`--env-file ${fixture.project.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/\\.env\\.production`))
+  assert.match(log, /-f .*docker-compose\.prod\.yml up -d --force-recreate app/)
+})
+
+test('rollback migration compatibility gate cannot be bypassed by --yes and treats malformed or duplicate state as unknown', async () => {
+  for (const state of [
+    'MIGRATIONS_APPLIED=applied\n',
+    'MIGRATIONS_APPLIED=broken\n',
+    'MIGRATIONS_APPLIED=none\nMIGRATIONS_APPLIED=applied\n',
+    '',
+  ]) {
+    const fixture = await installRollbackFixture()
+    if (state) await writeFile(join(fixture.project, 'backups/last-deployment-state.env'), state)
+    const env = {
+      PATH: `${fixture.bin}:${process.env.PATH}`,
+      COMMAND_LOG: fixture.log,
+      ROLLBACK_WAIT_SECONDS: '0',
+    }
+    const blocked = runScript(join(fixture.scriptDir, 'rollback.sh'), ['--yes'], env, root)
+    assert.notEqual(blocked.status, 0, `state=${JSON.stringify(state)}`)
+    assert.match(`${blocked.stdout}\n${blocked.stderr}`, /Migrations applied state: (applied|unknown)/)
+    const log = await readFile(fixture.log, 'utf8')
+    assert.doesNotMatch(log, /docker tag approval-app/)
+
+    const approved = runScript(join(fixture.scriptDir, 'rollback.sh'), ['--yes'], env, root, 'ROLLBACK APP ONLY\n')
+    assert.equal(approved.status, 0, `state=${JSON.stringify(state)}\n${approved.stdout}\n${approved.stderr}`)
+  }
+})
+
+test('rollback preserves ordinary confirmation unless --yes is provided', async () => {
+  const fixture = await installRollbackFixture()
+  await writeFile(join(fixture.project, 'backups/last-deployment-state.env'), 'MIGRATIONS_APPLIED=none\n')
+  const env = {
+    PATH: `${fixture.bin}:${process.env.PATH}`,
+    COMMAND_LOG: fixture.log,
+    ROLLBACK_WAIT_SECONDS: '0',
+  }
+  const cancelled = runScript(join(fixture.scriptDir, 'rollback.sh'), [], env, root, 'n\n')
+  assert.equal(cancelled.status, 0, cancelled.stderr)
+  assert.match(cancelled.stdout, /Cancelled\./)
+  assert.doesNotMatch(await readFile(fixture.log, 'utf8'), /backup|docker tag approval-app/)
+
+  const approved = runScript(join(fixture.scriptDir, 'rollback.sh'), [], env, root, 'y\n')
+  assert.equal(approved.status, 0, `${approved.stdout}\n${approved.stderr}`)
+  assert.match(await readFile(fixture.log, 'utf8'), /docker tag approval-app:rollback approval-app:latest/)
+})
+
+test('rollback aborts before retagging when canonical backup fails', async () => {
+  const fixture = await installRollbackFixture()
+  await writeFile(join(fixture.project, 'backups/last-deployment-state.env'), 'MIGRATIONS_APPLIED=none\n')
+  const result = runScript(join(fixture.scriptDir, 'rollback.sh'), ['--yes'], {
+    PATH: `${fixture.bin}:${process.env.PATH}`,
+    COMMAND_LOG: fixture.log,
+    BACKUP_EXIT: '1',
+    ROLLBACK_WAIT_SECONDS: '0',
+  }, root)
+  assert.notEqual(result.status, 0)
+  const log = await readFile(fixture.log, 'utf8')
+  assert.match(log, /backup/)
+  assert.doesNotMatch(log, /docker tag approval-app| up -d /)
+})
+
+test('restore fallback starts and uses only explicit production compose when containers are absent', async () => {
+  const fixture = await installRollbackFixture(true)
+  await writeFile(join(fixture.project, 'backup.sql'), 'PostgreSQL database dump\n')
+  await writeFile(join(fixture.bin, 'docker'), `#!/bin/sh
+printf 'docker %s\\n' "$*" >>"$COMMAND_LOG"
+case "$1" in
+  compose)
+    [ "\${2:-}" = version ] && exit 0
+    case " $* " in
+      *' config --volumes '*) printf 'uploads_data\\n'; exit 0 ;;
+      *' ps '*) exit 1 ;;
+      *' up -d db '*) exit 0 ;;
+      *' exec -T db '*) exit 0 ;;
+      *' restart app '*) exit 0 ;;
+    esac
+    exit 0
+    ;;
+  ps) exit 0 ;;
+  volume) printf 'uploads_data\\n'; exit 0 ;;
+esac
+exit 0
+`)
+  await chmod(join(fixture.bin, 'docker'), 0o755)
+  const result = runScript(join(fixture.scriptDir, 'restore.sh'), [join(fixture.project, 'backup.sql')], {
+    PATH: `${fixture.bin}:${process.env.PATH}`,
+    COMMAND_LOG: fixture.log,
+    RESTORE_WAIT_SECONDS: '0',
+  }, root, 'yes\n')
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
+  const log = await readFile(fixture.log, 'utf8')
+  assert.match(log, /docker compose -p approval-app --env-file .*\.env\.production -f .*docker-compose\.prod\.yml up -d db/)
+  assert.match(log, /docker compose -p approval-app --env-file .*\.env\.production -f .*docker-compose\.prod\.yml exec -T db/)
+  assert.match(log, /docker compose -p approval-app --env-file .*\.env\.production -f .*docker-compose\.prod\.yml restart app/)
+  assert.doesNotMatch(log, /docker-compose\.yml/)
+})
 
 test('fake command deployment uses pinned compose and running image inspection', async () => {
   const fixture = await fakeBin()

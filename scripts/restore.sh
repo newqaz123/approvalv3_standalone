@@ -18,10 +18,33 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$SCRIPT_DIR/../docker-compose.prod.yml" ]; then
+    PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+elif [ -f "$SCRIPT_DIR/docker-compose.prod.yml" ]; then
+    PROJECT_ROOT="$SCRIPT_DIR"
+else
+    echo 'Cannot locate docker-compose.prod.yml' >&2
+    exit 1
+fi
+
+ENV_FILE="$PROJECT_ROOT/.env.production"
+PROD_COMPOSE_FILE="$PROJECT_ROOT/docker-compose.prod.yml"
 DB_CONTAINER="${DB_CONTAINER:-approval-db}"
 APP_CONTAINER="${APP_CONTAINER:-approval-app}"
 POSTGRES_USER_VALUE="${POSTGRES_USER:-postgres}"
 POSTGRES_DB_VALUE="${POSTGRES_DB:-app_db}"
+
+compose_prod() {
+    if docker compose version >/dev/null 2>&1; then
+        docker compose -p approval-app --env-file "$ENV_FILE" -f "$PROD_COMPOSE_FILE" "$@"
+    elif command -v docker-compose >/dev/null 2>&1; then
+        docker-compose -p approval-app --env-file "$ENV_FILE" -f "$PROD_COMPOSE_FILE" "$@"
+    else
+        echo 'Docker Compose is not installed' >&2
+        return 1
+    fi
+}
 
 # Resolve the actual Docker volume name that backs the uploads mount. Prefers
 # the declared `uploads_data` name; otherwise falls back to the project-prefixed
@@ -30,7 +53,7 @@ POSTGRES_DB_VALUE="${POSTGRES_DB:-app_db}"
 # recreated or renamed.
 resolve_uploads_volume() {
     local declared resolved
-    declared="$(docker compose config --volumes 2>/dev/null | grep -x 'uploads_data' | head -n1)"
+    declared="$(compose_prod config --volumes 2>/dev/null | grep -x 'uploads_data' | head -n1)"
     if [ -n "$declared" ] && docker volume ls --format '{{.Name}}' 2>/dev/null | grep -qx "$declared"; then
         printf '%s\n' "$declared"
         return 0
@@ -73,10 +96,10 @@ if [ $# -eq 0 ]; then
     echo "Available backups:"
     echo ""
     echo "Database backups:"
-    find backups -maxdepth 1 -name 'db_*.sql' -type f -size +0 -print 2>/dev/null | xargs -r ls -1ht || echo "  (none found)"
+    find "$PROJECT_ROOT/backups" -maxdepth 1 -name 'db_*.sql' -type f -size +0 -print 2>/dev/null | xargs -r ls -1ht || echo "  (none found)"
     echo ""
     echo "Uploads backups:"
-    ls -1ht backups/uploads_*.tar.gz 2>/dev/null || echo "  (none found)"
+    ls -1ht "$PROJECT_ROOT"/backups/uploads_*.tar.gz 2>/dev/null || echo "  (none found)"
     echo ""
     exit 1
 fi
@@ -102,13 +125,13 @@ if ! grep -q "PostgreSQL database dump" "$DB_BACKUP" 2>/dev/null; then
 fi
 echo -e "${GREEN}✓ Database backup valid${NC}"
 
-# Check if Docker Compose is running
-if ! docker ps --format '{{.Names}}' | grep -qx "$DB_CONTAINER" && ! docker compose ps &>/dev/null && ! docker-compose ps &>/dev/null; then
-    echo -e "${YELLOW}⚠ WARNING: Docker Compose services are not running${NC}"
-    echo "Starting services for restore..."
-    docker compose up -d || docker-compose up -d
+# Start only the production database when its container is absent.
+if ! docker ps --format '{{.Names}}' | grep -qx "$DB_CONTAINER"; then
+    echo -e "${YELLOW}⚠ WARNING: The database container is not running${NC}"
+    echo "Starting the production database for restore..."
+    compose_prod up -d db
     echo "Waiting for database to be ready..."
-    sleep 10
+    sleep "${RESTORE_WAIT_SECONDS:-10}"
 fi
 
 # ==============================================
@@ -132,12 +155,9 @@ echo -e "${BLUE}[2/4]${NC} Restoring database..."
 if docker ps --format '{{.Names}}' | grep -qx "$DB_CONTAINER"; then
     docker exec -i "$DB_CONTAINER" psql -U "$POSTGRES_USER_VALUE" -d "$POSTGRES_DB_VALUE" -c 'drop schema public cascade; create schema public;'
     docker exec -i "$DB_CONTAINER" psql -U "$POSTGRES_USER_VALUE" -d "$POSTGRES_DB_VALUE" < "$DB_BACKUP"
-elif command -v docker-compose &>/dev/null; then
-    docker-compose exec -T db psql -U "$POSTGRES_USER_VALUE" -d "$POSTGRES_DB_VALUE" -c 'drop schema public cascade; create schema public;'
-    docker-compose exec -T db psql -U "$POSTGRES_USER_VALUE" -d "$POSTGRES_DB_VALUE" < "$DB_BACKUP"
 else
-    docker compose exec -T db psql -U "$POSTGRES_USER_VALUE" -d "$POSTGRES_DB_VALUE" -c 'drop schema public cascade; create schema public;'
-    docker compose exec -T db psql -U "$POSTGRES_USER_VALUE" -d "$POSTGRES_DB_VALUE" < "$DB_BACKUP"
+    compose_prod exec -T db psql -U "$POSTGRES_USER_VALUE" -d "$POSTGRES_DB_VALUE" -c 'drop schema public cascade; create schema public;'
+    compose_prod exec -T db psql -U "$POSTGRES_USER_VALUE" -d "$POSTGRES_DB_VALUE" < "$DB_BACKUP"
 fi
 
 if [ $? -eq 0 ]; then
@@ -150,10 +170,8 @@ fi
 RESTORED_USERS="unknown"
 if docker ps --format '{{.Names}}' | grep -qx "$DB_CONTAINER"; then
     RESTORED_USERS="$(docker exec "$DB_CONTAINER" psql -U "$POSTGRES_USER_VALUE" -d "$POSTGRES_DB_VALUE" -tAc "select count(*) from users;" 2>/dev/null || echo unknown)"
-elif command -v docker-compose &>/dev/null; then
-    RESTORED_USERS="$(docker-compose exec -T db psql -U "$POSTGRES_USER_VALUE" -d "$POSTGRES_DB_VALUE" -tAc "select count(*) from users;" 2>/dev/null || echo unknown)"
 else
-    RESTORED_USERS="$(docker compose exec -T db psql -U "$POSTGRES_USER_VALUE" -d "$POSTGRES_DB_VALUE" -tAc "select count(*) from users;" 2>/dev/null || echo unknown)"
+    RESTORED_USERS="$(compose_prod exec -T db psql -U "$POSTGRES_USER_VALUE" -d "$POSTGRES_DB_VALUE" -tAc "select count(*) from users;" 2>/dev/null || echo unknown)"
 fi
 
 echo "Restored users: $RESTORED_USERS"
@@ -209,10 +227,8 @@ echo -e "${BLUE}[4/4]${NC} Restarting application services..."
 # Restart app container to ensure clean state
 if docker ps --format '{{.Names}}' | grep -qx "$APP_CONTAINER"; then
     docker restart "$APP_CONTAINER" >/dev/null
-elif command -v docker-compose &>/dev/null; then
-    docker-compose restart app
 else
-    docker compose restart app
+    compose_prod restart app
 fi
 
 echo -e "${GREEN}✓ Application services restarted${NC}"
@@ -232,7 +248,7 @@ if [ -n "$UPLOADS_BACKUP" ]; then
 fi
 echo ""
 echo "Application is restarting..."
-echo "Check logs with: docker compose logs -f app"
+echo "Check logs with: docker compose -p approval-app --env-file '$ENV_FILE' -f '$PROD_COMPOSE_FILE' logs -f app"
 echo ""
 echo "Visit: http://localhost:3000"
 echo ""

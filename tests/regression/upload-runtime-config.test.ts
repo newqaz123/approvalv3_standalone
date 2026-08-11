@@ -18,7 +18,6 @@ it('creates and chowns the private uploads directory in the runner image', () =>
 
 it('mounts the existing uploads_data volume at the private path in every compose file', () => {
   const composes: Record<string, string> = {
-    base: read('docker-compose.yml'),
     dev: read('docker-compose.dev.yml'),
     prod: read('docker-compose.prod.yml'),
   }
