@@ -1,181 +1,55 @@
-# VPS Deployment Guide
+# Approval App — VPS Deployment Entry Point
 
-## Quick Setup (Ubuntu/Debian)
+This file is retained for operators who bookmarked the older VPS guide. Production is Docker Compose only and now uses the unified safe deployment workflow.
 
-### 1. Clone and Setup
-```bash
-git clone <your-repo-url>
-cd ApprovalAppV3_Standalone
-./setup-vps.sh
-```
+## Ubuntu VPS
 
-### 2. Start the Application
-```bash
-npm run dev
-```
-
-## What the Setup Script Does
-
-✅ **Installs Dependencies:**
-- Docker & Docker Compose
-- Node.js 20.x
-- npm packages
-
-✅ **Creates Environment:**
-- `.env.local` with secure random secrets
-- Auto-detects your VPS IP address
-- Configures database connection
-
-✅ **Database Setup:**
-- Starts PostgreSQL in Docker
-- Applies all migrations
-- Seeds initial data (admin user, departments)
-
-✅ **Generates Prisma Client**
-
-## Manual VPS Setup (if script fails)
-
-### Install Dependencies
-```bash
-# Docker
-curl -fsSL https://get.docker.com -o get-docker.sh
-sh get-docker.sh
-sudo usermod -aG docker $USER
-
-# Docker Compose
-sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-sudo chmod +x /usr/local/bin/docker-compose
-
-# Node.js 20
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt-get install -y nodejs
-
-# Log out and back in for Docker permissions
-```
-
-### Configure Environment
-```bash
-# Copy the template
-cp .env.example .env.local
-
-# Edit for your setup
-nano .env.local
-```
-
-**Development (.env.local):**
-```bash
-DATABASE_URL="postgresql://postgres:changeme@localhost:5432/app_db?schema=public"
-NEXTAUTH_URL="http://localhost:3000"
-NEXTAUTH_SECRET="$(openssl rand -base64 32)"
-UPLOAD_DIR="public/uploads"
-CRON_SECRET="$(openssl rand -base64 32)"
-```
-
-**Production (.env.production):**
-```bash
-DATABASE_URL="postgresql://postgres:changeme@db:5432/app_db?schema=public"
-NEXTAUTH_URL="https://your-domain.com"
-NEXTAUTH_SECRET="$(openssl rand -base64 32)"
-UPLOAD_DIR="public/uploads"
-CRON_SECRET="$(openssl rand -base64 32)"
-```
-
-### Start Services
-```bash
-# Install npm packages
-npm install
-
-# Start database
-docker-compose up -d db
-
-# Setup database
-DATABASE_URL="postgresql://postgres:changeme@localhost:5432/app_db?schema=public" npx prisma migrate deploy
-DATABASE_URL="postgresql://postgres:changeme@localhost:5432/app_db?schema=public" npx prisma db seed
-
-# Start app
-npm run dev
-```
-
-## Production Deployment
-
-For production, consider:
-
-### Option 1: Docker Compose (Full)
-```bash
-docker-compose up -d
-```
-
-### Option 2: PM2 (Process Manager)
-```bash
-npm install -g pm2
-pm2 start npm --name "approval-app" -- run dev
-pm2 startup
-pm2 save
-```
-
-### Option 3: Systemd Service
-Create `/etc/systemd/system/approval-app.service`:
-```ini
-[Unit]
-Description=Approval App
-After=network.target
-
-[Service]
-Type=simple
-User=ubuntu
-WorkingDirectory=/path/to/ApprovalAppV3_Standalone
-ExecStart=/usr/bin/npm run dev
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-```
+1. Install Docker with Compose v2 and Git.
+2. Clone the repository and keep the production checkout on `main`.
+3. Create `.env.production` from `.env.example`.
+4. Set strong secrets, PostgreSQL credentials, `UPLOAD_DIR=/app/uploads`, and one shared HTTPS origin for `AUTH_URL`, `NEXTAUTH_URL`, and `NEXT_PUBLIC_APP_URL`.
+5. Run:
 
 ```bash
-sudo systemctl enable approval-app
-sudo systemctl start approval-app
+bash scripts/deploy.sh
 ```
 
-## Security Notes
+Choose **Ubuntu VPS / GitHub update**. The update is fast-forward-only from `origin/main`, preserves a dirty tracked tree only through an explicitly named stash, creates verified database and uploads backups, applies migrations, checks health, and verifies persistent data.
 
-🔒 **Change Default Passwords:**
-- Database: Update `changeme` in docker-compose.yml
-- Admin: Change `changeme` after first login
+## Offline intranet server
 
-🔒 **Firewall:**
+Extract the approved package, copy `.env.production.example` to `.env.production`, set production values, then run:
+
 ```bash
-sudo ufw allow 22    # SSH
-sudo ufw allow 3000  # App
-sudo ufw enable
+bash scripts/deploy.sh
 ```
 
-🔒 **Environment:**
-- Use strong secrets in production
-- Consider HTTPS with Let's Encrypt
-- Backup database regularly
+Choose **Offline intranet package**. Checksums are verified before image loading, and offline mode does not use Git or the network.
 
-## Access After Setup
+## Explicit Compose files
 
-- **App:** `http://YOUR_VPS_IP:3000`
-- **Admin:** `admin@example.com` / `changeme`
-- **Database:** `npx prisma studio` (port 5555)
+Development only:
 
-## Troubleshooting
-
-### Docker Permission Issues
 ```bash
-sudo usermod -aG docker $USER
-# Log out and log back in
+docker compose -f docker-compose.dev.yml up -d
 ```
 
-### Port Already in Use
+Production deployment contract:
+
 ```bash
-sudo lsof -i :3000
-sudo kill -9 <PID>
+docker compose -p approval-app --env-file .env.production -f docker-compose.prod.yml up -d db migrate app
 ```
 
-### Database Connection Issues
+Routine updates never run seed. On a confirmed new empty installation only:
+
 ```bash
-docker-compose logs db
-docker-compose restart db
+docker compose -p approval-app --env-file .env.production -f docker-compose.prod.yml --profile first-install run --rm seed
 ```
+
+## Persistence and rollback
+
+Keep `.env.production`, the PostgreSQL data volume, the private uploads volume, and `backups/`. Rollback changes only the app image and does not reverse database migrations. Applied or unknown migration state requires an explicit compatibility decision and the exact phrase `ROLLBACK APP ONLY`.
+
+Use `https://approval.example.com` as the model public origin. `http://localhost:3000` is a host-local health check only; direct IP/container port access is unsupported. `AUTH_TRUST_HOST=true` trusts only headers from the controlled Nginx proxy.
+
+For backup, restore, rollback, health checks, reverse-proxy configuration, and troubleshooting, follow [DEPLOY.md](DEPLOY.md).

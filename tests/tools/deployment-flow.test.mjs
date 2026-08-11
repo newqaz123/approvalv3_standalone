@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { existsSync } from 'node:fs'
 import { chmod, mkdtemp, readFile, writeFile, mkdir, copyFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -103,6 +104,36 @@ test('offline setup and Docker context preserve the production package contract'
   assert.match(dockerignore, /^\*\.sql$/m)
   assert.match(dockerignore, /^\*\.sql\.gz$/m)
   assert.match(dockerignore, /^\.env\*$/m)
+})
+
+test('only explicit development and production compose files remain live', async () => {
+  const ambiguousCompose = ['docker-compose', 'yml'].join('.')
+  assert.equal(existsSync(ambiguousCompose), false)
+  for (const path of [
+    'README.md',
+    'DEPLOY.md',
+    'DEPLOYMENT.md',
+    'docs/DEPLOY.md',
+    'scripts/deploy.sh',
+    'scripts/rollback.sh',
+    'scripts/backup.sh',
+    'scripts/restore.sh',
+    'scripts/setup.sh',
+  ]) {
+    assert.doesNotMatch(await read(path), /docker-compose\.yml/, path)
+  }
+})
+
+test('operator docs teach the unified safe production workflow', async () => {
+  const documents = await Promise.all(['README.md', 'DEPLOY.md', 'DEPLOYMENT.md', 'docs/DEPLOY.md'].map(read))
+  const combined = documents.join('\n')
+  assert.match(combined, /bash scripts\/deploy\.sh/)
+  assert.match(combined, /docker compose -f docker-compose\.dev\.yml up -d/)
+  assert.match(combined, /db migrate app/)
+  assert.match(combined, /first-install/)
+  assert.match(combined, /ROLLBACK APP ONLY/)
+  assert.match(combined, /HTTPS origin/i)
+  assert.doesNotMatch(combined, /docker compose down -v|docker volume prune|prisma migrate reset|prisma db push/)
 })
 
 test('deploy entry point offers online and offline modes', async () => {

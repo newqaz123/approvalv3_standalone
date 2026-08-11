@@ -31,61 +31,60 @@ Open `http://localhost:3000` and sign in:
 - **Email:** `admin@example.com`
 - **Password:** `changeme`
 
-### Docker (Production)
+### Docker development
+
+Use the development Compose file explicitly:
 
 ```bash
-# 1. Configure
+docker compose -f docker-compose.dev.yml up -d
+```
+
+### Production deployment
+
+Production has one beginner-safe entry point for both an online Ubuntu VPS and an offline intranet package:
+
+```bash
 cp .env.example .env.production
-# Edit .env.production with your database credentials and secrets
+# Set production credentials and one shared HTTPS origin for AUTH_URL,
+# NEXTAUTH_URL, and NEXT_PUBLIC_APP_URL.
+bash scripts/deploy.sh
+```
 
-# 2. Deploy
-docker compose up -d
+Choose **Ubuntu VPS / GitHub update** for a routine update from `main`, or **Offline intranet package** for an extracted package. The script validates the environment and checksums, tags the running images for rollback, records data state, backs up PostgreSQL and uploads, applies migrations, verifies health, and checks that data and attachments were preserved.
 
-# 3. Verify
-curl http://localhost:3000/api/health
+The production Compose contract is always explicit:
+
+```bash
+docker compose -p approval-app --env-file .env.production -f docker-compose.prod.yml up -d db migrate app
+```
+
+Routine deployment never runs the seed service. On a confirmed first installation only, seed is separately profile-gated:
+
+```bash
+docker compose -p approval-app --env-file .env.production -f docker-compose.prod.yml --profile first-install run --rm seed
 ```
 
 ## Interactive Deployment Manager
 
-The project includes an operator menu for Docker-based install, update, backup, restore, health check, and rollback tasks:
-
 ```bash
 npm run manage
 ```
 
-Use this before updating a live installation. The manager checks `.env.production`, creates backups before update operations, wraps the existing Docker scripts, and runs a health check after deployment.
+Choose option `2` to update an existing installation; the manager delegates once to `bash scripts/deploy.sh`, where you choose online or offline mode. Backup, restore, health, and rollback remain separate manager options.
 
-Supported update sources:
+Online deployment requires the checked-out `main` branch and a fast-forward-only update. If tracked source changes are present, deployment aborts by default or offers an explicitly named stash. The stash is never automatically restored or deleted; recover it later with the exact name printed by the script.
 
-- Current Git branch on the VPS
-- Extracted GitHub zip/package
-- Flash drive or local package folder
+Offline deployment verifies `SHA256SUMS` before loading any image and performs no Git or network operation.
 
-### Updating a VPS install from GitHub
+Every update preserves and verifies:
 
-If you want the VPS to track a GitHub branch, switch the VPS checkout to that branch first, then use the manager update flow.
+- `.env.production`;
+- the PostgreSQL data volume;
+- the private uploads volume;
+- verified database and uploads backups; and
+- pre-existing attachment gaps without allowing new missing files.
 
-```bash
-cd /opt/approval-app
-git fetch origin
-git checkout <branch-name>
-git pull --ff-only origin <branch-name>
-npm run manage
-```
-
-Then choose:
-
-- `2` Update existing installation
-- `1` Git update from current branch
-
-The manager will back up the current database and uploads before updating, then run a health check after the deploy finishes.
-
-Persistent data is kept outside source updates:
-
-- `.env.production`
-- PostgreSQL Docker volume
-- uploads Docker volume
-- `backups/`
+Rollback restores only the previous app image. It does not reverse database migrations; when migration state is applied or unknown, the operator must type `ROLLBACK APP ONLY` after confirming schema compatibility.
 
 ## Features
 
@@ -201,7 +200,8 @@ Request Created → Approval Chain (Level 1 → 2 → 3)
 │   ├── lib/                   # Auth config, Prisma client, utilities
 │   ├── server-actions/        # Server-side business logic
 │   └── middleware.ts          # Route protection
-├── docker-compose.yml         # Production deployment
+├── docker-compose.dev.yml     # Local Docker development
+├── docker-compose.prod.yml    # Production and offline deployment
 ├── Dockerfile                 # Multi-stage build
 └── .env.example               # Environment template
 ```
@@ -220,20 +220,14 @@ npx prisma db seed       # Seed database
 
 ## Docker Deployment
 
-The Docker setup includes:
+The Docker setup includes PostgreSQL 15, a persistent private uploads volume, a standalone Next.js image, a one-shot migration service, health checks, log rotation, and resource limits.
 
-- **PostgreSQL 15** with persistent volume
-- **Next.js** standalone build (~110MB image)
-- **Auto-migrations** via migration service
-- **Health checks** for app and database
-- **Log rotation** and resource limits
+- Development: `docker compose -f docker-compose.dev.yml up -d`
+- Production: `bash scripts/deploy.sh`
+- Production status: `docker compose -p approval-app --env-file .env.production -f docker-compose.prod.yml ps`
+- Application logs: `docker compose -p approval-app --env-file .env.production -f docker-compose.prod.yml logs -f app`
 
-```bash
-docker compose up -d          # Start all services
-docker compose logs -f app    # View app logs
-docker compose down           # Stop services
-docker compose down -v        # Stop + remove volumes (⚠️ deletes data)
-```
+See [DEPLOY.md](DEPLOY.md) for the safe update, backup, restore, and rollback runbook.
 
 ## Security
 

@@ -1,727 +1,155 @@
-# Approval System - Deployment Guide
+# Approval System — Production Operations
 
-**Target Audience:** System administrators and developers deploying on Hostinger VPS or VMware/Linux VMs
-**Architecture:** Docker Compose with multi-stage Dockerfile
-**One-command deployment:** `./scripts/deploy.sh`
-
----
-
-## Table of Contents
-
-1. [Prerequisites](#prerequisites)
-2. [Initial Setup](#initial-setup)
-3. [Deployment](#deployment)
-4. [Updates](#updates)
-5. [Backups](#backups)
-6. [Monitoring & Health Checks](#monitoring--health-checks)
-7. [Troubleshooting](#troubleshooting)
-
----
-
-## Prerequisites
-
-### System Requirements
-
-- **Operating System:** Linux (Ubuntu 20.04+, Debian 11+, or Alpine 3.15+)
-- **RAM:** Minimum 2GB, Recommended 4GB
-- **Storage:** Minimum 20GB (database + uploads grow over time)
-- **CPU:** 2 cores minimum
-
-### Required Software
-
-| Tool | Minimum Version | How to Install |
-| ------- | ----------------- | ----------------- |
-| Docker | 20.10+ | `curl -fsSL https://get.docker.com -o get-docker.sh && sh get-docker.sh` |
-| Docker Compose | v2 | Included with Docker v20.10+ or install separately |
-| Git | 2.x | `sudo apt install git` (Ubuntu) or `sudo yum install git` (CentOS) |
-
-### Verify Installation
+The canonical beginner-safe deployment command is:
 
 ```bash
-# Check Docker
-docker --version
-# Should output: Docker version 24.x.x or higher
-
-# Check Docker Compose
-docker compose version
-# Should output: Docker Compose version v2.x.x
+bash scripts/deploy.sh
 ```
 
----
+The script supports an online Ubuntu VPS checkout and an extracted offline intranet package. It validates configuration, preserves persistent data, creates verified backups, handles migrations, checks health, and audits attachment integrity.
 
-## Initial Setup
+## Two explicit Compose environments
 
-### Step 1: Clone Repository
-
-Clone the repository to your server:
+Local development:
 
 ```bash
-git clone https://github.com/your-org/approval-app-v2.git
-cd approval-app-v2
+docker compose -f docker-compose.dev.yml up -d
 ```
 
-### Step 2: Run Setup Script
-
-The setup script initializes the environment:
+Production inspection:
 
 ```bash
-chmod +x scripts/setup.sh
-./scripts/setup.sh
+docker compose -p approval-app --env-file .env.production -f docker-compose.prod.yml ps
 ```
 
-**What setup.sh does:**
-
-- Creates `.env.production` from `.env.production.example` template
-- Creates `uploads/` directory for file uploads
-- Creates `backups/` directory for backup storage
-- Sets proper permissions on `uploads/` directory
-- Makes all scripts executable
-
-### Step 3: Configure Environment Variables
-
-Edit `.env.production` with your actual values:
+Production deployment starts only the database, one-shot migration, and application services:
 
 ```bash
-nano .env.production
+docker compose -p approval-app --env-file .env.production -f docker-compose.prod.yml up -d db migrate app
 ```
 
-**Required variables:**
-
-| Variable | Description | Where to Get |
-| ---------- | ------------- | --------------- |
-| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk public key for frontend auth | [Clerk Dashboard → Apps → API Keys](https://dashboard.clerk.com) |
-| `CLERK_SECRET_KEY` | Clerk secret key for backend auth | Same as above (Secret key) |
-| `CLERK_WEBHOOK_SECRET` | Webhook signing secret | Clerk Dashboard → Webhooks (after deployment) |
-| `POSTGRES_PASSWORD` | Database password | Choose a secure password |
-| `NEXTAUTH_URL` | Your application's public URL | e.g., `https://approval.example.com` |
-| `AUTH_URL` | Canonical Auth.js v5 origin | Same public HTTPS origin as `NEXTAUTH_URL` |
-| `NEXT_PUBLIC_APP_URL` | App API base | Must match `AUTH_URL` / `NEXTAUTH_URL` |
-| `AUTH_TRUST_HOST` | Trust forwarded proxy headers | Set to `true` (required behind Nginx) |
-| `NEXTAUTH_SECRET` | JWT encryption secret | Generate with: `openssl rand -base64 32` |
-| `CRON_SECRET` | Cron job security secret | Generate with: `openssl rand -base64 32` |
-
-**Database variables (internal Docker networking):**
+Routine updates do not run seed. Seed is available only through the `first-install` profile:
 
 ```bash
-POSTGRES_USER=postgres
-POSTGRES_DB=app_db
-DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/app_db
+docker compose -p approval-app --env-file .env.production -f docker-compose.prod.yml --profile first-install run --rm seed
 ```
 
-**Note:** In Docker Compose, `db` is the internal service name. Do not use `localhost` or an IP address.
+Use that command only after confirming a new empty installation.
 
----
+## Production environment
 
-## Deployment
+Create `.env.production` from `.env.example` in a repository checkout or `.env.production.example` in an offline package.
 
-### One-Command Deployment
+The public URL values must share one exact HTTPS origin:
 
-Deploy the application with a single command:
+```text
+AUTH_URL=https://approval.example.com
+NEXTAUTH_URL=https://approval.example.com
+NEXT_PUBLIC_APP_URL=https://approval.example.com
+AUTH_TRUST_HOST=true
+```
+
+Use a PostgreSQL `DATABASE_URL` with the internal host `db`. Match its user, password, and database to the `POSTGRES_*` values. Keep private attachments at `UPLOAD_DIR=/app/uploads`. Generate strong values for `NEXTAUTH_SECRET` and `CRON_SECRET`.
+
+The environment checker fails before deployment if required values are missing, insecure, malformed, or inconsistent. It never prints secret values.
+
+## Online VPS updates
+
+1. Keep the server checkout on `main`.
+2. Ensure `.env.production` is configured.
+3. Run `bash scripts/deploy.sh`.
+4. Choose **Ubuntu VPS / GitHub update**.
+
+The update is fast-forward-only from `origin/main`. A dirty tracked tree aborts by default. If the operator explicitly requests preservation, deployment creates a uniquely named stash and prints recovery instructions. It never automatically applies or deletes the stash.
+
+The coordinator tags rollback images from the running container image IDs before building. It then captures state, audits attachments, and creates verified database and uploads backups before changing images or services.
+
+## Offline intranet updates
+
+Build the package on an internet-connected development machine:
 
 ```bash
-./scripts/deploy.sh
+bash scripts/build-package.sh <version>
 ```
 
-**What deploy.sh does:**
-
-1. Pulls latest changes from Git (if in a Git repository)
-2. Rebuilds Docker images from source
-3. Stops and removes old containers
-4. Starts new containers
-5. Waits for services to become healthy
-6. Displays service status
-
-### Manual Deployment (Alternative)
-
-If you prefer manual control:
+After transferring and extracting the archive on the intranet server:
 
 ```bash
-# 1. Build images
-docker compose build --no-cache
-
-# 2. Start services
-docker compose up -d
-
-# 3. Check status
-docker compose ps
+cp .env.production.example .env.production
+# Edit production values.
+bash scripts/deploy.sh
 ```
 
-### Verify Deployment
+Choose **Offline intranet package**. The coordinator verifies `SHA256SUMS` before any image load or safety mutation. Offline mode does not invoke Git or network commands.
 
-After deployment, verify the application is running:
+## Manager
 
 ```bash
-# Run health check script
-./scripts/health-check.sh
+npm run manage
 ```
 
-Expected output:
+Option `2` delegates an existing-installation update exactly once to `bash scripts/deploy.sh`; select online or offline mode there. Backup, restore, health check, and rollback remain separate manager actions.
 
-```
-✓ Database (approval-db): running
-✓ Application (approval-app): running
-✓ Database health: healthy
-✓ Application health: healthy
-✓ API health endpoint: responding (200 OK)
+## Persistence guarantees
 
-============================================
-✓ All systems healthy
-============================================
-```
+The deployment workflow preserves and verifies:
 
-Access the application through the configured public HTTPS origin
-(e.g. `https://approval.example.com`). `http://localhost:3000` is a
-host-local health check only — it confirms the container is up on the server
-itself and is not the Auth.js public origin. Once the DNS proxy contract is
-enabled, direct IP/container port access is unsupported.
+- `.env.production`;
+- the PostgreSQL data volume;
+- the private uploads volume;
+- `backups/` and its verified artifacts;
+- user and upload-file counts; and
+- existing attachment gaps while rejecting any newly missing attachment path.
 
-**Note:** If deploying to a production domain, configure a reverse proxy (Nginx) to forward HTTP/HTTPS traffic to port 3000. See [Reverse Proxy (Nginx)](#reverse-proxy-nginx) for a production example including the upload body-size limit.
+If required volumes are missing or only partially present, deployment fails closed instead of treating the host as a fresh installation.
 
----
-
-## Updates
-
-### Update with Deploy Script
-
-To update the application with zero downtime:
+## Backup and restore
 
 ```bash
-./scripts/deploy.sh
+bash scripts/backup.sh
+bash scripts/restore.sh backups/db_<timestamp>.sql backups/uploads_<timestamp>.tar.gz
 ```
 
-**Update process:**
+Backup must produce non-empty database and uploads artifacts with checksums. Restore is destructive and prompts before replacing data. If the database container is absent, restore starts only `db` through the explicit production Compose contract.
 
-1. Pulls latest code from Git
-2. Rebuilds Docker images
-3. Gracefully stops old containers
-4. Starts new containers
-5. Migrations run automatically before app starts
-6. Data persists across updates
-
-**Downtime:** ~5-10 seconds (depends on build time)
-
-### Manual Update Process
-
-If you need more control:
+## Migration-aware rollback
 
 ```bash
-# 1. Stop services
-docker compose down
-
-# 2. Pull latest code
-git pull origin main
-
-# 3. Rebuild
-docker compose build
-
-# 4. Start services
-docker compose up -d
-
-# 5. Check logs
-docker compose logs -f
+bash scripts/rollback.sh
 ```
 
----
+Rollback always creates a fresh canonical backup before retagging and recreates only `app`. It does not reverse migrations.
 
-## Backups
+When migration state is `applied` or `unknown`—including missing, malformed, or duplicate state—the operator must evaluate old-app/current-schema compatibility and type the exact phrase `ROLLBACK APP ONLY`. The `--yes` option skips only the ordinary confirmation and cannot bypass this gate.
 
-### Automated Backup
+A migration failure is terminal. Do not automatically change app images after an applied or unknown migration.
 
-Run the backup script manually or schedule via cron:
+## Health and diagnostics
 
 ```bash
-./scripts/backup.sh
+bash scripts/health-check.sh
+docker compose -p approval-app --env-file .env.production -f docker-compose.prod.yml ps
+docker compose -p approval-app --env-file .env.production -f docker-compose.prod.yml logs -f app
+docker compose -p approval-app --env-file .env.production -f docker-compose.prod.yml logs -f migrate
 ```
 
-**What backup.sh does:**
+If deployment stops, read the first reported failed stage. Preserve the generated backup paths, deployment-state file, rollback tags, and any named dirty-tree stash before troubleshooting.
 
-1. Dumps PostgreSQL database to SQL file
-2. Archives uploads directory as tar.gz
-3. Stores backups in `./backups/`
-4. Applies retention policy (keeps last 5 backups)
-5. Reports backup file sizes
+## Reverse proxy and uploads
 
-**Backup files created:**
+Browse the application only at the configured public origin, such as `https://approval.example.com`. `http://localhost:3000` is a host-local health check only; direct IP/container port access is unsupported. `AUTH_TRUST_HOST=true` trusts the host and protocol forwarded by this controlled Nginx proxy, not arbitrary public hosts.
 
-- `backups/db_YYYYMMDD_HHMMSS.sql` - Database dump
-- `backups/uploads_YYYYMMDD_HHMMSS.tar.gz` - Uploads archive
-
-### Schedule Automated Backups (Cron)
-
-Add a cron job to run daily backups:
-
-```bash
-# Edit crontab
-crontab -e
-
-# Add line to run backup daily at 2 AM
-0 2 * * * cd /path/to/approval-app-v2 && ./scripts/backup.sh >> backups/cron.log 2>&1
-```
-
-### Restore from Backup
-
-To restore from a backup:
-
-```bash
-# Restore database only
-./scripts/restore.sh backups/db_20260214_120000.sql
-
-# Restore database and uploads
-./scripts/restore.sh backups/db_20260214_120000.sql backups/uploads_20260214_120000.tar.gz
-```
-
-**What restore.sh does:**
-
-1. Validates backup file format
-2. Confirms restore operation (safety check)
-3. Restores database from SQL dump
-4. Restores uploads from tar.gz (if specified)
-5. Restarts application services
-
-**Warning:** Database restore is destructive—it replaces the current database.
-
----
-
-## Monitoring & Health Checks
-
-### Health Check Script
-
-Monitor system health at any time:
-
-```bash
-./scripts/health-check.sh
-```
-
-**Health checks performed:**
-
-1. Docker Compose availability
-2. Container running status (db, app)
-3. Docker health status (internal healthcheck)
-4. HTTP API endpoint response
-
-**Exit codes:**
-
-- `0` = All systems healthy
-- `1` = One or more systems unhealthy
-
-### View Logs
-
-Follow real-time logs:
-
-```bash
-# All services
-docker compose logs -f
-
-# Specific service
-docker compose logs -f app
-docker compose logs -f db
-```
-
-**Log rotation:**
-Docker Compose is configured to rotate logs automatically:
-
-- Maximum file size: 10MB per log file
-- Maximum files: 3 per service
-
-This prevents disk space exhaustion from log accumulation.
-
----
-
-## Troubleshooting
-
-### Containers Won't Start
-
-**Check service status:**
-
-```bash
-docker compose ps
-```
-
-**View startup logs:**
-
-```bash
-docker compose logs
-```
-
-**Common causes:**
-
-1. Missing `.env.production` → Run `./scripts/setup.sh`
-2. Invalid environment variables → Check `.env.production` syntax
-3. Port 3000 already in use → Stop other services or change port mapping
-
-### Database Connection Errors
-
-**Symptoms:** App logs show "connection refused" or "ECONNREFUSED"
-
-**Solutions:**
-
-1. Check database health:
-
-    ```bash
-    docker compose logs db
-    ```
-
-2. Verify DATABASE_URL format:
-
-    ```bash
-    # Correct (Docker internal networking)
-    DATABASE_URL=postgresql://postgres:password@db:5432/app_db
-
-    # Incorrect (localhost won't work in Docker)
-    DATABASE_URL=postgresql://postgres:password@localhost:5432/app_db
-    ```
-
-3. Check database health status:
-
-    ```bash
-    docker compose exec db pg_isready -U postgres
-    ```
-
-### File Upload Permission Errors
-
-**Symptoms:** Logs show "EACCES: permission denied" when saving uploads
-
-**Cause:** Container runs as UID 1001 (nextjs user), but host `uploads/` directory is owned by root.
-
-**Solution:**
-
-```bash
-# Fix permissions on host
-sudo chown -R 1001:1001 uploads/
-sudo chmod -R 755 uploads/
-```
-
-**Preventative measure:** The `setup.sh` script sets permissions automatically. Run it again if you encounter this issue.
-
-### Container Health is Unhealthy
-
-**Check health status:**
-
-```bash
-docker compose ps
-```
-
-If health status shows "unhealthy":
-
-1. Check healthcheck logs:
-
-    ```bash
-    docker compose logs app | grep "healthcheck"
-    ```
-
-2. Restart the service:
-
-    ```bash
-    docker compose restart app
-    ```
-
-3. If persistent, rebuild:
-
-    ```bash
-    docker compose down
-    docker compose build --no-cache
-    docker compose up -d
-    ```
-
-### Disk Space Issues
-
-**Check disk usage:**
-
-```bash
-# Docker system usage
-docker system df
-
-# Container disk usage
-du -sh .next/ uploads/
-```
-
-**Free space:**
-
-```bash
-# Remove unused images
-docker image prune -a
-
-# Remove unused containers
-docker container prune
-
-# Remove unused volumes (WARNING: deletes data)
-docker volume prune
-```
-
-**Backup cleanup:** The backup script automatically removes old backups (retention: 5 files). Manually remove if needed:
-
-```bash
-# List backups
-ls -lh backups/
-
-# Remove specific backup
-rm backups/db_20260101_120000.sql
-```
-
-### Migration Failures
-
-**Symptoms:** `migrate` service exits with error, `app` service won't start
-
-**Check migration logs:**
-
-```bash
-docker compose logs migrate
-```
-
-**Common migration issues:**
-
-1. **Database not ready when migrations run**
-   - Solution: Wait longer, migrations will retry automatically
-   - Check db health: `docker compose ps`
-
-2. **Schema conflict**
-   - Solution: Manual database reset (WARNING: data loss):
-
-     ```bash
-     docker compose down -v
-     docker compose up -d
-     ```
-
-3. **Prisma client not generated**
-   - Solution: Rebuild image (Prisma generation happens during build):
-
-     ```bash
-     docker compose build --no-cache
-     ```
-
-### Auth.js Origin and Logout Issues
-
-**Symptoms:** Sign out redirects to `http://localhost:3000`, sign-in redirects
-to the wrong host, or sessions appear to switch origins between pages.
-
-**Cause:** The app runs behind a reverse proxy, so Auth.js must be told which
-public origin to use. The three URL variables — `AUTH_URL`, `NEXTAUTH_URL`,
-and `NEXT_PUBLIC_APP_URL` — must all match the public HTTPS origin
-(e.g. `https://approval.example.com`). A mismatch between the Auth.js
-callback base and the app API base causes cookie/session mismatches.
-
-**Fix:**
-
-1. Set all three URL variables to the same public HTTPS origin in
-   `.env.production`.
-2. Confirm `AUTH_TRUST_HOST=true` is set. This permits Auth.js to trust the
-   `Host` / `X-Forwarded-Host` and `X-Forwarded-Proto` headers forwarded by
-   the controlled Nginx proxy; without it Auth.js derives `http://localhost`
-   from the internal container host.
-3. Verify the reverse proxy forwards the headers shown in
-   [Reverse Proxy (Production Nginx)](#reverse-proxy-production-nginx).
-4. Restart the app container and retry sign out.
-
-Sign out itself uses the relative `/sign-in` callback, so the browser stays on
-an origin it is already talking to — no absolute URL is baked into the client.
-
-### Reset Application (Data Loss Warning)
-
-**Warning:** This deletes all data (database and uploads). Only use for testing or catastrophic recovery.
-
-```bash
-# Stop and remove all containers and volumes
-docker compose down -v
-
-# Restart (fresh database)
-docker compose up -d
-```
-
----
-
-## Architecture Reference
-
-### Docker Services
-
-| Service | Image | Purpose | Ports | Volumes |
-| --------- | -------- | --------- | -------- | ---------- |
-| `db` | postgres:15-alpine | PostgreSQL database | 5432 (internal) | db_data |
-| `migrate` | Custom (builder stage) | Run migrations | - | - |
-| `app` | Custom (runner stage) | Next.js application | 3000 | uploads_data |
-
-### Volumes
-
-| Volume | Purpose | Backup Strategy |
-|--------|---------|-----------------|
-| `db_data` | Persistent PostgreSQL data | `pg_dump` via backup.sh |
-| `uploads_data` | Persistent file uploads | `tar` archive via backup.sh |
-
-### Multi-Stage Dockerfile
-
-The Dockerfile uses three stages:
-
-1. **base:** Alpine base with Prisma dependencies
-2. **deps:** Installs npm dependencies (cached layer)
-3. **builder:** Builds Next.js and generates Prisma client
-4. **runner:** Minimal production image with built artifacts
-
-This results in a smaller final image (~110MB vs 300MB+ without stages).
-
----
-
-## Reverse Proxy (Production Nginx)
-
-Put Nginx (or another reverse proxy) in front of the container on production
-domains and forward traffic to the host port the app publishes (3000).
+Forward the public host and protocol to port 3000:
 
 ```nginx
-server {
-    listen 80;
-    server_name approval.example.com;
-
-    # Server Action transport limit. The app itself rejects attachments over
-    # 10 MB (see below); 15 MB here keeps the transport from clipping a valid
-    # upload before the app's own validation runs.
-    client_max_body_size 15m;
-
-    location / {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Host              $host;
-        proxy_set_header X-Forwarded-Host  $host;
-        proxy_set_header X-Real-IP         $remote_addr;
-        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header Upgrade           $http_upgrade;
-        proxy_set_header Connection        "upgrade";
-    }
-
-    # Attachments now live in the private /app/uploads volume and are streamed
-    # only by the authenticated app route. Direct serving from /uploads/ is
-    # obsolete — deny it so files are never exposed without authorization.
-    location /uploads/ {
-        deny all;
-        return 404;
-    }
-}
+client_max_body_size 15m;
+proxy_set_header Host              $host;
+proxy_set_header X-Forwarded-Host  $host;
+proxy_set_header X-Forwarded-Proto $scheme;
+proxy_set_header X-Real-IP         $remote_addr;
+proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
 ```
 
-**Upload limits — 10 MB app / 15 MB transport:** The application rejects any
-attachment larger than **10 MB** (its own policy). The Next.js Server Action
-transport and this reverse proxy both allow up to **15 MB**, so the
-application's validation — not the network layer — is the gatekeeper that
-rejects oversized uploads.
+Do not serve `/uploads/` directly. Attachments are private files under `/app/uploads` and must flow through authenticated application routes. The application file limit is 10 MB; the 15 MB transport limit allows request overhead without bypassing application validation.
 
----
-
-## Hostinger VPS Deployment Notes
-
-### Default Setup
-
-Hostinger VPS provides:
-
-- Ubuntu 20.04 or 22.04
-- SSH access
-- 1-4GB RAM options
-- 40-80GB SSD storage
-
-### Quick Start on Hostinger
-
-```bash
-# 1. SSH to your VPS
-ssh root@your-hostinger-ip
-
-# 2. Install Docker
-curl -fsSL https://get.docker.com -o get-docker.sh
-sh get-docker.sh
-
-# 3. Install Git
-apt update && apt install -y git
-
-# 4. Clone repository
-git clone https://github.com/your-org/approval-app-v2.git
-cd approval-app-v2
-
-# 5. Run setup
-./scripts/setup.sh
-
-# 6. Configure environment
-nano .env.production
-
-# 7. Deploy
-./scripts/deploy.sh
-```
-
-### Configure Firewall
-
-Hostinger uses UFW (Uncomplicated Firewall). Allow necessary ports:
-
-```bash
-# Allow SSH
-ufw allow 22/tcp
-
-# Allow HTTP/HTTPS (if using reverse proxy)
-ufw allow 80/tcp
-ufw allow 443/tcp
-
-# Enable firewall
-ufw enable
-
-# Check status
-ufw status
-```
-
-**Note:** Port 3000 is exposed via Docker but typically not exposed to the internet directly. Configure a reverse proxy (Nginx) to forward `yourdomain.com` → `localhost:3000`.
-
----
-
-## VMware/Internal VM Deployment Notes
-
-### Network Configuration
-
-For VMware VMs on internal networks:
-
-1. **Static IP:** Assign a static IP to the VM
-2. **DNS:** Configure internal DNS to point `approval.internal.yourcompany.com` to the VM IP
-3. **Firewall:** Open port 3000 on the VM firewall
-
-### VMware Tools
-
-Install VMware Tools for better performance:
-
-```bash
-# On Ubuntu/Debian
-sudo apt install open-vm-tools-desktop
-
-# Verify
-vmware-toolbox-cmd -v
-```
-
-### Resource Allocation
-
-| Component | Minimum | Recommended |
-| ------------ | ----------- | -------------- |
-| vCPU | 2 | 4 |
-| RAM | 2GB | 4GB |
-| Disk | 20GB | 50GB+ |
-
----
-
-## Security Checklist
-
-- [ ] Changed default PostgreSQL password in `.env.production`
-- [ ] Generated strong secrets for `NEXTAUTH_SECRET` and `CRON_SECRET`
-- [ ] Configured Clerk webhook secret after deployment
-- [ ] Set up firewall rules to limit access
-- [ ] Configured automatic backups (cron job)
-- [ ] Verified backup restoration works
-- [ ] Set log rotation (already configured in docker-compose.yml)
-- [ ] Monitor disk space regularly
-- [ ] Review Docker logs for security events
-
----
-
-## Support
-
-For issues or questions:
-
-1. Check [Troubleshooting](#troubleshooting) section
-2. Review Docker logs: `docker compose logs`
-3. Run health check: `./scripts/health-check.sh`
-4. Check project issues: [GitHub Issues](https://github.com/your-org/approval-app-v2/issues)
-
----
-
-**Last Updated:** 2026-02-14
-**Version:** 1.0
-**Compatibility:** Approval App v0.1.0+
+See the package-facing [../DEPLOY.md](../DEPLOY.md) for the full step-by-step operator runbook.
