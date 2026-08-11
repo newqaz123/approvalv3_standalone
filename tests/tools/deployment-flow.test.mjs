@@ -124,6 +124,15 @@ function runDeployment(script, args, env, cwd) {
   return spawnSync('/bin/bash', [script, ...args], { cwd, env: { ...process.env, ...env }, encoding: 'utf8' })
 }
 
+function assertLogSequence(log, markers) {
+  let offset = 0
+  for (const marker of markers) {
+    const position = log.indexOf(marker, offset)
+    assert.notEqual(position, -1, `missing or out-of-order command marker: ${marker}\n${log}`)
+    offset = position + marker.length
+  }
+}
+
 test('main online update path proves rollback and backup precede build and preservation follows health', async () => {
   const fixture = await fakeBin()
   const deployRoot = join(fixture.dir, 'online-root')
@@ -133,7 +142,22 @@ test('main online update path proves rollback and backup precede build and prese
   }, fixture.dir)
   assert.equal(result.status, 0, result.stderr)
   const log = await readFile(fixture.log, 'utf8')
-  assert.match(log, /docker inspect -f \{\{\.Image\}\} approval-app[\s\S]*backup[\s\S]*docker build[\s\S]*compose.*up -d db migrate app[\s\S]*MIGRATION_COMMAND_REACHED[\s\S]*State.Health.Status[\s\S]*docker inspect -f \{\{range \.Mounts\}\}/)
+  const stateCaptureMarker = 'docker inspect -f {{range .Mounts}}{{.Name}} {{.Destination}}{{"\\\\n"}}{{end}} approval-db\n'
+  assertLogSequence(log, [
+    'docker image tag sha256:appimage approval-app:rollback\n',
+    'docker image tag sha256:migrateimage approval-migrate:rollback\n',
+    stateCaptureMarker,
+    'docker exec approval-db sh -c psql -Atqc "select id, \\"filePath\\" from file_attachments order by id;"\n',
+    'backup\n',
+    'docker build --target runner -t approval-app:latest ',
+    'docker build --target migrator -t approval-migrate:latest ',
+    'up -d db migrate app\n',
+    'MIGRATION_COMMAND_REACHED\n',
+    'docker inspect -f {{.State.Health.Status}} approval-app\n',
+    'curl -fsS http://localhost:3000/api/health\n',
+    stateCaptureMarker,
+  ])
+  assert.match(result.stdout, /Deployment succeeded \(online\)\./)
   assert.doesNotMatch(log, /seed|down -v|volume prune/)
 })
 
@@ -145,7 +169,9 @@ test('main offline checksum failure identifies checksum and stops before any saf
     PATH: `${fixture.bin}:${process.env.PATH}`, COMMAND_LOG: fixture.log, DEPLOY_ROOT: deployRoot, APP_CONTAINER_MISSING: '1',
   }, fixture.dir)
   assert.notEqual(result.status, 0)
-  assert.match(`${result.stdout}\\n${result.stderr}`, /FAILED|checksum/i)
+  const output = `${result.stdout}\n${result.stderr}`
+  assert.ok(output.includes('ERROR: Offline package checksum validation failed'), output)
+  assert.ok(!output.includes('Deployment succeeded (offline).'), output)
   const log = await readFile(fixture.log, 'utf8')
   assert.doesNotMatch(log, /inspect|tag|load|backup|build|MIGRATION_COMMAND_REACHED|Health.Status|success/i)
   assert.equal(log, 'docker compose version\n')
