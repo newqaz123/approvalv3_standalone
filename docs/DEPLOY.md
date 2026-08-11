@@ -8,6 +8,8 @@ bash scripts/deploy.sh
 
 The script supports an online Ubuntu VPS checkout and an extracted offline intranet package. It validates configuration, preserves persistent data, creates verified backups, handles migrations, checks health, and audits attachment integrity.
 
+Host prerequisites are Docker with Compose v2, Node.js 20 or newer for the environment gate, and `curl` for HTTP health checks. Online mode additionally requires Git; offline mode requires a SHA-256 utility (`sha256sum` or `shasum`).
+
 ## Two explicit Compose environments
 
 Local development:

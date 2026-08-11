@@ -154,6 +154,12 @@ exec)
 		esac
 	fi
 	if [ "$container" = "approval-app" ]; then
+		for a in "$@"; do
+			if [ "$a" = "tar" ]; then
+				printf 'uploads archive dummy content\n'
+				exit 0
+			fi
+		done
 		if [ "${FILES_FAILURE:-0}" = "1" ]; then
 			exit 1
 		fi
@@ -197,7 +203,13 @@ volume)
 	exit 0
 	;;
 run)
-	# docker run --rm -v <vol>:/data:ro -v <host>:/backup alpine tar -czf /backup/<name> -C /data .
+	# Legacy restore fixtures may write to /backup; offline-safe backup streams tar to stdout.
+	for a in "$@"; do
+		if [ "$a" = "tar" ] && printf '%s\n' "$*" | grep -q -- '-czf -'; then
+			printf 'uploads archive dummy content\n'
+			exit 0
+		fi
+	done
 	backup_host=""
 	for a in "$@"; do
 		case "$a" in

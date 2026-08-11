@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync } from 'node:fs'
-import { chmod, mkdtemp, readFile, writeFile, mkdir, copyFile } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, writeFile, mkdir, copyFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { execFileSync, spawnSync } from 'node:child_process'
@@ -416,9 +416,32 @@ async function installDeployRoot(rootDir) {
   await mkdir(join(rootDir, 'scripts/lib'), { recursive: true })
   await copyFile(join(root, 'scripts/deploy.sh'), join(rootDir, 'scripts/deploy.sh'))
   await copyFile(join(root, 'scripts/lib/deploy-common.sh'), join(rootDir, 'scripts/lib/deploy-common.sh'))
-  await writeFile(join(rootDir, 'scripts/backup.sh'), `#!/usr/bin/env bash\nset -eu\nmkdir -p "$BACKUP_DIR"\necho backup >>"$COMMAND_LOG"\nprintf x >"$BACKUP_DIR/db.sql"\nprintf x >"$BACKUP_DIR/uploads.tar.gz"\nprintf 'DB_BACKUP_PATH=%s\\nUPLOADS_BACKUP_PATH=%s\\nDB_BACKUP_SHA256=x\\nUPLOADS_BACKUP_SHA256=x\\n' "$DEPLOY_ROOT/backups/db.sql" "$DEPLOY_ROOT/backups/uploads.tar.gz"\n`)
+  for (const script of ['deploy-offline.sh', 'restore.sh', 'rollback.sh', 'health-check.sh', 'setup.sh']) {
+    await copyFile(join(root, 'scripts', script), join(rootDir, 'scripts', script))
+  }
+  await writeFile(join(rootDir, 'scripts/backup.sh'), `#!/usr/bin/env bash
+set -eu
+checksum() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'; else shasum -a 256 "$1" | awk '{print $1}'; fi
+}
+mkdir -p "$BACKUP_DIR"
+echo backup >>"$COMMAND_LOG"
+printf x >"$BACKUP_DIR/db.sql"
+printf x >"$BACKUP_DIR/uploads.tar.gz"
+db_sha="$(checksum "$BACKUP_DIR/db.sql")"
+uploads_sha="$(checksum "$BACKUP_DIR/uploads.tar.gz")"
+if [ "\${FORGED_BACKUP_SHA:-0}" = 1 ]; then db_sha="${'0'.repeat(64)}"; uploads_sha="${'0'.repeat(64)}"; fi
+printf 'DB_BACKUP_PATH=%s\\nUPLOADS_BACKUP_PATH=%s\\nDB_BACKUP_SHA256=%s\\nUPLOADS_BACKUP_SHA256=%s\\n' "$DEPLOY_ROOT/backups/db.sql" "$DEPLOY_ROOT/backups/uploads.tar.gz" "$db_sha" "$uploads_sha"
+`)
   await chmod(join(rootDir, 'scripts/backup.sh'), 0o755)
   await writeFile(join(rootDir, 'Dockerfile'), 'FROM scratch\n')
+}
+
+function portableChecksums(files, cwd) {
+  const hasSha256sum = spawnSync('sha256sum', ['--version'], { encoding: 'utf8' }).status === 0
+  return hasSha256sum
+    ? execFileSync('sha256sum', files, { cwd, encoding: 'utf8' })
+    : execFileSync('shasum', ['-a', '256', ...files], { cwd, encoding: 'utf8' })
 }
 
 async function installOfflinePackage(rootDir, checksum = true) {
@@ -426,13 +449,24 @@ async function installOfflinePackage(rootDir, checksum = true) {
   await mkdir(join(rootDir, 'images'))
   for (const image of ['approval-app.tar', 'approval-migrate.tar', 'postgres.tar']) await writeFile(join(rootDir, 'images', image), 'fake-image')
   await writeFile(join(rootDir, 'VERSION'), 'VERSION=1.0.0\n')
-  const files = ['VERSION', 'docker-compose.prod.yml', 'images/approval-app.tar', 'images/approval-migrate.tar', 'images/postgres.tar', 'scripts/deploy.sh', 'scripts/lib/deploy-common.sh', 'tools/env-check.mjs', 'tools/lib/env.mjs']
-  const sums = checksum ? execFileSync('sha256sum', files, { cwd: rootDir, encoding: 'utf8' }) : `${'0'.repeat(64)}  VERSION\n`
+  const files = [
+    'VERSION', 'docker-compose.prod.yml',
+    'images/approval-app.tar', 'images/approval-migrate.tar', 'images/postgres.tar',
+    'scripts/deploy.sh', 'scripts/deploy-offline.sh', 'scripts/backup.sh', 'scripts/restore.sh',
+    'scripts/rollback.sh', 'scripts/health-check.sh', 'scripts/setup.sh',
+    'scripts/lib/deploy-common.sh', 'tools/env-check.mjs', 'tools/lib/env.mjs',
+  ]
+  const sums = checksum ? portableChecksums(files, rootDir) : `${'0'.repeat(64)}  VERSION\n`
   await writeFile(join(rootDir, 'SHA256SUMS'), sums)
 }
 
-function runDeployment(script, args, env, cwd) {
-  return spawnSync('/bin/bash', [script, ...args], { cwd, env: { ...process.env, ...env }, encoding: 'utf8' })
+function runDeployment(script, args, env, cwd, options = {}) {
+  return spawnSync('/bin/bash', [script, ...args], {
+    cwd,
+    env: { ...process.env, ...env },
+    encoding: 'utf8',
+    ...options,
+  })
 }
 
 function assertLogSequence(log, markers) {
@@ -443,6 +477,76 @@ function assertLogSequence(log, markers) {
     offset = position + marker.length
   }
 }
+
+test('backup archives uploads without an unpackaged helper image', async () => {
+  const source = await read('scripts/backup.sh')
+  assert.doesNotMatch(source, /alpine:(?:latest|[0-9.]+)/)
+  assert.match(source, /docker exec "\$APP_CONTAINER" tar -czf -/)
+  assert.match(source, /--pull=never/)
+})
+
+test('canonical backup creates non-empty database and uploads artifacts without pulling', async () => {
+  const fixture = await fakeBin()
+  const deployRoot = join(fixture.dir, 'real-backup-root')
+  await installValidGate(deployRoot)
+  const result = runScript(join(root, 'scripts/backup.sh'), [], {
+    PATH: `${fixture.bin}:${process.env.PATH}`,
+    COMMAND_LOG: fixture.log,
+    DEPLOY_ROOT: deployRoot,
+    BACKUP_DIR: join(deployRoot, 'backups'),
+  }, fixture.dir)
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
+  const dbPath = result.stdout.match(/^DB_BACKUP_PATH=(.+)$/m)?.[1]
+  const uploadsPath = result.stdout.match(/^UPLOADS_BACKUP_PATH=(.+)$/m)?.[1]
+  assert.ok(dbPath && uploadsPath, result.stdout)
+  assert.ok((await readFile(dbPath)).length > 0)
+  assert.ok((await readFile(uploadsPath)).length > 0)
+  const log = await readFile(fixture.log, 'utf8')
+  assert.match(log, /docker exec approval-app tar -czf - -C \/app\/uploads \./)
+  assert.doesNotMatch(log, /docker run|alpine|--pull=always/)
+})
+
+test('deployment preflight requires every documented host command', async () => {
+  const source = await read('scripts/deploy.sh')
+  for (const command of ['docker', 'node', 'curl']) {
+    assert.match(source, new RegExp(`require_host_command ${command}`))
+  }
+  const docs = `${await read('DEPLOY.md')}\n${await read('docs/DEPLOY.md')}`
+  assert.match(docs, /Node\.js/)
+  assert.match(docs, /curl/)
+})
+
+test('verified backup rejects forged checksum summaries', async () => {
+  const fixture = await fakeBin()
+  const deployRoot = join(fixture.dir, 'backup-root')
+  await installDeployRoot(deployRoot)
+  const result = runShell('source scripts/lib/deploy-common.sh; run_verified_backup', {
+    PATH: `${fixture.bin}:${process.env.PATH}`,
+    COMMAND_LOG: fixture.log,
+    DEPLOY_ROOT: deployRoot,
+    ENV_FILE: join(deployRoot, '.env.production'),
+    PROD_COMPOSE_FILE: join(deployRoot, 'docker-compose.prod.yml'),
+    FORGED_BACKUP_SHA: '1',
+  })
+  assert.notEqual(result.status, 0)
+  assert.match(`${result.stdout}\n${result.stderr}`, /checksum/i)
+})
+
+test('online dirty-tree abort happens before rollback tags, state, or backup mutation', async () => {
+  const fixture = await fakeBin()
+  const deployRoot = join(fixture.dir, 'dirty-root')
+  await installDeployRoot(deployRoot)
+  const result = runDeployment(join(root, 'scripts/deploy.sh'), ['--online'], {
+    PATH: `${fixture.bin}:${process.env.PATH}`,
+    COMMAND_LOG: fixture.log,
+    DEPLOY_ROOT: deployRoot,
+    DIRTY_TREE_OUTPUT: ' M local-change.txt',
+  }, fixture.dir, { input: '\n' })
+  assert.notEqual(result.status, 0)
+  assert.match(`${result.stdout}\n${result.stderr}`, /working tree is dirty|deployment aborted/i)
+  const log = await readFile(fixture.log, 'utf8')
+  assert.doesNotMatch(log, /docker image tag|backup|select id|Mounts/)
+})
 
 test('main online update path proves rollback and backup precede build and preservation follows health', async () => {
   const fixture = await fakeBin()
@@ -497,7 +601,24 @@ test('main offline path never invokes Git or network commands', async () => {
   }, fixture.dir)
   assert.equal(result.status, 0, result.stderr)
   const log = await readFile(fixture.log, 'utf8')
-  assert.doesNotMatch(log, /\bgit\b|\bfetch\b|\bpull\b/)
+  assert.doesNotMatch(log, /\bgit\b|\bfetch\b|\bpull\b|alpine:latest|--pull=always/)
+})
+
+test('offline package validation requires backup and recovery scripts before mutation', async () => {
+  const fixture = await fakeBin()
+  const deployRoot = join(fixture.dir, 'offline-missing-runtime')
+  await installOfflinePackage(deployRoot)
+  await rm(join(deployRoot, 'scripts/backup.sh'))
+  const result = runDeployment(join(root, 'scripts/deploy.sh'), ['--offline', deployRoot], {
+    PATH: `${fixture.bin}:${process.env.PATH}`,
+    COMMAND_LOG: fixture.log,
+    DEPLOY_ROOT: deployRoot,
+    APP_CONTAINER_MISSING: '1',
+  }, fixture.dir)
+  assert.notEqual(result.status, 0)
+  assert.match(`${result.stdout}\n${result.stderr}`, /missing: scripts\/backup\.sh/)
+  const log = await readFile(fixture.log, 'utf8')
+  assert.doesNotMatch(log, /docker image tag|docker load|backup|MIGRATION_COMMAND_REACHED/)
 })
 
 test('main migration failure stops health and success without automatic rollback', async () => {
@@ -538,6 +659,45 @@ test('main online invocation from another cwd targets resolved deployment root',
   assert.equal(result.status, 0, result.stderr)
   const log = await readFile(fixture.log, 'utf8')
   assert.match(log, new RegExp(`git -C ${deployRoot.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}`))
+})
+
+test('production deployment records unknown migration state before starting compose', async () => {
+  const fixture = await fakeBin()
+  const gateRoot = join(fixture.dir, 'deployment-root')
+  await installValidGate(gateRoot)
+  const stateFile = join(fixture.dir, 'state.env')
+  await writeFile(stateFile, 'MIGRATIONS_APPLIED=none\n')
+  const result = runShell('source scripts/lib/deploy-common.sh; deploy_production_services', {
+    PATH: `${fixture.bin}:${process.env.PATH}`,
+    COMMAND_LOG: fixture.log,
+    DEPLOY_ROOT: gateRoot,
+    ENV_FILE: join(gateRoot, '.env.production'),
+    ENV_TEMPLATE: join(gateRoot, '.env.example'),
+    PROD_COMPOSE_FILE: join(gateRoot, 'docker-compose.prod.yml'),
+    DEPLOY_STATE_FILE: stateFile,
+    COMPOSE_UP_EXIT: '1',
+  })
+  assert.notEqual(result.status, 0)
+  assert.match(await readFile(stateFile, 'utf8'), /^MIGRATIONS_APPLIED=unknown$/m)
+  assert.match(await readFile(fixture.log, 'utf8'), /MIGRATION_COMMAND_REACHED/)
+})
+
+test('migration-state persistence failure prevents compose from starting', async () => {
+  const fixture = await fakeBin()
+  const gateRoot = join(fixture.dir, 'deployment-root')
+  await installValidGate(gateRoot)
+  const result = runShell('source scripts/lib/deploy-common.sh; deploy_production_services', {
+    PATH: `${fixture.bin}:${process.env.PATH}`,
+    COMMAND_LOG: fixture.log,
+    DEPLOY_ROOT: gateRoot,
+    ENV_FILE: join(gateRoot, '.env.production'),
+    ENV_TEMPLATE: join(gateRoot, '.env.example'),
+    PROD_COMPOSE_FILE: join(gateRoot, 'docker-compose.prod.yml'),
+    DEPLOY_STATE_FILE: join(fixture.dir, 'state.env'),
+    CHOWN_EXIT: '1',
+  })
+  assert.notEqual(result.status, 0)
+  assert.doesNotMatch(await readFile(fixture.log, 'utf8'), /MIGRATION_COMMAND_REACHED/)
 })
 
 test('migration failure reaches the fake migration command and is terminal', async () => {

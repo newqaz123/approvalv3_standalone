@@ -73,6 +73,22 @@ backup_summary_value() {
   printf '%s\n' "$output" | sed -n "s/^${key}=//p" | tail -n 1
 }
 
+sha256_digest() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    fail 'No SHA-256 utility is installed'
+  fi
+}
+
+verify_backup_checksum() {
+  local path="$1" expected="$2" actual
+  actual="$(sha256_digest "$path")" || return 1
+  [ "$actual" = "$expected" ] || { fail "Backup checksum mismatch: $path"; return 1; }
+}
+
 canonical_directory() {
   [ -d "$1" ] || return 1
   CDPATH= cd -P -- "$1" 2>/dev/null && pwd -P
@@ -132,6 +148,8 @@ run_verified_backup() {
   [ -n "$db_path" ] && [ -n "$uploads_path" ] && [ -n "$db_sha" ] && [ -n "$uploads_sha" ] || { fail 'Backup summary is incomplete'; return 1; }
   path_in_backup_dir "$db_path" "$backup_root" || { fail 'Database backup is outside the deployment backup directory or empty'; return 1; }
   path_in_backup_dir "$uploads_path" "$backup_root" || { fail 'Uploads backup is outside the deployment backup directory or empty'; return 1; }
+  verify_backup_checksum "$db_path" "$db_sha" || return 1
+  verify_backup_checksum "$uploads_path" "$uploads_sha" || return 1
   printf 'DB_BACKUP_PATH=%s\n' "$db_path"
   printf 'UPLOADS_BACKUP_PATH=%s\n' "$uploads_path"
   printf 'DB_BACKUP_SHA256=%s\n' "$db_sha"
@@ -330,26 +348,39 @@ verify_attachment_integrity() { verify_new_attachment_integrity "$@"; }
 
 deploy_production_services() {
   run_env_gate || return 1
+  if ! record_migration_outcome unknown "${OLD_VERSION:-unknown}" "${NEW_VERSION:-unknown}"; then
+    fail 'Migration state could not be marked unknown before deployment'
+    return 1
+  fi
   compose_prod up -d db migrate app
 }
 
 record_migration_outcome() {
-  local outcome="$1" old_version="${2:-unknown}" new_version="${3:-unknown}" state_dir
+  local outcome="$1" old_version="${2:-unknown}" new_version="${3:-unknown}" state_dir temporary
   state_dir="$(dirname "$DEPLOY_STATE_FILE")"
   mkdir -p "$state_dir" || return 1
+  temporary="$(mktemp "$state_dir/.migration-state.XXXXXX")" || return 1
   if [ -f "$DEPLOY_STATE_FILE" ]; then
-    sed -i.bak "s/^MIGRATIONS_APPLIED=.*/MIGRATIONS_APPLIED=$outcome/" "$DEPLOY_STATE_FILE" 2>/dev/null || true
-    rm -f "$DEPLOY_STATE_FILE.bak"
-    if ! grep -q '^MIGRATIONS_APPLIED=' "$DEPLOY_STATE_FILE"; then printf 'MIGRATIONS_APPLIED=%s\n' "$outcome" >>"$DEPLOY_STATE_FILE"; fi
+    awk -v outcome="$outcome" '
+      BEGIN { written = 0 }
+      /^MIGRATIONS_APPLIED=/ {
+        if (!written) { print "MIGRATIONS_APPLIED=" outcome; written = 1 }
+        next
+      }
+      { print }
+      END { if (!written) print "MIGRATIONS_APPLIED=" outcome }
+    ' "$DEPLOY_STATE_FILE" >"$temporary" || { rm -f "$temporary"; return 1; }
   else
-    printf 'MIGRATIONS_APPLIED=%s\n' "$outcome" >"$DEPLOY_STATE_FILE"
+    printf 'MIGRATIONS_APPLIED=%s\n' "$outcome" >"$temporary" || { rm -f "$temporary"; return 1; }
   fi
   {
     printf 'MIGRATION_OLD_VERSION=%s\n' "$old_version"
     printf 'MIGRATION_NEW_VERSION=%s\n' "$new_version"
     printf 'MIGRATION_TIMESTAMP=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-  } >>"$DEPLOY_STATE_FILE"
-  chmod 600 "$DEPLOY_STATE_FILE"
+  } >>"$temporary" || { rm -f "$temporary"; return 1; }
+  chmod 600 "$temporary" || { rm -f "$temporary"; return 1; }
+  ensure_root_owned "$temporary" || { rm -f "$temporary"; return 1; }
+  mv -f "$temporary" "$DEPLOY_STATE_FILE" || { rm -f "$temporary"; return 1; }
   ensure_root_owned "$DEPLOY_STATE_FILE" || return 1
 }
 
@@ -366,14 +397,20 @@ wait_for_migration() {
         fi
         return 0
       fi
-      record_migration_outcome unknown "${OLD_VERSION:-unknown}" "${NEW_VERSION:-unknown}"
+      if ! record_migration_outcome unknown "${OLD_VERSION:-unknown}" "${NEW_VERSION:-unknown}"; then
+        fail 'Migration failed and durable unknown state could not be recorded safely'
+        return 1
+      fi
       fail "Migration container exited with code ${exit_code:-unknown}"
       return 1
     fi
     sleep 1
     elapsed=$((elapsed + 1))
   done
-  record_migration_outcome unknown "${OLD_VERSION:-unknown}" "${NEW_VERSION:-unknown}"
+  if ! record_migration_outcome unknown "${OLD_VERSION:-unknown}" "${NEW_VERSION:-unknown}"; then
+    fail 'Migration timed out and durable unknown state could not be recorded safely'
+    return 1
+  fi
   fail 'Migration did not finish within 120 seconds'
   return 1
 }

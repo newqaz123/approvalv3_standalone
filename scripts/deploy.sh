@@ -22,6 +22,10 @@ select_mode() {
 }
 usage() { printf 'Usage: %s [--online|--offline <package-dir>]\n' "$0"; }
 
+require_host_command() {
+  command -v "$1" >/dev/null 2>&1 || { fail "Required host command is not installed: $1"; return 1; }
+}
+
 has_running_app() { docker inspect approval-app >/dev/null 2>&1; }
 has_required_volumes() {
   local volumes
@@ -45,8 +49,8 @@ prepare_existing_state() {
   DEPLOY_MODE=install
 }
 
-online_git_prepare() {
-  local status choice stash_ref old_commit new_commit origin_commit
+online_git_preflight() {
+  local status choice stash_ref old_commit
   git -C "$DEPLOY_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1 || { fail 'Online deployment requires a Git checkout'; return 1; }
   status="$(git -C "$DEPLOY_ROOT" status --porcelain)"
   if [ -n "$status" ]; then
@@ -64,6 +68,11 @@ online_git_prepare() {
   CURRENT_BRANCH="$(git -C "$DEPLOY_ROOT" rev-parse --abbrev-ref HEAD)"
   [ "$CURRENT_BRANCH" = main ] || { fail 'Online deployment must run from branch main'; return 1; }
   old_commit="$(git -C "$DEPLOY_ROOT" rev-parse HEAD)"
+  export CURRENT_BRANCH OLD_VERSION="$old_commit"
+}
+
+online_git_acquire() {
+  local new_commit origin_commit
   git -C "$DEPLOY_ROOT" fetch origin main
   # Main-branch contract: git pull --ff-only origin main.
   # Compatibility form: git pull --ff-only origin "$CURRENT_BRANCH".
@@ -71,15 +80,15 @@ online_git_prepare() {
   new_commit="$(git -C "$DEPLOY_ROOT" rev-parse HEAD)"
   origin_commit="$(git -C "$DEPLOY_ROOT" rev-parse origin/main)"
   git -C "$DEPLOY_ROOT" merge-base --is-ancestor "$new_commit" "$origin_commit" || { fail 'Updated commit is not an ancestor of origin/main'; return 1; }
-  export OLD_VERSION="$old_commit" NEW_VERSION="$new_commit"
-  printf 'Online source: %s -> %s\n' "$old_commit" "$new_commit"
+  export NEW_VERSION="$new_commit"
+  printf 'Online source: %s -> %s\n' "$OLD_VERSION" "$new_commit"
   docker build --target runner -t approval-app:latest "$DEPLOY_ROOT"
   docker build --target migrator -t approval-migrate:latest "$DEPLOY_ROOT"
 }
 
 validate_offline_package() {
   local required
-  for required in VERSION SHA256SUMS docker-compose.prod.yml images/approval-app.tar images/approval-migrate.tar images/postgres.tar scripts/deploy.sh scripts/lib/deploy-common.sh tools/env-check.mjs tools/lib/env.mjs; do
+  for required in VERSION SHA256SUMS docker-compose.prod.yml images/approval-app.tar images/approval-migrate.tar images/postgres.tar scripts/deploy.sh scripts/deploy-offline.sh scripts/backup.sh scripts/restore.sh scripts/rollback.sh scripts/health-check.sh scripts/setup.sh scripts/lib/deploy-common.sh tools/env-check.mjs tools/lib/env.mjs; do
     [ -f "$DEPLOY_ROOT/$required" ] || { fail "Offline package is missing: $required"; return 1; }
   done
   [ -s "$DEPLOY_ROOT/VERSION" ] || { fail 'Offline VERSION is empty'; return 1; }
@@ -116,11 +125,18 @@ main() {
   # shellcheck source=scripts/lib/deploy-common.sh
   . "$REPO_ROOT/scripts/lib/deploy-common.sh"
   export DEPLOY_ROOT ENV_FILE="${DEPLOY_ROOT}/.env.production" PROD_COMPOSE_FILE="${DEPLOY_ROOT}/docker-compose.prod.yml"
-  STAGE=preflight; detect_compose >/dev/null
+  STAGE=preflight
+  require_host_command docker
+  require_host_command node
+  require_host_command curl
+  detect_compose >/dev/null
   STAGE=validation; run_env_gate
   if [ "$mode" = offline ]; then
     STAGE=package-validation
     validate_offline_package || { fail 'Offline package checksum validation failed'; return 1; }
+  else
+    STAGE=source-preflight
+    online_git_preflight
   fi
   STAGE=classification; classify_existing_state
   STAGE=rollback; tag_rollback_images
@@ -133,7 +149,7 @@ main() {
     printf 'First install: no existing data to back up.\n'
   fi
   STAGE=source-acquisition
-  if [ "$mode" = online ]; then online_git_prepare; else load_offline_images; fi
+  if [ "$mode" = online ]; then online_git_acquire; else load_offline_images; fi
   STAGE=production-deploy; deploy_production_services
   STAGE=migration; wait_for_migration
   STAGE=health; wait_for_health

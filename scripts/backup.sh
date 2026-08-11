@@ -115,13 +115,22 @@ if [ "$USERS_COUNT" = "0" ]; then
 fi
 
 UPLOADS_BACKUP_FILE="$BACKUP_DIR/uploads_$TIMESTAMP.tar.gz"
-BACKUP_DIR_ABS="$(CDPATH= cd -- "$BACKUP_DIR" && pwd)"
 if docker ps --format '{{.Names}}' | grep -qx "$APP_CONTAINER"; then
   UPLOADS_PATH="$(resolve_uploads_path_in_container)"
-  docker run --rm --volumes-from "$APP_CONTAINER":ro -v "$BACKUP_DIR_ABS:/backup" alpine:latest tar -czf "/backup/$(basename "$UPLOADS_BACKUP_FILE")" -C "$UPLOADS_PATH" .
+  if ! docker exec "$APP_CONTAINER" tar -czf - -C "$UPLOADS_PATH" . >"$UPLOADS_BACKUP_FILE"; then
+    rm -f "$UPLOADS_BACKUP_FILE"
+    printf 'ERROR: uploads archive failed in the running app container\n' >&2
+    exit 1
+  fi
 else
   UPLOADS_VOLUME="$(resolve_uploads_volume)"
-  docker run --rm -v "$UPLOADS_VOLUME:/data:ro" -v "$BACKUP_DIR_ABS:/backup" alpine:latest tar -czf "/backup/$(basename "$UPLOADS_BACKUP_FILE")" -C /data .
+  APP_IMAGE="$(docker inspect -f '{{.Image}}' "$APP_CONTAINER" 2>/dev/null || true)"
+  [ -n "$APP_IMAGE" ] || { printf 'ERROR: app container image is unavailable for offline-safe uploads backup\n' >&2; exit 1; }
+  if ! docker run --rm --pull=never -v "$UPLOADS_VOLUME:/data:ro" "$APP_IMAGE" tar -czf - -C /data . >"$UPLOADS_BACKUP_FILE"; then
+    rm -f "$UPLOADS_BACKUP_FILE"
+    printf 'ERROR: uploads archive failed without pulling an external image\n' >&2
+    exit 1
+  fi
 fi
 [ -s "$UPLOADS_BACKUP_FILE" ] || { printf 'ERROR: uploads backup is empty\n' >&2; exit 1; }
 UPLOADS_SHA256="$(sha256_file "$UPLOADS_BACKUP_FILE")"

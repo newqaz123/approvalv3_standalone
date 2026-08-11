@@ -67,6 +67,8 @@ Requirements:
 
 - Run from the application repository on branch `main`.
 - Docker and Docker Compose v2 are installed.
+- Node.js 20 or newer is installed for the production environment gate.
+- `curl` is installed for the HTTP health check.
 - The host can reach the Git remote.
 - `.env.production` is already configured.
 
