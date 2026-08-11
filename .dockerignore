@@ -12,6 +12,9 @@ README.md
 graphify-out/
 plugins/
 deploy/
+backups/
+*.sql
+*.sql.gz
 .playwright-mcp/
 playwright-report/
 test-results/

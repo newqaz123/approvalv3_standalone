@@ -25,8 +25,84 @@ test('rollback resolves the project root and explicit production compose contrac
 
 test('offline package keeps the canonical backup script at scripts/backup.sh', async () => {
   const source = await read('scripts/build-package.sh')
-  assert.match(source, /mkdir -p "\$PACKAGE_DIR\/scripts"/)
-  assert.match(source, /cp "\$PROJECT_DIR\/scripts\/backup\.sh" "\$PACKAGE_DIR\/scripts\/backup\.sh"/)
+  assert.match(source, /mkdir -p .*"\$PACKAGE_DIR\/scripts\/lib"/)
+  assert.match(source, /cp "\$PROJECT_DIR\/scripts\/backup\.sh" "\$PACKAGE_DIR\/scripts\/"/)
+})
+
+test('offline package includes the unified deployment runtime', async () => {
+  const source = await read('scripts/build-package.sh')
+  for (const path of [
+    'scripts/deploy.sh',
+    'scripts/deploy-offline.sh',
+    'scripts/backup.sh',
+    'scripts/restore.sh',
+    'scripts/rollback.sh',
+    'scripts/health-check.sh',
+    'scripts/setup.sh',
+    'scripts/lib/deploy-common.sh',
+    'tools/env-check.mjs',
+    'tools/lib/env.mjs',
+  ]) {
+    assert.ok(source.includes(path), `missing package source path: ${path}`)
+  }
+  assert.match(source, /SHA256SUMS/)
+  assert.doesNotMatch(source, /Run: bash deploy-offline\.sh/)
+})
+
+test('package checksum-only mode writes a portable verifiable manifest', async () => {
+  const fixture = await mkdtemp(join(tmpdir(), 'package-checksums-'))
+  for (const directory of ['images', 'scripts/lib', 'tools/lib']) {
+    await mkdir(join(fixture, directory), { recursive: true })
+  }
+  for (const file of [
+    'images/app.tar',
+    'scripts/deploy.sh',
+    'scripts/lib/deploy-common.sh',
+    'tools/env-check.mjs',
+    'tools/lib/env.mjs',
+    'docker-compose.prod.yml',
+    'VERSION',
+  ]) {
+    await writeFile(join(fixture, file), `fixture:${file}\n`)
+  }
+
+  const generated = spawnSync('/bin/bash', ['scripts/build-package.sh', '--checksums-only', fixture], {
+    cwd: root,
+    encoding: 'utf8',
+  })
+  assert.equal(generated.status, 0, generated.stderr)
+
+  const manifest = await readFile(join(fixture, 'SHA256SUMS'), 'utf8')
+  for (const file of [
+    'images/app.tar',
+    'scripts/deploy.sh',
+    'scripts/lib/deploy-common.sh',
+    'tools/env-check.mjs',
+    'tools/lib/env.mjs',
+    'docker-compose.prod.yml',
+    'VERSION',
+  ]) {
+    assert.match(manifest, new RegExp(`  ${file.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}$`, 'm'))
+  }
+
+  const verifier = spawnSync('sha256sum', ['--version'], { encoding: 'utf8' }).status === 0
+    ? ['sha256sum', ['-c', 'SHA256SUMS']]
+    : ['shasum', ['-a', '256', '-c', 'SHA256SUMS']]
+  const verified = spawnSync(verifier[0], verifier[1], { cwd: fixture, encoding: 'utf8' })
+  assert.equal(verified.status, 0, `${verified.stdout}\n${verified.stderr}`)
+})
+
+test('offline setup and Docker context preserve the production package contract', async () => {
+  const setup = await read('scripts/setup.sh')
+  assert.match(setup, /bash scripts\/deploy\.sh/)
+  assert.match(setup, /Offline intranet package/)
+  assert.doesNotMatch(setup, /bind mount|Creating uploads directory|chmod 755 uploads/i)
+
+  const dockerignore = await read('.dockerignore')
+  assert.match(dockerignore, /^backups\/$/m)
+  assert.match(dockerignore, /^\*\.sql$/m)
+  assert.match(dockerignore, /^\*\.sql\.gz$/m)
+  assert.match(dockerignore, /^\.env\*$/m)
 })
 
 test('deploy entry point offers online and offline modes', async () => {

@@ -24,26 +24,10 @@ if [ ! -f .env.production ]; then
     echo "Copying .env.production.example to .env.production"
     cp .env.production.example .env.production
     echo -e "${GREEN}✓ Created .env.production from template${NC}"
-    echo -e "${YELLOW}⚠ IMPORTANT: Edit .env.production with your actual values before running deploy.sh${NC}"
+    echo -e "${YELLOW}⚠ IMPORTANT: Edit .env.production with your actual values before running bash scripts/deploy.sh${NC}"
 else
     echo -e "${GREEN}✓ .env.production already exists${NC}"
 fi
-
-# Create uploads directory if using bind mount (fallback from volume)
-if [ ! -d "uploads" ]; then
-    echo "Creating uploads directory..."
-    mkdir -p uploads
-    echo -e "${GREEN}✓ Created uploads/ directory${NC}"
-else
-    echo -e "${GREEN}✓ uploads/ directory already exists${NC}"
-fi
-
-# Set proper permissions for uploads directory
-# Note: In Docker Compose, the app container runs as UID 1001 (nextjs user)
-# If using bind mount, we need to set ownership on the host
-echo "Setting permissions for uploads directory..."
-chmod 755 uploads
-echo -e "${GREEN}✓ Set permissions on uploads/${NC}"
 
 # Make all scripts executable
 echo "Making scripts executable..."
@@ -66,5 +50,6 @@ echo "============================================"
 echo ""
 echo "Next steps:"
 echo "1. Edit .env.production with your actual values"
-echo "2. Run: ./scripts/deploy.sh"
+echo "2. Run: bash scripts/deploy.sh"
+echo "3. Choose: Offline intranet package"
 echo ""

@@ -19,6 +19,39 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+checksum_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1"
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1"
+  else
+    echo "Neither sha256sum nor shasum is available" >&2
+    return 1
+  fi
+}
+
+write_package_checksums() {
+  local package_root="$1"
+  (
+    cd "$package_root"
+    {
+      find images scripts tools -type f -print
+      printf '%s\n' docker-compose.prod.yml VERSION
+    } | LC_ALL=C sort | while IFS= read -r file; do
+      checksum_file "$file"
+    done > SHA256SUMS
+  )
+}
+
+if [ "${1:-}" = "--checksums-only" ]; then
+  if [ "$#" -ne 2 ] || [ ! -d "$2" ]; then
+    echo "Usage: $0 --checksums-only <package-directory>" >&2
+    exit 2
+  fi
+  write_package_checksums "$2"
+  exit 0
+fi
+
 # Version from git tag or commit hash
 VERSION="${1:-$(git describe --tags --always --dirty 2>/dev/null || echo "dev-$(date +%Y%m%d%H%M)")}"
 DATE=$(date +%Y%m%d)
@@ -74,8 +107,7 @@ echo -e "${GREEN}✓ postgres:15-alpine exported${NC}"
 # Step 2: Create package directory
 echo -e "${BLUE}[3/6]${NC} Creating package directory..."
 rm -rf "$PACKAGE_DIR"
-mkdir -p "$PACKAGE_DIR/images"
-mkdir -p "$PACKAGE_DIR/scripts"
+mkdir -p "$PACKAGE_DIR/images" "$PACKAGE_DIR/scripts/lib" "$PACKAGE_DIR/tools/lib"
 echo -e "${GREEN}✓ Package directory ready${NC}"
 
 # Step 3: Move exported images into package
@@ -90,12 +122,16 @@ echo -e "${BLUE}[5/6]${NC} Packaging config files..."
 cp "$PROJECT_DIR/docker-compose.prod.yml" "$PACKAGE_DIR/"
 cp "$PROJECT_DIR/.env.example" "$PACKAGE_DIR/.env.production.example"
 cp "$PROJECT_DIR/DEPLOY.md" "$PACKAGE_DIR/"
-cp "$PROJECT_DIR/scripts/deploy-offline.sh" "$PACKAGE_DIR/"
-cp "$PROJECT_DIR/scripts/rollback.sh" "$PACKAGE_DIR/"
-cp "$PROJECT_DIR/scripts/backup.sh" "$PACKAGE_DIR/scripts/backup.sh"
-cp "$PROJECT_DIR/scripts/db-backup.sh" "$PACKAGE_DIR/"
-cp "$PROJECT_DIR/scripts/setup.sh" "$PACKAGE_DIR/"
-cp "$PROJECT_DIR/scripts/health-check.sh" "$PACKAGE_DIR/"
+cp "$PROJECT_DIR/scripts/deploy.sh" "$PACKAGE_DIR/scripts/"
+cp "$PROJECT_DIR/scripts/deploy-offline.sh" "$PACKAGE_DIR/scripts/"
+cp "$PROJECT_DIR/scripts/backup.sh" "$PACKAGE_DIR/scripts/"
+cp "$PROJECT_DIR/scripts/restore.sh" "$PACKAGE_DIR/scripts/"
+cp "$PROJECT_DIR/scripts/rollback.sh" "$PACKAGE_DIR/scripts/"
+cp "$PROJECT_DIR/scripts/health-check.sh" "$PACKAGE_DIR/scripts/"
+cp "$PROJECT_DIR/scripts/setup.sh" "$PACKAGE_DIR/scripts/"
+cp "$PROJECT_DIR/scripts/lib/deploy-common.sh" "$PACKAGE_DIR/scripts/lib/"
+cp "$PROJECT_DIR/tools/env-check.mjs" "$PACKAGE_DIR/tools/"
+cp "$PROJECT_DIR/tools/lib/env.mjs" "$PACKAGE_DIR/tools/lib/"
 
 # Write version file
 cat > "$PACKAGE_DIR/VERSION" <<EOF
@@ -113,18 +149,17 @@ Built:   $(date -u +"%Y-%m-%d %H:%M UTC")
 Commit:  $(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 
 Quick Start:
-1. Transfer this folder to the server
-2. Edit .env.production.example -> .env.production with your values
-3. Run: bash deploy-offline.sh
+1. Extract the package on the server.
+2. Copy .env.production.example to .env.production and set production values.
+3. Run: bash scripts/deploy.sh
+4. Choose: Offline intranet package.
 EOF
 
-# Make scripts executable
-chmod +x "$PACKAGE_DIR/deploy-offline.sh" 2>/dev/null || true
-chmod +x "$PACKAGE_DIR/rollback.sh" 2>/dev/null || true
-chmod +x "$PACKAGE_DIR/scripts/backup.sh" 2>/dev/null || true
-chmod +x "$PACKAGE_DIR/db-backup.sh" 2>/dev/null || true
-chmod +x "$PACKAGE_DIR/health-check.sh" 2>/dev/null || true
-chmod +x "$PACKAGE_DIR/setup.sh" 2>/dev/null || true
+# Make packaged shell entry points executable.
+chmod +x "$PACKAGE_DIR"/scripts/*.sh 2>/dev/null || true
+
+# Generate the integrity manifest after the runtime package is complete.
+write_package_checksums "$PACKAGE_DIR"
 
 # Create tarball
 echo ""
