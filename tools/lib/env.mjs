@@ -67,7 +67,7 @@ export function createOriginReport(current) {
       issues.push(`${key} must be a valid absolute URL`)
     } else if (/^http:\/\/(localhost|127\.0\.0\.1)(:|$)/.test(origin)) {
       issues.push(`${key} must not use localhost in production`)
-    } else if (origin.startsWith('http://')) {
+    } else if (!origin.startsWith('https://')) {
       issues.push(`${key} must use HTTPS in production`)
     }
   }
@@ -99,6 +99,9 @@ export function createRuntimeReport(current) {
   }
 
   if (databaseUrl) {
+    if (databaseUrl.protocol !== 'postgresql:' && databaseUrl.protocol !== 'postgres:') {
+      issues.push('DATABASE_URL must use a PostgreSQL scheme (postgresql: or postgres:)')
+    }
     const databaseName = databaseUrl.pathname.replace(/^\//, '')
     if (databaseUrl.hostname !== 'db') issues.push('DATABASE_URL must use host db')
     if (decodeURIComponent(databaseUrl.username) !== current.POSTGRES_USER) {

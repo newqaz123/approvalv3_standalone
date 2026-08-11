@@ -137,6 +137,16 @@ test('createOriginReport requires one HTTPS production origin', () => {
   assert.match(report.issues.join('\n'), /HTTPS/)
 })
 
+test('createOriginReport rejects non-HTTPS schemes such as ftp', () => {
+  const report = createOriginReport({
+    AUTH_URL: 'ftp://approval.example.com',
+    NEXTAUTH_URL: 'ftp://approval.example.com',
+    NEXT_PUBLIC_APP_URL: 'ftp://approval.example.com',
+    AUTH_TRUST_HOST: 'true',
+  })
+  assert.match(report.issues.join('\n'), /HTTPS/)
+})
+
 test('createRuntimeReport accepts the Docker production contract', () => {
   const report = createRuntimeReport({
     DATABASE_URL: 'postgresql://app-user:strong-password@db:5432/app_db?schema=public',
@@ -168,6 +178,19 @@ test('createRuntimeReport rejects unsafe Docker paths and database drift', () =>
   assert.match(issues, /password must match POSTGRES_PASSWORD/)
   assert.match(issues, /NEXTAUTH_SECRET still uses a placeholder/)
   assert.match(issues, /CRON_SECRET still uses a placeholder/)
+})
+
+test('createRuntimeReport requires a PostgreSQL DATABASE_URL', () => {
+  const report = createRuntimeReport({
+    DATABASE_URL: 'mysql://app-user:strong-password@db:5432/app_db',
+    POSTGRES_USER: 'app-user',
+    POSTGRES_PASSWORD: 'strong-password',
+    POSTGRES_DB: 'app_db',
+    UPLOAD_DIR: '/app/uploads',
+    NEXTAUTH_SECRET: 'a-production-secret-with-32-characters',
+    CRON_SECRET: 'another-production-secret-value',
+  })
+  assert.match(report.issues.join('\n'), /PostgreSQL/)
 })
 
 test('env-check CLI exits 1 on runtime issues and never prints secret values', async () => {
