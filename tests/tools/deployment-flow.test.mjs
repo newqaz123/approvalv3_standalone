@@ -124,20 +124,20 @@ function runDeployment(script, args, env, cwd) {
   return spawnSync('/bin/bash', [script, ...args], { cwd, env: { ...process.env, ...env }, encoding: 'utf8' })
 }
 
-test('main online path proves rollback, build, deploy, migration, and health order', async () => {
+test('main online update path proves rollback and backup precede build and preservation follows health', async () => {
   const fixture = await fakeBin()
   const deployRoot = join(fixture.dir, 'online-root')
   await installDeployRoot(deployRoot)
   const result = runDeployment(join(root, 'scripts/deploy.sh'), ['--online'], {
-    PATH: `${fixture.bin}:${process.env.PATH}`, COMMAND_LOG: fixture.log, DEPLOY_ROOT: deployRoot, APP_CONTAINER_MISSING: '1',
+    PATH: `${fixture.bin}:${process.env.PATH}`, COMMAND_LOG: fixture.log, DEPLOY_ROOT: deployRoot,
   }, fixture.dir)
   assert.equal(result.status, 0, result.stderr)
   const log = await readFile(fixture.log, 'utf8')
-  assert.match(log, /build.*compose.*migrate.*State.Health.Status/s)
+  assert.match(log, /docker inspect -f \{\{\.Image\}\} approval-app[\s\S]*backup[\s\S]*docker build[\s\S]*compose.*up -d db migrate app[\s\S]*MIGRATION_COMMAND_REACHED[\s\S]*State.Health.Status[\s\S]*docker inspect -f \{\{range \.Mounts\}\}/)
   assert.doesNotMatch(log, /seed|down -v|volume prune/)
 })
 
-test('main offline checksum failure identifies checksum and stops before load or backup', async () => {
+test('main offline checksum failure identifies checksum and stops before any safety or acquisition command', async () => {
   const fixture = await fakeBin()
   const deployRoot = join(fixture.dir, 'offline-root')
   await installOfflinePackage(deployRoot, false)
@@ -147,7 +147,8 @@ test('main offline checksum failure identifies checksum and stops before load or
   assert.notEqual(result.status, 0)
   assert.match(`${result.stdout}\\n${result.stderr}`, /FAILED|checksum/i)
   const log = await readFile(fixture.log, 'utf8')
-  assert.doesNotMatch(log, /load|backup|build/)
+  assert.doesNotMatch(log, /inspect|tag|load|backup|build|MIGRATION_COMMAND_REACHED|Health.Status|success/i)
+  assert.equal(log, 'docker compose version\n')
 })
 
 test('main offline path never invokes Git or network commands', async () => {

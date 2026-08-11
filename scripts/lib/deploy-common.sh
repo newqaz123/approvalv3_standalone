@@ -91,7 +91,7 @@ canonical_existing_path() {
     esac
     [ -e "$path" ] || return 1
   done
-  dir="$(CDPATH= cd -P -- "$(dirname "$path")" 2>/dev/null)" || return 1
+  dir="$(CDPATH= cd -P -- "$(dirname "$path")" 2>/dev/null && pwd -P)" || return 1
   base="$(basename "$path")"
   [ -f "$dir/$base" ] || return 1
   printf '%s/%s\n' "$dir" "$base"
