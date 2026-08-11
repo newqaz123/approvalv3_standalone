@@ -98,15 +98,6 @@ load_offline_images() {
   docker load -i "$DEPLOY_ROOT/images/approval-app.tar"
 }
 
-run_test_plan() {
-  tag_rollback_images
-  run_verified_backup
-  if [ "${DEPLOY_TEST_PLAN:-}" = online ]; then online_git_prepare; else load_offline_images; fi
-  deploy_production_services
-  wait_for_migration
-  wait_for_health
-}
-
 main() {
   local mode package_dir
   case "${1:-}" in
@@ -127,7 +118,10 @@ main() {
   export DEPLOY_ROOT ENV_FILE="${DEPLOY_ROOT}/.env.production" PROD_COMPOSE_FILE="${DEPLOY_ROOT}/docker-compose.prod.yml"
   STAGE=preflight; detect_compose >/dev/null
   STAGE=validation; run_env_gate
-  [ "$mode" = offline ] && validate_offline_package
+  if [ "$mode" = offline ]; then
+    STAGE=package-validation
+    validate_offline_package || { fail 'Offline package checksum validation failed'; return 1; }
+  fi
   STAGE=classification; classify_existing_state
   STAGE=rollback; tag_rollback_images
   STAGE=state; prepare_existing_state

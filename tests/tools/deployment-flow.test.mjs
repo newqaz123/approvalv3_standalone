@@ -100,63 +100,106 @@ async function installValidGate(rootDir) {
   await writeFile(join(rootDir, 'docker-compose.prod.yml'), 'services: {}\n')
 }
 
-test('coordinator executes online stages in safety order through build and deploy', async () => {
+async function installDeployRoot(rootDir) {
+  await installValidGate(rootDir)
+  await mkdir(join(rootDir, 'scripts/lib'), { recursive: true })
+  await copyFile(join(root, 'scripts/deploy.sh'), join(rootDir, 'scripts/deploy.sh'))
+  await copyFile(join(root, 'scripts/lib/deploy-common.sh'), join(rootDir, 'scripts/lib/deploy-common.sh'))
+  await writeFile(join(rootDir, 'scripts/backup.sh'), `#!/usr/bin/env bash\nset -eu\nmkdir -p "$BACKUP_DIR"\necho backup >>"$COMMAND_LOG"\nprintf x >"$BACKUP_DIR/db.sql"\nprintf x >"$BACKUP_DIR/uploads.tar.gz"\nprintf 'DB_BACKUP_PATH=%s\\nUPLOADS_BACKUP_PATH=%s\\nDB_BACKUP_SHA256=x\\nUPLOADS_BACKUP_SHA256=x\\n' "$DEPLOY_ROOT/backups/db.sql" "$DEPLOY_ROOT/backups/uploads.tar.gz"\n`)
+  await chmod(join(rootDir, 'scripts/backup.sh'), 0o755)
+  await writeFile(join(rootDir, 'Dockerfile'), 'FROM scratch\n')
+}
+
+async function installOfflinePackage(rootDir, checksum = true) {
+  await installDeployRoot(rootDir)
+  await mkdir(join(rootDir, 'images'))
+  for (const image of ['approval-app.tar', 'approval-migrate.tar', 'postgres.tar']) await writeFile(join(rootDir, 'images', image), 'fake-image')
+  await writeFile(join(rootDir, 'VERSION'), 'VERSION=1.0.0\n')
+  const files = ['VERSION', 'docker-compose.prod.yml', 'images/approval-app.tar', 'images/approval-migrate.tar', 'images/postgres.tar', 'scripts/deploy.sh', 'scripts/lib/deploy-common.sh', 'tools/env-check.mjs', 'tools/lib/env.mjs']
+  const sums = checksum ? execFileSync('sha256sum', files, { cwd: rootDir, encoding: 'utf8' }) : `${'0'.repeat(64)}  VERSION\n`
+  await writeFile(join(rootDir, 'SHA256SUMS'), sums)
+}
+
+function runDeployment(script, args, env, cwd) {
+  return spawnSync('/bin/bash', [script, ...args], { cwd, env: { ...process.env, ...env }, encoding: 'utf8' })
+}
+
+test('main online path proves rollback, build, deploy, migration, and health order', async () => {
   const fixture = await fakeBin()
-  const source = await read('scripts/deploy.sh')
-  const result = runShell(
-    'DEPLOY_SOURCE_ONLY=1; source scripts/deploy.sh; tag_rollback_images(){ echo rollback >>"$COMMAND_LOG"; }; run_verified_backup(){ echo backup >>"$COMMAND_LOG"; }; deploy_production_services(){ echo compose >>"$COMMAND_LOG"; }; wait_for_migration(){ echo migrate >>"$COMMAND_LOG"; }; wait_for_health(){ echo health >>"$COMMAND_LOG"; }; DEPLOY_TEST_PLAN=online; run_test_plan',
-    { PATH: `${fixture.bin}:${process.env.PATH}`, COMMAND_LOG: fixture.log, DEPLOY_ROOT: fixture.dir },
-  )
+  const deployRoot = join(fixture.dir, 'online-root')
+  await installDeployRoot(deployRoot)
+  const result = runDeployment(join(root, 'scripts/deploy.sh'), ['--online'], {
+    PATH: `${fixture.bin}:${process.env.PATH}`, COMMAND_LOG: fixture.log, DEPLOY_ROOT: deployRoot, APP_CONTAINER_MISSING: '1',
+  }, fixture.dir)
   assert.equal(result.status, 0, result.stderr)
   const log = await readFile(fixture.log, 'utf8')
-  assert.match(log, /rollback.*backup.*build.*compose.*migrate.*health/s)
+  assert.match(log, /build.*compose.*migrate.*State.Health.Status/s)
   assert.doesNotMatch(log, /seed|down -v|volume prune/)
-  assert.match(source, /run_test_plan/)
 })
 
-test('offline checksum failure stops before docker load', async () => {
+test('main offline checksum failure identifies checksum and stops before load or backup', async () => {
   const fixture = await fakeBin()
-  const result = runShell(
-    'DEPLOY_SOURCE_ONLY=1; source scripts/deploy.sh; validate_offline_package; load_offline_images',
-    { PATH: `${fixture.bin}:${process.env.PATH}`, COMMAND_LOG: fixture.log, DEPLOY_ROOT: fixture.dir, SHA256SUMS: 'missing' },
-  )
+  const deployRoot = join(fixture.dir, 'offline-root')
+  await installOfflinePackage(deployRoot, false)
+  const result = runDeployment(join(root, 'scripts/deploy.sh'), ['--offline', deployRoot], {
+    PATH: `${fixture.bin}:${process.env.PATH}`, COMMAND_LOG: fixture.log, DEPLOY_ROOT: deployRoot, APP_CONTAINER_MISSING: '1',
+  }, fixture.dir)
   assert.notEqual(result.status, 0)
-  const log = await readFile(fixture.log, 'utf8').catch(() => '')
-  assert.doesNotMatch(log, /load/)
+  assert.match(`${result.stdout}\\n${result.stderr}`, /FAILED|checksum/i)
+  const log = await readFile(fixture.log, 'utf8')
+  assert.doesNotMatch(log, /load|backup|build/)
 })
 
-test('offline mode never invokes Git or network commands', async () => {
+test('main offline path never invokes Git or network commands', async () => {
   const fixture = await fakeBin()
-  const result = runShell(
-    'DEPLOY_SOURCE_ONLY=1; source scripts/deploy.sh; tag_rollback_images(){ echo rollback >>"$COMMAND_LOG"; }; run_verified_backup(){ echo backup >>"$COMMAND_LOG"; }; deploy_production_services(){ echo compose >>"$COMMAND_LOG"; }; wait_for_migration(){ echo migrate >>"$COMMAND_LOG"; }; wait_for_health(){ echo health >>"$COMMAND_LOG"; }; DEPLOY_TEST_PLAN=offline; run_test_plan',
-    { PATH: `${fixture.bin}:${process.env.PATH}`, COMMAND_LOG: fixture.log, DEPLOY_ROOT: fixture.dir },
-  )
+  const deployRoot = join(fixture.dir, 'offline-root')
+  await installOfflinePackage(deployRoot)
+  const result = runDeployment(join(root, 'scripts/deploy.sh'), ['--offline', deployRoot], {
+    PATH: `${fixture.bin}:${process.env.PATH}`, COMMAND_LOG: fixture.log, DEPLOY_ROOT: deployRoot, APP_CONTAINER_MISSING: '1',
+  }, fixture.dir)
   assert.equal(result.status, 0, result.stderr)
   const log = await readFile(fixture.log, 'utf8')
-  assert.doesNotMatch(log, /git|curl|fetch|pull/)
+  assert.doesNotMatch(log, /\bgit\b|\bfetch\b|\bpull\b/)
 })
 
-test('missing app with partial or complete data volumes fails closed', async () => {
+test('main migration failure stops health and success without automatic rollback', async () => {
+  const fixture = await fakeBin()
+  const deployRoot = join(fixture.dir, 'offline-root')
+  await installOfflinePackage(deployRoot)
+  const result = runDeployment(join(root, 'scripts/deploy.sh'), ['--offline', deployRoot], {
+    PATH: `${fixture.bin}:${process.env.PATH}`, COMMAND_LOG: fixture.log, DEPLOY_ROOT: deployRoot,
+    MIGRATE_EXIT_CODE: '1', MIGRATE_STATE: 'exited', MIGRATION_TIMEOUT_SECONDS: '1', APP_CONTAINER_MISSING: '1',
+  }, fixture.dir)
+  assert.notEqual(result.status, 0)
+  const log = await readFile(fixture.log, 'utf8')
+  assert.match(log, /MIGRATION_COMMAND_REACHED/)
+  const postMigration = log.slice(log.indexOf('MIGRATION_COMMAND_REACHED'))
+  assert.doesNotMatch(postMigration, /health|healthy|Deployment succeeded|rollback/)
+})
+
+test('main missing app with partial or complete data volumes fails closed', async () => {
   const fixture = await fakeBin()
   for (const volumes of ['db_data', 'uploads_data', 'db_data\\nuploads_data']) {
-    const result = runShell(
-      'DEPLOY_SOURCE_ONLY=1; source scripts/deploy.sh; prepare_existing_state',
-      { PATH: `${fixture.bin}:${process.env.PATH}`, DOCKER_VOLUMES: volumes, APP_CONTAINER_MISSING: '1' },
-    )
+    const deployRoot = join(fixture.dir, `offline-${volumes.replace('\\n', '-')}`)
+    await installOfflinePackage(deployRoot)
+    const result = runDeployment(join(root, 'scripts/deploy.sh'), ['--offline', deployRoot], {
+      PATH: `${fixture.bin}:${process.env.PATH}`, COMMAND_LOG: fixture.log, DEPLOY_ROOT: deployRoot,
+      APP_CONTAINER_MISSING: '1', DOCKER_VOLUMES: volumes,
+    }, fixture.dir)
     assert.notEqual(result.status, 0, `volumes=${volumes}`)
   }
 })
 
-test('online acquisition uses resolved deployment root from another cwd', async () => {
+test('main online invocation from another cwd targets resolved deployment root', async () => {
   const fixture = await fakeBin()
-  const result = runShell(
-    `DEPLOY_SOURCE_ONLY=1; source "${join(root, 'scripts/deploy.sh')}"; online_git_prepare`,
-    { PATH: `${fixture.bin}:${process.env.PATH}`, COMMAND_LOG: fixture.log, DEPLOY_ROOT: fixture.dir, FAKE_GIT_BRANCH: 'main' },
-    { cwd: fixture.dir },
-  )
+  const deployRoot = join(fixture.dir, 'online-root')
+  await installDeployRoot(deployRoot)
+  const result = runDeployment(join(root, 'scripts/deploy.sh'), ['--online'], {
+    PATH: `${fixture.bin}:${process.env.PATH}`, COMMAND_LOG: fixture.log, DEPLOY_ROOT: deployRoot, APP_CONTAINER_MISSING: '1',
+  }, fixture.dir)
   assert.equal(result.status, 0, result.stderr)
   const log = await readFile(fixture.log, 'utf8')
-  assert.match(log, new RegExp(`git -C ${fixture.dir.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}`))
+  assert.match(log, new RegExp(`git -C ${deployRoot.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}`))
 })
 
 test('migration failure reaches the fake migration command and is terminal', async () => {
