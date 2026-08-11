@@ -1,182 +1,145 @@
-#!/bin/bash
-# ==============================================
-# Approval App - Backup Script
-# ==============================================
-# Purpose: Backup database and uploads with retention
-# Usage: ./backup.sh
-# ==============================================
+#!/usr/bin/env bash
+# Create verified database and uploads artifacts for a production deployment.
+# This script never removes Docker volumes or mutates application data.
+set -e
 
-set -e  # Exit on error
-
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-# Configuration
-BACKUP_DIR="./backups"
-RETENTION_COUNT=10  # Keep last 10 non-empty backups
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+DEPLOY_ROOT="${DEPLOY_ROOT:-$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)}"
+BACKUP_DIR="${BACKUP_DIR:-$DEPLOY_ROOT/backups}"
+ENV_FILE="${ENV_FILE:-$DEPLOY_ROOT/.env.production}"
+PROD_COMPOSE_FILE="${PROD_COMPOSE_FILE:-$DEPLOY_ROOT/docker-compose.prod.yml}"
+COMPOSE_PROJECT_NAME="approval-app"
+RETENTION_COUNT=10
+TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 DB_CONTAINER="${DB_CONTAINER:-approval-db}"
 APP_CONTAINER="${APP_CONTAINER:-approval-app}"
 
-# Resolve the actual Docker volume name that backs the uploads mount. Prefers
-# the declared `uploads_data` name; otherwise falls back to the project-prefixed
-# volume (e.g. <project>_uploads_data) discovered through `docker compose
-# config --volumes` and `docker volume ls`. The existing volume is never
-# recreated or renamed.
+compose_prod() {
+  if docker compose version >/dev/null 2>&1; then
+    docker compose -p "$COMPOSE_PROJECT_NAME" --env-file "$ENV_FILE" -f "$PROD_COMPOSE_FILE" "$@"
+  elif command -v docker-compose >/dev/null 2>&1; then
+    docker-compose -p "$COMPOSE_PROJECT_NAME" --env-file "$ENV_FILE" -f "$PROD_COMPOSE_FILE" "$@"
+  else
+    printf 'ERROR: Docker Compose is not installed\n' >&2
+    return 1
+  fi
+}
+
+sha256_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    printf 'ERROR: no SHA-256 utility is installed\n' >&2
+    return 1
+  fi
+}
+
 resolve_uploads_volume() {
-    local declared resolved
-    declared="$(docker compose config --volumes 2>/dev/null | grep -x 'uploads_data' | head -n1)"
-    if [ -n "$declared" ] && docker volume ls --format '{{.Name}}' 2>/dev/null | grep -qx "$declared"; then
-        printf '%s\n' "$declared"
-        return 0
+  local mount_info mount_name mount_destination candidate count candidates
+  # Inspect first, including stopped containers. This preserves the actual
+  # named volume instead of guessing from the current checkout.
+  mount_info="$(docker inspect -f '{{range .Mounts}}{{.Name}} {{.Destination}}{{"\\n"}}{{end}}' "$APP_CONTAINER" 2>/dev/null || true)"
+  while read -r mount_name mount_destination; do
+    if [ "$mount_destination" = "/app/uploads" ] && [ -n "$mount_name" ]; then
+      printf '%s\n' "$mount_name"
+      return 0
     fi
-    resolved="$(docker volume ls --format '{{.Name}}' 2>/dev/null | grep -Ex '([A-Za-z0-9][A-Za-z0-9_.-]*_)?uploads_data' | head -n1)"
-    if [ -n "$resolved" ]; then
-        printf '%s\n' "$resolved"
-    else
-        printf '%s\n' 'uploads_data'
-    fi
+  done <<EOF_MOUNTS
+$mount_info
+EOF_MOUNTS
+
+  count=0
+  candidates=''
+  while IFS= read -r candidate; do
+    [ -n "$candidate" ] || continue
+    count=$((count + 1))
+    candidates="${candidates}${candidate}
+"
+  done <<EOF_VOLUMES
+$(docker volume ls --format '{{.Name}}' 2>/dev/null | grep -E '(^|_)uploads_data$' || true)
+EOF_VOLUMES
+  if [ "$count" -eq 1 ]; then
+    printf '%s' "$candidates" | sed -n '1p'
+    return 0
+  fi
+  if [ "$count" -gt 1 ]; then
+    printf 'ERROR: multiple uploads volumes found; refusing to guess:\n%s' "$candidates" >&2
+  else
+    printf 'ERROR: no named uploads volume found\n' >&2
+  fi
+  return 1
 }
 
-# Resolve the uploads path inside a running app container. Prefers the private
-# /app/uploads mount and falls back to the legacy public path only while a
-# pre-migration image is still running (transition period).
 resolve_uploads_path_in_container() {
-    if docker exec "$APP_CONTAINER" test -d /app/uploads 2>/dev/null; then
-        printf '%s\n' '/app/uploads'
-    elif docker exec "$APP_CONTAINER" test -d /app/public/uploads 2>/dev/null; then
-        printf '%s\n' '/app/public/uploads'
-    else
-        printf '%s\n' '/app/uploads'
-    fi
+  if docker exec "$APP_CONTAINER" test -d /app/uploads 2>/dev/null; then
+    printf '%s\n' '/app/uploads'
+  elif docker exec "$APP_CONTAINER" test -d /app/public/uploads 2>/dev/null; then
+    printf '%s\n' '/app/public/uploads'
+  else
+    printf 'ERROR: uploads mount is unavailable\n' >&2
+    return 1
+  fi
 }
 
-echo "============================================"
-echo "  Approval App - Backup"
-echo "============================================"
-echo ""
+mkdir -p "$BACKUP_DIR"
+chmod 755 "$BACKUP_DIR"
 
-# Create backup directory if it doesn't exist
-if [ ! -d "$BACKUP_DIR" ]; then
-    echo "Creating backup directory..."
-    mkdir -p "$BACKUP_DIR"
-    chmod 755 "$BACKUP_DIR"
+# Ensure the explicit production Compose contract is used whenever Compose is called.
+if ! compose_prod ps >/dev/null 2>&1; then
+  if ! docker ps --format '{{.Names}}' | grep -qx "$DB_CONTAINER"; then
+    printf 'ERROR: production services are not running and %s was not found\n' "$DB_CONTAINER" >&2
+    exit 1
+  fi
 fi
-
-# Check if Docker Compose is running
-if ! docker compose ps &>/dev/null && ! docker-compose ps &>/dev/null; then
-    if ! docker ps --format '{{.Names}}' | grep -qx "$DB_CONTAINER"; then
-        echo -e "${RED}✗ ERROR: Docker Compose services are not running and $DB_CONTAINER was not found${NC}"
-        echo "Start services with: ./scripts/deploy.sh"
-        exit 1
-    fi
-fi
-
-# ==============================================
-# 1. Backup Database
-# ==============================================
-echo -e "${BLUE}[1/3]${NC} Backing up database..."
 
 DB_BACKUP_FILE="$BACKUP_DIR/db_$TIMESTAMP.sql"
-
-# Prefer the known container name because some existing VPS installs are not
-# visible to `docker compose exec db` from the current checkout.
 if docker ps --format '{{.Names}}' | grep -qx "$DB_CONTAINER"; then
-    docker exec "$DB_CONTAINER" pg_dump -U "${POSTGRES_USER:-postgres}" "${POSTGRES_DB:-app_db}" > "$DB_BACKUP_FILE"
-elif command -v docker-compose &>/dev/null; then
-    docker-compose exec -T db pg_dump -U "${POSTGRES_USER:-postgres}" "${POSTGRES_DB:-app_db}" > "$DB_BACKUP_FILE"
+  docker exec "$DB_CONTAINER" pg_dump -U "${POSTGRES_USER:-postgres}" "${POSTGRES_DB:-app_db}" >"$DB_BACKUP_FILE"
 else
-    docker compose exec -T db pg_dump -U "${POSTGRES_USER:-postgres}" "${POSTGRES_DB:-app_db}" > "$DB_BACKUP_FILE"
+  compose_prod exec -T db pg_dump -U "${POSTGRES_USER:-postgres}" "${POSTGRES_DB:-app_db}" >"$DB_BACKUP_FILE"
 fi
+[ -s "$DB_BACKUP_FILE" ] || { printf 'ERROR: database backup is empty\n' >&2; exit 1; }
+DB_SHA256="$(sha256_file "$DB_BACKUP_FILE")"
+[ -n "$DB_SHA256" ] || exit 1
 
-if [ -f "$DB_BACKUP_FILE" ] && [ -s "$DB_BACKUP_FILE" ]; then
-    echo -e "${GREEN}✓ Database backed up: $DB_BACKUP_FILE${NC}"
-else
-    echo -e "${RED}✗ ERROR: Database backup failed${NC}"
-    exit 1
-fi
-
-USERS_COUNT="unknown"
 if docker ps --format '{{.Names}}' | grep -qx "$DB_CONTAINER"; then
-    USERS_COUNT="$(docker exec "$DB_CONTAINER" psql -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-app_db}" -tAc "select count(*) from users;" 2>/dev/null || echo unknown)"
-elif command -v docker-compose &>/dev/null; then
-    USERS_COUNT="$(docker-compose exec -T db psql -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-app_db}" -tAc "select count(*) from users;" 2>/dev/null || echo unknown)"
+  USERS_COUNT="$(docker exec "$DB_CONTAINER" psql -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-app_db}" -tAc 'select count(*) from users;' 2>/dev/null || printf '%s' unknown)"
 else
-    USERS_COUNT="$(docker compose exec -T db psql -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-app_db}" -tAc "select count(*) from users;" 2>/dev/null || echo unknown)"
+  USERS_COUNT="$(compose_prod exec -T db psql -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-app_db}" -tAc 'select count(*) from users;' 2>/dev/null || printf '%s' unknown)"
 fi
-
-echo "Users in database: $USERS_COUNT"
+printf 'Users in database: %s\n' "$USERS_COUNT"
 if [ "$USERS_COUNT" = "0" ]; then
-    echo -e "${YELLOW}⚠ WARNING: Database backup contains 0 users${NC}"
-    echo "Do not use this backup for account recovery unless you expect an empty user table."
+  printf 'WARNING: Database backup contains 0 users\n' >&2
 fi
-
-# ==============================================
-# 2. Backup Uploads Volume
-# ==============================================
-echo -e "${BLUE}[2/3]${NC} Backing up uploads..."
 
 UPLOADS_BACKUP_FILE="$BACKUP_DIR/uploads_$TIMESTAMP.tar.gz"
-BACKUP_DIR_ABS="$(cd "$BACKUP_DIR" && pwd)"
-
+BACKUP_DIR_ABS="$(CDPATH= cd -- "$BACKUP_DIR" && pwd)"
 if docker ps --format '{{.Names}}' | grep -qx "$APP_CONTAINER"; then
-    UPLOADS_PATH="$(resolve_uploads_path_in_container)"
-    docker run --rm \
-        --volumes-from "$APP_CONTAINER":ro \
-        -v "$BACKUP_DIR_ABS:/backup" \
-        alpine:latest \
-        tar -czf "/backup/$(basename $UPLOADS_BACKUP_FILE)" -C "$UPLOADS_PATH" .
+  UPLOADS_PATH="$(resolve_uploads_path_in_container)"
+  docker run --rm --volumes-from "$APP_CONTAINER":ro -v "$BACKUP_DIR_ABS:/backup" alpine:latest tar -czf "/backup/$(basename "$UPLOADS_BACKUP_FILE")" -C "$UPLOADS_PATH" .
 else
-    UPLOADS_VOLUME="$(resolve_uploads_volume)"
-    docker run --rm \
-        -v "$UPLOADS_VOLUME:/data:ro" \
-        -v "$BACKUP_DIR_ABS:/backup" \
-        alpine:latest \
-        tar -czf "/backup/$(basename $UPLOADS_BACKUP_FILE)" -C /data .
+  UPLOADS_VOLUME="$(resolve_uploads_volume)"
+  docker run --rm -v "$UPLOADS_VOLUME:/data:ro" -v "$BACKUP_DIR_ABS:/backup" alpine:latest tar -czf "/backup/$(basename "$UPLOADS_BACKUP_FILE")" -C /data .
 fi
+[ -s "$UPLOADS_BACKUP_FILE" ] || { printf 'ERROR: uploads backup is empty\n' >&2; exit 1; }
+UPLOADS_SHA256="$(sha256_file "$UPLOADS_BACKUP_FILE")"
+[ -n "$UPLOADS_SHA256" ] || exit 1
 
-if [ -f "$UPLOADS_BACKUP_FILE" ] && [ -s "$UPLOADS_BACKUP_FILE" ]; then
-    echo -e "${GREEN}✓ Uploads backed up: $UPLOADS_BACKUP_FILE${NC}"
-else
-    echo -e "${YELLOW}⚠ WARNING: Uploads backup may have failed or was empty${NC}"
-fi
+# Retain only non-empty artifacts. Use shell loops rather than GNU-only xargs flags.
+# The equivalent GNU find predicate is -size +0; zero-byte artifacts are never retained.
+for file in "$BACKUP_DIR"/db_*.sql; do
+  [ -f "$file" ] || continue
+  [ -s "$file" ] || rm -f "$file"
+done
+for file in "$BACKUP_DIR"/uploads_*.tar.gz; do
+  [ -f "$file" ] || continue
+  [ -s "$file" ] || rm -f "$file"
+done
 
-# ==============================================
-# 3. Cleanup Old Backups (Retention Policy)
-# ==============================================
-echo -e "${BLUE}[3/3]${NC} Applying retention policy (keep last $RETENTION_COUNT)..."
-
-# Remove old non-empty database backups (keep last RETENTION_COUNT).
-# Zero-byte failed backups are ignored by the retention count and removed separately.
-find "$BACKUP_DIR" -maxdepth 1 -name 'db_*.sql' -type f -size +0 -print 2>/dev/null \
-    | xargs -r ls -1t \
-    | tail -n +$((RETENTION_COUNT + 1)) \
-    | xargs -r rm -f
-find "$BACKUP_DIR" -maxdepth 1 -name 'db_*.sql' -type f -size 0 -print -delete 2>/dev/null || true
-echo -e "${GREEN}✓ Cleaned old database backups${NC}"
-
-# Remove old uploads backups (keep last RETENTION_COUNT)
-ls -1t "$BACKUP_DIR"/uploads_*.tar.gz 2>/dev/null | tail -n +$((RETENTION_COUNT + 1)) | xargs -r rm -f
-echo -e "${GREEN}✓ Cleaned old uploads backups${NC}"
-
-# ==============================================
-# Summary
-# ==============================================
-echo ""
-echo "============================================"
-echo -e "${GREEN}✓ Backup Complete!${NC}"
-echo "============================================"
-echo ""
-echo "Backup files created:"
-echo "  - $DB_BACKUP_FILE"
-echo "  - $UPLOADS_BACKUP_FILE"
-echo ""
-echo "Total backup size:"
-du -sh "$BACKUP_DIR" | tail -1
-echo ""
-echo "Restore with: ./scripts/restore.sh <backup_file>"
-echo ""
+# The summary is intentionally the final output so callers can capture it safely.
+printf 'DB_BACKUP_PATH=%s\n' "$DB_BACKUP_FILE"
+printf 'UPLOADS_BACKUP_PATH=%s\n' "$UPLOADS_BACKUP_FILE"
+printf 'DB_BACKUP_SHA256=%s\n' "$DB_SHA256"
+printf 'UPLOADS_BACKUP_SHA256=%s\n' "$UPLOADS_SHA256"
