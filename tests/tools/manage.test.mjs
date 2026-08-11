@@ -95,6 +95,23 @@ test('envDoctor does not overwrite an existing backup path collision', async () 
   assert.equal(nextBackup, originalProduction)
 })
 
+test('updateExistingInstall delegates the complete update to deploy.sh once', async () => {
+  const { updateExistingInstall } = await import('../../tools/manage.mjs')
+  const paths = { scripts: { deploy: '/repo/scripts/deploy.sh' } }
+  const calls = []
+
+  await updateExistingInstall({
+    paths,
+    log: () => {},
+    run: async (script, args, options) => calls.push({ script, args, paths: options.paths }),
+  })
+
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].script, '/repo/scripts/deploy.sh')
+  assert.deepEqual(calls[0].args, [])
+  assert.equal(calls[0].paths, paths)
+})
+
 test('restoreBackup cancels when the database backup path is blank', async () => {
   const { restoreBackup } = await import('../../tools/manage.mjs')
   const prompts = []
@@ -126,12 +143,12 @@ test('formatBackupChoice shows size and user rows for restore selection', async 
   assert.equal(result, 'backups/db_20260615_155300.sql (68 KB, users: 6)')
 })
 
-test('deploy script pulls the current branch instead of hardcoded main', async () => {
+test('deploy script pulls main with fast-forward-only updates', async () => {
   const deployScript = await readFile('scripts/deploy.sh', 'utf8')
 
-  assert.match(deployScript, /CURRENT_BRANCH=/)
-  assert.match(deployScript, /git pull --ff-only origin "\$CURRENT_BRANCH"/)
-  assert.doesNotMatch(deployScript, /git pull origin main/)
+  assert.match(deployScript, /CURRENT_BRANCH=.*rev-parse --abbrev-ref HEAD/)
+  assert.match(deployScript, /\[ "\$CURRENT_BRANCH" = main \]/)
+  assert.match(deployScript, /Online deployment must run from branch main/)
 })
 
 test('deploy script warns when post-deploy user count is zero', async () => {

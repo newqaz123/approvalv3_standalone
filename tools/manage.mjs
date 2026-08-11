@@ -223,35 +223,11 @@ export async function rollback(options = {}) {
 
 export async function updateExistingInstall({
   paths = defaultPaths,
-  ask = async () => '',
   log = console.log,
+  run = runScript,
 } = {}) {
-  log('\nUpdate source')
-  log('1. Git update from current branch')
-  log('2. Offline package / flash drive folder')
-  const choice = await ask('Choose update source: ')
-
-  if (choice !== '1' && choice !== '2') {
-    log('Update cancelled.')
-    return
-  }
-
-  log('\nCreating backup before update.')
-  await backupData({ paths, log })
-
-  if (choice === '1') {
-    await runScript(paths.scripts.deploy, [], { paths, log })
-  } else {
-    const packageDir = await ask('Path to extracted package folder: ')
-    if (!packageDir) {
-      log('Update cancelled.')
-      return
-    }
-    await runScript(paths.scripts.offlineDeploy, [packageDir], { paths, log })
-  }
-
-  log('\nRunning health check after update.')
-  await healthCheck({ paths, log })
+  log('\nStarting unified deployment workflow.')
+  await run(paths.scripts.deploy, [], { paths, log })
 }
 
 export async function restoreBackup({

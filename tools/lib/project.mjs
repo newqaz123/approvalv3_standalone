@@ -19,7 +19,6 @@ export function resolveManagerPaths(root = getProjectRoot()) {
       backup: path.join(root, 'scripts', 'backup.sh'),
       restore: path.join(root, 'scripts', 'restore.sh'),
       deploy: path.join(root, 'scripts', 'deploy.sh'),
-      offlineDeploy: path.join(root, 'scripts', 'deploy-offline.sh'),
       health: path.join(root, 'scripts', 'health-check.sh'),
       rollback: path.join(root, 'scripts', 'rollback.sh'),
     },

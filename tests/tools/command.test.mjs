@@ -47,7 +47,6 @@ test('resolveManagerPaths points at expected script names', () => {
   assert.equal(paths.scripts.backup, path.join('/repo', 'scripts', 'backup.sh'))
   assert.equal(paths.scripts.restore, path.join('/repo', 'scripts', 'restore.sh'))
   assert.equal(paths.scripts.deploy, path.join('/repo', 'scripts', 'deploy.sh'))
-  assert.equal(paths.scripts.offlineDeploy, path.join('/repo', 'scripts', 'deploy-offline.sh'))
   assert.equal(paths.scripts.health, path.join('/repo', 'scripts', 'health-check.sh'))
   assert.equal(paths.scripts.rollback, path.join('/repo', 'scripts', 'rollback.sh'))
 })
