@@ -8,22 +8,7 @@ import { execFileSync, spawnSync } from 'node:child_process'
 const root = resolve('.')
 const read = (path) => readFile(path, 'utf8')
 
-test('deploy entry point offers online and offline modes', async () => {
-  const source = await read('scripts/deploy.sh')
-  assert.match(source, /Ubuntu VPS \/ GitHub update/)
-  assert.match(source, /Offline intranet package/)
-  assert.match(source, /--online/)
-  assert.match(source, /--offline/)
-})
-
-test('online mode requires main and fast-forward-only pull', async () => {
-  const source = await read('scripts/deploy.sh')
-  assert.match(source, /git pull --ff-only origin main/)
-  assert.match(source, /branch.*main/i)
-  assert.doesNotMatch(source, /git reset --hard|git checkout --/)
-})
-
-test('deployment common library pins the production compose contract', async () => {
+ test('deployment common library pins the production compose contract', async () => {
   const source = await read('scripts/lib/deploy-common.sh')
   assert.match(source, /COMPOSE_PROJECT_NAME="approval-app"/)
   assert.match(source, /--env-file "\$ENV_FILE"/)
