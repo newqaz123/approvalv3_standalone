@@ -104,6 +104,7 @@ test('offline setup and Docker context preserve the production package contract'
   assert.match(dockerignore, /^\*\.sql$/m)
   assert.match(dockerignore, /^\*\.sql\.gz$/m)
   assert.match(dockerignore, /^\.env\*$/m)
+  assert.match(dockerignore, /^\.pi-subagents\/$/m)
 })
 
 test('only explicit development and production compose files remain live', async () => {
