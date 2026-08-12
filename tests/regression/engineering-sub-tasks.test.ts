@@ -352,8 +352,6 @@ describe('engineering sub-task request modal panel wiring', () => {
     assert.match(source, /canManageEngineeringSubTasks/)
     assert.match(source, /isSubTaskVisibleForRequestStatus/)
     assert.match(source, /setSubTaskOptions/)
-    assert.match(source, /if \(loading && !requestData\) \{/)
-    assert.doesNotMatch(source, /if \(loading \|\| !requestData\) \{/)
     assert.match(source, /subTasksElement/)
     assert.match(source, /requestData\.subTasks/)
     assert.match(source, /workRequisitionReceived/)

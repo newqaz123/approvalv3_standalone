@@ -24,6 +24,14 @@ import { FilePreviewDialog } from '@/components/requests/file-preview-dialog'
 import { getFileDownloadUrl, getFilePreviewUrl } from '@/lib/file-preview'
 import type { ExportPackageRequestItem } from '@/lib/export-package'
 import { SubTasksSection } from './sub-tasks-section'
+import { RequestDetailSkeleton } from '@/components/loading/request-detail-skeleton'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 
 interface RequestModalRouterProps {
   requestId: string
@@ -38,7 +46,11 @@ interface RequestModalRouterProps {
  * Smart modal router that displays the appropriate modal variant
  * based on request status, user permissions, and current state
  */
-export function RequestModalRouter({
+export function RequestModalRouter(props: RequestModalRouterProps) {
+  return <RequestModalRouterContent key={props.requestId} {...props} />
+}
+
+function RequestModalRouterContent({
   requestId,
   open,
   onOpenChange,
@@ -147,7 +159,19 @@ export function RequestModalRouter({
   }
 
   if (loading && !requestData) {
-    return null // Or a loading skeleton
+    return (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-w-5xl w-full max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Loading request</DialogTitle>
+            <DialogDescription className="sr-only">
+              Request details are loading.
+            </DialogDescription>
+          </DialogHeader>
+          <RequestDetailSkeleton />
+        </DialogContent>
+      </Dialog>
+    )
   }
   if (!requestData) {
     return null
