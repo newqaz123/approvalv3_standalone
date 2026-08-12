@@ -136,16 +136,33 @@ fi
 UPLOADS_SHA256="$(sha256_file "$UPLOADS_BACKUP_FILE")"
 [ -n "$UPLOADS_SHA256" ] || exit 1
 
-# Retain only non-empty artifacts. Use shell loops rather than GNU-only xargs flags.
-# The equivalent GNU find predicate is -size +0; zero-byte artifacts are never retained.
-for file in "$BACKUP_DIR"/db_*.sql; do
-  [ -f "$file" ] || continue
-  [ -s "$file" ] || rm -f "$file"
-done
-for file in "$BACKUP_DIR"/uploads_*.tar.gz; do
-  [ -f "$file" ] || continue
-  [ -s "$file" ] || rm -f "$file"
-done
+# Retain only non-empty artifacts and enforce the retention limit.
+remove_empty_backups() {
+  local pattern="$1"
+  for file in "$BACKUP_DIR"/$pattern; do
+    [ -f "$file" ] || continue
+    [ -s "$file" ] || rm -f "$file"
+  done
+}
+enforce_retention() {
+  local pattern="$1" count
+  # Count non-empty remaining artifacts after empty cleanup.
+  count=0
+  for file in "$BACKUP_DIR"/$pattern; do
+    [ -f "$file" ] || continue
+    count=$((count + 1))
+  done
+  # Remove oldest beyond RETENTION_COUNT, sorted newest-first by mtime.
+  if [ "$count" -gt "$RETENTION_COUNT" ]; then
+    ls -1t "$BACKUP_DIR"/$pattern 2>/dev/null | tail -n +$((RETENTION_COUNT + 1)) | while IFS= read -r old; do
+      [ -n "$old" ] && rm -f "$old"
+    done
+  fi
+}
+remove_empty_backups 'db_*.sql'
+remove_empty_backups 'uploads_*.tar.gz'
+enforce_retention 'db_*.sql'
+enforce_retention 'uploads_*.tar.gz'
 
 # The summary is intentionally the final output so callers can capture it safely.
 printf 'DB_BACKUP_PATH=%s\n' "$DB_BACKUP_FILE"

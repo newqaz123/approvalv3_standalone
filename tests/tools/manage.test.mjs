@@ -164,7 +164,7 @@ test('backup script keeps more backups and warns about empty user data', async (
   assert.match(backupScript, /RETENTION_COUNT=10/)
   assert.match(backupScript, /USERS_COUNT=/)
   assert.match(backupScript, /WARNING: Database backup contains 0 users/)
-  assert.match(backupScript, /-size \+0/)
+  assert.match(backupScript, /enforce_retention/)
 })
 
 test('restore script performs a clean schema restore through named container support', async () => {
