@@ -12,11 +12,13 @@ The work is presentation- and interaction-focused. Existing permissions, routes,
 
 ## Design Reference
 
-Open Design project: **Approval App Desktop UX Refresh** (`approval-app-desktop-ux-refresh`)  
-Entry artifact: `approval-system-ux-study.html`  
-Studio: <http://127.0.0.1:59340/projects/approval-app-desktop-ux-refresh/conversations/d001c0de-9013-4f50-9af8-6f3b4924f1c7>
+Open Design project: **Approval App Desktop UX Refresh v2** (`approval-app-desktop-ux-refresh-v2`)
 
-The artifact compares three density directions. Production will follow **A — Adaptive wide canvas**, adjusted to preserve the application's existing brand text, Lucide navigation icons, semantic status colors, and live behavior. It will not introduce the artifact's illustrative data, extra Apply button, extra Export action, or a new logo.
+Entry artifact: `approval-system-ux-study.html`
+
+Studio: <http://127.0.0.1:59340/projects/approval-app-desktop-ux-refresh-v2/conversations/7f34510f-3e55-4c51-89c1-8318c5efaf43>
+
+The artifact compares three density directions. Production will follow **A — Adaptive wide canvas** with the approved existing clean theme: white application surfaces, a cool light-gray page background, slate text and borders, restrained blue interactive states, existing semantic status colors, and a near-black primary New Request action. The application keeps its existing **Approval System** brand text and Lucide navigation icons. It will not introduce the artifact's illustrative data, native HTML dropdowns, extra Apply button, extra Export action, or a new logo.
 
 ## Goals
 
@@ -36,6 +38,7 @@ The artifact compares three density directions. Production will follow **A — A
 - No broad typography, color, dark-mode, dashboard-card, or mobile-card redesign.
 - No consolidation of all hierarchy workflows into one picker component in this task.
 - No new filter result counts because the current API does not provide facet counts.
+- No replacement or restyling of the existing Radix-based `src/components/ui/select.tsx` dropdown component.
 
 ## 1. Shared Authenticated Canvas
 
@@ -101,7 +104,7 @@ Arrange controls in two visual tiers:
 
 1. **Primary query tier**
    - title/description search receives the largest share of width;
-   - department and requester selectors;
+   - department and requester selectors continue to use the existing Radix-based `Select`, `SelectTrigger`, `SelectContent`, and `SelectItem` components from `src/components/ui/select.tsx` **as-is**—do not replace them with native `<select>` elements or change their interaction behavior;
    - from/to date inputs;
    - the existing no-WR toggle;
    - contextual **Clear all** when filters differ from defaults.
@@ -201,7 +204,7 @@ Add regression coverage for:
 
 - the shared 1720px shell utility and its use by dashboard/admin layouts and navbar;
 - the desktop/mobile navbar breakpoint handoff and compact metadata behavior;
-- Requests' two-tier responsive filter structure without an Apply-step contract change;
+- Requests' two-tier responsive filter structure without an Apply-step contract change, while retaining the existing custom Select imports and avoiding native `<select>` elements;
 - desktop table minimum width, title-first proportions, row focus/keyboard behavior, and non-wrapping dates;
 - unchanged mobile request-card rendering;
 - visible hierarchy search, name/email/role matching, result count, empty state, bounded results, and reset behavior in every covered flow.
