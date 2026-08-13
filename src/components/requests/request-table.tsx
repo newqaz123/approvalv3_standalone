@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useCallback, useEffect } from 'react'
+import React, { useState, useMemo, useCallback, useEffect } from 'react'
 import {
   ColumnDef,
   flexRender,
@@ -68,14 +68,25 @@ export function RequestTable({ initialData, onDataRefresh }: RequestTableProps) 
     setIsModalOpen(true)
   }, [])
 
+  const handleRowKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLTableRowElement>, requestId: string) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault()
+        handleRowClick(requestId)
+      }
+    },
+    [handleRowClick]
+  )
+
   // Memoize column definitions to prevent recreation on every render
   const columns: ColumnDef<RequestListRow>[] = useMemo(() => [
     {
       accessorKey: 'title',
       header: 'Title',
+      size: 380,
       cell: ({ row }) => (
-        <div className="flex items-center gap-2">
-          <span className="font-medium">{row.getValue('title')}</span>
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="line-clamp-2 break-words font-medium leading-5">{row.getValue('title')}</span>
           {row.original.hasRejection && (row.original.status === 'ImprovementRequest' || row.original.status === 'SentToEngineer') && <RejectedBadge size="sm" showText={false} />}
         </div>
       ),
@@ -83,23 +94,28 @@ export function RequestTable({ initialData, onDataRefresh }: RequestTableProps) 
     {
       accessorKey: 'requester',
       header: 'Requester',
+      size: 150,
       cell: ({ row }) => row.original.requester?.name || '—',
     },
     {
       accessorKey: 'status',
       header: 'Status',
+      size: 130,
       cell: ({ row }) => (
-        <StatusBadge
-          status={row.getValue('status') as any}
-          hasRejection={row.original.hasRejection && (row.original.status === 'ImprovementRequest' || row.original.status === 'SentToEngineer')}
-        />
+        <div className="flex min-w-0 items-center">
+          <StatusBadge
+            status={row.getValue('status') as any}
+            hasRejection={row.original.hasRejection && (row.original.status === 'ImprovementRequest' || row.original.status === 'SentToEngineer')}
+          />
+        </div>
       ),
     },
     {
       id: 'approvalStatus',
       header: 'Approval Status',
+      size: 150,
       cell: ({ row }) => (
-        <div className="flex justify-center">
+        <div className="flex items-center justify-center">
           <ApprovalStatusBadge
             key={`approvals-${row.original.id}-${row.original.approvals?.map(a => a.status).join('-')}`}
             approvals={row.original.approvals || []}
@@ -112,13 +128,14 @@ export function RequestTable({ initialData, onDataRefresh }: RequestTableProps) 
     {
       id: 'pic',
       header: 'PIC',
+      size: 140,
       cell: ({ row }) => {
         const assignments = row.original.engineerAssignments
         if (!assignments || assignments.length === 0) return <span className="text-gray-400">—</span>
         return (
-          <div className="flex items-center gap-1.5">
+          <div className="flex min-w-0 items-center gap-1.5">
             <UserCircle className="h-3.5 w-3.5 text-blue-500 flex-shrink-0" />
-            <span className="text-sm text-gray-700 truncate max-w-[150px]" title={assignments.map(a => a.engineer.name).join(', ')}>
+            <span className="truncate text-sm text-gray-700" title={assignments.map(a => a.engineer.name).join(', ')}>
               {assignments.map(a => a.engineer.name.split(' ')[0]).join(', ')}
             </span>
           </div>
@@ -128,16 +145,18 @@ export function RequestTable({ initialData, onDataRefresh }: RequestTableProps) 
     {
       accessorKey: 'department',
       header: 'Department',
+      size: 130,
       cell: ({ row }) => row.original.department?.name || '—',
     },
     {
       accessorKey: '_count.fileAttachments',
       header: 'Files',
+      size: 70,
       cell: ({ row }) => {
         const count = row.original._count.fileAttachments
         return count > 0 ? (
           <div className="flex items-center gap-1">
-            <FileText className="h-4 w-4 text-gray-400" />
+            <FileText className="h-4 w-4 flex-shrink-0 text-gray-400" />
             <span>{count}</span>
           </div>
         ) : null
@@ -146,11 +165,12 @@ export function RequestTable({ initialData, onDataRefresh }: RequestTableProps) 
     {
       accessorKey: 'createdAt',
       header: 'Created',
+      size: 130,
       cell: ({ row }) => {
         const date = new Date(row.getValue('createdAt'))
         return (
-          <div className="flex items-center gap-1 text-sm text-gray-500">
-            <Clock className="h-3 w-3" />
+          <div className="flex items-center gap-1 whitespace-nowrap text-sm text-gray-500">
+            <Clock className="h-3 w-3 flex-shrink-0" />
             {format(date, 'MMM d, yyyy')}
           </div>
         )
@@ -183,12 +203,12 @@ export function RequestTable({ initialData, onDataRefresh }: RequestTableProps) 
 
       {/* Desktop table view */}
       <div className="hidden md:block border rounded-md">
-        <Table>
+        <Table className="min-w-[1220px] table-fixed">
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id}>
                 {headerGroup.headers.map((header) => (
-                  <TableHead key={header.id}>
+                  <TableHead key={header.id} style={{ width: header.getSize() }}>
                     {header.isPlaceholder
                       ? null
                       : flexRender(
@@ -205,14 +225,17 @@ export function RequestTable({ initialData, onDataRefresh }: RequestTableProps) 
               table.getRowModel().rows.map((row) => (
                 <TableRow
                   key={row.id}
+                  tabIndex={0}
+                  aria-label={`Open request ${row.original.title}`}
                   className={cn(
-                    "cursor-pointer hover:bg-gray-50",
+                    "min-h-[60px] cursor-pointer hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500",
                     row.original.workRequisitionReceived && "bg-sky-50 hover:bg-sky-100/60"
                   )}
                   onClick={() => handleRowClick(row.original.id)}
+                  onKeyDown={(event) => handleRowKeyDown(event, row.original.id)}
                 >
                   {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id}>
+                    <TableCell key={cell.id} className="py-3" style={{ width: cell.column.getSize() }}>
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </TableCell>
                   ))}

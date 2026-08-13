@@ -53,3 +53,34 @@ describe('Requests desktop data flow and header', () => {
     assert.doesNotMatch(listClient, />\s*Apply\s*</)
   })
 })
+
+describe('Requests desktop table proportions and keyboard rows', () => {
+  const table = read('src/components/requests/request-table.tsx')
+  const requestCard = read('src/components/mobile/request-card.tsx')
+
+  it('uses fixed desktop proportions, taller scan rows, and keyboard activation', () => {
+    assert.match(table, /<Table className="min-w-\[[^\]]+\] table-fixed"/)
+    assert.match(table, /line-clamp-2/)
+    assert.match(table, /whitespace-nowrap/)
+    assert.match(table, /min-h-\[60px\]/)
+    assert.match(table, /tabIndex=\{0\}/)
+    assert.match(table, /aria-label=\{`Open request /)
+    assert.doesNotMatch(table, /<TableRow[\s\S]{0,300}role="button"/)
+    assert.match(table, /event\.key === 'Enter' \|\| event\.key === ' '/)
+    assert.match(table, /focus-visible:/)
+    assert.match(table, /bg-sky-50 hover:bg-sky-100\/60/)
+    assert.match(table, /className="md:hidden space-y-3"/)
+    assert.match(table, /className="hidden md:block/)
+    assert.match(table, /<RequestCard/)
+    assert.match(table, /<RequestModalRouter/)
+  })
+
+  it('keeps RequestCard tap and empty-state contracts unchanged', () => {
+    assert.match(requestCard, /export function RequestCard/)
+    assert.match(requestCard, /onTap: \(requestId: string\) => void/)
+    assert.match(requestCard, /onClick=\{\(\) => onTap\(request\.id\)\}/)
+    assert.match(requestCard, /export function RequestCardsEmptyState/)
+    assert.match(requestCard, /message = 'No requests found'/)
+    assert.match(requestCard, /submessage = 'Create your first request to get started'/)
+  })
+})
