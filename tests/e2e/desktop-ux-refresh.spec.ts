@@ -624,8 +624,8 @@ async function exercisePickerFixture(page: Page, label: string) {
 		page.locator(`[data-picker-fixture="${label}"]`).getByText("No more users available"),
 		`${label}: exhausted state shows "No more users available"`,
 	).toBeVisible();
+	await closePicker(page, label);
 	await page
 		.locator(`[data-picker-fixture="${label}"] [data-picker-reset]`)
 		.click();
-	await closePicker(page, label);
 }
