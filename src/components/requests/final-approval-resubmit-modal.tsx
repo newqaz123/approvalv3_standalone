@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { format } from 'date-fns'
 import {
   X,
@@ -41,6 +41,8 @@ import { Button } from '@/components/ui/button'
 import { FormattedText } from '@/components/ui/formatted-text'
 import { Separator } from '@/components/ui/separator'
 import { cn } from '@/lib/utils'
+import { ApproverSearchField } from '@/components/approvals/approver-search-field'
+import { filterApproversByQuery } from '@/lib/approver-search'
 
 // Types
 interface ApprovalStep {
@@ -239,6 +241,21 @@ function CustomApprovalPicker({
   onChange: (approvers: string[]) => void
 }) {
   const [isOpen, setIsOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const unselectedUsers = availableUsers.filter((user) => !selectedApprovers.includes(user.id))
+  const filteredUsers = filterApproversByQuery(unselectedUsers, searchQuery)
+
+  const setPickerOpen = (nextOpen: boolean) => {
+    setIsOpen(nextOpen)
+    if (!nextOpen) {
+      setSearchQuery('')
+      return
+    }
+    requestAnimationFrame(() => {
+      searchInputRef.current?.focus()
+    })
+  }
 
   const addApprover = (userId: string) => {
     if (!selectedApprovers.includes(userId)) {
@@ -319,7 +336,7 @@ function CustomApprovalPicker({
 
       <div className="relative">
         <button
-          onClick={() => setIsOpen(!isOpen)}
+          onClick={() => setPickerOpen(!isOpen)}
           className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-dashed border-slate-300 dark:border-slate-700 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
         >
           <Plus className="w-4 h-4" />
@@ -327,15 +344,26 @@ function CustomApprovalPicker({
         </button>
 
         {isOpen && (
-          <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-lg z-50 max-h-48 overflow-y-auto">
-            {availableUsers
-              .filter((u) => !selectedApprovers.includes(u.id))
-              .map((user) => (
+          <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-lg z-50">
+            <div className="p-2">
+              <ApproverSearchField
+                value={searchQuery}
+                onChange={setSearchQuery}
+                resultCount={filteredUsers.length}
+                inputRef={searchInputRef}
+              />
+            </div>
+            <div className="max-h-[260px] overflow-y-auto">
+              {unselectedUsers.length === 0
+                ? <p className="px-3 py-2 text-sm text-slate-400 italic">No more users available</p>
+                : filteredUsers.length === 0
+                  ? <p className="px-3 py-2 text-sm text-slate-400 italic">No approvers found</p>
+                  : filteredUsers.map((user) => (
                 <button
                   key={user.id}
                   onClick={() => {
                     addApprover(user.id)
-                    setIsOpen(false)
+                    setPickerOpen(false)
                   }}
                   className="w-full text-left px-3 py-2 hover:bg-slate-100 dark:hover:bg-slate-800 text-sm"
                 >
@@ -347,9 +375,7 @@ function CustomApprovalPicker({
                   </p>
                 </button>
               ))}
-            {availableUsers.filter((u) => !selectedApprovers.includes(u.id)).length === 0 && (
-              <p className="px-3 py-2 text-sm text-slate-400 italic">No more users available</p>
-            )}
+            </div>
           </div>
         )}
       </div>
@@ -357,12 +383,14 @@ function CustomApprovalPicker({
       {isOpen && (
         <div
           className="fixed inset-0 z-40"
-          onClick={() => setIsOpen(false)}
+          onClick={() => setPickerOpen(false)}
         />
       )}
     </div>
   )
 }
+
+export { CustomApprovalPicker as FinalApprovalResubmitPickerHarness }
 
 export function FinalApprovalResubmitModal({
   open,

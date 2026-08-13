@@ -86,3 +86,66 @@ describe('CustomApprovalPicker search', () => {
     assert.match(source, /Level \{user\.level\}/)
   })
 })
+
+function assertLiveModalPicker(path: string, harnessName: string) {
+  const source = read(path)
+
+  assert.match(source, /function CustomApprovalPicker/)
+  assert.doesNotMatch(source, /export function CustomApprovalPicker/)
+  assert.match(source, /import \{ filterApproversByQuery \} from ['"]@\/lib\/approver-search['"]/)
+  assert.match(source, /import \{ ApproverSearchField \} from ['"]@\/components\/approvals\/approver-search-field['"]/)
+  assert.match(source, /const \[searchQuery, setSearchQuery\] = useState\(''\)/)
+  assert.match(source, /const searchInputRef = useRef<HTMLInputElement>\(null\)/)
+  assert.match(
+    source,
+    /const unselectedUsers = availableUsers\.filter\(\(user\) => !selectedApprovers\.includes\(user\.id\)\)/
+  )
+  assert.match(source, /const filteredUsers = filterApproversByQuery\(unselectedUsers, searchQuery\)/)
+  assert.match(source, /<ApproverSearchField/)
+  assert.match(source, /No approvers found/)
+  assert.match(source, /No more users available/)
+  assert.match(source, /max-h-\[260px\] overflow-y-auto/)
+  assert.match(source, /const setPickerOpen = \(nextOpen: boolean\)/)
+  assert.match(source, /requestAnimationFrame/)
+  assert.match(source, /setSearchQuery\(''\)/)
+  assert.match(
+    source,
+    /addApprover\(user\.id\)\s*setPickerOpen\(false\)/
+  )
+  assert.match(source, /onClick=\{\(\) => setPickerOpen\(false\)\}/)
+  assert.match(
+    source,
+    /unselectedUsers\.length === 0\s*\?\s*<p[^>]*>No more users available<\/p>\s*:\s*filteredUsers\.length === 0\s*\?\s*<p[^>]*>No approvers found<\/p>/
+  )
+  assert.match(source, new RegExp('export \\{ CustomApprovalPicker as ' + harnessName + ' \\}'))
+  assert.doesNotMatch(source, new RegExp('function ' + harnessName))
+  assert.doesNotMatch(source, /currentUserId/)
+}
+
+
+describe('Submitter modal CustomApprovalPicker search', () => {
+  it('keeps a file-private picker with shared search, reset, and harness alias', () => {
+    assertLiveModalPicker(
+      'src/components/requests/submitter-modal.tsx',
+      'SubmitterApprovalPickerHarness'
+    )
+  })
+})
+
+describe('Submit final approval modal CustomApprovalPicker search', () => {
+  it('keeps a file-private picker with shared search, reset, and harness alias', () => {
+    assertLiveModalPicker(
+      'src/components/requests/submit-final-approval-modal.tsx',
+      'SubmitFinalApprovalPickerHarness'
+    )
+  })
+})
+
+describe('Final approval resubmit modal CustomApprovalPicker search', () => {
+  it('keeps a file-private picker with shared search, reset, and harness alias', () => {
+    assertLiveModalPicker(
+      'src/components/requests/final-approval-resubmit-modal.tsx',
+      'FinalApprovalResubmitPickerHarness'
+    )
+  })
+})
