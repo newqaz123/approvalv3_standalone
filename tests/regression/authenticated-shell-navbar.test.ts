@@ -42,4 +42,26 @@ describe('authenticated shell and navigation', () => {
     assert.match(mobileNav, /lg:hidden/)
     assert.doesNotMatch(mobileNav, /md:hidden/)
   })
+
+  it('aligns the navbar to the same shell and keeps links keyboard-visible', () => {
+    const source = read('src/components/navigation/navbar.tsx')
+
+    assert.match(source, /AUTHENTICATED_SHELL_CLASS/)
+    assert.doesNotMatch(source, /max-w-7xl/)
+    assert.match(source, /min-h-\[44px\]/)
+    assert.match(source, /focus-visible:/)
+    assert.match(source, /aria-current=\{[^}]+\? 'page' : undefined\}/)
+    assert.match(source, /data-auth-shell/)
+  })
+
+  it('keeps the pending badge inline and collapses secondary user metadata', () => {
+    const source = read('src/components/navigation/navbar.tsx')
+
+    assert.match(source, /aria-label=\{`\$\{pendingCount\} pending actions`\}/)
+    assert.doesNotMatch(source, /absolute -right-1 -top-1/)
+    assert.match(source, /data-user-secondary/)
+    assert.match(source, /hidden 2xl:inline/)
+    assert.match(source, /callbackUrl: '\/sign-in'/)
+    assert.match(source, /setInterval\(fetchPendingCount, 30000\)/)
+  })
 })
