@@ -149,3 +149,50 @@ describe('Final approval resubmit modal CustomApprovalPicker search', () => {
     )
   })
 })
+
+describe('Legacy solution modal CustomApprovalPicker search', () => {
+  it('keeps a file-private expanded picker with shared search, reset, and harness alias', () => {
+    const source = read('src/components/requests/solution-modal.tsx')
+
+    assert.match(source, /function CustomApprovalPicker/)
+    assert.doesNotMatch(source, /export function CustomApprovalPicker/)
+    assert.match(source, /import \{ filterApproversByQuery \} from ['"]@\/lib\/approver-search['"]/)
+    assert.match(source, /import \{ ApproverSearchField \} from ['"]@\/components\/approvals\/approver-search-field['"]/)
+    assert.match(source, /const \[searchQuery, setSearchQuery\] = useState\(''\)/)
+    assert.match(source, /const availableUsers = users\.filter\(u => !selectedIds\.includes\(u\.id\)\)/)
+    assert.match(source, /const filteredUsers = filterApproversByQuery\(availableUsers, searchQuery\)/)
+    assert.match(
+      source,
+      /\{isExpanded && \([\s\S]*<ApproverSearchField[\s\S]*\)\}/,
+    )
+    assert.match(source, /<ApproverSearchField/)
+    assert.match(source, /resultCount=\{filteredUsers\.length\}/)
+    assert.match(source, /No more users available/)
+    assert.match(source, /No approvers found/)
+    assert.match(
+      source,
+      /availableUsers\.length === 0[\s\S]*No more users available[\s\S]*filteredUsers\.length === 0[\s\S]*No approvers found[\s\S]*filteredUsers\.map/,
+    )
+    assert.match(source, /max-h-\[260px\] overflow-y-auto/)
+    assert.match(source, /user\.email/)
+    assert.match(source, /user\.role/)
+    assert.match(source, /<Switch checked=\{isExpanded\}/)
+    assert.match(source, /setIsExpanded\(false\)/)
+    assert.match(source, /setSearchQuery\(''\)/)
+    assert.match(
+      source,
+      /setIsExpanded\(false\)\s*setSearchQuery\(''\)/,
+    )
+    assert.match(
+      source,
+      /onClick=\{\(\) => setExpanded\(!isExpanded\)\}/,
+    )
+    assert.match(
+      source,
+      /onChange\(\[\.\.\.selectedIds, user\.id\]\)[\s\S]*setSearchQuery\(''\)/,
+    )
+    assert.match(source, /export \{ CustomApprovalPicker as SolutionModalApprovalPickerHarness \}/)
+    assert.doesNotMatch(source, /function SolutionModalApprovalPickerHarness/)
+    assert.doesNotMatch(source, /currentUserId/)
+  })
+})

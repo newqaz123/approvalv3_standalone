@@ -45,6 +45,8 @@ import { FormattedText } from '@/components/ui/formatted-text'
 import { Separator } from '@/components/ui/separator'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
+import { ApproverSearchField } from '@/components/approvals/approver-search-field'
+import { filterApproversByQuery } from '@/lib/approver-search'
 import { cn } from '@/lib/utils'
 
 // Types
@@ -285,12 +287,14 @@ function CustomApprovalPicker({
   onChange: (ids: string[]) => void
 }) {
   const [isExpanded, setIsExpanded] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
 
   const selectedUsers = selectedIds
     .map(id => users.find(u => u.id === id))
     .filter((u): u is User => u !== undefined)
 
   const availableUsers = users.filter(u => !selectedIds.includes(u.id))
+  const filteredUsers = filterApproversByQuery(availableUsers, searchQuery)
 
   const moveUp = (index: number) => {
     if (index <= 0) return
@@ -310,11 +314,20 @@ function CustomApprovalPicker({
     onChange(selectedIds.filter(uid => uid !== id))
   }
 
+  const setExpanded = (nextExpanded: boolean) => {
+    if (!nextExpanded) {
+      setIsExpanded(false)
+      setSearchQuery('')
+      return
+    }
+    setIsExpanded(true)
+  }
+
   return (
     <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
       {/* Fixed: Use div instead of button to avoid nesting with Switch */}
       <div
-        onClick={() => setIsExpanded(!isExpanded)}
+        onClick={() => setExpanded(!isExpanded)}
         className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors cursor-pointer"
       >
         <div className="flex items-center gap-2">
@@ -328,11 +341,18 @@ function CustomApprovalPicker({
             </span>
           )}
         </div>
-        <Switch checked={isExpanded} onCheckedChange={setIsExpanded} />
+        <Switch checked={isExpanded} onCheckedChange={setExpanded} />
       </div>
 
       {isExpanded && (
         <div className="px-4 pb-4 border-t border-slate-100 dark:border-slate-800">
+          <div className="mt-3">
+            <ApproverSearchField
+              value={searchQuery}
+              onChange={setSearchQuery}
+              resultCount={filteredUsers.length}
+            />
+          </div>
           {/* Selected Users */}
           {selectedUsers.length > 0 && (
             <div className="mt-3 space-y-2">
@@ -378,14 +398,21 @@ function CustomApprovalPicker({
           )}
 
           {/* Add Users */}
-          {availableUsers.length > 0 && (
-            <div className="mt-3">
-              <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Add Approvers</p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-40 overflow-y-auto">
-                {availableUsers.map(user => (
+          <div className="mt-3">
+            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Add Approvers</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[260px] overflow-y-auto">
+              {availableUsers.length === 0 ? (
+                <p className="text-xs text-slate-400">No more users available</p>
+              ) : filteredUsers.length === 0 ? (
+                <p className="text-xs text-slate-400">No approvers found</p>
+              ) : (
+                filteredUsers.map(user => (
                   <button
                     key={user.id}
-                    onClick={() => onChange([...selectedIds, user.id])}
+                    onClick={() => {
+                      onChange([...selectedIds, user.id])
+                      setSearchQuery('')
+                    }}
                     className="flex items-center gap-2 p-2 hover:bg-slate-50 dark:hover:bg-slate-800/50 rounded-lg border border-slate-100 dark:border-slate-800 text-left transition-colors"
                   >
                     <div className="size-6 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-400 text-[10px] font-bold">
@@ -393,19 +420,21 @@ function CustomApprovalPicker({
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-slate-900 dark:text-slate-100 truncate">{user.name}</p>
-                      <p className="text-xs text-slate-400">{user.role}</p>
+                      <p className="text-xs text-slate-400">{user.role} • {user.email}</p>
                     </div>
                     <Plus className="w-4 h-4 text-slate-400" />
                   </button>
-                ))}
-              </div>
+                ))
+              )}
             </div>
-          )}
+          </div>
         </div>
       )}
     </div>
   )
 }
+
+export { CustomApprovalPicker as SolutionModalApprovalPickerHarness }
 
 // Solution Approval Actions
 function SolutionApprovalActions({ 
