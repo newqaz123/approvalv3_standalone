@@ -33,7 +33,7 @@ const engineeringTabs: Tab[] = [
 
 /**
  * Mobile top tab bar navigation with smart scroll behavior.
- * Visible only on mobile breakpoints (< md).
+ * Visible only on mobile breakpoints (< lg).
  * Auto-hides when scrolling down, reappears when scrolling up.
  */
 export function MobileNav() {
@@ -82,7 +82,7 @@ export function MobileNav() {
   return (
     <nav
       className={cn(
-        'fixed top-0 left-0 right-0 z-50 bg-white border-b border-gray-200 transition-transform duration-300 md:hidden',
+        'fixed top-0 left-0 right-0 z-50 bg-white border-b border-gray-200 transition-transform duration-300 lg:hidden',
         isVisible ? 'translate-y-0' : '-translate-y-full'
       )}
     >
