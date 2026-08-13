@@ -447,7 +447,7 @@ const HARNESS_USERS = [
 ] as const;
 
 /** The open real picker (only one fixture is exercised at a time). */
-const openPicker = (page: Page) => page.locator("[data-picker-root]");
+const openPicker = (page: Page) => page.locator("[data-picker-root]:visible");
 const pickerSearch = (page: Page) => openPicker(page).locator("input").first();
 const fixtureOpen = (page: Page, label: string) =>
 	page.locator(`[data-picker-fixture="${label}"] [data-picker-open]`);
@@ -466,6 +466,20 @@ async function pickerCount(page: Page): Promise<number> {
 	} catch {
 		return Number.NaN;
 	}
+}
+
+async function closePicker(page: Page, label: string) {
+	const closeControl = page.locator(
+		`[data-picker-fixture="${label}"] [data-picker-close]`,
+	);
+	if (await closeControl.count()) {
+		await closeControl.click({ position: { x: 2, y: 2 } });
+	} else {
+		const trigger = fixtureOpen(page, label);
+		if (await trigger.isEnabled()) await trigger.click();
+	}
+	if (await openPicker(page).count()) await page.keyboard.press("Escape");
+	await expect(openPicker(page), `${label}: picker closes cleanly`).toHaveCount(0);
 }
 
 /**
@@ -587,20 +601,18 @@ async function exercisePickerFixture(page: Page, label: string) {
 		pickerSearch(page),
 		`${label}: selecting an approver cleared the query`,
 	).toHaveValue("");
-	if (await pickerSearch(page).isVisible().catch(() => false)) {
-		await fixtureOpen(page, label).click();
-	}
+	await closePicker(page, label);
 
 	// 5. Close/reopen-reset: typing then closing and reopening clears the query.
 	await fixtureOpen(page, label).click();
 	await pickerSearch(page).fill(grace.name);
-	await fixtureOpen(page, label).click();
+	await closePicker(page, label);
 	await fixtureOpen(page, label).click();
 	await expect(
 		pickerSearch(page),
 		`${label}: closing/reopening cleared the query`,
 	).toHaveValue("");
-	await fixtureOpen(page, label).click();
+	await closePicker(page, label);
 
 	// 6. Exhausted state (every user preselected) + harness reset to clean state.
 	await page
@@ -612,8 +624,8 @@ async function exercisePickerFixture(page: Page, label: string) {
 		page.locator(`[data-picker-fixture="${label}"]`).getByText("No more users available"),
 		`${label}: exhausted state shows "No more users available"`,
 	).toBeVisible();
-	if (await pickerSearch(page).isVisible().catch(() => false)) await trigger.click();
 	await page
 		.locator(`[data-picker-fixture="${label}"] [data-picker-reset]`)
 		.click();
+	await closePicker(page, label);
 }

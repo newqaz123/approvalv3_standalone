@@ -300,6 +300,7 @@ function CustomApprovalPicker({
       {/* Click outside to close */}
       {isOpen && (
         <div
+          data-picker-close
           className="fixed inset-0 z-40"
           onClick={() => setPickerOpen(false)}
         />
