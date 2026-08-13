@@ -64,4 +64,47 @@ describe('authenticated shell and navigation', () => {
     assert.match(source, /callbackUrl: '\/sign-in'/)
     assert.match(source, /setInterval\(fetchPendingCount, 30000\)/)
   })
+
+  it('does not re-cap wide operational pages inside the shared shell', () => {
+    const widePages = [
+      'src/app/(dashboard)/dashboard/page.tsx',
+      'src/app/(dashboard)/requests/my-actions/page.tsx',
+      'src/app/(dashboard)/analytics/loading.tsx',
+      'src/components/analytics/analytics-page.tsx',
+      'src/app/admin/deleted-requests/page.tsx',
+      'src/app/admin/retention/page.tsx',
+      'src/app/admin/departments/[id]/hierarchy/page.tsx',
+    ]
+
+    for (const path of widePages) {
+      const source = read(path)
+      assert.doesNotMatch(source, /className=["'][^"']*\bcontainer\b/)
+      assert.doesNotMatch(source, /max-w-7xl/)
+    }
+  })
+
+  it('keeps focused forms and detail pages narrow', () => {
+    const focusedContracts = new Map([
+      ['src/app/(dashboard)/profile/page.tsx', 'max-w-2xl'],
+      ['src/app/(dashboard)/change-password/page.tsx', 'max-w-2xl'],
+      ['src/app/(dashboard)/requests/new/page.tsx', 'max-w-3xl'],
+      ['src/app/(dashboard)/engineering/solutions/[requestId]/page.tsx', 'max-w-4xl'],
+      ['src/app/(dashboard)/requests/[requestId]/page.tsx', 'max-w-5xl'],
+      ['src/app/admin/templates/new/page.tsx', 'max-w-2xl'],
+      ['src/app/admin/templates/[id]/page.tsx', 'max-w-2xl'],
+    ])
+
+    for (const [path, token] of focusedContracts) assert.ok(read(path).includes(token))
+  })
+
+  it('keeps Approval Chain unassigned narrow and assigned wide', () => {
+    const source = read('src/app/(dashboard)/approval-chain/page.tsx')
+    const unassignedStart = source.indexOf('if (!approvalChain)')
+    const assignedStart = source.lastIndexOf('return (')
+    const unassigned = source.slice(unassignedStart, assignedStart)
+    const assigned = source.slice(assignedStart)
+
+    assert.ok(unassigned.includes('max-w-4xl'))
+    assert.doesNotMatch(assigned, /max-w-7xl/)
+  })
 })

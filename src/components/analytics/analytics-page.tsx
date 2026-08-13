@@ -161,7 +161,7 @@ export function AnalyticsPage({ initialData, filters, userId }: AnalyticsPagePro
   const showSkeleton = isLoading && !isInitialLoad
 
   return (
-    <div className="container max-w-7xl py-6 space-y-6">
+    <div className="w-full py-6 space-y-6">
       {/* Page header + filters */}
       <div className="space-y-4">
         <div className="flex flex-col gap-1">

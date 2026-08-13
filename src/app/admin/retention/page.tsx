@@ -10,7 +10,7 @@ export default async function RetentionPage() {
   await requireAdmin()
 
   return (
-    <div className="container mx-auto py-8">
+    <div className="w-full py-8">
       <div className="mb-6">
         <h1 className="text-3xl font-bold flex items-center gap-2">
           <Archive className="h-8 w-8 text-muted-foreground" />

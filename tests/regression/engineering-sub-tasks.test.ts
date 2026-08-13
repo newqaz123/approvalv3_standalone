@@ -273,7 +273,7 @@ describe('engineering sub-task request and filter wiring', () => {
     assert.match(dashboardTabs, /TabsList className="flex w-full sm:max-w-xl"/)
     assert.match(dashboardTabs, /formatDistanceToNow/)
     assert.doesNotMatch(dashboardPage, />Dashboard<\/h1>/)
-    assert.match(dashboardPage, /container py-4/)
+    assert.match(dashboardPage, /w-full py-4/)
   })
 })
 

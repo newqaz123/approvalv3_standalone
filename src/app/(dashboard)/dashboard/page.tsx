@@ -5,7 +5,7 @@ export default async function DashboardPage() {
   const session = await auth()
 
   return (
-    <div className="container py-4">
+    <div className="w-full py-4">
       <DashboardTabs userId={session?.user?.id ?? null} />
     </div>
   )
