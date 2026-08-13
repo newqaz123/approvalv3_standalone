@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "@playwright/test";
 
 /**
  * Desktop UX Refresh — browser acceptance contract.
@@ -155,13 +155,15 @@ test.describe("Desktop UX Refresh — baseline acceptance (observed RED before p
 		// Desktop navbar is visible.
 		await expect(desktopNavbar(page)).toBeVisible();
 
-		// Primary links are visible AND share one row (no wrapping). Visibility
-		// alone does not prove "do not wrap": at baseline the multi-word labels
-		// ("My Actions", "Budget Monitor", "Admin Panel") wrap to two lines (~56px)
-		// while single-word links stay one line (~36px), so their top edges differ
-		// by ~10px. Require every link's top edge to sit within 6px (one row) and
-		// the navbar to keep its single-row height; the refresh makes links compact
-		// and single-line, bringing the spread to ~0.
+		// Primary links are visible AND each renders its label on a single line
+		// (no wrapping). Visibility, top-edge spread, and overall nav height do
+		// not prove "do not wrap": the nav is a fixed `h-16` row that clips
+		// overflow. Instead, measure each link's TEXT line count directly (range
+		// height / computed line-height). At baseline the multi-word labels ("My
+		// Actions", "Budget Monitor", "Admin Panel") wrap to two lines (ratio
+		// ~2.0) while single-word links stay one line (ratio ~1.0); the refresh
+		// makes every link single-line, so the per-link threshold (<= 1.5) is a
+		// stable geometry contract for both the baseline and the approved navbar.
 		const linkLabels = [
 			"Requests",
 			"My Actions",
@@ -169,20 +171,15 @@ test.describe("Desktop UX Refresh — baseline acceptance (observed RED before p
 			"Budget Monitor",
 			"Admin Panel",
 		];
-		const tops: number[] = [];
 		for (const label of linkLabels) {
 			const link = desktopNavbar(page).getByRole("link", { name: label });
 			await expect(link, `navbar link "${label}" is visible`).toBeVisible();
-			tops.push((await link.boundingBox())!.y);
+			const ratio = await navLinkTextLineRatio(link);
+			expect(
+				ratio,
+				`navbar link "${label}" label is one line (ratio ${ratio.toFixed(2)})`,
+			).toBeLessThanOrEqual(1.5);
 		}
-		expect(
-			Math.max(...tops) - Math.min(...tops),
-			"navbar links sit on one row (no wrapping)",
-		).toBeLessThanOrEqual(6);
-		const navHeight = (await desktopNavbar(page).boundingBox())!.height;
-		expect(navHeight, "navbar keeps a single ~64px row").toBeLessThanOrEqual(
-			76,
-		);
 
 		// Secondary role/email metadata collapses below `2xl`. Baseline RED: the
 		// navbar always renders `Admin • admin@example.com` with no responsive hide.
@@ -389,10 +386,10 @@ test.describe("Desktop UX Refresh — baseline acceptance (observed RED before p
 	 *    to <body>, so all command queries are PAGE-level (only one picker is
 	 *    open at a time): `[cmdk-root]` (root), `[cmdk-root] input` (search),
 	 *    `[cmdk-item]` (each available approver, showing name/email/role/level),
-	 *    `[data-picker-count]` (live result count), `No approvers found`
+	 *    `[data-picker-count]` (live result count rendering the integer N), `No approvers found`
 	 *    (zero query matches), `No more users available` (all selected).
-	 *  - Selecting an approver clears the query (select-reset); closing and
-	 *    reopening the picker clears the query (close-reset).
+	 *  - Selecting an approver clears the query (select-reset; the picker need not
+	 *    auto-close). Closing and reopening the picker clears the query (close-reset).
 	 */
 	test("7. /test-harness/hierarchy-pickers exposes five real picker fixtures with full search behavior", async ({
 		page,
@@ -456,6 +453,46 @@ const fixtureOpen = (page: Page, label: string) =>
 	page.locator(`[data-picker-fixture="${label}"] [data-picker-open]`);
 
 /**
+ * Numeric value of the open picker's live result count (`[data-picker-count]`,
+ * e.g. "3 approvers found"). Returns NaN if unreadable so callers can poll.
+ */
+async function pickerCount(page: Page): Promise<number> {
+	try {
+		const text = await openCommand(page)
+			.locator("[data-picker-count]")
+			.innerText();
+		const match = text.match(/\d+/);
+		return match ? Number(match[0]) : Number.NaN;
+	} catch {
+		return Number.NaN;
+	}
+}
+
+/**
+ * Approximate number of visual text lines inside a navbar link, measured as
+ * (range height of the link's text node) / (computed line-height). ~1.0 means
+ * the label is on one line; ~2.0 means it wrapped. Padding/min-height/flex do
+ * not affect it, so the same threshold works for the baseline and approved
+ * navbar. Used to prove each link's label does not wrap.
+ */
+async function navLinkTextLineRatio(link: Locator): Promise<number> {
+	return link.evaluate((el: HTMLElement) => {
+		const lineHeight = Number.parseFloat(getComputedStyle(el).lineHeight) || 20;
+		const range = document.createRange();
+		let textNode: Node | null = null;
+		for (const node of Array.from(el.childNodes)) {
+			if (node.nodeType === 3 && (node.textContent || "").trim()) {
+				textNode = node;
+				break;
+			}
+		}
+		if (!textNode) return 1;
+		range.selectNodeContents(textNode);
+		return range.getBoundingClientRect().height / lineHeight;
+	});
+}
+
+/**
  * Open one fixture's real picker and assert the full search contract: live
  * count, match-by-name/email/role/level, no-result copy, select-reset,
  * close/reopen-reset, and the exhausted state.
@@ -463,7 +500,7 @@ const fixtureOpen = (page: Page, label: string) =>
 async function exercisePickerFixture(page: Page, label: string) {
 	const [ada, grace, linus] = HARNESS_USERS;
 
-	// 1. Open the picker; a live result count and the full pool are shown.
+	// 1. Open the picker; the full pool is listed and the live count matches it.
 	await fixtureOpen(page, label).click();
 	await expect(pickerSearch(page), `${label}: search field opens`).toBeVisible({
 		timeout: 3000,
@@ -472,39 +509,80 @@ async function exercisePickerFixture(page: Page, label: string) {
 		openCommand(page).locator("[data-picker-count]"),
 		`${label}: live result count is shown`,
 	).toBeVisible();
-	expect(
-		await openCommand(page).locator("[cmdk-item]").count(),
-		`${label}: available approvers are listed`,
-	).toBeGreaterThanOrEqual(1);
+	await expect
+		.poll(
+			async () => await openCommand(page).locator("[cmdk-item]").count(),
+			`${label}: full approver pool is listed`,
+		)
+		.toBe(HARNESS_USERS.length);
+	await expect
+		.poll(
+			async () => await pickerCount(page),
+			`${label}: count reflects the full pool before filtering`,
+		)
+		.toBe(HARNESS_USERS.length);
 
-	// 2. Match by name / email / role / level (metadata exists and is searched).
-	const matches: Array<[string, string, string]> = [
-		["name", ada.name, ada.name],
-		["email", grace.email, grace.email],
-		["role", linus.role, linus.role],
-		["level", grace.level, grace.level],
+	// 2. Match by name / email / role / level. For each query the matching
+	//    approver is present, a known non-matching approver is absent, the list
+	//    narrows to exactly one, and the live count updates to 1 — so a static /
+	//    unfiltered list or a stale count cannot pass. Metadata is per fixture.
+	const items = () => openCommand(page).locator("[cmdk-item]");
+	const matches: Array<[string, string, string, string]> = [
+		["name", ada.name, ada.name, linus.name],
+		["email", grace.email, grace.name, ada.name],
+		["role", linus.role, linus.name, grace.name],
+		["level", grace.level, grace.name, linus.name],
 	];
-	for (const [field, query, expectedText] of matches) {
+	for (const [field, query, matchName, nonMatchName] of matches) {
 		await pickerSearch(page).fill(query);
 		await expect(
-			openCommand(page)
-				.locator("[cmdk-item]")
-				.filter({ hasText: expectedText }),
-			`${label}: match by ${field} ("${query}")`,
+			items().filter({ hasText: matchName }),
+			`${label}: match by ${field} ("${query}") shows ${matchName}`,
 		).toBeVisible();
+		await expect(
+			items().filter({ hasText: nonMatchName }),
+			`${label}: match by ${field} ("${query}") hides non-matching ${nonMatchName}`,
+		).toHaveCount(0);
+		await expect
+			.poll(
+				async () => await items().count(),
+				`${label}: exactly one match by ${field}`,
+			)
+			.toBe(1);
+		await expect
+			.poll(
+				async () => await pickerCount(page),
+				`${label}: count updates to 1 after ${field} query`,
+			)
+			.toBe(1);
 	}
 
-	// 3. No-result state (exact copy).
+	// 3. No-result state (exact copy) and the list empties.
 	await pickerSearch(page).fill("zzzzzz-no-such-approver");
 	await expect(
 		openCommand(page).getByText("No approvers found"),
 		`${label}: search miss shows "No approvers found"`,
 	).toBeVisible();
+	await expect
+		.poll(
+			async () => await items().count(),
+			`${label}: no items on a search miss`,
+		)
+		.toBe(0);
 
-	// 4. Select-reset: selecting a real approver clears the query (then closes).
+	// 4. Select-reset: selecting a real approver clears the query. The picker may
+	//    auto-close on select OR stay open — only reopen the trigger if it
+	//    actually closed; assert the query is cleared either way (do not require
+	//    auto-close).
 	await pickerSearch(page).fill(ada.name);
-	await openCommand(page).locator("[cmdk-item]").first().click();
-	await fixtureOpen(page, label).click(); // reopen after select-close
+	await items().first().click();
+	if (
+		!(await pickerSearch(page)
+			.isVisible()
+			.catch(() => false))
+	) {
+		await fixtureOpen(page, label).click();
+	}
 	await expect(
 		pickerSearch(page),
 		`${label}: selecting an approver cleared the query`,
