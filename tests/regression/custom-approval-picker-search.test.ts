@@ -56,6 +56,10 @@ describe('CustomApprovalPicker search', () => {
     assert.match(source, /<ApproverSearchField inputKind="command"/)
     assert.match(source, /resultCount=\{filteredUsers\.length\}/)
     assert.match(source, /onOpenChange=\{handleOpenChange\}/)
+    assert.match(
+      source,
+      /<CommandList className="max-h-\[260px\] overflow-y-auto">\s*\{availableUsers\.length > 0 && filteredUsers\.length === 0 && \(\s*<CommandEmpty>No approvers found<\/CommandEmpty>\s*\)\}\s*<CommandGroup/
+    )
   })
 
   it('distinguishes a search miss from exhausted selection', () => {

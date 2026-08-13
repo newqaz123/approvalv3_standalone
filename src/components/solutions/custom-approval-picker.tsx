@@ -114,10 +114,10 @@ export function CustomApprovalPicker({
                   onChange={setSearchValue}
                   resultCount={filteredUsers.length}
                 />
-                {availableUsers.length > 0 && filteredUsers.length === 0 && (
-                  <CommandEmpty>No approvers found</CommandEmpty>
-                )}
                 <CommandList className="max-h-[260px] overflow-y-auto">
+                  {availableUsers.length > 0 && filteredUsers.length === 0 && (
+                    <CommandEmpty>No approvers found</CommandEmpty>
+                  )}
                   <CommandGroup>
                     {filteredUsers.map((user) => (
                       <CommandItem
