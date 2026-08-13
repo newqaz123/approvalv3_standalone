@@ -97,6 +97,7 @@ export function CustomApprovalPicker({
           <Popover open={open} onOpenChange={handleOpenChange}>
             <PopoverTrigger asChild>
               <Button
+                data-picker-open
                 type="button"
                 variant="outline"
                 size="sm"
@@ -108,7 +109,7 @@ export function CustomApprovalPicker({
               </Button>
             </PopoverTrigger>
             <PopoverContent className="p-0" align="start" side="bottom">
-              <Command shouldFilter={false}>
+              <Command data-picker-root shouldFilter={false}>
                 <ApproverSearchField inputKind="command"
                   value={searchValue}
                   onChange={setSearchValue}
@@ -121,6 +122,7 @@ export function CustomApprovalPicker({
                   <CommandGroup>
                     {filteredUsers.map((user) => (
                       <CommandItem
+                        data-picker-item
                         key={user.id}
                         value={user.id}
                         onSelect={() => handleSelectUser(user.id)}

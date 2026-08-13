@@ -57,7 +57,7 @@ export function ApproverSearchField({
           />
         </div>
       )}
-      <p role="status" aria-live="polite" className="text-sm text-muted-foreground">
+      <p data-picker-count role="status" aria-live="polite" className="text-sm text-muted-foreground">
         {countLabel}
       </p>
     </div>

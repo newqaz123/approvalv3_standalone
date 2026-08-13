@@ -327,6 +327,7 @@ function CustomApprovalPicker({
     <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
       {/* Fixed: Use div instead of button to avoid nesting with Switch */}
       <div
+        data-picker-open
         onClick={() => setExpanded(!isExpanded)}
         className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors cursor-pointer"
       >
@@ -345,7 +346,7 @@ function CustomApprovalPicker({
       </div>
 
       {isExpanded && (
-        <div className="px-4 pb-4 border-t border-slate-100 dark:border-slate-800">
+        <div data-picker-root className="px-4 pb-4 border-t border-slate-100 dark:border-slate-800">
           <div className="mt-3">
             <ApproverSearchField
               value={searchQuery}
@@ -408,6 +409,7 @@ function CustomApprovalPicker({
               ) : (
                 filteredUsers.map(user => (
                   <button
+                    data-picker-item
                     key={user.id}
                     onClick={() => {
                       onChange([...selectedIds, user.id])

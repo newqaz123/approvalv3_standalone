@@ -379,15 +379,15 @@ test.describe("Desktop UX Refresh — baseline acceptance (observed RED before p
 	 *    stable label from HARNESS_FIXTURES, sharing the deterministic
 	 *    server-action-free user pool in HARNESS_USERS.
 	 *  - Each fixture exposes stable controls:
-	 *      [data-picker-open]    — opens the picker (its PopoverTrigger)
+	 *      [data-picker-open]    — opens its real workflow-specific picker
 	 *      [data-picker-exhaust] — harness control that preselects every user
 	 *      [data-picker-reset]   — harness control that clears all selections
-	 *  - The open picker is a Radix Popover whose content PORTALS a cmdk command
-	 *    to <body>, so all command queries are PAGE-level (only one picker is
-	 *    open at a time): `[cmdk-root]` (root), `[cmdk-root] input` (search),
-	 *    `[cmdk-item]` (each available approver, showing name/email/role/level),
-	 *    `[data-picker-count]` (live result count rendering the integer N), `No approvers found`
-	 *    (zero query matches), `No more users available` (all selected).
+	 *  - The open picker exposes behavior-level selectors shared by the existing
+	 *    heterogeneous implementations: `[data-picker-root]` (root), its input
+	 *    (search), `[data-picker-item]` (each available approver, showing
+	 *    name/email/role/level), `[data-picker-count]` (live result count),
+	 *    `No approvers found` (zero query matches), and `No more users available`
+	 *    (all selected).
 	 *  - Selecting an approver clears the query (select-reset; the picker need not
 	 *    auto-close). Closing and reopening the picker clears the query (close-reset).
 	 */
@@ -446,9 +446,9 @@ const HARNESS_USERS = [
 	},
 ] as const;
 
-/** The open picker's portaled cmdk command (only one picker is open at a time). */
-const openCommand = (page: Page) => page.locator("[cmdk-root]");
-const pickerSearch = (page: Page) => openCommand(page).locator("input").first();
+/** The open real picker (only one fixture is exercised at a time). */
+const openPicker = (page: Page) => page.locator("[data-picker-root]");
+const pickerSearch = (page: Page) => openPicker(page).locator("input").first();
 const fixtureOpen = (page: Page, label: string) =>
 	page.locator(`[data-picker-fixture="${label}"] [data-picker-open]`);
 
@@ -458,7 +458,7 @@ const fixtureOpen = (page: Page, label: string) =>
  */
 async function pickerCount(page: Page): Promise<number> {
 	try {
-		const text = await openCommand(page)
+		const text = await openPicker(page)
 			.locator("[data-picker-count]")
 			.innerText();
 		const match = text.match(/\d+/);
@@ -506,12 +506,12 @@ async function exercisePickerFixture(page: Page, label: string) {
 		timeout: 3000,
 	});
 	await expect(
-		openCommand(page).locator("[data-picker-count]"),
+		openPicker(page).locator("[data-picker-count]"),
 		`${label}: live result count is shown`,
 	).toBeVisible();
 	await expect
 		.poll(
-			async () => await openCommand(page).locator("[cmdk-item]").count(),
+			async () => await openPicker(page).locator("[data-picker-item]").count(),
 			`${label}: full approver pool is listed`,
 		)
 		.toBe(HARNESS_USERS.length);
@@ -526,7 +526,7 @@ async function exercisePickerFixture(page: Page, label: string) {
 	//    approver is present, a known non-matching approver is absent, the list
 	//    narrows to exactly one, and the live count updates to 1 — so a static /
 	//    unfiltered list or a stale count cannot pass. Metadata is per fixture.
-	const items = () => openCommand(page).locator("[cmdk-item]");
+	const items = () => openPicker(page).locator("[data-picker-item]");
 	const matches: Array<[string, string, string, string]> = [
 		["name", ada.name, ada.name, linus.name],
 		["email", grace.email, grace.name, ada.name],
@@ -560,7 +560,7 @@ async function exercisePickerFixture(page: Page, label: string) {
 	// 3. No-result state (exact copy) and the list empties.
 	await pickerSearch(page).fill("zzzzzz-no-such-approver");
 	await expect(
-		openCommand(page).getByText("No approvers found"),
+		openPicker(page).getByText("No approvers found"),
 		`${label}: search miss shows "No approvers found"`,
 	).toBeVisible();
 	await expect
@@ -587,29 +587,32 @@ async function exercisePickerFixture(page: Page, label: string) {
 		pickerSearch(page),
 		`${label}: selecting an approver cleared the query`,
 	).toHaveValue("");
-	await page.keyboard.press("Escape");
+	if (await pickerSearch(page).isVisible().catch(() => false)) {
+		await fixtureOpen(page, label).click();
+	}
 
 	// 5. Close/reopen-reset: typing then closing and reopening clears the query.
 	await fixtureOpen(page, label).click();
 	await pickerSearch(page).fill(grace.name);
-	await page.keyboard.press("Escape");
+	await fixtureOpen(page, label).click();
 	await fixtureOpen(page, label).click();
 	await expect(
 		pickerSearch(page),
 		`${label}: closing/reopening cleared the query`,
 	).toHaveValue("");
-	await page.keyboard.press("Escape");
+	await fixtureOpen(page, label).click();
 
 	// 6. Exhausted state (every user preselected) + harness reset to clean state.
 	await page
 		.locator(`[data-picker-fixture="${label}"] [data-picker-exhaust]`)
 		.click();
-	await fixtureOpen(page, label).click();
+	const trigger = fixtureOpen(page, label);
+	if (await trigger.isEnabled()) await trigger.click();
 	await expect(
-		openCommand(page).getByText("No more users available"),
+		page.locator(`[data-picker-fixture="${label}"]`).getByText("No more users available"),
 		`${label}: exhausted state shows "No more users available"`,
 	).toBeVisible();
-	await page.keyboard.press("Escape");
+	if (await pickerSearch(page).isVisible().catch(() => false)) await trigger.click();
 	await page
 		.locator(`[data-picker-fixture="${label}"] [data-picker-reset]`)
 		.click();

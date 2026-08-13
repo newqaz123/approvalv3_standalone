@@ -4,6 +4,20 @@ import { readFileSync } from 'node:fs'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
+it('exposes shared picker harness selectors', () => {
+  const approverSearchSource = read('src/components/approvals/approver-search-field.tsx')
+  const sharedPickerSource = read('src/components/solutions/custom-approval-picker.tsx')
+
+  assert.match(approverSearchSource, /data-picker-count/)
+  assert.match(sharedPickerSource, /data-picker-open/)
+  assert.match(sharedPickerSource, /data-picker-root/)
+  assert.match(sharedPickerSource, /data-picker-item/)
+  assert.match(sharedPickerSource, /PopoverTrigger/)
+  assert.match(sharedPickerSource, /<Command[^>]*shouldFilter=\{false\}/)
+  assert.match(sharedPickerSource, /CommandList/)
+  assert.match(sharedPickerSource, /CommandItem/)
+})
+
 describe('ApproverSearchField', () => {
   it('exposes an accessible search field with live result count', () => {
     const source = read('src/components/approvals/approver-search-field.tsx')
@@ -51,7 +65,7 @@ describe('CustomApprovalPicker search', () => {
   })
 
   it('uses the command search field with external filtering and a bounded list', () => {
-    assert.match(source, /<Command shouldFilter=\{false\}/)
+    assert.match(source, /<Command[^>]*shouldFilter=\{false\}/)
     assert.match(source, /<CommandList className="max-h-\[260px\] overflow-y-auto"/)
     assert.match(source, /<ApproverSearchField inputKind="command"/)
     assert.match(source, /resultCount=\{filteredUsers\.length\}/)
@@ -102,6 +116,9 @@ function assertLiveModalPicker(path: string, harnessName: string) {
   )
   assert.match(source, /const filteredUsers = filterApproversByQuery\(unselectedUsers, searchQuery\)/)
   assert.match(source, /<ApproverSearchField/)
+  assert.match(source, /data-picker-open/)
+  assert.match(source, /data-picker-root/)
+  assert.match(source, /data-picker-item/)
   assert.match(source, /No approvers found/)
   assert.match(source, /No more users available/)
   assert.match(source, /max-h-\[260px\] overflow-y-auto/)
@@ -166,6 +183,9 @@ describe('Legacy solution modal CustomApprovalPicker search', () => {
       /\{isExpanded && \([\s\S]*<ApproverSearchField[\s\S]*\)\}/,
     )
     assert.match(source, /<ApproverSearchField/)
+    assert.match(source, /data-picker-open/)
+    assert.match(source, /data-picker-root/)
+    assert.match(source, /data-picker-item/)
     assert.match(source, /resultCount=\{filteredUsers\.length\}/)
     assert.match(source, /No more users available/)
     assert.match(source, /No approvers found/)
