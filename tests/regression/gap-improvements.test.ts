@@ -36,7 +36,10 @@ describe('Gapforimprove regressions', () => {
     const requestFilters = read('src/components/requests/request-filters.tsx')
 
     assert.match(requestFilters, /gap-2/)
-    assert.ok(requestFilters.includes('lg:grid-cols-[minmax(16rem,1.4fr)_repeat(5,minmax(0,1fr))]'))
+    assert.match(requestFilters, /data-filter-tier="primary"/)
+    assert.match(requestFilters, /data-filter-tier="status"/)
+    assert.match(requestFilters, /lg:grid-cols-3/)
+    assert.ok(requestFilters.includes('2xl:grid-cols-[minmax(20rem,1.8fr)_repeat(4,minmax(10rem,1fr))_minmax(11rem,auto)]'))
     assert.match(requestFilters, /h-10/)
     assert.match(requestFilters, /From date/)
     assert.match(requestFilters, /To date/)

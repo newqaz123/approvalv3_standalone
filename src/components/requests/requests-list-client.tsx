@@ -70,7 +70,7 @@ export function RequestsListClient({
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Requests</h1>
+          <h1 className="text-3xl font-bold">Requests</h1>
           <p className="text-muted-foreground">
             View and track improvement requests from your department
           </p>
@@ -78,7 +78,7 @@ export function RequestsListClient({
         <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
           <BulkDeleteByDateRange />
           <Button 
-            className="w-full sm:w-auto"
+            className="w-full bg-slate-950 text-white hover:bg-slate-800 sm:w-auto"
             onClick={() => setShowNewRequestModal(true)}
           >
             <Plus className="mr-2 h-4 w-4" />

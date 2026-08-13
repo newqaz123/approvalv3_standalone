@@ -102,15 +102,18 @@ export function RequestFilters({ departments, requesters, onFilterChange }: Requ
         )}
       </div>
 
-      <div className="grid grid-cols-1 gap-2 md:grid-cols-2 lg:grid-cols-[minmax(16rem,1.4fr)_repeat(5,minmax(0,1fr))]">
-        <div>
+      <div
+        data-filter-tier="primary"
+        className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-[minmax(20rem,1.8fr)_repeat(4,minmax(10rem,1fr))_minmax(11rem,auto)]"
+      >
+        <div className="md:col-span-2 lg:col-span-2 2xl:col-span-1">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
             <Input
               placeholder="Search title or description..."
               value={filters.search || ''}
               onChange={(e) => updateFilter('search', e.target.value)}
-              className="h-10 min-h-10 pl-9"
+              className="h-10 min-h-10 bg-white pl-9"
             />
           </div>
         </div>
@@ -168,7 +171,7 @@ export function RequestFilters({ departments, requesters, onFilterChange }: Requ
               if (!e.currentTarget.value) e.currentTarget.type = 'text'
             }}
             onChange={(e) => updateFilter('dateFrom', e.target.value)}
-            className="h-10 min-h-10"
+            className="h-10 min-h-10 bg-white"
           />
         </div>
 
@@ -187,7 +190,7 @@ export function RequestFilters({ departments, requesters, onFilterChange }: Requ
               if (!e.currentTarget.value) e.currentTarget.type = 'text'
             }}
             onChange={(e) => updateFilter('dateTo', e.target.value)}
-            className="h-10 min-h-10"
+            className="h-10 min-h-10 bg-white"
           />
         </div>
 
@@ -219,7 +222,7 @@ export function RequestFilters({ departments, requesters, onFilterChange }: Requ
         </Button>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div data-filter-tier="status" className="flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3">
         <span className="text-xs font-medium text-gray-600">Status</span>
         {ALL_STATUSES.map((status) => {
           const isChecked = filters.statuses?.includes(status) || false
