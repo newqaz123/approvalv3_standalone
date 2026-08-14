@@ -229,7 +229,7 @@ export function RequestFilters({ departments, requesters, onFilterChange }: Requ
           return (
             <div
               key={status}
-              className="flex h-8 cursor-pointer items-center gap-1.5 rounded-md border bg-white px-2 text-xs font-normal text-gray-700 shadow-sm"
+              className="flex h-10 cursor-pointer items-center gap-1.5 rounded-md border bg-white px-2 text-xs font-normal text-gray-700 shadow-sm"
             >
               <Checkbox
                 id={`request-status-${status}`}

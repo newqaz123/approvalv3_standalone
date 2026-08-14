@@ -228,14 +228,14 @@ export function RequestTable({ initialData, onDataRefresh }: RequestTableProps) 
                   tabIndex={0}
                   aria-label={`Open request ${row.original.title}`}
                   className={cn(
-                    "min-h-[60px] cursor-pointer hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500",
+                    "cursor-pointer hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500",
                     row.original.workRequisitionReceived && "bg-sky-50 hover:bg-sky-100/60"
                   )}
                   onClick={() => handleRowClick(row.original.id)}
                   onKeyDown={(event) => handleRowKeyDown(event, row.original.id)}
                 >
                   {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id} className="py-3" style={{ width: cell.column.getSize() }}>
+                    <TableCell key={cell.id} className="h-[60px] py-3" style={{ width: cell.column.getSize() }}>
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </TableCell>
                   ))}

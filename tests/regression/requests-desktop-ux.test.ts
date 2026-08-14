@@ -24,6 +24,8 @@ describe('Requests desktop filters', () => {
   it('renders distinct primary and status tiers with responsive controls', () => {
     assert.match(filters, /data-filter-tier="primary"/)
     assert.match(filters, /data-filter-tier="status"/)
+    assert.match(filters, /className="flex h-10 cursor-pointer/)
+    assert.doesNotMatch(filters, /className="flex h-8 cursor-pointer/)
     assert.match(filters, /lg:grid-cols-3/)
     assert.ok(filters.includes('2xl:grid-cols-[minmax(20rem,1.8fr)_repeat(4,minmax(10rem,1fr))_minmax(11rem,auto)]'))
     assert.match(filters, /Clear All/)
@@ -62,7 +64,8 @@ describe('Requests desktop table proportions and keyboard rows', () => {
     assert.match(table, /<Table className="min-w-\[[^\]]+\] table-fixed"/)
     assert.match(table, /line-clamp-2/)
     assert.match(table, /whitespace-nowrap/)
-    assert.match(table, /min-h-\[60px\]/)
+    assert.match(table, /<TableCell[^>]*className="h-\[60px\] py-3"/)
+    assert.doesNotMatch(table, /<TableRow[\s\S]{0,300}min-h-\[60px\]/)
     assert.match(table, /tabIndex=\{0\}/)
     assert.match(table, /aria-label=\{`Open request /)
     assert.doesNotMatch(table, /<TableRow[\s\S]{0,300}role="button"/)
