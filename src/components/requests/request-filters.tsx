@@ -87,26 +87,11 @@ export function RequestFilters({ departments, requesters, onFilterChange }: Requ
 
   return (
     <div className="space-y-3 rounded-lg border bg-gray-50 p-3">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-700">Filters</h3>
-        {hasActiveFilters && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={clearFilters}
-            className="h-8 text-xs"
-          >
-            <X className="h-3 w-3 mr-1" />
-            Clear All
-          </Button>
-        )}
-      </div>
-
       <div
         data-filter-tier="primary"
-        className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-[minmax(20rem,1.8fr)_repeat(4,minmax(10rem,1fr))_minmax(11rem,auto)]"
+        className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-[minmax(16rem,1.6fr)_repeat(4,minmax(8.5rem,1fr))_minmax(9rem,auto)_minmax(5.5rem,auto)]"
       >
-        <div className="md:col-span-2 lg:col-span-2 2xl:col-span-1">
+        <div className="md:col-span-2 lg:col-span-2 xl:col-span-1">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
             <Input
@@ -196,7 +181,7 @@ export function RequestFilters({ departments, requesters, onFilterChange }: Requ
 
         <Button
           type="button"
-          variant="outline"
+          variant="ghost"
           onClick={toggleNoWrFilter}
           aria-pressed={showOnlyNoWr}
           className={cn(
@@ -220,16 +205,30 @@ export function RequestFilters({ departments, requesters, onFilterChange }: Requ
           </span>
           <span>Show only no WR</span>
         </Button>
+
+        <Button
+          type="button"
+          variant="outline"
+          onClick={clearFilters}
+          disabled={!hasActiveFilters}
+          className="h-10 min-h-10 text-xs"
+        >
+          <X className="h-3 w-3 mr-1" />
+          Clear All
+        </Button>
       </div>
 
-      <div data-filter-tier="status" className="flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3">
+      <div
+        data-filter-tier="status"
+        className="flex flex-wrap items-center gap-1.5 border-t border-slate-200 pt-3 xl:flex-nowrap xl:gap-2"
+      >
         <span className="text-xs font-medium text-gray-600">Status</span>
         {ALL_STATUSES.map((status) => {
           const isChecked = filters.statuses?.includes(status) || false
           return (
             <div
               key={status}
-              className="flex h-10 cursor-pointer items-center gap-1.5 rounded-md border bg-white px-2 text-xs font-normal text-gray-700 shadow-sm"
+              className="flex h-10 cursor-pointer items-center gap-1.5 rounded-md border bg-white px-2 text-xs font-normal text-gray-700 shadow-sm whitespace-nowrap"
             >
               <Checkbox
                 id={`request-status-${status}`}

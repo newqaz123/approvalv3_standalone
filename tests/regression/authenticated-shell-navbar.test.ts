@@ -69,6 +69,16 @@ describe('authenticated shell and navigation', () => {
     assert.match(source, /setInterval\(fetchPendingCount, 30000\)/)
   })
 
+  it('shows department and email in the secondary user line', () => {
+    const source = read('src/components/navigation/navbar.tsx')
+
+    assert.match(source, /\/api\/user\/department/)
+    assert.match(source, /setDepartmentName\(data\?\.name \?\? null\)/)
+    assert.match(source, /\{departmentName \? `\$\{departmentName\} \u2022 ` : ''\}/)
+    assert.match(source, /\{user\?\.email\}/)
+    assert.doesNotMatch(source, /charAt\(0\)\.toUpperCase\(\)/)
+  })
+
   it('does not re-cap wide operational pages inside the shared shell', () => {
     const widePages = [
       'src/app/(dashboard)/dashboard/page.tsx',

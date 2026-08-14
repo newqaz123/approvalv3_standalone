@@ -35,11 +35,16 @@ describe('Gapforimprove regressions', () => {
   it('/requests filters use a compact responsive layout', () => {
     const requestFilters = read('src/components/requests/request-filters.tsx')
 
-    assert.match(requestFilters, /gap-2/)
+    assert.match(requestFilters, /gap-1\.5/)
     assert.match(requestFilters, /data-filter-tier="primary"/)
     assert.match(requestFilters, /data-filter-tier="status"/)
     assert.match(requestFilters, /lg:grid-cols-3/)
-    assert.ok(requestFilters.includes('2xl:grid-cols-[minmax(20rem,1.8fr)_repeat(4,minmax(10rem,1fr))_minmax(11rem,auto)]'))
+    assert.ok(
+      requestFilters.includes(
+        'xl:grid-cols-[minmax(16rem,1.6fr)_repeat(4,minmax(8.5rem,1fr))_minmax(9rem,auto)_minmax(5.5rem,auto)]'
+      )
+    )
+    assert.match(requestFilters, /xl:flex-nowrap/)
     assert.match(requestFilters, /h-10/)
     assert.match(requestFilters, /From date/)
     assert.match(requestFilters, /To date/)

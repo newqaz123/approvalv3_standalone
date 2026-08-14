@@ -27,6 +27,7 @@ export function Navbar() {
   const pathname = usePathname()
   const [menuOpen, setMenuOpen] = useState(false)
   const [pendingCount, setPendingCount] = useState(0)
+  const [departmentName, setDepartmentName] = useState<string | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
 
   const userRole = user?.role || null
@@ -78,6 +79,29 @@ export function Navbar() {
       window.removeEventListener('approvalapp:request-data-changed', fetchPendingCount)
       clearInterval(interval)
     }
+  }, [user?.id])
+
+  // Department name for the secondary user line. Read-only lookup keyed to the
+  // signed-in user, mirroring the pending-count fetch pattern above.
+  useEffect(() => {
+    if (!user?.id) {
+      setDepartmentName(null)
+      return
+    }
+
+    async function fetchDepartmentName() {
+      try {
+        const response = await fetch('/api/user/department')
+        if (response.ok) {
+          const data = await response.json()
+          setDepartmentName(data?.name ?? null)
+        }
+      } catch (error) {
+        console.error('Failed to fetch user department:', error)
+      }
+    }
+
+    fetchDepartmentName()
   }, [user?.id])
 
   // Sign out always redirects to the relative /sign-in route so the browser
@@ -191,7 +215,7 @@ export function Navbar() {
             <div className="text-right">
               <p className="text-sm font-medium text-gray-900">{user?.name || 'User'}</p>
               <span data-user-secondary className="hidden 2xl:inline text-xs text-gray-500">
-                {userRole ? userRole.charAt(0).toUpperCase() + userRole.slice(1).replace('_', ' ') : 'User'} • {user?.email}
+                {departmentName ? `${departmentName} • ` : ''}{user?.email}
               </span>
             </div>
 

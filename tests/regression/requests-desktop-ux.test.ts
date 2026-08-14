@@ -27,8 +27,22 @@ describe('Requests desktop filters', () => {
     assert.match(filters, /className="flex h-10 cursor-pointer/)
     assert.doesNotMatch(filters, /className="flex h-8 cursor-pointer/)
     assert.match(filters, /lg:grid-cols-3/)
-    assert.ok(filters.includes('2xl:grid-cols-[minmax(20rem,1.8fr)_repeat(4,minmax(10rem,1fr))_minmax(11rem,auto)]'))
+    assert.ok(
+      filters.includes(
+        'xl:grid-cols-[minmax(16rem,1.6fr)_repeat(4,minmax(8.5rem,1fr))_minmax(9rem,auto)_minmax(5.5rem,auto)]'
+      )
+    )
+    assert.doesNotMatch(filters, /2xl:grid-cols-/)
+  })
+
+  it('collapses the filter block to exactly two rows without a heading', () => {
+    assert.doesNotMatch(filters, />\s*Filters\s*</)
+    assert.doesNotMatch(filters, /font-semibold text-gray-700/)
     assert.match(filters, /Clear All/)
+    assert.match(filters, /disabled=\{!hasActiveFilters\}/)
+    assert.doesNotMatch(filters, /\{hasActiveFilters && \(/)
+    assert.match(filters, /data-filter-tier="status"[^>]*flex flex-wrap[^>]*xl:flex-nowrap/)
+    assert.match(filters, /whitespace-nowrap/)
   })
 })
 
