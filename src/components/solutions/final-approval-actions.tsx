@@ -34,7 +34,7 @@ import { CustomApprovalPicker } from '@/components/solutions/custom-approval-pic
 
 interface InitiateFinalApprovalButtonProps {
   requestId: string
-  departmentUsers: Array<{ id: string; name: string; email: string; level: number | null }>
+  departmentUsers: Array<{ id: string; name: string; email: string; departmentName: string | null; level: number | null }>
   onSuccess?: () => void
 }
 

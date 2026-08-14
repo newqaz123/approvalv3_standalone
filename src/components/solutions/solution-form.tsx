@@ -55,7 +55,7 @@ interface SolutionFormProps {
   requestId: string
   requestTitle: string
   currentUserId: string
-  allUsers: Array<{ id: string; name: string; email: string; level: number | null }>
+  allUsers: Array<{ id: string; name: string; email: string; departmentName: string | null; level: number | null }>
   previousSolution?: {
     title: string
     description: string

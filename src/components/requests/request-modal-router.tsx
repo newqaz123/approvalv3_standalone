@@ -78,7 +78,7 @@ function RequestModalRouterContent({
     subcontractors: Array<{ id: string; name: string }>
   } | null>(null)
 
-  const [availableUsers, setAvailableUsers] = useState<Array<{ id: string; name: string; email: string; level: number | undefined; role: string }>>([])
+  const [availableUsers, setAvailableUsers] = useState<Array<{ id: string; name: string; email: string; level: number | undefined; role: string; departmentName: string | null }>>([])
 
   useEffect(() => {
     if (open && requestId) {

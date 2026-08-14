@@ -3,9 +3,9 @@ import assert from 'node:assert/strict'
 import { filterApproversByQuery } from '@/lib/approver-search'
 
 const users = [
-  { id: 'a', name: 'Kanokwan Srisawat', email: 'kanokwan@example.com', role: 'Procurement Lead', level: 2 },
-  { id: 'b', name: 'Narin Chantarat', email: 'narin@example.com', role: 'System Admin', level: 1 },
-  { id: 'c', name: 'Patthira Nopphakun', email: 'patthira@example.com', role: null, level: 3 },
+  { id: 'a', name: 'Kanokwan Srisawat', email: 'kanokwan@example.com', role: 'Procurement Lead', departmentName: 'Central Procurement', level: 2 },
+  { id: 'b', name: 'Narin Chantarat', email: 'narin@example.com', role: 'System Admin', departmentName: 'Corporate Services', level: 1 },
+  { id: 'c', name: 'Patthira Nopphakun', email: 'patthira@example.com', role: null, departmentName: null, level: 3 },
 ]
 
 describe('filterApproversByQuery', () => {
@@ -15,8 +15,13 @@ describe('filterApproversByQuery', () => {
   })
 
   it('matches optional role and level metadata', () => {
-    assert.deepEqual(filterApproversByQuery(users, 'procurement').map((u) => u.id), ['a'])
+    assert.deepEqual(filterApproversByQuery(users, 'procurement lead').map((u) => u.id), ['a'])
     assert.deepEqual(filterApproversByQuery(users, 'level 3').map((u) => u.id), ['c'])
+  })
+
+  it('matches department names case-insensitively', () => {
+    assert.deepEqual(filterApproversByQuery(users, 'CENTRAL PROCUREMENT').map((u) => u.id), ['a'])
+    assert.deepEqual(filterApproversByQuery(users, 'corporate services').map((u) => u.id), ['b'])
   })
 
   it('returns all users for whitespace and none for a miss without mutating order', () => {

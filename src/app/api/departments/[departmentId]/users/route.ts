@@ -23,11 +23,21 @@ export async function GET(
         name: true,
         email: true,
         level: true,
+        department: {
+          select: {
+            name: true,
+          },
+        },
       },
       orderBy: { name: 'asc' },
     })
 
-    return NextResponse.json(users)
+    return NextResponse.json(
+      users.map(({ department, ...user }) => ({
+        ...user,
+        departmentName: department?.name ?? null,
+      }))
+    )
   } catch (error) {
     console.error('Failed to fetch department users:', error)
     return NextResponse.json({ error: 'Failed to fetch users' }, { status: 500 })

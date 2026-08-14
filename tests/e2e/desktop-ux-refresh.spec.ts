@@ -422,26 +422,29 @@ const HARNESS_FIXTURES = [
 
 /**
  * Deterministic, server-action-free approver pool shared by every harness
- * fixture. Each entry carries name + email + role + level so search parity can
- * be asserted across all four metadata axes.
+ * fixture. Each entry carries name + email + department + role + level so search parity can
+ * be asserted across all five metadata axes.
  */
 const HARNESS_USERS = [
 	{
 		name: "Ada Lovelace",
 		email: "ada@example.com",
 		role: "Engineering",
+		department: "Research and Development",
 		level: "Level 1",
 	},
 	{
 		name: "Grace Hopper",
 		email: "grace@example.com",
 		role: "Production",
+		department: "Manufacturing Operations",
 		level: "Level 2",
 	},
 	{
 		name: "Linus Torvalds",
 		email: "linus@example.com",
 		role: "Quality",
+		department: "Quality Assurance",
 		level: "Level 3",
 	},
 ] as const;
@@ -536,7 +539,7 @@ async function exercisePickerFixture(page: Page, label: string) {
 		)
 		.toBe(HARNESS_USERS.length);
 
-	// 2. Match by name / email / role / level. For each query the matching
+	// 2. Match by name / email / department / role / level. For each query the matching
 	//    approver is present, a known non-matching approver is absent, the list
 	//    narrows to exactly one, and the live count updates to 1 — so a static /
 	//    unfiltered list or a stale count cannot pass. Metadata is per fixture.
@@ -544,6 +547,7 @@ async function exercisePickerFixture(page: Page, label: string) {
 	const matches: Array<[string, string, string, string]> = [
 		["name", ada.name, ada.name, linus.name],
 		["email", grace.email, grace.name, ada.name],
+		["department", ada.department, ada.name, grace.name],
 		["role", linus.role, linus.name, grace.name],
 		["level", grace.level, grace.name, linus.name],
 	];

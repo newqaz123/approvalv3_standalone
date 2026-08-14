@@ -3,6 +3,7 @@ export interface ApproverSearchFields {
   name: string
   email: string
   role?: string | null
+  departmentName?: string | null
   level?: number | null
 }
 
@@ -19,6 +20,9 @@ export function filterApproversByQuery<T extends ApproverSearchFields>(
     const parts = [user.name, user.email]
     if (user.role) {
       parts.push(user.role)
+    }
+    if (user.departmentName) {
+      parts.push(user.departmentName)
     }
     if (user.level != null) {
       parts.push(String(user.level), `Level ${user.level}`)

@@ -24,6 +24,7 @@ interface User {
   id: string
   name: string
   email: string
+  departmentName: string | null
   level: number | null
 }
 
@@ -130,7 +131,7 @@ export function CustomApprovalPicker({
                         <User className="mr-2 h-4 w-4" />
                         <span className="flex-1">{user.name}</span>
                         <span className="text-xs text-muted-foreground">
-                          {user.email}
+                          {user.departmentName ?? 'No department'} • {user.email}
                         </span>
                         {user.level != null && (
                           <span className="text-xs text-muted-foreground">
@@ -180,7 +181,7 @@ export function CustomApprovalPicker({
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate">{user.name}</p>
                   <p className="text-xs text-muted-foreground truncate">
-                    {user.email}
+                    {user.departmentName ?? 'No department'} • {user.email}
                   </p>
                 </div>
                 <div className="flex items-center gap-1">

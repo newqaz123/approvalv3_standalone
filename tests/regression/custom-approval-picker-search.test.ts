@@ -23,7 +23,7 @@ describe('ApproverSearchField', () => {
     const source = read('src/components/approvals/approver-search-field.tsx')
 
     assert.match(source, /Search approvers/)
-    assert.match(source, /Search by name, email, role, or level/)
+    assert.match(source, /Search by name, email, department, role, or level/)
     assert.match(source, /role="status"/)
     assert.match(source, /aria-live="polite"/)
     assert.match(source, /1 approver/)
@@ -195,7 +195,7 @@ describe('Legacy solution modal CustomApprovalPicker search', () => {
     )
     assert.match(source, /max-h-\[260px\] overflow-y-auto/)
     assert.match(source, /user\.email/)
-    assert.match(source, /user\.role/)
+    assert.match(source, /user\.departmentName/)
     assert.match(source, /<Switch checked=\{isExpanded\}/)
     assert.match(source, /setIsExpanded\(false\)/)
     assert.match(source, /setSearchQuery\(''\)/)

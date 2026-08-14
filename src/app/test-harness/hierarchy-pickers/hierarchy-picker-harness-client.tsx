@@ -9,8 +9,8 @@ import { SolutionModalApprovalPickerHarness } from '@/components/requests/soluti
 
 /**
  * Deterministic, server-action-free approver pool shared by every harness
- * fixture. Each entry carries name + email + role + level so search parity can
- * be exercised across all four metadata axes. Level values are numeric so the
+ * fixture. Each entry carries name + email + department + role + level so search parity can
+ * be exercised across all five metadata axes. Level values are numeric so the
  * shared picker's `level: number | null` contract is satisfied; the search
  * helper renders them as "Level N" at runtime.
  */
@@ -19,13 +19,14 @@ interface HarnessUser {
   name: string
   email: string
   role: string
+  departmentName: string
   level: number
 }
 
 const HARNESS_USERS: HarnessUser[] = [
-  { id: 'ada', name: 'Ada Lovelace', email: 'ada@example.com', role: 'Engineering', level: 1 },
-  { id: 'grace', name: 'Grace Hopper', email: 'grace@example.com', role: 'Production', level: 2 },
-  { id: 'linus', name: 'Linus Torvalds', email: 'linus@example.com', role: 'Quality', level: 3 },
+  { id: 'ada', name: 'Ada Lovelace', email: 'ada@example.com', role: 'Engineering', departmentName: 'Research and Development', level: 1 },
+  { id: 'grace', name: 'Grace Hopper', email: 'grace@example.com', role: 'Production', departmentName: 'Manufacturing Operations', level: 2 },
+  { id: 'linus', name: 'Linus Torvalds', email: 'linus@example.com', role: 'Quality', departmentName: 'Quality Assurance', level: 3 },
 ]
 
 const ALL_USER_IDS = HARNESS_USERS.map((user) => user.id)

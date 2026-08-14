@@ -71,6 +71,7 @@ interface User {
   name: string
   email: string
   role: string
+  departmentName: string | null
   level?: number
 }
 
@@ -218,7 +219,7 @@ function CustomApprovalPicker({
                   Level {index + 1}: {user.name}
                 </p>
                 <p className="text-xs text-slate-400 truncate">
-                  {user.role} • {user.email}
+                  {user.departmentName ?? 'No department'} • {user.email}
                 </p>
               </div>
               <div className="flex items-center gap-1">
@@ -288,7 +289,7 @@ function CustomApprovalPicker({
                     {user.name}
                   </p>
                   <p className="text-xs text-slate-500">
-                    {user.role} • {user.email}
+                    {user.departmentName ?? 'No department'} • {user.email}
                   </p>
                 </button>
               ))}

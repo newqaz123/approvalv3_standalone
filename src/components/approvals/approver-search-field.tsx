@@ -40,7 +40,7 @@ export function ApproverSearchField({
           autoFocus={autoFocus}
           value={value}
           onValueChange={onChange}
-          placeholder="Search by name, email, role, or level"
+          placeholder="Search by name, email, department, role, or level"
           className="min-h-11 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         />
       ) : (
@@ -52,7 +52,7 @@ export function ApproverSearchField({
             autoFocus={autoFocus}
             value={value}
             onChange={(event) => onChange(event.target.value)}
-            placeholder="Search by name, email, role, or level"
+            placeholder="Search by name, email, department, role, or level"
             className="min-h-11 pl-9 focus-visible:ring-1"
           />
         </div>

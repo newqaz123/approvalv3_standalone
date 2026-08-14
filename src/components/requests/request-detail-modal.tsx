@@ -90,7 +90,7 @@ export function RequestDetailModal({
   const [canApproveFinal, setCanApproveFinal] = useState(false)
   const [finalApproval, setFinalApproval] = useState<any>(null)
   const [finalApprovals, setFinalApprovals] = useState<any[]>([])
-  const [departmentUsers, setDepartmentUsers] = useState<Array<{ id: string; name: string; email: string; level: number | null }>>([])
+  const [departmentUsers, setDepartmentUsers] = useState<Array<{ id: string; name: string; email: string; departmentName: string | null; level: number | null }>>([])
   const [showStaleWarning, setShowStaleWarning] = useState(false)
   const [isUserInteracting, setIsUserInteracting] = useState(false)
   const [interactionTimer, setInteractionTimer] = useState<NodeJS.Timeout | null>(null)
