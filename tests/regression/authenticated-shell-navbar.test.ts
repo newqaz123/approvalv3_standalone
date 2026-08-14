@@ -17,6 +17,10 @@ describe('authenticated shell and navigation', () => {
     }
   })
 
+  it('scans shared lib constants so responsive shell utilities are generated', () => {
+    assert.match(read('tailwind.config.ts'), /src\/lib\/\*\*\/\*\.\{js,ts,jsx,tsx,mdx\}/)
+  })
+
   it('uses the shared shell in every authenticated layout', () => {
     for (const path of [dashboardLayout, ...adminLayouts]) {
       const source = read(path)
