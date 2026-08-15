@@ -4,6 +4,7 @@ import { Component, type ReactNode } from 'react'
 import dynamic from 'next/dynamic'
 import { FormattedTextarea } from '@/components/ui/formatted-textarea'
 import type { RichTextEditorProps } from '@/components/rich-text/rich-text-editor'
+import { sanitizeRichText } from '@/lib/rich-text-sanitizer'
 
 const RichTextEditorInner = dynamic<RichTextEditorProps>(
   () => import('@/components/rich-text/rich-text-editor'),
@@ -36,7 +37,7 @@ export function RichTextEditor(props: RichTextEditorProps) {
       fallback={
         <FormattedTextarea
           value={props.value}
-          onChange={(e) => props.onChange(e.target.value)}
+          onChange={(e) => props.onChange(sanitizeRichText(e.target.value))}
           disabled={props.disabled}
           rows={5}
         />
