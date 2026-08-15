@@ -12,6 +12,7 @@ export function sanitizeRichText(html: string): string {
       allowedTags: [...RICH_TEXT_ALLOWED_TAGS],
       allowedAttributes: { a: ['href', 'target', 'rel'] },
       allowedSchemes: ['http', 'https', 'mailto'],
+      allowProtocolRelative: false,
       transformTags: {
         a: (tagName, attribs) => ({
           tagName,

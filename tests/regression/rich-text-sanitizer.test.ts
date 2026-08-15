@@ -28,6 +28,26 @@ describe('sanitizeRichText', () => {
     assert.ok(!out.includes('<img'))
   })
 
+  it('strips protocol-relative and obfuscated hostile hrefs', () => {
+    for (const href of [
+      '//evil.com',
+      'JAVASCRIPT:alert(1)',
+      'java\tscript:alert(1)',
+      '&#106;avascript:alert(1)',
+      'vbscript:alert(1)',
+    ]) {
+      const out = sanitizeRichText(`<a href="${href}">hostile</a>`)
+      assert.ok(!/<a\b[^>]*\bhref=/i.test(out), `href should be stripped: ${href}`)
+    }
+  })
+
+  it('keeps safe relative and allowed-scheme hrefs', () => {
+    for (const href of ['/relative', 'relative/path', 'https://example.com', 'http://example.com', 'mailto:user@example.com']) {
+      const out = sanitizeRichText(`<a href="${href}">safe</a>`)
+      assert.ok(out.includes(`href="${href}"`), `href should survive: ${href}`)
+    }
+  })
+
   it('strips disallowed structural markup and styling attributes', () => {
     const out = sanitizeRichText('<table><tr><td>t</td></tr></table><p style="color:red" class="x" id="y">keep</p><span style="font-size:99px">s</span>')
     assert.ok(!out.includes('<table'))
