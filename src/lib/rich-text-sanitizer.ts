@@ -5,6 +5,13 @@ export const RICH_TEXT_ALLOWED_TAGS = [
   'p', 'br', 'strong', 'em', 'u', 's', 'ul', 'ol', 'li', 'h2', 'h3', 'a',
 ] as const
 
+/** Exact allowed link schemes. Scheme-less/relative hrefs are stripped (text kept). */
+const ALLOWED_HREF_RE = /^(?:https?:|mailto:)/i
+
+function isAllowedHref(href: string | undefined): href is string {
+  return typeof href === 'string' && ALLOWED_HREF_RE.test(href)
+}
+
 /** Whitelist-sanitize authored description HTML. Never throws. */
 export function sanitizeRichText(html: string): string {
   try {
@@ -14,10 +21,13 @@ export function sanitizeRichText(html: string): string {
       allowedSchemes: ['http', 'https', 'mailto'],
       allowProtocolRelative: false,
       transformTags: {
-        a: (tagName, attribs) => ({
-          tagName,
-          attribs: { ...attribs, target: '_blank', rel: 'noopener noreferrer' },
-        }),
+        a: (tagName, attribs) => {
+          const next: Record<string, string> = { target: '_blank', rel: 'noopener noreferrer' }
+          if (isAllowedHref(attribs.href)) {
+            next.href = attribs.href
+          }
+          return { tagName, attribs: next }
+        },
       },
       disallowedTagsMode: 'discard',
     })

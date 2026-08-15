@@ -25,10 +25,7 @@ export function FormattedText({
   if (containsRichTextHtml(text)) {
     if (maxVisibleCharacters === undefined) {
       const html = { __html: sanitizeRichText(text) }
-      if (className) {
-        return <span className={cn(className)} dangerouslySetInnerHTML={html} />
-      }
-      return <span dangerouslySetInnerHTML={html} />
+      return <span className={cn(className, 'rich-text')} dangerouslySetInnerHTML={html} />
     }
     // Truncated contexts (tables, previews) show plain text so slicing can't
     // break tags mid-stream. truncateFormattedText returns tokens directly.

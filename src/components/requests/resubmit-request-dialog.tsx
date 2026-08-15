@@ -36,7 +36,7 @@ const resubmitSchema = z.object({
   description: z
     .string()
     .min(1, 'Description is required')
-    .max(5000, 'Description too long'),
+    .max(20000, 'Description too long'),
 })
 
 type ResubmitFormValues = z.infer<typeof resubmitSchema>

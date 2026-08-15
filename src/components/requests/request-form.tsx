@@ -19,7 +19,7 @@ import {
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { FormattedTextarea } from '@/components/ui/formatted-textarea'
+import { RichTextEditor } from '@/components/rich-text/rich-text-editor-lazy'
 import {
   Select,
   SelectContent,
@@ -332,11 +332,10 @@ export function RequestForm({ templates = [], defaultTemplateId, onSuccess }: Re
             <FormItem>
               <FormLabel className="text-base md:text-sm">Description *</FormLabel>
               <FormControl>
-                <FormattedTextarea
-                  placeholder="Provide detailed information about your request..."
-                  rows={6}
-                  {...field}
-                  className="min-h-32 resize-y"
+                <RichTextEditor
+                  value={field.value ?? ''}
+                  onChange={field.onChange}
+                  minHeight={192}
                 />
               </FormControl>
               <FormDescription className="text-base md:text-sm">

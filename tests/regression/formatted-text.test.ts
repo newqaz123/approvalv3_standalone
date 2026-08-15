@@ -178,3 +178,24 @@ describe("FormattedText dual-format rendering", () => {
 		assert.match(source, /tokenizeFormattedText\(/);
 	});
 });
+
+describe("FormattedText rich output styling", () => {
+	it("applies the rich-text class on the sanitized HTML span", () => {
+		const source = read("src/components/ui/formatted-text.tsx");
+		assert.match(source, /cn\(className,\s*["']rich-text["']\)/);
+	});
+
+	it("defines rich-text typography styles in globals.css", () => {
+		const css = read("src/app/globals.css");
+		assert.match(css, /\.rich-text h2 \{/, "h2 rule missing");
+		assert.match(css, /\.rich-text h3 \{/, "h3 rule missing");
+		assert.match(css, /\.rich-text ul \{[^}]*list-style:\s*disc/, "ul disc missing");
+		assert.match(css, /\.rich-text ol \{[^}]*list-style:\s*decimal/, "ol decimal missing");
+		assert.match(css, /\.rich-text a \{/, "anchor rule missing");
+	});
+
+	it("reuses rich-text styling inside the editor body", () => {
+		const source = read("src/components/rich-text/rich-text-editor.tsx");
+		assert.match(source, /rich-text prose-rich-text/);
+	});
+});

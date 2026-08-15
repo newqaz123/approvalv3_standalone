@@ -85,7 +85,7 @@ export default function RichTextEditor({
         'aria-multiline': 'true',
         role: 'textbox',
         class:
-          'prose-rich-text min-h-[var(--rich-min-h)] w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm leading-relaxed text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
+          'rich-text prose-rich-text min-h-[var(--rich-min-h)] w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm leading-relaxed text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
         style: `--rich-min-h: ${minHeight}px`,
       },
     },

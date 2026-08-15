@@ -324,11 +324,18 @@ export function renderDescriptionHtml(
 	maxVisibleCharacters?: number,
 ): string {
 	if (containsRichTextHtml(source)) {
+		const sanitized = sanitizeRichText(source);
 		if (maxVisibleCharacters === undefined) {
-			return sanitizeRichText(source);
+			return sanitized;
 		}
+		const plain = richTextToPlainText(source);
+		if (plain.length <= maxVisibleCharacters) {
+			// Fits the budget: keep the formatting (email short descriptions).
+			return sanitized;
+		}
+		// Over budget: truncate the visible text only — never slice tags.
 		return escapeFormattedTextHtml(
-			richTextToPlainText(source).slice(0, maxVisibleCharacters),
+			plain.slice(0, maxVisibleCharacters),
 		);
 	}
 	return renderFormattedTextHtml(source, maxVisibleCharacters);

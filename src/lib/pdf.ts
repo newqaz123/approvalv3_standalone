@@ -313,6 +313,7 @@ export function renderRequestEvidenceHTML(data: RequestPDFData): string {
     .description ul, .description ol { margin: 6px 0 6px 20px; padding: 0; }
     .description li { margin: 2px 0; }
     .description a { color: #1d4ed8; text-decoration: underline; }
+    .description a::after { content: " (" attr(href) ")"; font-size: 9px; color: #64748b; }
     table {
       width: 100%;
       border-collapse: collapse;

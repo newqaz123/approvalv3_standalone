@@ -5,9 +5,10 @@ import { readFileSync } from 'node:fs'
 const read = (path: string) => readFileSync(path, 'utf8')
 
 describe('formatted description editors', () => {
-  it('uses the formatted textarea for new request descriptions', () => {
+  it('uses the rich text editor for new request descriptions', () => {
     const source = read('src/components/requests/request-form.tsx')
-    assert.match(source, /FormattedTextarea/)
+    assert.match(source, /RichTextEditor/)
+    assert.doesNotMatch(source, /<FormattedTextarea/)
     assert.match(source, /name="description"/)
   })
 
@@ -38,7 +39,9 @@ describe('formatted description editors', () => {
   it('keeps the 20000-character rich description limit on client forms', () => {
     assert.match(read('src/components/requests/request-form.tsx'), /max\(20000/)
     assert.match(read('src/components/solutions/solution-form.tsx'), /max\(20000/)
+    assert.match(read('src/components/requests/resubmit-request-dialog.tsx'), /max\(20000/)
     assert.doesNotMatch(read('src/components/requests/request-form.tsx'), /max\(5000/)
     assert.doesNotMatch(read('src/components/solutions/solution-form.tsx'), /max\(5000/)
+    assert.doesNotMatch(read('src/components/requests/resubmit-request-dialog.tsx'), /max\(5000/)
   })
 })

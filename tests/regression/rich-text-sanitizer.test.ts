@@ -41,10 +41,15 @@ describe('sanitizeRichText', () => {
     }
   })
 
-  it('keeps safe relative and allowed-scheme hrefs', () => {
-    for (const href of ['/relative', 'relative/path', 'https://example.com', 'http://example.com', 'mailto:user@example.com']) {
+  it('keeps allowed-scheme hrefs and strips scheme-less relative ones', () => {
+    for (const href of ['https://example.com', 'http://example.com', 'mailto:user@example.com', 'HTTPS://example.com']) {
       const out = sanitizeRichText(`<a href="${href}">safe</a>`)
       assert.ok(out.includes(`href="${href}"`), `href should survive: ${href}`)
+    }
+    for (const href of ['/relative', 'relative/path']) {
+      const out = sanitizeRichText(`<a href="${href}">rel</a>`)
+      assert.ok(!/<a\b[^>]*\bhref=/i.test(out), `href should be stripped: ${href}`)
+      assert.ok(out.includes('>rel</a>'), `link text should be kept: ${href}`)
     }
   })
 
