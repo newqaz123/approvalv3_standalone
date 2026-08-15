@@ -1,3 +1,9 @@
+import {
+	containsRichTextHtml,
+	richTextToPlainText,
+	sanitizeRichText,
+} from "@/lib/rich-text-sanitizer";
+
 export type FormattedTextToken =
 	| { type: "text" | "bold"; value: string }
 	| { type: "lineBreak" };
@@ -306,4 +312,37 @@ export function renderFormattedTextPlainText(
 	maxVisibleCharacters?: number,
 ): string {
 	return tokensToVisibleString(selectTokens(source, maxVisibleCharacters));
+}
+
+/**
+ * One description renderer for email + PDF: sanitized HTML for rich rows,
+ * legacy markup otherwise. Truncation happens on visible text only — never
+ * on tags.
+ */
+export function renderDescriptionHtml(
+	source: string,
+	maxVisibleCharacters?: number,
+): string {
+	if (containsRichTextHtml(source)) {
+		if (maxVisibleCharacters === undefined) {
+			return sanitizeRichText(source);
+		}
+		return escapeFormattedTextHtml(
+			richTextToPlainText(source).slice(0, maxVisibleCharacters),
+		);
+	}
+	return renderFormattedTextHtml(source, maxVisibleCharacters);
+}
+
+export function renderDescriptionPlainText(
+	source: string,
+	maxVisibleCharacters?: number,
+): string {
+	if (containsRichTextHtml(source)) {
+		const plain = richTextToPlainText(source);
+		return maxVisibleCharacters === undefined
+			? plain
+			: plain.slice(0, maxVisibleCharacters);
+	}
+	return renderFormattedTextPlainText(source, maxVisibleCharacters);
 }

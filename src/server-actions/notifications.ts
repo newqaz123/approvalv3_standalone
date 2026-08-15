@@ -2,8 +2,8 @@
 
 import { auth } from "@/lib/auth-config";
 import {
-	renderFormattedTextHtml,
-	renderFormattedTextPlainText,
+	renderDescriptionHtml,
+	renderDescriptionPlainText,
 } from "@/lib/formatted-text";
 import prisma from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
@@ -220,7 +220,7 @@ function buildRequestDetailsHtml(details: RequestEmailDetails | null) {
 		buildDetailRow("Created", formatDate(details.createdAt)),
 		buildDetailRow("Cost estimate", resolveEmailCostEstimate(details)),
 		buildFormattedDescriptionRow(
-			renderFormattedTextHtml(details.description, 280),
+			renderDescriptionHtml(details.description, 280),
 		),
 	];
 
@@ -249,7 +249,7 @@ Request details
 - Status: ${formatRequestStatus(details.status)}
 - Created: ${formatDate(details.createdAt)}
 - Cost estimate: ${resolveEmailCostEstimate(details)}
-- Description: ${renderFormattedTextPlainText(details.description, 280)}
+- Description: ${renderDescriptionPlainText(details.description, 280)}
 `;
 }
 

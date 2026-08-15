@@ -6,7 +6,7 @@
  */
 
 import puppeteer from "puppeteer";
-import { renderFormattedTextHtml } from "@/lib/formatted-text";
+import { renderDescriptionHtml } from "@/lib/formatted-text";
 
 export interface RequestPDFData {
 	id?: string;
@@ -308,6 +308,11 @@ export function renderRequestEvidenceHTML(data: RequestPDFData): string {
       padding: 8px;
       border: 1px solid #edf2ef;
     }
+    .description h2 { font-size: 16px; font-weight: 700; margin: 12px 0 4px; }
+    .description h3 { font-size: 14px; font-weight: 700; margin: 10px 0 4px; }
+    .description ul, .description ol { margin: 6px 0 6px 20px; padding: 0; }
+    .description li { margin: 2px 0; }
+    .description a { color: #1d4ed8; text-decoration: underline; }
     table {
       width: 100%;
       border-collapse: collapse;
@@ -370,7 +375,7 @@ export function renderRequestEvidenceHTML(data: RequestPDFData): string {
     <div class="solution-grid">
       <div>
         <strong>${escapeHtml(data.solution.title)}</strong>
-        <div class="description">${renderFormattedTextHtml(data.solution.description)}</div>
+        <div class="description">${renderDescriptionHtml(data.solution.description)}</div>
       </div>
       <div class="solution-meta">
         <p><strong>Approved Cost</strong><br>${escapeHtml(formatCurrency(data.solution.costEstimate, data.solution.currency))}</p>
@@ -386,7 +391,7 @@ export function renderRequestEvidenceHTML(data: RequestPDFData): string {
 
   <div class="section">
     <h2>Original Request</h2>
-    <div class="description">${renderFormattedTextHtml(data.description)}</div>
+    <div class="description">${renderDescriptionHtml(data.description)}</div>
   </div>
 
   <div class="section">
