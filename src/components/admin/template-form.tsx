@@ -16,6 +16,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
+import { RichTextEditor } from '@/components/rich-text/rich-text-editor-lazy'
 import { createTemplate, updateTemplate, type CreateTemplateInput, type UpdateTemplateInput } from '@/server-actions/templates'
 
 const templateFormSchema = z.object({
@@ -123,10 +124,10 @@ export function TemplateForm({ initialData, onSuccess, onCancel }: TemplateFormP
             <FormItem>
               <FormLabel>Template Description *</FormLabel>
               <FormControl>
-                <Textarea
-                  placeholder="Provide detailed description content..."
-                  rows={6}
-                  {...field}
+                <RichTextEditor
+                  value={field.value ?? ''}
+                  onChange={field.onChange}
+                  minHeight={180}
                 />
               </FormControl>
               <p className="text-xs text-muted-foreground">

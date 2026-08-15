@@ -4,6 +4,7 @@ import prisma from '@/lib/prisma'
 import { requireAdmin } from '@/lib/auth'
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
+import { descriptionSchema } from '@/lib/schemas/solution-schemas'
 
 export interface CreateTemplateInput {
   name: string
@@ -28,7 +29,7 @@ export interface GetTemplatesOptions {
 const createTemplateSchema = z.object({
   name: z.string().min(1, 'Template name is required'),
   title: z.string().min(1, 'Template title is required'),
-  description: z.string().min(1, 'Description is required'),
+  description: descriptionSchema,
   isDefault: z.boolean().optional(),
 })
 
@@ -36,7 +37,7 @@ const updateTemplateSchema = z.object({
   id: z.string().min(1, 'Template ID is required'),
   name: z.string().min(1, 'Template name is required'),
   title: z.string().min(1, 'Template title is required'),
-  description: z.string().min(1, 'Description is required'),
+  description: descriptionSchema,
   isActive: z.boolean().optional(),
 })
 
