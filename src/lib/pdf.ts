@@ -5,162 +5,172 @@
  * Uses Puppeteer with headless Chromium for HTML-to-PDF conversion.
  */
 
-import puppeteer from 'puppeteer'
-import { renderFormattedTextHtml } from '@/lib/formatted-text'
+import puppeteer from "puppeteer";
+import { renderFormattedTextHtml } from "@/lib/formatted-text";
 
 export interface RequestPDFData {
-  id?: string
-  referenceId?: string
-  title: string
-  description: string
-  requester: {
-    name: string
-    email: string
-    department: string
-  }
-  department: string
-  status: string
-  createdAt: Date
-  completedAt?: Date
-  solution?: {
-    title: string
-    description: string
-    costEstimate: number
-    currency: string
-    timeline?: string
-    conceptDesign?: string
-    submittedBy: string
-    submittedAt: Date
-    fileAttachments: Array<{
-      fileName: string
-      fileSize: number
-      fileType: string
-      createdAt: Date
-    }>
-  }
-  fileAttachments: Array<{
-    fileName: string
-    fileSize: number
-    fileType: string
-    createdAt: Date
-    uploadedBy: string
-  }>
-  approvalPhases: Array<{
-    phaseName: string
-    phaseOrder: number
-    approvals: Array<{
-      approverName: string
-      approverRole?: string
-      approverDepartment?: string
-      requiredLevel: number
-      status: 'approved' | 'rejected' | 'pending'
-      comments?: string
-      approvedAt?: Date
-      order: number
-      stage: string
-      isSolutionApproval: boolean
-    }>
-  }>
-  activities: Array<{
-    action: string
-    userName: string
-    createdAt: Date
-    comments?: string
-  }>
-  generatedBy: string
+	id?: string;
+	referenceId?: string;
+	title: string;
+	description: string;
+	requester: {
+		name: string;
+		email: string;
+		department: string;
+	};
+	department: string;
+	status: string;
+	createdAt: Date;
+	completedAt?: Date;
+	solution?: {
+		title: string;
+		description: string;
+		costEstimate: number;
+		currency: string;
+		timeline?: string;
+		conceptDesign?: string;
+		submittedBy: string;
+		submittedAt: Date;
+		fileAttachments: Array<{
+			fileName: string;
+			fileSize: number;
+			fileType: string;
+			createdAt: Date;
+		}>;
+	};
+	fileAttachments: Array<{
+		fileName: string;
+		fileSize: number;
+		fileType: string;
+		createdAt: Date;
+		uploadedBy: string;
+	}>;
+	approvalPhases: Array<{
+		phaseName: string;
+		phaseOrder: number;
+		approvals: Array<{
+			approverName: string;
+			approverRole?: string;
+			approverDepartment?: string;
+			requiredLevel: number;
+			status: "approved" | "rejected" | "pending";
+			comments?: string;
+			approvedAt?: Date;
+			order: number;
+			stage: string;
+			isSolutionApproval: boolean;
+		}>;
+	}>;
+	activities: Array<{
+		action: string;
+		userName: string;
+		createdAt: Date;
+		comments?: string;
+	}>;
+	generatedBy: string;
 }
 
 export async function generatePdfFromHTML(html: string): Promise<Buffer> {
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-      '--font-render-hinting=none',
-    ],
-    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-  })
+	const browser = await puppeteer.launch({
+		headless: true,
+		args: [
+			"--no-sandbox",
+			"--disable-setuid-sandbox",
+			"--disable-dev-shm-usage",
+			"--disable-gpu",
+			"--font-render-hinting=none",
+		],
+		executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+	});
 
-  try {
-    const page = await browser.newPage()
+	try {
+		const page = await browser.newPage();
 
-    await page.setContent(html, { waitUntil: 'networkidle0' })
+		await page.setContent(html, { waitUntil: "networkidle0" });
 
-    const pdf = await page.pdf({
-      format: 'A4',
-      printBackground: true,
-      margin: { top: '14mm', right: '18mm', bottom: '12mm', left: '12mm' },
-    })
+		const pdf = await page.pdf({
+			format: "A4",
+			printBackground: true,
+			margin: { top: "14mm", right: "18mm", bottom: "12mm", left: "12mm" },
+		});
 
-    return Buffer.from(pdf)
-  } finally {
-    await browser.close()
-  }
+		return Buffer.from(pdf);
+	} finally {
+		await browser.close();
+	}
 }
 
-export async function generateRequestPDF(data: RequestPDFData): Promise<Buffer> {
-  return generatePdfFromHTML(renderRequestEvidenceHTML(data))
+export async function generateRequestPDF(
+	data: RequestPDFData,
+): Promise<Buffer> {
+	return generatePdfFromHTML(renderRequestEvidenceHTML(data));
 }
 
 function formatDate(date: Date | string): string {
-  return new Intl.DateTimeFormat('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(date))
+	return new Intl.DateTimeFormat("en-US", {
+		year: "numeric",
+		month: "short",
+		day: "numeric",
+		hour: "2-digit",
+		minute: "2-digit",
+	}).format(new Date(date));
 }
 
 function formatDateShort(date: Date | string): string {
-  return new Intl.DateTimeFormat('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  }).format(new Date(date))
+	return new Intl.DateTimeFormat("en-US", {
+		year: "numeric",
+		month: "short",
+		day: "numeric",
+	}).format(new Date(date));
 }
 
 function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return bytes + ' B'
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
-  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+	if (bytes < 1024) return bytes + " B";
+	if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+	return (bytes / (1024 * 1024)).toFixed(1) + " MB";
 }
 
 function escapeHtml(text: string | number | null | undefined): string {
-  return String(text ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;')
+	return String(text ?? "")
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;")
+		.replace(/'/g, "&#039;");
 }
 
 function formatCurrency(amount: number, currency: string): string {
-  try {
-    return new Intl.NumberFormat('th-TH', { style: 'currency', currency }).format(amount)
-  } catch {
-    return `${currency} ${amount.toLocaleString('en-US')}`
-  }
+	try {
+		return new Intl.NumberFormat("th-TH", {
+			style: "currency",
+			currency,
+		}).format(amount);
+	} catch {
+		return `${currency} ${amount.toLocaleString("en-US")}`;
+	}
 }
 
-function statusClass(status: RequestPDFData['approvalPhases'][number]['approvals'][number]['status']): string {
-  if (status === 'approved') return 'approved'
-  if (status === 'rejected') return 'rejected'
-  return 'pending'
+function statusClass(
+	status: RequestPDFData["approvalPhases"][number]["approvals"][number]["status"],
+): string {
+	if (status === "approved") return "approved";
+	if (status === "rejected") return "rejected";
+	return "pending";
 }
 
 export function renderRequestEvidenceHTML(data: RequestPDFData): string {
-  const generatedAt = formatDate(new Date())
-  const createdLabel = formatDateShort(data.createdAt)
-  const completedLabel = data.completedAt ? formatDateShort(data.completedAt) : 'Not completed'
-  const attachmentCount = data.fileAttachments.length + (data.solution?.fileAttachments.length ?? 0)
-  const reference = data.referenceId || data.id || '-'
-  const requestAttachments = data.fileAttachments
-  const solutionAttachments = data.solution?.fileAttachments ?? []
+	const generatedAt = formatDate(new Date());
+	const createdLabel = formatDateShort(data.createdAt);
+	const completedLabel = data.completedAt
+		? formatDateShort(data.completedAt)
+		: "Not completed";
+	const attachmentCount =
+		data.fileAttachments.length + (data.solution?.fileAttachments.length ?? 0);
+	const reference = data.referenceId || data.id || "-";
+	const requestAttachments = data.fileAttachments;
+	const solutionAttachments = data.solution?.fileAttachments ?? [];
 
-  return `<!DOCTYPE html>
+	return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
@@ -352,7 +362,9 @@ export function renderRequestEvidenceHTML(data: RequestPDFData): string {
     </div>
   </div>
 
-  ${data.solution ? `
+  ${
+		data.solution
+			? `
   <div class="section">
     <h2>Engineering Solution</h2>
     <div class="solution-grid">
@@ -363,12 +375,14 @@ export function renderRequestEvidenceHTML(data: RequestPDFData): string {
       <div class="solution-meta">
         <p><strong>Approved Cost</strong><br>${escapeHtml(formatCurrency(data.solution.costEstimate, data.solution.currency))}</p>
         <p><strong>Submitted</strong><br>${escapeHtml(data.solution.submittedBy)}<br>${formatDate(data.solution.submittedAt)}</p>
-        ${data.solution.timeline ? `<p><strong>Timeline</strong><br>${escapeHtml(data.solution.timeline)}</p>` : ''}
+        ${data.solution.timeline ? `<p><strong>Timeline</strong><br>${escapeHtml(data.solution.timeline)}</p>` : ""}
       </div>
     </div>
-    ${data.solution.conceptDesign ? `<br><strong>Concept Design</strong><div class="description">${escapeHtml(data.solution.conceptDesign)}</div>` : ''}
+    ${data.solution.conceptDesign ? `<br><strong>Concept Design</strong><div class="description">${escapeHtml(data.solution.conceptDesign)}</div>` : ""}
   </div>
-  ` : ''}
+  `
+			: ""
+	}
 
   <div class="section">
     <h2>Original Request</h2>
@@ -382,50 +396,66 @@ export function renderRequestEvidenceHTML(data: RequestPDFData): string {
         <tr><th>Source</th><th>File</th><th>Size</th><th>Date</th></tr>
       </thead>
       <tbody>
-        ${requestAttachments.map((file) => `
+        ${requestAttachments
+					.map(
+						(file) => `
           <tr>
             <td>Request</td>
             <td>${escapeHtml(file.fileName)}<br><span class="muted">Uploaded by ${escapeHtml(file.uploadedBy)}</span></td>
             <td>${formatFileSize(file.fileSize)}</td>
             <td>${formatDateShort(file.createdAt)}</td>
           </tr>
-        `).join('')}
-        ${solutionAttachments.map((file) => `
+        `,
+					)
+					.join("")}
+        ${solutionAttachments
+					.map(
+						(file) => `
           <tr>
             <td>Solution</td>
             <td>${escapeHtml(file.fileName)}</td>
             <td>${formatFileSize(file.fileSize)}</td>
             <td>${formatDateShort(file.createdAt)}</td>
           </tr>
-        `).join('')}
-        ${attachmentCount === 0 ? '<tr><td colspan="4" class="muted">No attachments recorded.</td></tr>' : ''}
+        `,
+					)
+					.join("")}
+        ${attachmentCount === 0 ? '<tr><td colspan="4" class="muted">No attachments recorded.</td></tr>' : ""}
       </tbody>
     </table>
   </div>
 
   <div class="section">
     <h2>Approval Chain</h2>
-    ${data.approvalPhases.map((phase) => `
+    ${data.approvalPhases
+			.map(
+				(phase) => `
       <h3>${escapeHtml(phase.phaseName)}</h3>
       <table>
         <thead>
           <tr><th>Stage</th><th>Approver</th><th>Level</th><th>Department</th><th>Status</th><th>Approved</th><th>Comments</th></tr>
         </thead>
         <tbody>
-          ${phase.approvals.map((approval) => `
+          ${phase.approvals
+						.map(
+							(approval) => `
             <tr>
               <td>${escapeHtml(approval.stage)}</td>
               <td>${escapeHtml(approval.approverName)}</td>
               <td>${approval.requiredLevel}</td>
-              <td>${escapeHtml(approval.approverDepartment || approval.approverRole || '-')}</td>
+              <td>${escapeHtml(approval.approverDepartment || approval.approverRole || "-")}</td>
               <td><span class="status ${statusClass(approval.status)}">${escapeHtml(approval.status)}</span></td>
-              <td>${approval.approvedAt ? formatDate(approval.approvedAt) : '-'}</td>
-              <td>${escapeHtml(approval.comments || '-')}</td>
+              <td>${approval.approvedAt ? formatDate(approval.approvedAt) : "-"}</td>
+              <td>${escapeHtml(approval.comments || "-")}</td>
             </tr>
-          `).join('')}
+          `,
+						)
+						.join("")}
         </tbody>
       </table>
-    `).join('')}
+    `,
+			)
+			.join("")}
   </div>
 
   <div class="section">
@@ -435,14 +465,18 @@ export function renderRequestEvidenceHTML(data: RequestPDFData): string {
         <tr><th>Action</th><th>User</th><th>Date</th><th>Comments</th></tr>
       </thead>
       <tbody>
-        ${data.activities.map((activity) => `
+        ${data.activities
+					.map(
+						(activity) => `
           <tr>
             <td>${escapeHtml(activity.action)}</td>
             <td>${escapeHtml(activity.userName)}</td>
             <td>${formatDate(activity.createdAt)}</td>
-            <td>${escapeHtml(activity.comments || '-')}</td>
+            <td>${escapeHtml(activity.comments || "-")}</td>
           </tr>
-        `).join('')}
+        `,
+					)
+					.join("")}
       </tbody>
     </table>
   </div>
@@ -451,5 +485,5 @@ export function renderRequestEvidenceHTML(data: RequestPDFData): string {
     Generated on ${generatedAt} by ${escapeHtml(data.generatedBy)} from Approval System
   </div>
 </body>
-</html>`
+</html>`;
 }

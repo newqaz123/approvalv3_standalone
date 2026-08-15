@@ -210,7 +210,7 @@ describe('engineering sub-task request and filter wiring', () => {
       assert.match(source, /workRequisitionReceived: true/)
     }
 
-    assert.match(requests, /wrStatus\?: 'all' \| 'not-received' \| 'received'/)
+    assert.match(requests, /wrStatus\?: ['"]all['"] \| ['"]not-received['"] \| ['"]received['"]/)
     assert.match(requests, /whereClause\.workRequisitionReceived = true/)
     assert.match(requests, /whereClause\.workRequisitionReceived = false/)
     assert.match(requests, /subTasks:\s*\{/)
@@ -229,11 +229,11 @@ describe('engineering sub-task request and filter wiring', () => {
     const dashboardPage = readFileSync('src/app/(dashboard)/dashboard/page.tsx', 'utf8')
 
     assert.match(api, /wrStatus/)
-    assert.match(requestFilters, /wrStatus\?: 'all' \| 'not-received' \| 'received'/)
-    assert.match(requestFilters, /DEFAULT_WR_FILTER = 'all'/)
+    assert.match(requestFilters, /wrStatus\?: ['"]all['"] \| ['"]not-received['"] \| ['"]received['"]/)
+    assert.match(requestFilters, /DEFAULT_WR_FILTER = ["']all["']/)
     assert.match(requestFilters, /Show only no WR/)
     assert.match(requestFilters, /h-10 min-h-10/)
-    assert.match(requestFilters, /className=\{cn\(\s*'h-10 min-h-10 w-full/)
+    assert.match(requestFilters, /className=\{cn\(\s*['"]h-10 min-h-10 w-full/)
     assert.match(requestFilters, /translate-x-4/)
     assert.match(requestFilters, /bg-emerald-500/)
     assert.doesNotMatch(requestFilters, /border-dashed/)
@@ -248,7 +248,7 @@ describe('engineering sub-task request and filter wiring', () => {
     assert.match(requestTable, /workRequisitionReceived\?: boolean/)
     assert.match(requestTable, /bg-sky-50/)
     assert.doesNotMatch(requestTable, /bg-emerald-50/)
-    assert.match(dashboardFilters, /wrStatus\?: 'all' \| 'not-received' \| 'received'/)
+    assert.match(dashboardFilters, /wrStatus\?: ['"]all['"] \| ['"]not-received['"] \| ['"]received['"]/)
     assert.match(dashboardFilters, /DEFAULT_WR_FILTER = 'all'/)
     assert.match(dashboardFilters, /Show only no WR/)
     assert.match(dashboardFilters, /h-10 min-h-10/)
