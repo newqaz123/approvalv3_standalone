@@ -366,4 +366,20 @@ describe("Gapforimprove regressions", () => {
 		);
 		assert.doesNotMatch(notifyUsersInDepartment, /createNotification\(/);
 	});
+
+	it("rich description validation uses the 20000-character server limit", () => {
+		const schemas = read("src/lib/schemas/solution-schemas.ts");
+		const requests = read("src/server-actions/requests.ts");
+
+		assert.match(
+			schemas,
+			/max\(20000, ['"]Description too long['"]\)/,
+		);
+		assert.match(schemas, /richTextToPlainText/);
+		assert.doesNotMatch(schemas, /max\(5000/);
+
+		// requests.ts consumes the shared schema (no duplicated inline limit).
+		assert.match(requests, /descriptionSchema/);
+		assert.doesNotMatch(requests, /max\(5000/);
+	});
 });

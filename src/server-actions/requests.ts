@@ -9,11 +9,12 @@ import { createApprovalChain, getApproversAtLevel } from './approvals'
 import { requireAdmin } from '@/lib/auth'
 import { getCurrentUser, getUserById } from '@/lib/cache/user-cache'
 import { deleteAttachmentFile } from '@/lib/attachments/storage'
+import { descriptionSchema } from '@/lib/schemas/solution-schemas'
 
 // Zod schema for request validation
 const createRequestSchema = z.object({
   title: z.string().min(1, 'Title is required').max(200, 'Title too long'),
-  description: z.string().min(1, 'Description is required').max(5000, 'Description too long'),
+  description: descriptionSchema,
 })
 
 export interface CreateRequestInput {
@@ -2083,11 +2084,7 @@ export async function resubmitRequest(input: {
   }
 
   if (input.description !== undefined) {
-    const descValidation = z
-      .string()
-      .min(1, 'Description is required')
-      .max(5000, 'Description too long')
-      .safeParse(input.description)
+    const descValidation = descriptionSchema.safeParse(input.description)
     if (!descValidation.success) {
       throw new Error(descValidation.error.issues[0].message)
     }

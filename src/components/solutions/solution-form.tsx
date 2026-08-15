@@ -36,7 +36,7 @@ import { useSolutionAttachments } from '@/hooks/use-solution-attachments'
 
 const solutionFormSchema = z.object({
   title: z.string().min(1, 'Title is required').max(200),
-  description: z.string().min(1, 'Description is required').max(5000),
+  description: z.string().min(1, 'Description is required').max(20000, 'Description too long'),
   costEstimate: z
     .number({ message: 'Enter a valid cost' })
     .positive('Cost must be greater than 0')

@@ -35,7 +35,7 @@ import { MobileFileUpload, type MobileFile } from '@/components/mobile/mobile-fi
 
 const requestFormSchema = z.object({
   title: z.string().min(1, 'Title is required').max(200, 'Title must be less than 200 characters'),
-  description: z.string().min(1, 'Description is required').max(5000, 'Description must be less than 5000 characters'),
+  description: z.string().min(1, 'Description is required').max(20000, 'Description too long'),
 })
 
 const MAX_FILE_DESCRIPTION_LENGTH = 60

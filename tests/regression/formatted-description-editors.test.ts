@@ -35,8 +35,10 @@ describe('formatted description editors', () => {
     assert.match(modal, /description/)
   })
 
-  it('keeps the existing 5000-character validation limit', () => {
-    assert.match(read('src/components/requests/request-form.tsx'), /max\(5000/)
-    assert.match(read('src/components/solutions/solution-form.tsx'), /max\(5000/)
+  it('keeps the 20000-character rich description limit on client forms', () => {
+    assert.match(read('src/components/requests/request-form.tsx'), /max\(20000/)
+    assert.match(read('src/components/solutions/solution-form.tsx'), /max\(20000/)
+    assert.doesNotMatch(read('src/components/requests/request-form.tsx'), /max\(5000/)
+    assert.doesNotMatch(read('src/components/solutions/solution-form.tsx'), /max\(5000/)
   })
 })
