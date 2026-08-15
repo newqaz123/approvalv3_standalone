@@ -54,7 +54,16 @@ describe("formatted text UI contracts", () => {
 		assert.match(source, /maxVisibleCharacters/);
 		assert.match(source, /<strong/);
 		assert.match(source, /<br/);
-		assert.doesNotMatch(source, /dangerouslySetInnerHTML/);
+		// Rich-HTML sources render through dangerouslySetInnerHTML, but ONLY
+		// after whitelist sanitization — the sanitizer call must wrap the value.
+		assert.match(
+			source,
+			/__html:\s*sanitizeRichText\(text\)/,
+		);
+		assert.doesNotMatch(
+			source,
+			/__html:\s*(?!sanitizeRichText\()[\s\S]{0,80}dangerouslySetInnerHTML/,
+		);
 	});
 
 	it("exposes an accessible Bold control", () => {

@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
 	renderFormattedTextHtml,
 	renderFormattedTextPlainText,
@@ -7,6 +8,8 @@ import {
 	truncateFormattedText,
 	visibleFormattedText,
 } from "@/lib/formatted-text";
+
+const read = (path: string) => readFileSync(path, "utf8");
 
 describe("formatted description tokenizer", () => {
 	it("keeps plain text unchanged", () => {
@@ -147,5 +150,31 @@ describe("formatted description tokenizer", () => {
 			{ type: "text", value: "..." },
 		]);
 		assert.equal(renderFormattedTextPlainText("ab \ncd", 4), "ab\n...");
+	});
+});
+
+describe("FormattedText dual-format rendering", () => {
+	it("renders sanitized HTML when the source starts with whitelisted markup", () => {
+		const source = read("src/components/ui/formatted-text.tsx");
+		assert.match(
+			source,
+			/import \{[^}]*containsRichTextHtml[^}]*\} from ['"]@\/lib\/rich-text-sanitizer['"]/,
+		);
+		assert.match(source, /dangerouslySetInnerHTML/);
+		assert.match(source, /sanitizeRichText\(/);
+		// The HTML branch must run BEFORE tokenizer truncation is applied.
+		assert.ok(
+			source.indexOf("containsRichTextHtml") < source.indexOf("truncateFormattedText"),
+		);
+	});
+
+	it("truncates rich sources to plain text when maxVisibleCharacters is set", () => {
+		const source = read("src/components/ui/formatted-text.tsx");
+		assert.match(source, /richTextToPlainText\(/);
+	});
+
+	it("keeps the legacy tokenizer path for non-HTML sources", () => {
+		const source = read("src/components/ui/formatted-text.tsx");
+		assert.match(source, /tokenizeFormattedText\(/);
 	});
 });
