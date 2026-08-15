@@ -17,7 +17,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { FormattedTextarea } from '@/components/ui/formatted-textarea'
+import { RichTextEditor } from '@/components/rich-text/rich-text-editor-lazy'
 import {
   Form,
   FormControl,
@@ -168,10 +168,10 @@ export function ResubmitRequestDialog({
                 <FormItem>
                   <FormLabel>Description</FormLabel>
                   <FormControl>
-                    <FormattedTextarea
-                      {...field}
-                      placeholder="Describe the improvement you're requesting and why it's needed..."
-                      rows={6}
+                    <RichTextEditor
+                      value={field.value ?? ""}
+                      onChange={field.onChange}
+                      minHeight={160}
                     />
                   </FormControl>
                   <FormMessage />

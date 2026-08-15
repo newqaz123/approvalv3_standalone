@@ -35,7 +35,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
-import { FormattedTextarea } from '@/components/ui/formatted-textarea'
+import { RichTextEditor } from '@/components/rich-text/rich-text-editor-lazy'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
@@ -703,13 +703,11 @@ export function SubmitterModal({
                 <Label htmlFor="description" className="text-sm font-bold">
                   Description <span className="text-red-500">*</span>
                 </Label>
-                <FormattedTextarea
+                <RichTextEditor
                   id="description"
                   value={description}
-                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setDescription(e.target.value)}
-                  placeholder="Describe the improvement request in detail..."
-                  rows={5}
-                  className="mt-1.5"
+                  onChange={setDescription}
+                  minHeight={140}
                 />
               </div>
             </div>
@@ -753,13 +751,11 @@ export function SubmitterModal({
                 <Label htmlFor="solutionDescription" className="text-sm font-bold">
                   Solution Description <span className="text-red-500">*</span>
                 </Label>
-                <FormattedTextarea
+                <RichTextEditor
                   id="solutionDescription"
                   value={solutionDescription}
-                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setSolutionDescription(e.target.value)}
-                  placeholder="Describe the engineering solution..."
-                  rows={4}
-                  className="mt-1.5"
+                  onChange={setSolutionDescription}
+                  minHeight={140}
                 />
               </div>
 

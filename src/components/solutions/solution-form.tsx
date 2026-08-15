@@ -19,7 +19,7 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { FormattedTextarea } from '@/components/ui/formatted-textarea'
+import { RichTextEditor } from '@/components/rich-text/rich-text-editor-lazy'
 import {
   Select,
   SelectContent,
@@ -310,10 +310,10 @@ export function SolutionForm({
               <FormItem>
                 <FormLabel>Description *</FormLabel>
                 <FormControl>
-                  <FormattedTextarea
-                    placeholder="Provide detailed information about your solution..."
-                    rows={6}
-                    {...field}
+                  <RichTextEditor
+                    value={field.value ?? ""}
+                    onChange={field.onChange}
+                    minHeight={160}
                   />
                 </FormControl>
                 <FormDescription>

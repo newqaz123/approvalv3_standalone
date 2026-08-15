@@ -11,22 +11,26 @@ describe('formatted description editors', () => {
     assert.match(source, /name="description"/)
   })
 
-  it('uses the formatted textarea in request resubmission', () => {
+  it("uses the rich text editor in request resubmission", () => {
     const source = read('src/components/requests/request-resubmit-modal.tsx')
-    assert.match(source, /FormattedTextarea/)
+    assert.match(source, /RichTextEditor/)
+    assert.doesNotMatch(source, /<FormattedTextarea/)
     assert.match(source, /id="description"/)
 
     const liveDialog = read('src/components/requests/resubmit-request-dialog.tsx')
-    assert.match(liveDialog, /FormattedTextarea/)
+    assert.match(liveDialog, /RichTextEditor/)
+    assert.doesNotMatch(liveDialog, /<FormattedTextarea/)
     assert.match(liveDialog, /name="description"/)
   })
 
-  it('uses the formatted textarea for solution submission and resubmission', () => {
+  it("uses the rich text editor for solution submission and resubmission", () => {
     const source = read('src/components/solutions/solution-form.tsx')
     const modal = read('src/components/requests/submitter-modal.tsx')
-    assert.match(source, /FormattedTextarea/)
+    assert.match(source, /RichTextEditor/)
+    assert.doesNotMatch(source, /<FormattedTextarea/)
     assert.match(source, /name="description"/)
-    assert.match(modal, /FormattedTextarea/)
+    assert.match(modal, /RichTextEditor/)
+    assert.doesNotMatch(modal, /FormattedTextarea/)
     assert.match(modal, /solutionDescription/)
     assert.match(modal, /description/)
   })

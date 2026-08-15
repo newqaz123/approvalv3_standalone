@@ -25,7 +25,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
-import { FormattedTextarea } from '@/components/ui/formatted-textarea'
+import { RichTextEditor } from '@/components/rich-text/rich-text-editor-lazy'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
@@ -190,13 +190,11 @@ export function RequestResubmitModal({
               <Label htmlFor="description" className="text-sm font-bold">
                 Description <span className="text-red-500">*</span>
               </Label>
-              <FormattedTextarea
+              <RichTextEditor
                 id="description"
                 value={description}
-                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setDescription(e.target.value)}
-                placeholder="Describe the improvement request in detail..."
-                rows={5}
-                className="mt-1.5"
+                onChange={setDescription}
+                minHeight={140}
               />
             </div>
           </div>
