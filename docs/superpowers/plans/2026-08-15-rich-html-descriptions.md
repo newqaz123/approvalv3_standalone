@@ -362,7 +362,7 @@ describe('RichTextEditor implementation', () => {
   })
 
   it('sanitizes editor output before it reaches the parent', () => {
-    assert.match(source, /sanitizeRichText\(editor\.getHTML\(\)\)/)
+    assert.match(source, /sanitizeRichText\((?:editor|current)\.getHTML\(\)\)/)
   })
 
   it('exposes an accessible toolbar with toggling state', () => {
