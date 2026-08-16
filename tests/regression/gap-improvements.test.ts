@@ -156,7 +156,7 @@ describe("Gapforimprove regressions", () => {
 		assert.match(requestTable, /const \[data, setData\] = useState/);
 		assert.match(
 			requestTable,
-			/useEffect\(\(\) => \{\s*setData\(initialData\)\s*\}, \[initialData\]\)/,
+			/useEffect\(\(\) => \{\s*setData\(initialData\);?\s*\}, \[initialData\]\)/,
 		);
 		assert.match(
 			listWithFilters,
@@ -371,10 +371,7 @@ describe("Gapforimprove regressions", () => {
 		const schemas = read("src/lib/schemas/solution-schemas.ts");
 		const requests = read("src/server-actions/requests.ts");
 
-		assert.match(
-			schemas,
-			/max\(20000, ['"]Description too long['"]\)/,
-		);
+		assert.match(schemas, /max\(20000, ['"]Description too long['"]\)/);
 		assert.match(schemas, /richTextToPlainText/);
 		assert.doesNotMatch(schemas, /max\(5000/);
 
