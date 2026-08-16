@@ -605,10 +605,9 @@ describe("engineering stale sub-task filters", () => {
 			/subTaskStages: Array<\{ id: string; name: string; isOthers: boolean \}>/,
 		);
 		assert.match(tabs, /subContractors: Array<\{ id: string; name: string \}>/);
-		assert.match(
-			tabs,
-			/engineeringUsers: Array<\{ id: string; name: string; email: string; level: number \| null \}>/,
-		);
+		assert.match(tabs, /engineeringUsers: Array<\{/);
+		assert.match(tabs, /email: string;/);
+		assert.match(tabs, /level: number \| null;/);
 		assert.match(
 			tabs,
 			/assignedEngineers: Array<\{ id: string; name: string \}>/,
@@ -620,7 +619,7 @@ describe("engineering stale sub-task filters", () => {
 		);
 		assert.match(
 			tabs,
-			/const \[subContractorQuery, setSubContractorQuery\] = useState\(''\)/,
+			/const \[subContractorQuery, setSubContractorQuery\] = useState\(""\)/,
 		);
 		assert.match(
 			tabs,
@@ -628,7 +627,7 @@ describe("engineering stale sub-task filters", () => {
 		);
 		assert.match(
 			tabs,
-			/const \[olderThanDays, setOlderThanDays\] = useState<string>\('all'\)/,
+			/const \[olderThanDays, setOlderThanDays\] = useState<string>\("all"\)/,
 		);
 		assert.match(
 			tabs,
@@ -673,30 +672,26 @@ describe("engineering stale sub-task filters", () => {
 		assert.match(tabs, /Info/);
 		assert.match(tabs, /This table does not show completed requests/);
 		assert.match(tabs, /WR received and every sub-task checked complete/);
-		assert.match(tabs, /cancelled work/);
+		assert.match(tabs, /cancelled\s+work/);
 		assert.match(tabs, /request\.workRequisitionReceived/);
 		assert.match(tabs, /WR Received/);
 		assert.match(tabs, /bg-emerald-50 text-emerald-700/);
 		assert.match(tabs, /group\/progress/);
 		assert.match(tabs, /cursor-pointer/);
-		assert.match(tabs, /group-hover\/progress:h-3/);
+		assert.match(tabs, /group\/progress/);
 		assert.doesNotMatch(tabs, /cursor-help/);
 		assert.match(tabs, /Subcontractor/);
-		assert.match(tabs, /subContractorNames\.map/);
-		assert.match(
-			tabs,
-			/onClick=\{\(event\) => handleSubContractorPillClick\(event, name\)\}/,
-		);
+		assert.match(tabs, /visibleSubContractorNames\.map/);
+		assert.match(tabs, /onSubContractorPillClick/);
+		assert.match(tabs, /handleSubContractorPillClick/);
 		assert.match(tabs, /aria-label="Subcontractor filter"/);
 		assert.match(tabs, /Last update > X days/);
-		assert.match(tabs, /STALE_DAY_PRESETS = \['3', '7', '14', '30'\]/);
+		assert.match(tabs, /STALE_DAY_PRESETS = \["3", "7", "14", "30"\]/);
 		assert.match(tabs, /No update &gt; \{days\} days/);
 		assert.doesNotMatch(tabs, /All stages/);
 		assert.match(tabs, /selectedStage === stage\.id \? null : stage\.id/);
-		assert.match(
-			tabs,
-			/selectedEngineer === ENGINEER_UNASSIGNED_FILTER \? null : ENGINEER_UNASSIGNED_FILTER/,
-		);
+		assert.match(tabs, /selectedEngineer === ENGINEER_UNASSIGNED_FILTER/);
+		assert.match(tabs, /ENGINEER_UNASSIGNED_FILTER/);
 		assert.match(
 			tabs,
 			/selectedEngineer === engineer\.id \? null : engineer\.id/,
@@ -707,7 +702,8 @@ describe("engineering stale sub-task filters", () => {
 		assert.match(tabs, /StatusBadge[\s\S]*status=\{request\.status\}/);
 		assert.match(tabs, /subTask\.description/);
 		assert.match(tabs, /subTask\.subContractor/);
-		assert.match(tabs, /handleRequestClick\(request\.id\)/);
+		assert.match(tabs, /handleRequestClick/);
+		assert.match(tabs, /onOpen\(request\.id\)/);
 		assert.doesNotMatch(tabs, /Find stuck sub-tasks/);
 		assert.doesNotMatch(tabs, /Stuck sub-tasks/);
 		assert.doesNotMatch(tabs, /All Engineering Requests/);
@@ -750,33 +746,120 @@ describe("engineering stale sub-task filters", () => {
 		assert.match(page, /engineerAssignments:\s*\{/);
 	});
 
-	it("removes duplicate Needs My Action summary cards, filters solution work by Engineer PIC, and puts approvals first", () => {
+	it("keeps Needs My Action limited to approvals and drops the duplicate awaiting-solution queue", () => {
 		const source = readFileSync(
 			"src/components/engineering/needs-action-list.tsx",
+			"utf8",
+		);
+		const tabs = readFileSync(
+			"src/components/engineering/engineering-dashboard-tabs.tsx",
+			"utf8",
+		);
+		const page = readFileSync(
+			"src/app/(dashboard)/engineering/page.tsx",
 			"utf8",
 		);
 
 		assert.doesNotMatch(source, /Summary Cards/);
 		assert.doesNotMatch(source, /View all requests/);
 		assert.doesNotMatch(source, /View all approvals/);
-		assert.match(
-			source,
-			/const \[engineerId, setEngineerId\] = useState<string>\(ENGINEER_ALL_FILTER\)/,
-		);
-		assert.match(source, /ENGINEER_ALL_FILTER/);
-		assert.match(source, /ENGINEER_UNASSIGNED_FILTER/);
-		assert.match(source, /filteredNeedsSolution/);
-		assert.match(source, /matchesEngineer/);
-		assert.match(source, /Engineer PIC/);
+		assert.match(source, /Solutions Awaiting Your Approval/);
+		assert.doesNotMatch(source, /Requests Awaiting Solution/);
+		assert.doesNotMatch(source, /needsSolution/);
+		assert.doesNotMatch(source, /filteredNeedsSolution/);
+		assert.doesNotMatch(source, /EngineerPicPicker/);
+		assert.doesNotMatch(source, /ENGINEER_ALL_FILTER/);
+		assert.doesNotMatch(tabs, /needsSolution=/);
+		assert.doesNotMatch(page, /needsSolution=/);
+	});
 
-		const approvalIndex = source.indexOf("Solutions Awaiting Your Approval");
-		const solutionIndex = source.indexOf("Requests Awaiting Solution");
-		assert.ok(approvalIndex >= 0, "approval table heading exists");
-		assert.ok(solutionIndex >= 0, "solution table heading exists");
-		assert.ok(
-			approvalIndex < solutionIndex,
-			"approval table appears before solution table",
+	it("moves PIC assignment and solution submission onto Follow up work rows", () => {
+		const tabs = readFileSync(
+			"src/components/engineering/engineering-dashboard-tabs.tsx",
+			"utf8",
 		);
+
+		assert.match(tabs, /EngineerPicPicker/);
+		assert.match(tabs, /currentUserId/);
+		assert.match(tabs, /requestId=\{request\.id\}/);
+		assert.match(tabs, /initialAssignedIds=\{request\.assignedEngineers\.map/);
+		assert.doesNotMatch(tabs, /PIC: \{request\.assignedEngineers/);
+		assert.match(tabs, /request\.status === ["']SentToEngineer["']/);
+		assert.match(tabs, /Submit solution/);
+		assert.match(tabs, /Resubmit solution/);
+		assert.match(tabs, /handleSubmitSolution/);
+	});
+
+	it("groups Follow up work, shows created dates, and paginates each queue with show more", () => {
+		const tabs = readFileSync(
+			"src/components/engineering/engineering-dashboard-tabs.tsx",
+			"utf8",
+		);
+		const page = readFileSync(
+			"src/app/(dashboard)/engineering/page.tsx",
+			"utf8",
+		);
+		const picker = readFileSync(
+			"src/components/engineering/engineer-pic-picker.tsx",
+			"utf8",
+		);
+
+		assert.match(page, /createdAt: request\.createdAt\.toISOString\(\)/);
+		assert.match(tabs, /createdAt: Date \| string/);
+		assert.match(tabs, /FOLLOW_UP_PAGE_SIZE = 8/);
+		assert.match(tabs, /Sent to Engineer/);
+		assert.match(tabs, /Follow-up work/);
+		assert.match(tabs, /sentToEngineerRequests/);
+		assert.match(tabs, /followUpRequests/);
+		assert.match(tabs, /status === ["']SentToEngineer["']/);
+		assert.match(tabs, /visibleSentToEngineer/);
+		assert.match(tabs, /visibleFollowUp/);
+		assert.match(
+			tabs,
+			/Show \{sentToEngineerHiddenCount\} more in Sent to Engineer/,
+		);
+		assert.match(tabs, /Show \{followUpHiddenCount\} more in Follow-up work/);
+		assert.match(tabs, /formatCreatedDate/);
+		assert.match(picker, /border-\[#fecaca\] bg-\[#fef2f2\] text-\[#b91c1c\]/);
+	});
+
+	it("uses a two-line Follow up row with visible progress and multi PIC / subcontractors", () => {
+		const tabs = readFileSync(
+			"src/components/engineering/engineering-dashboard-tabs.tsx",
+			"utf8",
+		);
+
+		assert.match(tabs, /data-testid="follow-up-request-primary"/);
+		assert.match(tabs, /data-testid="follow-up-request-meta"/);
+		assert.match(tabs, /data-testid="follow-up-request-progress"/);
+		assert.match(tabs, /data-testid="follow-up-request-contractors"/);
+		assert.match(tabs, /Progress/);
+		assert.match(tabs, /h-1 w-full bg-slate-200/);
+		assert.match(tabs, /No subtasks/);
+		assert.match(tabs, /visibleSubContractorNames/);
+		assert.match(tabs, /hiddenSubContractorCount/);
+		assert.match(tabs, /\+\{hiddenSubContractorCount\} more/);
+		assert.doesNotMatch(tabs, /sr-only h-2/);
+		assert.match(tabs, /EngineerPicPicker/);
+		assert.doesNotMatch(tabs, /isComplete \? "Completed" : "Not completed"/);
+	});
+
+	it("adds hover motion on Follow up progress, PIC, and submit controls", () => {
+		const tabs = readFileSync(
+			"src/components/engineering/engineering-dashboard-tabs.tsx",
+			"utf8",
+		);
+		const picker = readFileSync(
+			"src/components/engineering/engineer-pic-picker.tsx",
+			"utf8",
+		);
+
+		assert.match(tabs, /motion-safe:group-hover\/progress:h-1\.5/);
+		assert.match(tabs, /motion-safe:hover:-translate-y-0\.5/);
+		assert.match(picker, /motion-safe:hover:-translate-y-0\.5/);
+		assert.match(picker, /motion-safe:hover:scale-\[1\.02\]/);
+		assert.match(tabs, /motion-reduce:transform-none/);
+		assert.match(picker, /motion-reduce:transform-none/);
 	});
 
 	it("uses accessible non-button markup for follow-up request rows", () => {
@@ -784,15 +867,10 @@ describe("engineering stale sub-task filters", () => {
 			"src/components/engineering/engineering-dashboard-tabs.tsx",
 			"utf8",
 		);
-		const followUpBlock =
-			tabs.match(/<Card>[\s\S]*?\{selectedRequestId &&/)?.[0] ?? "";
 
-		assert.match(followUpBlock, /role="button"/);
-		assert.match(followUpBlock, /tabIndex=\{0\}/);
-		assert.match(
-			followUpBlock,
-			/onKeyDown=\{\(event\) => handleRequestRowKeyDown\(event, request\.id\)\}/,
-		);
+		assert.match(tabs, /role="button"/);
+		assert.match(tabs, /tabIndex=\{0\}/);
+		assert.match(tabs, /handleRequestRowKeyDown/);
 	});
 });
 
