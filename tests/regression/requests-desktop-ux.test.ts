@@ -105,7 +105,8 @@ describe("Requests desktop table proportions and keyboard rows", () => {
 			/event\.key === ["']Enter["'] \|\| event\.key === ["'] ["']/,
 		);
 		assert.match(table, /focus-visible:/);
-		assert.match(table, /bg-sky-50 hover:bg-sky-100\/60/);
+		// WR rows are no longer tinted — the state moved to a chip beside the title
+		assert.doesNotMatch(table, /bg-sky-50 hover:bg-sky-100/);
 		assert.match(table, /className="md:hidden space-y-3"/);
 		assert.match(table, /className="hidden md:block/);
 		assert.match(table, /<RequestCard/);
@@ -117,10 +118,10 @@ describe("Requests desktop table proportions and keyboard rows", () => {
 		assert.match(requestCard, /onTap: \(requestId: string\) => void/);
 		assert.match(requestCard, /onClick=\{\(\) => onTap\(request\.id\)\}/);
 		assert.match(requestCard, /export function RequestCardsEmptyState/);
-		assert.match(requestCard, /message = 'No requests found'/);
+		assert.match(requestCard, /message = ["']No requests found["']/);
 		assert.match(
 			requestCard,
-			/submessage = 'Create your first request to get started'/,
+			/submessage = ["']Create your first request to get started["']/,
 		);
 	});
 });
@@ -131,6 +132,7 @@ describe("Requests modern status pills and hover motion", () => {
 		"src/components/requests/approval-status-badge.tsx",
 	);
 	const table = read("src/components/requests/request-table.tsx");
+	const requestCard = read("src/components/mobile/request-card.tsx");
 
 	it("renders dot-style status pills with inset rings instead of flat pastel badges", () => {
 		assert.match(badge, /dot: ["']bg-blue-500["']/);
@@ -267,5 +269,23 @@ describe("Requests modern status pills and hover motion", () => {
 			table,
 			/assignments\.map\(\(a\) => a\.engineer\.name\)\.join\(", "\)/,
 		);
+	});
+
+	it("shows WR received as a chip beside the title on white rows", () => {
+		// desktop: chip lives in the title cell, flags- beside- title rule
+		assert.match(
+			table,
+			/row\.original\.workRequisitionReceived && \(\s*<span[\s\S]{0,600}?WR\s*<\/span>/,
+		);
+		assert.match(table, /ring-sky-600\/25/);
+		assert.match(table, /uppercase tracking-wide text-sky-700/);
+		// no full-row tint remains
+		assert.doesNotMatch(table, /bg-sky-50 hover:bg-sky-100/);
+		// mobile card gets the same chip on its title row
+		assert.match(
+			requestCard,
+			/request\.workRequisitionReceived && \(\s*<span[\s\S]{0,600}?WR\s*<\/span>/,
+		);
+		assert.match(requestCard, /text-sky-700/);
 	});
 });

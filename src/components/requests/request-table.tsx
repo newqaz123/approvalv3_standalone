@@ -8,7 +8,7 @@ import {
 	useReactTable,
 } from "@tanstack/react-table";
 import { format } from "date-fns";
-import { FileText, Clock } from "lucide-react";
+import { FileText, Clock, Check } from "lucide-react";
 import {
 	Table,
 	TableBody,
@@ -103,6 +103,12 @@ export function RequestTable({
 						<span className="line-clamp-2 break-words font-medium leading-5 transition-all duration-200 ease-out group-hover/row:text-gray-950 motion-safe:group-hover/row:translate-x-0.5 motion-reduce:transform-none">
 							{row.getValue("title")}
 						</span>
+						{row.original.workRequisitionReceived && (
+							<span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-sky-50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-sky-700 ring-1 ring-inset ring-sky-600/25">
+								<Check className="h-2.5 w-2.5" strokeWidth={3.5} aria-hidden />
+								WR
+							</span>
+						)}
 						{row.original.hasRejection &&
 							(row.original.status === "ImprovementRequest" ||
 								row.original.status === "SentToEngineer") && (
@@ -286,8 +292,6 @@ export function RequestTable({
 									aria-label={`Open request ${row.original.title}`}
 									className={cn(
 										"group/row cursor-pointer transition-colors duration-200 ease-out hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500",
-										row.original.workRequisitionReceived &&
-											"bg-sky-50 hover:bg-sky-100/60",
 									)}
 									onClick={() => handleRowClick(row.original.id)}
 									onKeyDown={(event) =>

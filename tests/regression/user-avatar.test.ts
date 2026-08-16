@@ -86,6 +86,24 @@ describe("avatar surfaces", () => {
 		assert.match(badge, /bg-emerald-300/);
 	});
 
+	it("renders the timeline body once and shares it across hover and mobile popovers", () => {
+		const badge = read("src/components/requests/approval-status-badge.tsx");
+		// one shared timeline component
+		assert.match(badge, /function ApprovalTimeline/);
+		// the pill spreads Radix trigger props — without this, hover/tap handlers never reach the DOM
+		assert.match(badge, /function ApprovalPill\(\{\s*size,\s*\.\.\.props\s*\}/);
+		assert.match(badge, /variant="default"\s*\{\.\.\.props\}/);
+		// both triggers bind directly to the pill — no wrapper button (avoids button-in-button)
+		assert.match(badge, /PopoverTrigger asChild>\s*<ApprovalPill/);
+		assert.match(badge, /HoverCardTrigger asChild>\s*<ApprovalPill/);
+		assert.doesNotMatch(badge, /<button[^>]*Show approval chain/);
+		// desktop keeps the hover card
+		assert.match(badge, /<HoverCard openDelay=\{200\}>/);
+		// mobile tap popover stops the card tap-through
+		assert.match(badge, /<Popover[\s>]/);
+		assert.match(badge, /onClick=\{\(event\) => event\.stopPropagation\(\)\}/);
+	});
+
 	it("PIC column reuses UserAvatar so colors match across surfaces", () => {
 		const table = read("src/components/requests/request-table.tsx");
 		assert.match(table, /import \{ UserAvatar \} from/);
