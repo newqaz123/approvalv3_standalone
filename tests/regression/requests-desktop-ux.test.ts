@@ -56,6 +56,23 @@ describe("Requests desktop filters", () => {
 		);
 		assert.match(filters, /whitespace-nowrap/);
 	});
+
+	it("orders status filters by workflow, not enum declaration order", () => {
+		const dashboardFilters = read("src/components/dashboard/table-filters.tsx");
+		const expectedOrder =
+			/ImprovementRequest,\s*RequestStatus\.SentToEngineer,\s*RequestStatus\.DesignCostEstimationApproval,\s*RequestStatus\.SendBackToRequester,\s*RequestStatus\.FinalApproval,\s*RequestStatus\.Completed,\s*RequestStatus\.Cancelled,?/;
+		// requests page: explicit workflow-ordered array
+		assert.match(filters, /const ALL_STATUSES[^=]*= \[/);
+		assert.doesNotMatch(filters, /const ALL_STATUSES[^=]*= Object\.values/);
+		assert.match(filters, expectedOrder);
+		// dashboard: same order
+		assert.match(dashboardFilters, /const ALL_STATUSES[^=]*= \[/);
+		assert.doesNotMatch(
+			dashboardFilters,
+			/const ALL_STATUSES[^=]*= Object\.values/,
+		);
+		assert.match(dashboardFilters, expectedOrder);
+	});
 });
 
 describe("Requests desktop data flow and header", () => {

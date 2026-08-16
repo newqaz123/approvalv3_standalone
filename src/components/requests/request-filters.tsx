@@ -48,7 +48,15 @@ const formatStatusLabel = (status: string): string => {
 	return statusMap[status] || status;
 };
 
-const ALL_STATUSES = Object.values(RequestStatus);
+const ALL_STATUSES = [
+	RequestStatus.ImprovementRequest,
+	RequestStatus.SentToEngineer,
+	RequestStatus.DesignCostEstimationApproval,
+	RequestStatus.SendBackToRequester,
+	RequestStatus.FinalApproval,
+	RequestStatus.Completed,
+	RequestStatus.Cancelled,
+];
 
 export function RequestFilters({
 	departments,
