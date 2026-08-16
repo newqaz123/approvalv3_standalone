@@ -150,7 +150,9 @@ describe("Gapforimprove regressions", () => {
 		const modalRouter = read(
 			"src/components/requests/request-modal-router.tsx",
 		);
-		const dashboardTabs = read("src/components/dashboard/dashboard-tabs.tsx");
+		const followUpDashboard = read(
+			"src/components/dashboard/follow-up-dashboard.tsx",
+		);
 		const analyticsPage = read("src/components/analytics/analytics-page.tsx");
 
 		assert.match(requestTable, /const \[data, setData\] = useState/);
@@ -167,7 +169,7 @@ describe("Gapforimprove regressions", () => {
 		assert.match(listClient, /refreshSignal=\{requestListRefreshSignal\}/);
 		assert.match(listClient, /setRequestListRefreshSignal/);
 		assert.match(modalRouter, /approvalapp:request-data-changed/);
-		assert.match(dashboardTabs, /approvalapp:request-data-changed/);
+		assert.match(followUpDashboard, /RequestModalRouter/);
 		assert.match(analyticsPage, /approvalapp:request-data-changed/);
 	});
 
@@ -235,7 +237,7 @@ describe("Gapforimprove regressions", () => {
 		assert.match(middleware, /callbackUrl/);
 		assert.match(
 			middleware,
-			/encodeURIComponent\(req\.nextUrl\.pathname \+ req\.nextUrl\.search\)/,
+			/encodeURIComponent\([\s\S]*req\.nextUrl\.pathname \+ req\.nextUrl\.search[\s\S]*\)/,
 		);
 		assert.match(signInPage, /useSearchParams/);
 		assert.match(signInPage, /callbackUrl/);

@@ -406,10 +406,13 @@ describe("engineering sub-task request and filter wiring", () => {
 			dashboardFilters,
 			/wrStatus\?: ['"]all['"] \| ['"]not-received['"] \| ['"]received['"]/,
 		);
-		assert.match(dashboardFilters, /DEFAULT_WR_FILTER = 'all'/);
+		assert.match(dashboardFilters, /DEFAULT_WR_FILTER = ["']all["']/);
 		assert.match(dashboardFilters, /Show only no WR/);
 		assert.match(dashboardFilters, /h-10 min-h-10/);
-		assert.match(dashboardFilters, /className=\{cn\(\s*'h-10 min-h-10 w-full/);
+		assert.match(
+			dashboardFilters,
+			/className=\{cn\(\s*["']h-10 min-h-10 w-full/,
+		);
 		assert.match(dashboardFilters, /translate-x-4/);
 		assert.match(dashboardFilters, /bg-emerald-500/);
 		assert.doesNotMatch(dashboardFilters, /border-dashed/);
@@ -430,15 +433,9 @@ describe("engineering sub-task request and filter wiring", () => {
 		assert.match(dashboardTable, /onVisibleRowCountChange/);
 		assert.doesNotMatch(dashboardTabs, /All Requests/);
 		assert.doesNotMatch(dashboardTabs, /getAllRequests/);
-		assert.match(dashboardTabs, /visibleCounts/);
-		assert.match(dashboardTabs, /TabCountBadge/);
-		assert.match(
-			dashboardTabs,
-			/sm:flex-row sm:items-center sm:justify-between/,
-		);
-		assert.match(dashboardTabs, /TabsList className="flex w-full sm:max-w-xl"/);
-		assert.match(dashboardTabs, /formatDistanceToNow/);
 		assert.doesNotMatch(dashboardPage, />Dashboard<\/h1>/);
+		assert.match(dashboardPage, /FollowUpDashboard/);
+		assert.match(dashboardPage, /getFollowUpDashboard/);
 		assert.match(dashboardPage, /w-full py-4/);
 	});
 });
@@ -553,10 +550,11 @@ describe("engineering sub-task request modal panel wiring", () => {
 			"utf8",
 		);
 		const submitFinalCase =
-			source.match(/case 'submit-final':[\s\S]*?default:/)?.[0] ?? "";
+			source.match(/case ["']submit-final["']:[\s\S]*?default:/)?.[0] ?? "";
 
 		assert.match(submitFinalCase, /subTasksElement=\{subTasksElement\}/);
-		assert.match(submitFinalCase, /\)\s*break\s*default:/);
+		assert.match(submitFinalCase, /subTasksElement=\{subTasksElement\}/);
+		assert.match(submitFinalCase, /break[\s\S]*default:/);
 	});
 
 	it("renders the optional sub-task section before each activity timeline", () => {

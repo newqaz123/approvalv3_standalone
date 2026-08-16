@@ -70,7 +70,8 @@ export function StatusBadge({ status, hasRejection }: StatusBadgeProps) {
 	const isRejected =
 		hasRejection &&
 		(status === RequestStatus.SentToEngineer ||
-			status === RequestStatus.ImprovementRequest);
+			status === RequestStatus.ImprovementRequest ||
+			status === RequestStatus.FinalApproval);
 
 	return (
 		<Badge

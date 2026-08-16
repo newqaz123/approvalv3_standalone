@@ -1,12 +1,12 @@
-import { auth } from '@/lib/auth-config'
-import { DashboardTabs } from '@/components/dashboard/dashboard-tabs'
+import { FollowUpDashboard } from "@/components/dashboard/follow-up-dashboard";
+import { getFollowUpDashboard } from "@/server-actions/dashboard";
 
 export default async function DashboardPage() {
-  const session = await auth()
+	const data = await getFollowUpDashboard();
 
-  return (
-    <div className="w-full py-4">
-      <DashboardTabs userId={session?.user?.id ?? null} />
-    </div>
-  )
+	return (
+		<div className="w-full py-4">
+			<FollowUpDashboard data={data} />
+		</div>
+	);
 }
