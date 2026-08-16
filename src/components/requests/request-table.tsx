@@ -25,24 +25,8 @@ import {
 	RequestCardsEmptyState,
 } from "@/components/mobile/request-card";
 import { ApprovalStatusBadge } from "./approval-status-badge";
+import { UserAvatar } from "@/components/ui/user-avatar";
 import { cn } from "@/lib/utils";
-
-const PIC_GRADIENTS = [
-	"linear-gradient(135deg,#3b82f6,#2563eb)",
-	"linear-gradient(135deg,#a855f7,#7c3aed)",
-	"linear-gradient(135deg,#f59e0b,#d97706)",
-	"linear-gradient(135deg,#10b981,#059669)",
-	"linear-gradient(135deg,#ec4899,#be185d)",
-	"linear-gradient(135deg,#06b6d4,#0e7490)",
-] as const;
-
-function getAvatarGradient(key: string) {
-	let hash = 0;
-	for (let i = 0; i < key.length; i++) {
-		hash = (hash * 31 + key.charCodeAt(i)) | 0;
-	}
-	return PIC_GRADIENTS[Math.abs(hash) % PIC_GRADIENTS.length];
-}
 
 export type RequestListRow = {
 	id: string;
@@ -191,20 +175,11 @@ export function RequestTable({
 							className="flex min-w-0 items-center gap-1.5 transition-all duration-200 ease-out motion-safe:group-hover/row:translate-x-0.5 motion-reduce:transform-none"
 							title={assignments.map((a) => a.engineer.name).join(", ")}
 						>
-							<span
-								aria-hidden
-								className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-white ring-2 ring-white shadow-sm"
-								style={{ background: getAvatarGradient(first.engineer.id) }}
-							>
-								<span className="text-[10px] font-bold">
-									{first.engineer.name
-										.split(" ")
-										.map((part) => part[0])
-										.join("")
-										.slice(0, 2)
-										.toUpperCase()}
-								</span>
-							</span>
+							<UserAvatar
+								name={first.engineer.name}
+								size="md"
+								className="shadow-sm"
+							/>
 							<span className="truncate text-sm text-gray-700 transition-colors duration-200 ease-out group-hover/row:text-gray-900">
 								{first.engineer.name.split(" ")[0]}
 								{remainingCount > 0 && (

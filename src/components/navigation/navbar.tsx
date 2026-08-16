@@ -16,6 +16,7 @@ import {
 	GitBranch,
 } from "lucide-react";
 import { usePathname } from "next/navigation";
+import { UserAvatar } from "@/components/ui/user-avatar";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import { AUTHENTICATED_SHELL_CLASS } from "@/lib/authenticated-shell";
 import { cn } from "@/lib/utils";
@@ -250,12 +251,12 @@ export function Navbar() {
 						<div className="relative" ref={menuRef}>
 							<button
 								onClick={() => setMenuOpen(!menuOpen)}
-								className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-300 transition-colors"
+								className="flex items-center justify-center rounded-full transition-all duration-200 ease-out hover:ring-2 hover:ring-blue-500 hover:ring-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
 								title="User menu"
 								aria-label="Open user menu"
 								aria-expanded={menuOpen}
 							>
-								{user?.name?.charAt(0)?.toUpperCase() || "?"}
+								<UserAvatar name={user?.name} size="lg" />
 							</button>
 
 							{menuOpen && (

@@ -177,13 +177,12 @@ describe("Requests modern status pills and hover motion", () => {
 		// progress bar
 		assert.match(approvalBadge, /h-1\.5 w-full rounded-full bg-gray-100/);
 		assert.match(approvalBadge, /style=\{\{ width:/);
-		// timeline connector + dots
+		// timeline connector + ring avatars (dots retired into UserAvatar)
 		assert.match(approvalBadge, /absolute left-\[9px\]/);
 		assert.match(approvalBadge, /bg-emerald-300/);
-		assert.match(approvalBadge, /bg-emerald-500/);
-		// current pending dot pulses, reduced-motion safe
-		assert.match(approvalBadge, /animate-pulse/);
-		assert.match(approvalBadge, /motion-reduce:animate-none/);
+		assert.match(approvalBadge, /status=\{\{/);
+		// current pending avatar pulses via the shared component, reduced-motion safe
+		assert.match(approvalBadge, /current: isCurrent/);
 		// later pending steps read as up next
 		assert.match(approvalBadge, /up next/);
 		// entrance motion on the popup
@@ -255,17 +254,18 @@ describe("Requests modern status pills and hover motion", () => {
 
 	it("renders PIC as an avatar with name and overflow count", () => {
 		assert.doesNotMatch(table, /UserCircle/);
-		assert.match(table, /getAvatarGradient/);
-		assert.match(table, /linear-gradient/);
+		assert.doesNotMatch(table, /PIC_GRADIENTS/);
+		assert.match(
+			table,
+			/import \{ UserAvatar \} from "@\/components\/ui\/user-avatar"/,
+		);
+		assert.match(table, /<UserAvatar\n[\s\S]*?name=\{first\.engineer\.name\}/);
+		assert.match(table, /size="md"/);
 		assert.match(table, /visibleAssignments\.slice\(0, 1\)/);
 		assert.match(table, /\+\{remainingCount\}/);
 		assert.match(
 			table,
 			/assignments\.map\(\(a\) => a\.engineer\.name\)\.join\(", "\)/,
 		);
-		assert.match(table, /h-6 w-6/);
-		assert.match(table, /rounded-full text-white/);
-		assert.match(table, /ring-2 ring-white/);
-		assert.match(table, /text-\[10px\] font-bold/);
 	});
 });

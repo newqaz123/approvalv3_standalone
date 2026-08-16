@@ -1,12 +1,13 @@
 "use client";
 
-import { CheckCircle2, Clock, XCircle, Check } from "lucide-react";
+import { Clock } from "lucide-react";
 import {
 	HoverCard,
 	HoverCardContent,
 	HoverCardTrigger,
 } from "@/components/ui/hover-card";
 import { Badge } from "@/components/ui/badge";
+import { UserAvatar } from "@/components/ui/user-avatar";
 import { cn } from "@/lib/utils";
 
 export interface Approval {
@@ -30,11 +31,9 @@ interface ApprovalStatusBadgeProps {
 
 export function ApprovalStatusBadge({
 	approvals,
-	requestStatus,
 	size = "default",
 }: ApprovalStatusBadgeProps) {
 	// Calculate overall approval state
-	const approvedCount = approvals.filter((a) => a.status === "approved").length;
 	const rejectedCount = approvals.filter((a) => a.status === "rejected").length;
 	const pendingCount = approvals.filter((a) => a.status === "pending").length;
 
@@ -187,27 +186,18 @@ export function ApprovalStatusBadge({
 										)}
 									/>
 								)}
-								{/* Step dot */}
-								<span className="relative z-10 flex h-5 w-5 shrink-0 items-center justify-center">
-									{isApproved && (
-										<span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500">
-											<Check className="h-3 w-3 text-white" strokeWidth={3} />
-										</span>
-									)}
-									{isRejected && (
-										<span className="flex h-5 w-5 items-center justify-center rounded-full bg-red-500">
-											<XCircle className="h-3.5 w-3.5 text-white" />
-										</span>
-									)}
-									{isPending && (
-										<span
-											className={cn(
-												"h-2.5 w-2.5 rounded-full bg-white ring-2 ring-amber-400",
-												isCurrent && "animate-pulse motion-reduce:animate-none",
-											)}
-										/>
-									)}
-								</span>
+								{/* Step marker: avatar with status ring */}
+								<UserAvatar
+									name={displayName}
+									size="sm"
+									status={{
+										approved: isApproved,
+										pending: isPending,
+										rejected: isRejected,
+										current: isCurrent,
+									}}
+									className="relative z-10"
+								/>
 								{/* Name + level */}
 								<div className="min-w-0 flex-1 pt-0.5">
 									<p className="truncate text-sm font-medium text-gray-700 leading-tight">
