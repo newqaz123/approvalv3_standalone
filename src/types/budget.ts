@@ -2,6 +2,7 @@ export interface BudgetCodeSummary {
   id: string
   code: string
   displayCode: string
+  name: string | null
   budgetAmount: number | null
   department: {
     id: string
@@ -44,6 +45,7 @@ export interface BudgetMonitorData {
   budgetCodes: BudgetCodeSummary[]
   groups: BudgetCodeGroup[]
   remainingRequests: BudgetRequestRecord[]
+  requests: BudgetRequestRecord[]
   filters: {
     departments: Array<{ id: string; name: string }>
     statuses: string[]

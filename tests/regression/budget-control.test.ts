@@ -31,6 +31,7 @@ describe('budget control helpers', () => {
         id: 'b1',
         code: 'AYT-PD1-CX-400',
         displayCode: 'AYT-PD1-CX-400',
+        name: null,
         budgetAmount: 10000000,
         department: { id: 'd1', name: 'Production 1' },
       },
@@ -67,6 +68,7 @@ describe('budget control helpers', () => {
           id: 'b1',
           code: 'CAPEX-2026-IT',
           displayCode: 'CAPEX-2026-IT',
+          name: null,
           budgetAmount: 1000,
           department: { id: 'd1', name: 'IT' },
         },
@@ -83,6 +85,7 @@ describe('budget control helpers', () => {
           id: 'b1',
           code: 'CAPEX-2026-IT',
           displayCode: 'CAPEX-2026-IT',
+          name: null,
           budgetAmount: 1000,
           department: { id: 'd1', name: 'IT' },
         },
@@ -109,6 +112,7 @@ describe('budget control helpers', () => {
           id: 'b1',
           code: 'CAPEX-2026-IT',
           displayCode: 'CAPEX-2026-IT',
+          name: null,
           budgetAmount: 1000,
           department: { id: 'd1', name: 'IT' },
         },
@@ -146,6 +150,7 @@ describe('budget control helpers', () => {
           id: 'b1',
           code: 'CAPEX-2026-IT',
           displayCode: 'CAPEX-2026-IT',
+          name: null,
           budgetAmount: 1,
           department: { id: 'd1', name: 'IT' },
         },
@@ -162,6 +167,7 @@ describe('budget control helpers', () => {
           id: 'b1',
           code: 'CAPEX-2026-IT',
           displayCode: 'CAPEX-2026-IT',
+          name: null,
           budgetAmount: 1,
           department: { id: 'd1', name: 'IT' },
         },
@@ -179,6 +185,22 @@ describe('budget control helpers', () => {
     assert.equal(rows[0]['Remaining Budget'], 0.7)
     assert.equal(rows[1]['Used Amount'], 0.3)
     assert.equal(rows[1]['Remaining Budget'], 0.7)
+  })
+})
+
+describe('budget code name field', () => {
+  it('adds a nullable name column and monitor requests list', () => {
+    const schema = readFileSync('prisma/schema.prisma', 'utf8')
+    const types = readFileSync('src/types/budget.ts', 'utf8')
+    const migration = readFileSync(
+      'prisma/migrations/20260817000000_add_budget_code_name/migration.sql',
+      'utf8'
+    )
+
+    assert.match(schema, /model budget_codes[\s\S]*name\s+String\?/)
+    assert.match(migration, /ALTER TABLE "budget_codes" ADD COLUMN "name" TEXT/)
+    assert.match(types, /name: string \| null/)
+    assert.match(types, /requests: BudgetRequestRecord\[\]/)
   })
 })
 
