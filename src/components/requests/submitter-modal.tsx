@@ -674,7 +674,6 @@ export function SubmitterModal({
 	};
 
 	return (
-		// pi-lens-ignore: ast-grep:no-nested-links
 		<Dialog
 			open={open}
 			onOpenChange={(nextOpen) => {
@@ -717,7 +716,6 @@ export function SubmitterModal({
 					</div>
 				</DialogHeader>
 				{/* Scrollable Content */}
-				// pi-lens-ignore: ast-grep:no-nested-links
 				<div className="min-h-0 flex-1 overflow-y-auto p-6 space-y-6 max-h-[calc(92svh-180px)] pointer-fine:max-h-[calc(90vh-180px)]">
 					{/* Rejection Banner (only for resubmit mode) */}
 					{mode === "resubmit" && initialData?.rejectionReason && (
