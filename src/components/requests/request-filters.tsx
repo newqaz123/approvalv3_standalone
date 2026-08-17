@@ -169,41 +169,31 @@ export function RequestFilters({
 					</Select>
 				</div>
 
-				<div>
+				<div className="date-filter-field relative min-w-0 overflow-hidden">
+					<span className="pointer-events-none flex h-10 min-h-10 items-center truncate rounded-md border border-input bg-white px-3 text-sm text-muted-foreground">
+						{filters.dateFrom || "From date"}
+					</span>
 					<Input
 						id="request-date-from"
-						type={filters.dateFrom ? "date" : "text"}
-						placeholder="From date"
+						type="date"
 						aria-label="From date"
 						value={filters.dateFrom || ""}
-						onFocus={(e) => {
-							e.currentTarget.type = "date";
-							e.currentTarget.showPicker?.();
-						}}
-						onBlur={(e) => {
-							if (!e.currentTarget.value) e.currentTarget.type = "text";
-						}}
 						onChange={(e) => updateFilter("dateFrom", e.target.value)}
-						className="h-10 min-h-10 bg-white"
+						className="absolute inset-0 h-10 min-h-10 w-full cursor-pointer opacity-0"
 					/>
 				</div>
 
-				<div>
+				<div className="date-filter-field relative min-w-0 overflow-hidden">
+					<span className="pointer-events-none flex h-10 min-h-10 items-center truncate rounded-md border border-input bg-white px-3 text-sm text-muted-foreground">
+						{filters.dateTo || "To date"}
+					</span>
 					<Input
 						id="request-date-to"
-						type={filters.dateTo ? "date" : "text"}
-						placeholder="To date"
+						type="date"
 						aria-label="To date"
 						value={filters.dateTo || ""}
-						onFocus={(e) => {
-							e.currentTarget.type = "date";
-							e.currentTarget.showPicker?.();
-						}}
-						onBlur={(e) => {
-							if (!e.currentTarget.value) e.currentTarget.type = "text";
-						}}
 						onChange={(e) => updateFilter("dateTo", e.target.value)}
-						className="h-10 min-h-10 bg-white"
+						className="absolute inset-0 h-10 min-h-10 w-full cursor-pointer opacity-0"
 					/>
 				</div>
 

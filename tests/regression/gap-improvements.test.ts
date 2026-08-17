@@ -67,15 +67,15 @@ describe("Gapforimprove regressions", () => {
 
 		assert.match(
 			submitterModal,
-			/mode === 'solution' \? initialData\?\.requestTitle \|\| '' : ''/,
+			/mode === ['"]solution['"] \? initialData\?\.requestTitle \|\| ['"]{2} : ['"]{2}/,
 		);
 		assert.match(
 			submitterModal,
-			/useState\(initialData\?\.solution\?\.currency \|\| 'THB'\)/,
+			/useState\(\s*initialData\?\.solution\?\.currency \|\| ['"]THB['"],?\s*\)/,
 		);
 		assert.match(
 			submitterModal,
-			/setCurrency\(initialData\.solution\.currency \|\| 'THB'\)/,
+			/setCurrency\(initialData\.solution\.currency \|\| ['"]THB['"]\)/,
 		);
 	});
 

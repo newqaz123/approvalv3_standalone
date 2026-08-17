@@ -255,10 +255,7 @@ export function CompletedRequestModal({
 				</DialogHeader>
 
 				{/* Scrollable Content */}
-				<div
-					className="flex-1 overflow-y-auto p-6 space-y-6"
-					style={{ maxHeight: "calc(90vh - 140px)" }}
-				>
+				<div className="min-h-0 flex-1 overflow-y-auto p-6 space-y-6 max-h-[calc(92svh-140px)] pointer-fine:max-h-[calc(90vh-140px)]">
 					{/* Completed Banner - Sent to Engineer */}
 					<div className="bg-emerald-50 dark:bg-emerald-900/10 rounded-xl p-4 border border-emerald-200 dark:border-emerald-800/30">
 						<div className="flex items-start gap-3">

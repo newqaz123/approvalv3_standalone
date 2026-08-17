@@ -338,8 +338,8 @@ export function FollowUpDashboard({ data }: { data: FollowUpDashboardData }) {
 				}}
 			>
 				<Drawer.Portal>
-					<Drawer.Overlay className="fixed inset-0 z-50 bg-slate-900/20 md:hidden" />
-					<Drawer.Content className="fixed inset-x-0 bottom-0 z-50 flex h-[88dvh] flex-col overflow-hidden rounded-t-[28px] border border-slate-200 bg-white outline-none md:hidden">
+					<Drawer.Overlay className="fixed inset-0 z-50 bg-slate-900/20 pointer-fine:hidden" />
+					<Drawer.Content className="fixed inset-x-0 bottom-0 z-50 flex h-[88svh] flex-col overflow-hidden rounded-t-[28px] border border-slate-200 bg-white outline-none pointer-fine:hidden">
 						{drawer && (
 							<FollowUpDrawerPanel
 								drawer={drawer}
@@ -357,7 +357,7 @@ export function FollowUpDashboard({ data }: { data: FollowUpDashboardData }) {
 			</Drawer.Root>
 
 			{drawer && (
-				<div className="fixed inset-0 z-50 hidden md:block">
+				<div className="fixed inset-0 z-50 hidden pointer-fine:block">
 					<button
 						type="button"
 						className="absolute inset-0 bg-slate-900/20"

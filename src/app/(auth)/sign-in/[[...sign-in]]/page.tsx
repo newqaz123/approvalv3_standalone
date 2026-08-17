@@ -42,9 +42,9 @@ export default function SignInPage() {
 	};
 
 	return (
-		<div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-indigo-50/30 to-slate-50 px-4 py-12">
+		<div className="flex min-h-dvh items-center justify-center bg-gradient-to-br from-slate-50 via-indigo-50/30 to-slate-50 px-4 py-8">
 			{/* Background Pattern */}
-			<div className="fixed inset-0 overflow-hidden pointer-events-none">
+			<div className="pointer-events-none fixed inset-0 hidden overflow-hidden sm:block">
 				<div className="absolute -top-1/2 -right-1/2 w-[800px] h-[800px] rounded-full bg-gradient-to-br from-indigo-200/20 to-purple-200/20 blur-3xl" />
 				<div className="absolute -bottom-1/2 -left-1/2 w-[600px] h-[600px] rounded-full bg-gradient-to-br from-emerald-200/20 to-teal-200/20 blur-3xl" />
 			</div>
@@ -55,14 +55,14 @@ export default function SignInPage() {
 					<div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-indigo-500 to-indigo-600 shadow-lg shadow-indigo-500/25 mb-6">
 						<CheckCircle className="w-8 h-8 text-white" />
 					</div>
-					<h1 className="text-3xl font-bold text-slate-900 tracking-tight">
+					<h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
 						Approval System
 					</h1>
 					<p className="mt-2 text-slate-600">Sign in to manage your workflow</p>
 				</div>
 
 				{/* Main Card */}
-				<div className="bg-white/80 backdrop-blur-xl rounded-2xl shadow-xl shadow-slate-200/50 border border-slate-200/60 p-8">
+				<div className="rounded-2xl border border-slate-200/60 bg-white/80 p-6 shadow-xl shadow-slate-200/50 backdrop-blur-xl sm:p-8">
 					{/* Error Message */}
 					{error && (
 						<div className="mb-6 rounded-xl bg-red-50 border border-red-100 p-4 flex items-start gap-3">
@@ -161,7 +161,7 @@ export default function SignInPage() {
 				</div>
 
 				{/* Trust Indicators */}
-				<div className="mt-8 flex items-center justify-center gap-6 text-slate-400">
+				<div className="mt-8 flex flex-wrap items-center justify-center gap-4 text-slate-400 sm:gap-6">
 					<div className="flex items-center gap-2 text-xs">
 						<div className="w-2 h-2 rounded-full bg-emerald-500" />
 						Secure login
