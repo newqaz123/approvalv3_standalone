@@ -352,6 +352,7 @@ describe('budget monitor server actions', () => {
       'updateRequestProjectEstimate',
       'updateBudgetCodeAmount',
       'createBudgetCode',
+      'pasteBudgetCodes',
       'exportBudgetMonitorXlsx',
     ]) {
       assert.match(source, new RegExp(`export async function ${exportName}\\b`))
@@ -430,6 +431,35 @@ describe('budget monitor server actions', () => {
     assert.match(assignSchemaBody, /budgetCodeId/)
     assert.match(assignSchemaBody, /budgetCode/)
     assert.match(assignSchemaBody, /exactly one/i)
+  })
+
+  it('returns a flat requests list and maps budget code name', () => {
+    const source = readServerAction()
+    const getDataBody = source.slice(
+      source.indexOf('export async function getBudgetMonitorData'),
+      source.indexOf('export async function assignRequestToBudgetCode')
+    )
+    assert.match(getDataBody, /name: true/)
+    assert.match(getDataBody, /requests,/)
+    assert.match(source, /name: budgetCode\.name \?\? null|name: decimalToNumber|name:/)
+  })
+
+  it('requires name and amount on create, update, and paste', () => {
+    const source = readServerAction()
+    assert.match(source, /export async function pasteBudgetCodes/)
+    assert.match(source, /name: z\.string\(\)[\s\S]*min\(1\)/)
+    const createBody = source.slice(
+      source.indexOf('const createBudgetCodeSchema'),
+      source.indexOf('function buildVisibleRequestWhere')
+    )
+    assert.match(createBody, /name:/)
+    assert.doesNotMatch(
+      source.slice(
+        source.indexOf('const createBudgetCodeSchema'),
+        source.indexOf('function buildVisibleRequestWhere')
+      ),
+      /budgetAmount: moneySchema/
+    )
   })
 
   it('renders budget monitor project estimate cells from the approved display amount', () => {
