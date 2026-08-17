@@ -32,7 +32,7 @@ export function BudgetRequestTable({
   onUnassign: (requestId: string) => Promise<void>
   onEditProjectEstimate: (requestId: string, value: number | null) => void
 }) {
-  const [assignedCollapsed, setAssignedCollapsed] = useState(false)
+  const [assignedExpanded, setAssignedExpanded] = useState(false)
   const unassigned = requests.filter((request) => !request.budgetCode)
   const assigned = requests.filter((request) => request.budgetCode)
 
@@ -169,15 +169,15 @@ export function BudgetRequestTable({
             <Button
               variant="ghost"
               size="icon"
-              aria-expanded={!assignedCollapsed}
-              onClick={() => setAssignedCollapsed(!assignedCollapsed)}
-              title={assignedCollapsed ? 'Expand assigned requests' : 'Collapse assigned requests'}
+              aria-expanded={assignedExpanded}
+              onClick={() => setAssignedExpanded(!assignedExpanded)}
+              title={assignedExpanded ? 'Collapse assigned requests' : 'Expand assigned requests'}
             >
-              {assignedCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              {assignedExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
             </Button>
           </div>
         </div>
-        {!assignedCollapsed &&
+        {assignedExpanded &&
           (assigned.length === 0 ? (
             <p className="rounded-md border border-dashed border-gray-300 bg-gray-50 p-4 text-center text-sm text-gray-500">
               No assigned requests.
