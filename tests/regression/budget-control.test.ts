@@ -4,11 +4,17 @@ import { readFileSync } from 'node:fs'
 import {
   buildBudgetCodeGroups,
   buildBudgetExportRows,
+  classifyBudgetCodePasteRows,
   fuzzyMatchBudgetCode,
-  matchesBudgetMonitorSearch,
+  getBudgetCodeHealth,
+  getBudgetCodeLabel,
   getBudgetProjectEstimateAmount,
   getBudgetUsageAmount,
+  groupBudgetCodesByDepartment,
+  matchesBudgetMonitorSearch,
   normalizeBudgetCode,
+  parseBudgetCodePaste,
+  sumVisibleRemainingBudget,
 } from '../../src/lib/budget-control'
 
 describe('budget control helpers', () => {
@@ -185,6 +191,133 @@ describe('budget control helpers', () => {
     assert.equal(rows[0]['Remaining Budget'], 0.7)
     assert.equal(rows[1]['Used Amount'], 0.3)
     assert.equal(rows[1]['Remaining Budget'], 0.7)
+  })
+
+  it('matches budget monitor search against budget code name', () => {
+    const request = {
+      title: 'Replace chilled water pump',
+      status: 'Completed',
+      department: { id: 'd1', name: 'Production 1' },
+      budgetCode: {
+        id: 'b1',
+        code: 'AYT-PD1-CX-400',
+        displayCode: 'AYT-PD1-CX-400',
+        name: 'Line 2 filler capex',
+        budgetAmount: 10000000,
+        department: { id: 'd1', name: 'Production 1' },
+      },
+    }
+
+    assert.equal(matchesBudgetMonitorSearch(request, 'filler capex'), true)
+    assert.equal(matchesBudgetMonitorSearch(request, 'warehouse'), false)
+  })
+
+  it('labels a budget code with name and falls back to displayCode', () => {
+    assert.equal(getBudgetCodeLabel({ name: 'Filler upgrade', displayCode: 'AYT-PD1-GF-411' }), 'Filler upgrade')
+    assert.equal(getBudgetCodeLabel({ name: '  ', displayCode: 'AYT-PD1-GF-411' }), 'AYT-PD1-GF-411')
+    assert.equal(getBudgetCodeLabel({ name: null, displayCode: 'AYT-PD1-GF-411' }), 'AYT-PD1-GF-411')
+  })
+
+  it('classifies budget health without blocking', () => {
+    assert.equal(getBudgetCodeHealth(-1, 100), 'Over')
+    assert.equal(getBudgetCodeHealth(10, 100), 'Watch')
+    assert.equal(getBudgetCodeHealth(20, 100), 'Healthy')
+    assert.equal(getBudgetCodeHealth(null, null), 'Healthy')
+    assert.equal(getBudgetCodeHealth(5, 0), 'Healthy')
+  })
+
+  it('groups budget codes by department and sums remaining', () => {
+    const groups = [
+      {
+        budgetCode: {
+          id: 'b1',
+          code: 'A',
+          displayCode: 'A',
+          name: 'Alpha',
+          budgetAmount: 100,
+          department: { id: 'd1', name: 'Production 1' },
+        },
+        usedAmount: 40,
+        remainingBudget: 60,
+        assignedRequestCount: 1,
+        requests: [],
+      },
+      {
+        budgetCode: {
+          id: 'b2',
+          code: 'B',
+          displayCode: 'B',
+          name: 'Beta',
+          budgetAmount: 50,
+          department: null,
+        },
+        usedAmount: 10,
+        remainingBudget: 40,
+        assignedRequestCount: 0,
+        requests: [],
+      },
+      {
+        budgetCode: {
+          id: 'b3',
+          code: 'C',
+          displayCode: 'C',
+          name: null,
+          budgetAmount: null,
+          department: { id: 'd2', name: 'Maintenance' },
+        },
+        usedAmount: 0,
+        remainingBudget: null,
+        assignedRequestCount: 0,
+        requests: [],
+      },
+    ]
+
+    const grouped = groupBudgetCodesByDepartment(groups)
+    assert.deepEqual(
+      grouped.map((entry) => [entry.departmentName, entry.departmentId, entry.groups.length]),
+      [
+        ['Maintenance', 'd2', 1],
+        ['Production 1', 'd1', 1],
+        ['No department', null, 1],
+      ]
+    )
+
+    assert.deepEqual(sumVisibleRemainingBudget(groups), { total: 100, groupCount: 2 })
+  })
+
+  it('parses paste text with headers, aliases, and headerless columns', () => {
+    const headed = parseBudgetCodePaste(
+      'Budget Code,Budget Code Name,Budget Amount\nAYT-PD1-GF-411,Filler,50000\n,Missing name,10\nAYT-PD1-GF-412,No amount,\nAYT-PD1-GF-411,Duplicate,1\nbad,Bad amount,abc'
+    )
+    assert.equal(headed.valid.length, 1)
+    assert.equal(headed.valid[0].code, 'AYT-PD1-GF-411')
+    assert.equal(headed.valid[0].displayCode, 'AYT-PD1-GF-411')
+    assert.equal(headed.valid[0].name, 'Filler')
+    assert.equal(headed.valid[0].budgetAmount, 50000)
+    assert.equal(headed.skipped.length, 4)
+
+    const headerless = parseBudgetCodePaste('AYT-MT-GF-210\tSeal kit\t28000')
+    assert.deepEqual(headerless.valid, [
+      {
+        code: 'AYT-MT-GF-210',
+        displayCode: 'AYT-MT-GF-210',
+        name: 'Seal kit',
+        budgetAmount: 28000,
+      },
+    ])
+    assert.equal(headerless.skipped.length, 0)
+  })
+
+  it('classifies paste rows as creates or updates using normalized codes', () => {
+    const classified = classifyBudgetCodePasteRows(
+      [
+        { code: 'AYT-PD1-GF-411', displayCode: 'AYT-PD1-GF-411', name: 'Filler', budgetAmount: 1 },
+        { code: 'AYT-NEW-001', displayCode: 'AYT-NEW-001', name: 'New', budgetAmount: 2 },
+      ],
+      [{ code: 'AYT-PD1-GF-411' }]
+    )
+    assert.equal(classified.updates[0].code, 'AYT-PD1-GF-411')
+    assert.equal(classified.creates[0].code, 'AYT-NEW-001')
   })
 })
 
