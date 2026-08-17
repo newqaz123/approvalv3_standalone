@@ -337,6 +337,23 @@ describe('budget code name field', () => {
   })
 })
 
+describe('budget code dialogs', () => {
+  it('requires name and amount in create and edit budget code dialogs', () => {
+    const createDialog = readFileSync('src/components/budget/budget-code-create-dialog.tsx', 'utf8')
+    const editDialog = readFileSync('src/components/budget/budget-code-edit-dialog.tsx', 'utf8')
+
+    assert.match(createDialog, /name: string/)
+    assert.match(createDialog, /budgetAmount: number/)
+    assert.match(createDialog, /id="new-budget-code-name"/)
+    assert.match(createDialog, /disabled=\{isSaving \|\| !canSubmit\}/)
+
+    assert.match(editDialog, /name: string/)
+    assert.match(editDialog, /budgetAmount: number/)
+    assert.match(editDialog, /id="budget-code-edit-name"/)
+    assert.match(editDialog, /disabled=\{isSaving \|\| !canSubmit\}/)
+  })
+})
+
 describe('budget monitor server actions', () => {
   function readServerAction() {
     return readFileSync('src/server-actions/budget-control.ts', 'utf8')
