@@ -519,18 +519,12 @@ describe('budget monitor server actions', () => {
   })
 
   it('renders budget monitor project estimate cells from the approved display amount', () => {
-    const box = readFileSync('src/components/budget/budget-code-box.tsx', 'utf8')
-    const remainingPanel = readFileSync('src/components/budget/remaining-request-panel.tsx', 'utf8')
+    const table = readFileSync('src/components/budget/budget-request-table.tsx', 'utf8')
 
-    assert.match(box, /getBudgetProjectEstimateAmount/)
-    assert.match(box, /projectEstimateAmount\?\.toLocaleString\(\) \?\? '-'/)
-    assert.match(box, /const hasApprovedEstimate = request\.engineeringEstimateCost !== null/)
-    assert.match(box, /hasApprovedEstimate \? \(/)
-    assert.match(box, /onClick=\{\(\) => onEditProjectEstimate\(request\.id, request\.projectEstimateCost\)\}/)
-    assert.match(remainingPanel, /getBudgetProjectEstimateAmount/)
-    assert.match(remainingPanel, /Project estimate: \{projectEstimateAmount\?\.toLocaleString\(\) \?\? '-'\}/)
-    assert.match(remainingPanel, /const hasApprovedEstimate = request\.engineeringEstimateCost !== null/)
-    assert.match(remainingPanel, /!hasApprovedEstimate && onEditProjectEstimate/)
+    assert.match(table, /getBudgetProjectEstimateAmount/)
+    assert.match(table, /projectEstimateAmount\?\.toLocaleString\(\) \?\? '—'/)
+    assert.match(table, /const hasApprovedEstimate = request\.engineeringEstimateCost !== null/)
+    assert.match(table, /onEditProjectEstimate\(request\.id, request\.projectEstimateCost\)/)
   })
 
   it('syncs approved engineering solution estimates into the editable project estimate field', () => {

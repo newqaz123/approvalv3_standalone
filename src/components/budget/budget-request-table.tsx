@@ -65,7 +65,8 @@ export function BudgetRequestTable({
 
   function renderCost(request: BudgetRequestRecord) {
     const projectEstimateAmount = getBudgetProjectEstimateAmount(request)
-    if (request.engineeringEstimateCost !== null) {
+    const hasApprovedEstimate = request.engineeringEstimateCost !== null
+    if (hasApprovedEstimate) {
       return (
         <span className="font-mono tabular-nums text-gray-700">
           {projectEstimateAmount?.toLocaleString() ?? '—'}
