@@ -338,6 +338,15 @@ describe('budget code name field', () => {
 })
 
 describe('budget code dialogs', () => {
+  it('previews paste rows before writing budget codes', () => {
+    const dialog = readFileSync('src/components/budget/budget-code-paste-dialog.tsx', 'utf8')
+    assert.match(dialog, /export function BudgetCodePasteDialog/)
+    assert.match(dialog, /parseBudgetCodePaste/)
+    assert.match(dialog, /classifyBudgetCodePasteRows/)
+    assert.match(dialog, /Confirm/)
+    assert.doesNotMatch(dialog, /type="file"/)
+  })
+
   it('requires name and amount in create and edit budget code dialogs', () => {
     const createDialog = readFileSync('src/components/budget/budget-code-create-dialog.tsx', 'utf8')
     const editDialog = readFileSync('src/components/budget/budget-code-edit-dialog.tsx', 'utf8')
