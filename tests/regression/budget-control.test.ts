@@ -369,6 +369,21 @@ describe('budget department panel', () => {
   })
 })
 
+describe('budget request assignment table', () => {
+  it('assigns requests with a group select instead of drag and drop', () => {
+    const table = readFileSync('src/components/budget/budget-request-table.tsx', 'utf8')
+
+    assert.match(table, /export function BudgetRequestTable/)
+    assert.match(table, /Unassigned/)
+    assert.match(table, /Assigned/)
+    assert.match(table, /aria-label="Assign group"/)
+    assert.match(table, /md:hidden/)
+    assert.match(table, /hidden md:table/)
+    assert.match(table, /getBudgetProjectEstimateAmount/)
+    assert.doesNotMatch(table, /DndContext|useDraggable|useDroppable/)
+  })
+})
+
 describe('budget monitor server actions', () => {
   function readServerAction() {
     return readFileSync('src/server-actions/budget-control.ts', 'utf8')
