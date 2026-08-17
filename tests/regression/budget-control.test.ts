@@ -354,6 +354,21 @@ describe('budget code dialogs', () => {
   })
 })
 
+describe('budget department panel', () => {
+  it('renders department-grouped budget cards without drop targets', () => {
+    const card = readFileSync('src/components/budget/budget-code-card.tsx', 'utf8')
+    const panel = readFileSync('src/components/budget/budget-department-panel.tsx', 'utf8')
+
+    assert.match(card, /export function BudgetCodeCard/)
+    assert.match(card, /getBudgetCodeHealth/)
+    assert.match(card, /getBudgetCodeLabel/)
+    assert.doesNotMatch(card, /useDroppable|DndContext|Drop remaining request/)
+    assert.match(panel, /groupBudgetCodesByDepartment/)
+    assert.match(panel, /Paste budget codes/)
+    assert.match(panel, /New budget code/)
+  })
+})
+
 describe('budget monitor server actions', () => {
   function readServerAction() {
     return readFileSync('src/server-actions/budget-control.ts', 'utf8')
