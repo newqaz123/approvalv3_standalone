@@ -46,9 +46,12 @@ export type RequestListRow = {
 		id: string;
 		status: "pending" | "approved" | "rejected";
 		approver?: { name: string } | null;
+		requiredApprover?: { name: string } | null;
 		requiredLevel: number;
 		order: number;
 		approvedAt?: Date | null;
+		isFinalApproval?: boolean;
+		potentialApprovers?: { name: string }[] | null;
 	}>;
 };
 
