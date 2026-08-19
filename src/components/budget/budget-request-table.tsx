@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { ChevronRight } from 'lucide-react'
 import { toast } from 'sonner'
+import { BudgetGroupCombobox } from '@/components/budget/budget-group-combobox'
 import { Button } from '@/components/ui/button'
 import { getBudgetCodeLabel, getBudgetProjectEstimateAmount } from '@/lib/budget-control'
 import type { BudgetCodeSummary, BudgetRequestRecord } from '@/types/budget'
@@ -49,19 +50,16 @@ export function BudgetRequestTable({
 
   function renderGroupSelect(request: BudgetRequestRecord) {
     return (
-      <select
+      <BudgetGroupCombobox
         aria-label="Assign group"
-        className="h-8 w-full rounded-md border border-input bg-white px-2 text-sm text-gray-900 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         value={request.budgetCode?.id ?? ''}
-        onChange={(event) => handleGroupChange(request, event.target.value)}
-      >
-        <option value="">Unassigned</option>
-        {sortBudgetCodesForRequest(budgetCodes, request).map((code) => (
-          <option key={code.id} value={code.id}>
-            {getBudgetCodeLabel(code)} · {code.displayCode}
-          </option>
-        ))}
-      </select>
+        options={sortBudgetCodesForRequest(budgetCodes, request).map((code) => ({
+          id: code.id,
+          label: getBudgetCodeLabel(code),
+          code: code.displayCode,
+        }))}
+        onChange={(budgetCodeId) => handleGroupChange(request, budgetCodeId)}
+      />
     )
   }
 
