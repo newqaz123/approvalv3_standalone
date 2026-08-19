@@ -38,7 +38,7 @@ describe('budget control wiring', () => {
     const page = readFileSync('src/components/budget/budget-monitor-page.tsx', 'utf8')
     const serverAction = readFileSync('src/server-actions/budget-control.ts', 'utf8')
 
-    assert.match(page, /placeholder="Search budget code or request"/)
+    assert.match(page, /placeholder="Search code or request"/)
     assert.match(page, /budgetCodeSearch/)
     assert.doesNotMatch(page, /placeholder="Filter budget code"/)
     assert.match(serverAction, /matchesBudgetMonitorSearch/)

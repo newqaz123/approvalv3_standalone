@@ -218,8 +218,57 @@ export function sumVisibleRemainingBudget(groups: BudgetCodeGroup[]) {
   }
 }
 
-function splitPasteLine(line: string): string[] {
-  return line.split(/[,\t;]/).map((cell) => cell.replace(/^"|"$/g, '').trim())
+/** Remove thousand-separator commas between digit groups (e.g. 50,000 → 50000)
+ * so they are not mistaken for column delimiters. Only strips when the pattern is
+ * digits , exactly-3-digits (repeated groups collapse via the loop). */
+export function stripThousandsSeparators(text: string): string {
+  let previous = text
+  let next = text.replace(/(\d),(?=\d{3}(?!\d))/g, '$1')
+  while (next !== previous) {
+    previous = next
+    next = next.replace(/(\d),(?=\d{3}(?!\d))/g, '$1')
+  }
+  return next
+}
+
+export function detectPasteDelimiter(text: string): '\t' | ',' | ';' {
+  if (text.includes('\t')) return '\t'
+  const lines = text.split(/\r?\n/).filter((line) => line.trim())
+  const sample = stripThousandsSeparators(lines.slice(0, 5).join('\n'))
+  const semis = (sample.match(/;/g) ?? []).length
+  const commas = (sample.match(/,/g) ?? []).length
+  if (semis > commas) return ';'
+  return ','
+}
+
+export function splitPasteLine(line: string, delimiter: '\t' | ',' | ';' = '\t'): string[] {
+  if (delimiter === '\t' || delimiter === ';') {
+    return line.split(delimiter).map((cell) => cell.replace(/^"|"$/g, '').trim())
+  }
+
+  const cells: string[] = []
+  let current = ''
+  let inQuotes = false
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i]
+    if (char === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"'
+        i += 1
+        continue
+      }
+      inQuotes = !inQuotes
+      continue
+    }
+    if (char === ',' && !inQuotes) {
+      cells.push(current.trim())
+      current = ''
+      continue
+    }
+    current += char
+  }
+  cells.push(current.trim())
+  return cells
 }
 
 function normalizePasteHeader(value: string): string {
@@ -235,23 +284,27 @@ function parsePasteAmount(value: string): number | null {
   return amount
 }
 
-export function parseBudgetCodePaste(text: string): {
+export function parseBudgetCodePaste(rawText: string): {
   valid: BudgetCodePasteRow[]
   skipped: BudgetCodePasteSkip[]
 } {
+  const text = stripThousandsSeparators(rawText)
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
   const valid: BudgetCodePasteRow[] = []
   const skipped: BudgetCodePasteSkip[] = []
   if (lines.length === 0) return { valid, skipped }
 
-  const firstCells = splitPasteLine(lines[0]).map(normalizePasteHeader)
+  const delimiter = detectPasteDelimiter(text)
+  const firstCells = splitPasteLine(lines[0], delimiter)
+  const firstHeaders = firstCells.map(normalizePasteHeader)
   const findIndex = (aliases: string[]) =>
-    firstCells.findIndex((header) => aliases.some((alias) => header === alias || header.includes(alias)))
+    firstHeaders.findIndex((header) => aliases.some((alias) => header === alias || header.includes(alias)))
 
   const headerCode = findIndex(['budget code', 'code'])
   const headerName = findIndex(['budget code name', 'name'])
   const headerAmount = findIndex(['budget amount', 'amount'])
-  const hasHeader = headerCode >= 0 || headerName >= 0 || headerAmount >= 0
+  const firstCellLooksLikeCode = /\d/.test(firstCells[0] ?? '')
+  const hasHeader = !firstCellLooksLikeCode && (headerCode >= 0 || headerName >= 0 || headerAmount >= 0)
   const codeIndex = hasHeader && headerCode >= 0 ? headerCode : 0
   const nameIndex = hasHeader && headerName >= 0 ? headerName : 1
   const amountIndex = hasHeader && headerAmount >= 0 ? headerAmount : 2
@@ -260,7 +313,7 @@ export function parseBudgetCodePaste(text: string): {
 
   for (let index = start; index < lines.length; index++) {
     const raw = lines[index]
-    const cells = splitPasteLine(raw)
+    const cells = splitPasteLine(raw, delimiter)
     const displayCode = cells[codeIndex] ?? ''
     const name = cells[nameIndex] ?? ''
     const amount = parsePasteAmount(cells[amountIndex] ?? '')
@@ -305,4 +358,56 @@ export function classifyBudgetCodePasteRows(
     creates: valid.filter((row) => !existing.has(row.code)),
     updates: valid.filter((row) => existing.has(row.code)),
   }
+}
+
+export type BudgetPasteGridRow = {
+  code: string
+  name: string
+  amount: string
+}
+
+const PASTE_GRID_KEYS = ['code', 'name', 'amount'] as const
+
+export function emptyPasteGrid(count = 8): BudgetPasteGridRow[] {
+  return Array.from({ length: count }, () => ({ code: '', name: '', amount: '' }))
+}
+
+export function applyPasteToGrid(
+  rows: BudgetPasteGridRow[],
+  startRow: number,
+  startCol: 0 | 1 | 2,
+  rawText: string
+): BudgetPasteGridRow[] {
+  const text = stripThousandsSeparators(rawText)
+  const lines = text.split(/\r?\n/).map((line) => line.replace(/\r$/, '')).filter((line) => line.length > 0)
+  if (lines.length === 0) return rows.map((row) => ({ ...row }))
+
+  const delimiter = detectPasteDelimiter(text)
+  const matrix = lines.map((line) => splitPasteLine(line, delimiter))
+  const next = rows.map((row) => ({ ...row }))
+  const singleColumn = matrix.every((cells) => cells.length === 1)
+
+  matrix.forEach((cells, offset) => {
+    const index = startRow + offset
+    while (next.length <= index) next.push({ code: '', name: '', amount: '' })
+    const row = { ...next[index] }
+    if (singleColumn) {
+      row[PASTE_GRID_KEYS[startCol]] = cells[0] ?? ''
+    } else {
+      cells.forEach((cell, columnOffset) => {
+        const column = startCol + columnOffset
+        if (column <= 2) row[PASTE_GRID_KEYS[column]] = cell
+      })
+    }
+    next[index] = row
+  })
+
+  return next
+}
+
+export function pasteGridToText(rows: BudgetPasteGridRow[]): string {
+  return rows
+    .filter((row) => row.code.trim() || row.name.trim() || row.amount.trim())
+    .map((row) => [row.code, row.name, row.amount].join('\t'))
+    .join('\n')
 }

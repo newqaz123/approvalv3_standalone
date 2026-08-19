@@ -53,7 +53,7 @@ const DialogContent = React.forwardRef<
 			<DialogPrimitive.Content
 				ref={ref}
 				className={cn(
-					"fixed inset-x-0 bottom-0 z-50 grid max-h-[92svh] pointer-coarse:max-h-[92svh] w-full max-w-lg gap-4 overflow-x-hidden rounded-t-2xl border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom pointer-fine:inset-x-auto pointer-fine:bottom-auto pointer-fine:left-1/2 pointer-fine:top-1/2 pointer-fine:-translate-x-1/2 pointer-fine:-translate-y-1/2 pointer-fine:data-[state=closed]:slide-out-to-left-1/2 pointer-fine:data-[state=closed]:slide-out-to-top-[48%] pointer-fine:data-[state=open]:slide-in-from-left-1/2 pointer-fine:data-[state=open]:slide-in-from-top-[48%]",
+					"fixed inset-x-0 bottom-0 z-50 grid max-h-[92svh] pointer-coarse:max-h-[92svh] w-full max-w-lg gap-4 overflow-x-hidden overflow-y-auto overscroll-contain rounded-t-2xl pointer-fine:rounded-2xl border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom pointer-fine:inset-x-auto pointer-fine:bottom-auto pointer-fine:left-1/2 pointer-fine:top-1/2 pointer-fine:-translate-x-1/2 pointer-fine:-translate-y-1/2 pointer-fine:data-[state=closed]:slide-out-to-left-1/2 pointer-fine:data-[state=closed]:slide-out-to-top-[48%] pointer-fine:data-[state=open]:slide-in-from-left-1/2 pointer-fine:data-[state=open]:slide-in-from-top-[48%]",
 					className,
 				)}
 				{...props}

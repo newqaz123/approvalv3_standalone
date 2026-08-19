@@ -55,11 +55,14 @@ export function BudgetCodeCreateDialog({ open, onOpenChange, departments, onCrea
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>New budget code</DialogTitle>
         </DialogHeader>
-        <div className="space-y-3">
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Add a budget code, name, and amount. Department is optional.
+          </p>
           <div className="space-y-2">
             <Label htmlFor="new-budget-code">Budget code</Label>
             <Input

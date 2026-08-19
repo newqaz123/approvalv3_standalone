@@ -214,10 +214,11 @@ export async function getBudgetMonitorData(input: BudgetMonitorFilters = {}): Pr
 
   const filters = filtersSchema.parse(input)
   const where = applyBudgetFilters(buildVisibleRequestWhere(user), filters)
+  const visibleWhere = { ...where, status: where.status ?? { not: 'Cancelled' } }
 
   const [requests, departments, creatorBudgetCodes] = await Promise.all([
     prisma.requests.findMany({
-      where,
+      where: visibleWhere,
       select: {
         id: true,
         title: true,

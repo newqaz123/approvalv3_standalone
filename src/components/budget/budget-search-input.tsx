@@ -5,13 +5,14 @@ import { Check, Search } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 
 interface BudgetSearchInputProps {
+  id?: string
   value: string
   placeholder: string
   options: Array<{ value: string; label: string; meta?: string }>
   onChange: (value: string) => void
 }
 
-export function BudgetSearchInput({ value, placeholder, options, onChange }: BudgetSearchInputProps) {
+export function BudgetSearchInput({ id, value, placeholder, options, onChange }: BudgetSearchInputProps) {
   const [open, setOpen] = useState(false)
   const trimmedValue = value.trim().toLowerCase()
   const filteredOptions = useMemo(() => {
@@ -26,7 +27,8 @@ export function BudgetSearchInput({ value, placeholder, options, onChange }: Bud
     <div className="relative">
       <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
       <Input
-        className="pl-9"
+        id={id}
+        className="h-9 pl-9 pr-8"
         placeholder={placeholder}
         value={value}
         onBlur={() => window.setTimeout(() => setOpen(false), 120)}

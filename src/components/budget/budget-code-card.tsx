@@ -1,6 +1,6 @@
 'use client'
 
-import { ChevronDown, ChevronRight, Pencil } from 'lucide-react'
+import { ChevronRight, MinusCircle, Pencil } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { getBudgetCodeHealth, getBudgetCodeLabel } from '@/lib/budget-control'
 import type { BudgetCodeGroup } from '@/types/budget'
@@ -10,11 +10,15 @@ export function BudgetCodeCard({
   collapsed,
   onCollapsedChange,
   onEditBudgetCode,
+  onUnassign,
+  onOpenRequest,
 }: {
   group: BudgetCodeGroup
   collapsed: boolean
   onCollapsedChange: (collapsed: boolean) => void
   onEditBudgetCode: () => void
+  onUnassign: (requestId: string) => void
+  onOpenRequest: (requestId: string) => void
 }) {
   const health = getBudgetCodeHealth(group.remainingBudget, group.budgetCode.budgetAmount)
   const usedPercent =
@@ -22,81 +26,111 @@ export function BudgetCodeCard({
       ? Math.min(100, Math.max(0, (group.usedAmount / group.budgetCode.budgetAmount) * 100))
       : null
 
+  const healthClass =
+    health === 'Over'
+      ? 'bg-red-50 text-red-700'
+      : health === 'Watch'
+        ? 'bg-amber-50 text-amber-700'
+        : health === 'Healthy'
+          ? 'bg-green-50 text-green-700'
+          : 'bg-gray-100 text-gray-600'
+  const barClass =
+    health === 'Over' ? 'bg-red-600' : health === 'Watch' ? 'bg-amber-600' : 'bg-gray-700'
+
   return (
-    <section className="rounded-lg border bg-white p-4 shadow-sm">
-      <div className="flex items-start justify-between gap-3">
+    <section className="overflow-hidden rounded-lg border bg-white transition-shadow duration-200 hover:shadow-sm">
+      <div className="grid items-center gap-3 px-3 py-3 lg:grid-cols-[minmax(0,1.4fr)_minmax(240px,1.4fr)_auto]">
         <button
           type="button"
-          className="min-h-11 min-w-0 flex-1 text-left"
+          className="group flex min-w-0 items-center gap-2 text-left"
           aria-expanded={!collapsed}
           onClick={() => onCollapsedChange(!collapsed)}
         >
-          <div className="text-base font-semibold">{getBudgetCodeLabel(group.budgetCode)}</div>
-          <p className="mt-1 text-xs text-gray-500">
-            {group.budgetCode.displayCode} · {group.assignedRequestCount} assigned request
-            {group.assignedRequestCount === 1 ? '' : 's'}
-          </p>
+          <ChevronRight className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 ${collapsed ? '' : 'rotate-90'}`} />
+          <span className="min-w-0">
+            <span className="block font-mono text-[11px] font-medium text-gray-500">{group.budgetCode.displayCode}</span>
+            <span className="block truncate text-sm font-semibold text-gray-900 group-hover:underline">
+              {getBudgetCodeLabel(group.budgetCode)}
+            </span>
+          </span>
         </button>
-        <div className="flex items-center gap-1">
-          <span className="rounded-full bg-gray-100 px-2 py-1 font-mono text-[11px]">{health}</span>
-          <Button variant="ghost" size="icon" onClick={onEditBudgetCode} title="Edit budget code">
-            <Pencil className="h-4 w-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => onCollapsedChange(!collapsed)}
-            title={collapsed ? 'Expand budget card' : 'Collapse budget card'}
-          >
-            {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-          </Button>
-        </div>
-      </div>
 
-      <div className="mt-3 grid grid-cols-1 overflow-hidden rounded-md border sm:grid-cols-3">
-        <div className="border-b p-3 sm:border-b-0 sm:border-r">
-          <div className="text-xs text-gray-500">Budget</div>
-          <div className="font-mono text-lg tabular-nums">
-            {group.budgetCode.budgetAmount?.toLocaleString() ?? '—'}
+        <div className="grid grid-cols-3 gap-0 max-lg:border-t max-lg:divide-x lg:gap-3">
+          <div className="py-1 pl-1 lg:py-0 lg:pl-0">
+            <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Budget amount</div>
+            <div className="text-sm font-semibold tabular-nums text-gray-900">
+              {group.budgetCode.budgetAmount?.toLocaleString() ?? '—'}
+            </div>
+          </div>
+          <div className="py-1 pl-3 lg:py-0 lg:pl-0">
+            <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Used</div>
+            <div className="text-sm font-semibold tabular-nums text-gray-900">{group.usedAmount.toLocaleString()}</div>
+          </div>
+          <div className="py-1 pl-3 lg:py-0 lg:pl-0">
+            <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Remaining</div>
+            <div className={`text-sm font-semibold tabular-nums ${group.remainingBudget !== null && group.remainingBudget < 0 ? 'text-red-700' : 'text-gray-900'}`}>
+              {group.remainingBudget?.toLocaleString() ?? '—'}
+            </div>
           </div>
         </div>
-        <div className="border-b p-3 sm:border-b-0 sm:border-r">
-          <div className="text-xs text-gray-500">Used</div>
-          <div className="font-mono text-lg tabular-nums">{group.usedAmount.toLocaleString()}</div>
-        </div>
-        <div className="p-3">
-          <div className="text-xs text-gray-500">Remaining</div>
-          <div className="font-mono text-lg tabular-nums">
-            {group.remainingBudget?.toLocaleString() ?? '—'}
-          </div>
+
+        <div className="flex shrink-0 items-center gap-2 max-lg:px-3 max-lg:pb-3 lg:justify-end">
+          <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${healthClass}`}>{health}</span>
+          <Button variant="outline" size="sm" onClick={onEditBudgetCode} title="Edit budget code">
+            <Pencil className="mr-1 h-3.5 w-3.5" />
+            Edit
+          </Button>
         </div>
       </div>
 
       {usedPercent !== null ? (
-        <div className="mt-3 h-1 overflow-hidden rounded-full bg-gray-200">
-          <div className="h-full bg-gray-900" style={{ width: `${usedPercent}%` }} />
+        <div className="h-1 bg-gray-100">
+          <div className={`h-full transition-[width] duration-300 ${barClass}`} style={{ width: `${usedPercent}%` }} />
         </div>
       ) : null}
 
-      {!collapsed ? (
-        <div className="mt-3 border-t pt-2">
-          {group.requests.length === 0 ? (
-            <p className="text-xs text-gray-500">No requests assigned to this group yet.</p>
-          ) : (
-            group.requests.map((request) => (
-              <div key={request.id} className="grid grid-cols-[1fr_auto_auto] gap-3 border-b py-2 text-sm last:border-b-0">
-                <div className="min-w-0 truncate font-medium" title={request.title}>
-                  {request.title}
+      <div
+        className={`grid transition-[grid-template-rows] duration-200 ease-out ${collapsed ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'}`}
+        {...(collapsed ? { inert: true } : {})}
+      >
+        <div className="overflow-hidden">
+          <div className="border-t">
+            {group.requests.length === 0 ? (
+              <p className="px-3 py-3 text-sm text-muted-foreground">No requests assigned to this group yet.</p>
+            ) : (
+              group.requests.map((request) => (
+                <div
+                  key={request.id}
+                  className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-3 border-t px-3 py-2 first:border-t-0"
+                >
+                  <button
+                    type="button"
+                    className="min-w-0 truncate text-left text-sm font-medium text-gray-900 underline-offset-2 hover:underline"
+                    title={request.title}
+                    onClick={() => onOpenRequest(request.id)}
+                  >
+                    {request.title}
+                  </button>
+                  <span className="text-xs text-muted-foreground">{request.status}</span>
+                  <span className="tabular-nums text-sm font-semibold text-gray-900">
+                    {request.usageAmount.toLocaleString()}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    title="Remove request from budget code"
+                    onClick={() => onUnassign(request.id)}
+                  >
+                    <MinusCircle className="h-4 w-4" />
+                  </Button>
                 </div>
-                <span className="text-xs text-gray-500">{request.status}</span>
-                <span className="font-mono text-xs tabular-nums">
-                  {request.usageAmount.toLocaleString()}
-                </span>
-              </div>
-            ))
-          )}
+              ))
+            )}
+          </div>
         </div>
-      ) : null}
+      </div>
     </section>
   )
 }

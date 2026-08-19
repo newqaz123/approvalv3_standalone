@@ -4,7 +4,10 @@ import { readFileSync } from 'node:fs'
 import {
   buildBudgetCodeGroups,
   buildBudgetExportRows,
+  applyPasteToGrid,
   classifyBudgetCodePasteRows,
+  emptyPasteGrid,
+  pasteGridToText,
   fuzzyMatchBudgetCode,
   getBudgetCodeHealth,
   getBudgetCodeLabel,
@@ -308,6 +311,17 @@ describe('budget control helpers', () => {
     assert.equal(headerless.skipped.length, 0)
   })
 
+  it('parses Excel tab-separated paste with thousand separators', () => {
+    const excel = parseBudgetCodePaste(
+      ['Budget Code\tBudget Code Name\tBudget Amount', 'AYT-PD1-GF-411\tFiller gauge\t50,000', 'AYT-PD1-HV-207\tHydraulic\t32,000'].join('\n')
+    )
+    assert.equal(excel.valid.length, 2)
+    assert.equal(excel.valid[0].name, 'Filler gauge')
+    assert.equal(excel.valid[0].budgetAmount, 50000)
+    assert.equal(excel.valid[1].budgetAmount, 32000)
+    assert.equal(excel.skipped.length, 0)
+  })
+
   it('classifies paste rows as creates or updates using normalized codes', () => {
     const classified = classifyBudgetCodePasteRows(
       [
@@ -318,6 +332,49 @@ describe('budget control helpers', () => {
     )
     assert.equal(classified.updates[0].code, 'AYT-PD1-GF-411')
     assert.equal(classified.creates[0].code, 'AYT-NEW-001')
+  })
+
+  it('fills one paste-grid column when Excel pastes a single column', () => {
+    const next = applyPasteToGrid(emptyPasteGrid(2), 0, 1, 'Filler gauge\nHydraulic')
+    assert.equal(next[0].name, 'Filler gauge')
+    assert.equal(next[1].name, 'Hydraulic')
+    assert.equal(next[0].code, '')
+  })
+
+  it('treats single-column formatted amounts as one column, not comma-delimited', () => {
+    const next = applyPasteToGrid(emptyPasteGrid(2), 0, 2, '50,000\n1,250,000')
+    assert.equal(next[0].amount, '50000')
+    assert.equal(next[1].amount, '1250000')
+    assert.equal(next[0].code, '')
+    assert.equal(next[0].name, '')
+  })
+
+  it('splits one-row semicolon paste into multiple columns', () => {
+    const next = applyPasteToGrid(emptyPasteGrid(1), 0, 0, 'AYT-NEW-9;Gauge set;90,000')
+    assert.equal(next[0].code, 'AYT-NEW-9')
+    assert.equal(next[0].name, 'Gauge set')
+    assert.equal(next[0].amount, '90000')
+  })
+
+  it('auto-grows the grid when pasting more rows than exist', () => {
+    const next = applyPasteToGrid(emptyPasteGrid(1), 0, 0, 'A-1\nA-2\nA-3')
+    assert.equal(next.length, 3)
+    assert.equal(next[2].code, 'A-3')
+  })
+
+  it('clamps multi-column paste at the last grid column', () => {
+    const next = applyPasteToGrid(emptyPasteGrid(1), 0, 0, 'AYT-X-1\tGauge\t50,000\textra cell')
+    assert.equal(next[0].code, 'AYT-X-1')
+    assert.equal(next[0].name, 'Gauge')
+    assert.equal(next[0].amount, '50000')
+  })
+
+  it('serializes non-empty grid rows as tab-delimited text', () => {
+    const text = pasteGridToText([
+      { code: 'AYT-1', name: 'Gauge', amount: '50,000' },
+      { code: '', name: '', amount: '' },
+    ])
+    assert.equal(text, 'AYT-1\tGauge\t50,000')
   })
 })
 
@@ -342,7 +399,8 @@ describe('budget code dialogs', () => {
     const dialog = readFileSync('src/components/budget/budget-code-paste-dialog.tsx', 'utf8')
     assert.match(dialog, /export function BudgetCodePasteDialog/)
     assert.match(dialog, /parseBudgetCodePaste/)
-    assert.match(dialog, /classifyBudgetCodePasteRows/)
+    assert.match(dialog, /applyPasteToGrid/)
+    assert.match(dialog, /Budget code name/)
     assert.match(dialog, /Confirm/)
     assert.doesNotMatch(dialog, /type="file"/)
   })
@@ -367,14 +425,16 @@ describe('budget department panel', () => {
   it('renders department-grouped budget cards without drop targets', () => {
     const card = readFileSync('src/components/budget/budget-code-card.tsx', 'utf8')
     const panel = readFileSync('src/components/budget/budget-department-panel.tsx', 'utf8')
+    const page = readFileSync('src/components/budget/budget-monitor-page.tsx', 'utf8')
 
     assert.match(card, /export function BudgetCodeCard/)
     assert.match(card, /getBudgetCodeHealth/)
     assert.match(card, /getBudgetCodeLabel/)
+    assert.match(card, /Budget amount/)
     assert.doesNotMatch(card, /useDroppable|DndContext|Drop remaining request/)
     assert.match(panel, /groupBudgetCodesByDepartment/)
-    assert.match(panel, /Paste budget codes/)
-    assert.match(panel, /New budget code/)
+    assert.match(page, /Paste budget codes/)
+    assert.match(page, /New budget code/)
   })
 })
 
@@ -387,7 +447,7 @@ describe('budget request assignment table', () => {
     assert.match(table, /Assigned/)
     assert.match(table, /aria-label="Assign group"/)
     assert.match(table, /md:hidden/)
-    assert.match(table, /hidden md:table/)
+    assert.match(table, /hidden min-w-full table-fixed md:table/)
     assert.match(table, /getBudgetProjectEstimateAmount/)
     assert.doesNotMatch(table, /DndContext|useDraggable|useDroppable/)
   })
