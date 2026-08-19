@@ -1,12 +1,40 @@
 'use client'
 
 import { useState } from 'react'
-import { ChevronRight } from 'lucide-react'
+import { ChevronRight, Info } from 'lucide-react'
 import { toast } from 'sonner'
 import { BudgetGroupCombobox } from '@/components/budget/budget-group-combobox'
 import { Button } from '@/components/ui/button'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { getBudgetCodeLabel, getBudgetProjectEstimateAmount } from '@/lib/budget-control'
 import type { BudgetCodeSummary, BudgetRequestRecord } from '@/types/budget'
+
+/** Clickable (i) beside the Cost label explaining which estimate is shown
+ * and when it can be edited. */
+function CostInfo() {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label="How Cost works"
+          className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-gray-100 hover:text-gray-700"
+        >
+          <Info className="h-3.5 w-3.5" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" side="bottom" className="w-72">
+        <p className="mb-1.5 text-xs font-semibold text-gray-900">How Cost works</p>
+        <ul className="list-disc space-y-1 pl-4 text-xs leading-relaxed text-gray-600">
+          <li>Shows the <b>approved engineering estimate</b> when one exists.</li>
+          <li>Otherwise shows the <b>project estimate</b> set for the request.</li>
+          <li><span className="font-medium text-blue-700">Blue</span> = click to edit the project estimate.</li>
+          <li>Gray = locked; an approved engineering estimate is in use.</li>
+        </ul>
+      </PopoverContent>
+    </Popover>
+  )
+}
 
 function sortBudgetCodesForRequest(
   budgetCodes: BudgetCodeSummary[],
@@ -101,7 +129,12 @@ export function BudgetRequestTable({
               <th className="px-2 py-2">Department</th>
               <th className="px-2 py-2">Group</th>
               <th className="px-2 py-2">Status</th>
-              <th className="px-2 py-2 text-right">Cost</th>
+              <th className="px-2 py-2 text-right">
+                <span className="inline-flex items-center justify-end gap-1">
+                  Cost
+                  <CostInfo />
+                </span>
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -146,7 +179,11 @@ export function BudgetRequestTable({
               </div>
               <div className="mt-2.5 flex items-center gap-2">
                 {renderGroupSelect(request)}
-                <span className="shrink-0">{renderCost(request)}</span>
+                <span className="inline-flex shrink-0 items-center gap-1">
+                  <span className="text-[11px] text-gray-500">Cost</span>
+                  <CostInfo />
+                  {renderCost(request)}
+                </span>
               </div>
             </div>
           ))}
