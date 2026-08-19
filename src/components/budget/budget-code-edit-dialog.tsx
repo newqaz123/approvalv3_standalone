@@ -13,7 +13,11 @@ interface BudgetCodeEditDialogProps {
   budgetCode: BudgetCodeSummary | null
   departments: Array<{ id: string; name: string }>
   onOpenChange: (open: boolean) => void
-  onSave: (input: { budgetAmount: number | null; departmentId: string | null }) => Promise<void>
+  onSave: (input: {
+    name: string
+    budgetAmount: number
+    departmentId: string | null
+  }) => Promise<void>
 }
 
 export function BudgetCodeEditDialog({
@@ -23,12 +27,21 @@ export function BudgetCodeEditDialog({
   onOpenChange,
   onSave,
 }: BudgetCodeEditDialogProps) {
+  const [name, setName] = useState('')
   const [budgetAmount, setBudgetAmount] = useState('')
   const [departmentId, setDepartmentId] = useState('none')
   const [isSaving, setIsSaving] = useState(false)
 
+  const parsedAmount = Number(budgetAmount)
+  const canSubmit =
+    name.trim() !== '' &&
+    budgetAmount.trim() !== '' &&
+    Number.isFinite(parsedAmount) &&
+    parsedAmount >= 0
+
   useEffect(() => {
     if (!open) return
+    setName(budgetCode?.name ?? '')
     setBudgetAmount(budgetCode?.budgetAmount?.toString() ?? '')
     setDepartmentId(budgetCode?.department?.id ?? 'none')
   }, [budgetCode, open])
@@ -37,7 +50,8 @@ export function BudgetCodeEditDialog({
     setIsSaving(true)
     try {
       await onSave({
-        budgetAmount: budgetAmount.trim() === '' ? null : Number(budgetAmount),
+        name: name.trim(),
+        budgetAmount: parsedAmount,
         departmentId: departmentId === 'none' ? null : departmentId,
       })
       onOpenChange(false)
@@ -53,6 +67,14 @@ export function BudgetCodeEditDialog({
           <DialogTitle>Edit budget code</DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
+          <div className="space-y-2">
+            <Label htmlFor="budget-code-edit-name">Budget code name</Label>
+            <Input
+              id="budget-code-edit-name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+            />
+          </div>
           <div className="space-y-2">
             <Label htmlFor="budget-code-edit-amount">Budget amount</Label>
             <Input
@@ -84,7 +106,7 @@ export function BudgetCodeEditDialog({
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="button" onClick={handleSave} disabled={isSaving}>
+            <Button type="button" onClick={handleSave} disabled={isSaving || !canSubmit}>
               Save
             </Button>
           </div>

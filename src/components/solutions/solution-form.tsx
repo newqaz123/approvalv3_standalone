@@ -19,7 +19,7 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { FormattedTextarea } from '@/components/ui/formatted-textarea'
+import { RichTextEditor } from '@/components/rich-text/rich-text-editor-lazy'
 import {
   Select,
   SelectContent,
@@ -36,7 +36,7 @@ import { useSolutionAttachments } from '@/hooks/use-solution-attachments'
 
 const solutionFormSchema = z.object({
   title: z.string().min(1, 'Title is required').max(200),
-  description: z.string().min(1, 'Description is required').max(5000),
+  description: z.string().min(1, 'Description is required').max(20000, 'Description too long'),
   costEstimate: z
     .number({ message: 'Enter a valid cost' })
     .positive('Cost must be greater than 0')
@@ -55,7 +55,7 @@ interface SolutionFormProps {
   requestId: string
   requestTitle: string
   currentUserId: string
-  allUsers: Array<{ id: string; name: string; email: string; level: number | null }>
+  allUsers: Array<{ id: string; name: string; email: string; departmentName: string | null; level: number | null }>
   previousSolution?: {
     title: string
     description: string
@@ -310,10 +310,10 @@ export function SolutionForm({
               <FormItem>
                 <FormLabel>Description *</FormLabel>
                 <FormControl>
-                  <FormattedTextarea
-                    placeholder="Provide detailed information about your solution..."
-                    rows={6}
-                    {...field}
+                  <RichTextEditor
+                    value={field.value ?? ""}
+                    onChange={field.onChange}
+                    minHeight={160}
                   />
                 </FormControl>
                 <FormDescription>

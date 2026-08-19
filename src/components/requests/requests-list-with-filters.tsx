@@ -10,6 +10,7 @@ interface RequestsListWithFiltersProps {
   departments: Array<{ id: string; name: string }>
   requesters: Array<{ id: string; name: string }>
   refreshSignal?: number
+  onFiltersChange?: (filters: GetRequestsFilters) => void
 }
 
 export function RequestsListWithFilters({
@@ -17,6 +18,7 @@ export function RequestsListWithFilters({
   departments,
   requesters,
   refreshSignal = 0,
+  onFiltersChange,
 }: RequestsListWithFiltersProps) {
   const [requests, setRequests] = useState<RequestListRow[]>(initialRequests)
   const [filters, setFilters] = useState<GetRequestsFilters>({ wrStatus: DEFAULT_WR_FILTER })
@@ -51,6 +53,7 @@ export function RequestsListWithFilters({
 
   const handleFilterChange = async (newFilters: GetRequestsFilters) => {
     setFilters(newFilters)
+    onFiltersChange?.(newFilters)
     setIsLoading(true)
 
     try {

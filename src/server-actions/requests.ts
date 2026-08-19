@@ -9,11 +9,14 @@ import { createApprovalChain, getApproversAtLevel } from './approvals'
 import { requireAdmin } from '@/lib/auth'
 import { getCurrentUser, getUserById } from '@/lib/cache/user-cache'
 import { deleteAttachmentFile } from '@/lib/attachments/storage'
+import { descriptionSchema } from '@/lib/schemas/solution-schemas'
+import { buildRequestExportRows } from '@/lib/request-export'
+import * as XLSX from 'xlsx'
 
 // Zod schema for request validation
 const createRequestSchema = z.object({
   title: z.string().min(1, 'Title is required').max(200, 'Title too long'),
-  description: z.string().min(1, 'Description is required').max(5000, 'Description too long'),
+  description: descriptionSchema,
 })
 
 export interface CreateRequestInput {
@@ -2083,11 +2086,7 @@ export async function resubmitRequest(input: {
   }
 
   if (input.description !== undefined) {
-    const descValidation = z
-      .string()
-      .min(1, 'Description is required')
-      .max(5000, 'Description too long')
-      .safeParse(input.description)
+    const descValidation = descriptionSchema.safeParse(input.description)
     if (!descValidation.success) {
       throw new Error(descValidation.error.issues[0].message)
     }
@@ -2273,4 +2272,27 @@ export async function getAllRequestsForRetention(includeArchived: boolean = true
   })
 
   return requests
+}
+
+/**
+ * Export the visible requests worklist to an XLSX workbook.
+ * Uses getMyRequests so visibility rules (admin / engineering / department
+ * + approval-chain membership) match what the user sees on /requests.
+ */
+export async function exportRequestsXlsx(filters?: GetRequestsFilters) {
+  const requests = await getMyRequests(filters)
+  const rows = buildRequestExportRows(requests)
+
+  const worksheet = XLSX.utils.json_to_sheet(rows)
+  const workbook = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Requests')
+  const buffer = XLSX.write(workbook, {
+    type: 'buffer',
+    bookType: 'xlsx',
+  }) as Buffer
+
+  return {
+    fileName: `requests-${new Date().toISOString().slice(0, 10)}.xlsx`,
+    base64: buffer.toString('base64'),
+  }
 }

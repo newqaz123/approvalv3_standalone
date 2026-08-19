@@ -29,11 +29,21 @@ export async function GET(request: Request) {
         level: true,
         role: true,
         departmentId: true,
+        department: {
+          select: {
+            name: true,
+          },
+        },
       },
       orderBy: { name: 'asc' },
     })
 
-    return NextResponse.json(users)
+    return NextResponse.json(
+      users.map(({ department, ...user }) => ({
+        ...user,
+        departmentName: department?.name ?? null,
+      }))
+    )
   } catch (error) {
     console.error('Failed to fetch users:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

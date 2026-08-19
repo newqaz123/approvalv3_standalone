@@ -13,14 +13,15 @@ describe('formatted description output contexts', () => {
 
   it('uses shared formatted output in notification email generation', () => {
     const source = read('src/server-actions/notifications.ts')
-    assert.match(source, /renderFormattedTextHtml/)
-    assert.match(source, /renderFormattedTextPlainText|visibleFormattedText/)
+    assert.match(source, /renderDescriptionHtml\(details\.description, 280\)/)
+    assert.match(source, /renderDescriptionPlainText\(details\.description, 280\)/)
     assert.doesNotMatch(source, /buildDetailRow\('Description',[^\n]*escapeHtml\(value\)/)
   })
 
   it('uses the escaped formatted renderer in PDF generation', () => {
     const source = read('src/lib/pdf.ts')
-    assert.match(source, /renderFormattedTextHtml/)
+    assert.match(source, /renderDescriptionHtml\(data\.solution\.description\)/)
+    assert.match(source, /renderDescriptionHtml\(data\.description\)/)
     assert.doesNotMatch(source, /escapeHtml\(data\.description\)/)
     assert.doesNotMatch(source, /escapeHtml\(data\.solution\.description\)/)
   })

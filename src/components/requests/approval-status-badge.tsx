@@ -1,174 +1,302 @@
-'use client'
+"use client";
 
-import { CheckCircle2, Clock, XCircle } from 'lucide-react'
+import { useState, type ComponentProps } from "react";
+import { Clock } from "lucide-react";
 import {
-  HoverCard,
-  HoverCardContent,
-  HoverCardTrigger,
-} from '@/components/ui/hover-card'
-import { Badge } from '@/components/ui/badge'
-import { cn } from '@/lib/utils'
+	HoverCard,
+	HoverCardContent,
+	HoverCardTrigger,
+} from "@/components/ui/hover-card";
+import {
+	Popover,
+	PopoverContent,
+	PopoverTrigger,
+} from "@/components/ui/popover";
+import { Badge } from "@/components/ui/badge";
+import { UserAvatar } from "@/components/ui/user-avatar";
+import { cn } from "@/lib/utils";
 
 export interface Approval {
-  id: string
-  status: 'pending' | 'approved' | 'rejected'
-  approver?: { name: string } | null
-  requiredApprover?: { name: string } | null
-  requiredLevel: number
-  order: number
-  approvedAt?: Date | null
-  isFinalApproval?: boolean
-  // For pending approvals, show potential approvers
-  potentialApprovers?: { name: string }[] | null
+	id: string;
+	status: "pending" | "approved" | "rejected";
+	approver?: { name: string } | null;
+	requiredApprover?: { name: string } | null;
+	requiredLevel: number;
+	order: number;
+	approvedAt?: Date | null;
+	isFinalApproval?: boolean;
+	// For pending approvals, show potential approvers
+	potentialApprovers?: { name: string }[] | null;
 }
 
 interface ApprovalStatusBadgeProps {
-  approvals: Approval[]
-  requestStatus: string
-  size?: 'default' | 'sm'
+	approvals: Approval[];
+	requestStatus: string;
+	size?: "default" | "sm";
+}
+
+function formatDate(date: Date | null | undefined) {
+	if (!date) return null;
+	const d = new Date(date);
+	return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function ApprovalPill({
+	size,
+	...props
+}: ComponentProps<typeof Badge> & { size?: "default" | "sm" }) {
+	return (
+		<Badge
+			variant="default"
+			{...props}
+			className={cn(
+				"font-medium cursor-help whitespace-nowrap gap-1.5 rounded-full bg-amber-50 text-amber-700 hover:bg-amber-50 ring-1 ring-inset ring-amber-600/25 select-none",
+				size === "sm" && "text-[10px] px-2 py-0",
+			)}
+		>
+			<Clock className="h-3 w-3" />
+			Approving
+		</Badge>
+	);
+}
+
+/**
+ * Shared timeline body used by both the desktop hover card and the mobile
+ * tap popover.
+ */
+function ApprovalTimeline({
+	stageApprovedCount,
+	chainLength,
+	stageProgressPct,
+	hasPendingInFinal,
+	currentLevel,
+	chain,
+	currentPendingIndex,
+	rejectedCount,
+}: {
+	stageApprovedCount: number;
+	chainLength: number;
+	stageProgressPct: number;
+	hasPendingInFinal: boolean;
+	currentLevel: number | null;
+	chain: Approval[];
+	currentPendingIndex: number;
+	rejectedCount: number;
+}) {
+	return (
+		<>
+			{/* Header: stage chip + progress */}
+			<div className="border-b border-gray-100 px-4 pt-3.5 pb-3">
+				<div className="flex items-center justify-between gap-2">
+					<p className="text-sm font-semibold text-gray-900">Approval chain</p>
+					<span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-700 ring-1 ring-inset ring-indigo-600/20">
+						{hasPendingInFinal ? "Final" : "Initial"}
+					</span>
+				</div>
+				<div
+					className="h-1.5 w-full rounded-full bg-gray-100 mt-2.5 overflow-hidden"
+					role="progressbar"
+					aria-valuenow={stageApprovedCount}
+					aria-valuemin={0}
+					aria-valuemax={chainLength}
+				>
+					<div
+						className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-emerald-500 transition-all duration-300"
+						style={{ width: `${stageProgressPct}%` }}
+					/>
+				</div>
+				<p className="mt-1.5 text-xs text-gray-500">
+					{stageApprovedCount} of {chainLength} approved
+					{currentLevel !== null && ` · waiting for level ${currentLevel}`}
+				</p>
+			</div>
+
+			{/* Timeline stepper */}
+			<ol className="px-4 py-3.5">
+				{chain.map((approval, index) => {
+					const isApproved = approval.status === "approved";
+					const isRejected = approval.status === "rejected";
+					const isPending = approval.status === "pending";
+					const isCurrent = isPending && index === currentPendingIndex;
+					const isUpNext = isPending && index > currentPendingIndex;
+					const stoppedByRejection =
+						rejectedCount > 0 &&
+						index > chain.findIndex((a) => a.status === "rejected");
+
+					const displayName =
+						isApproved || isRejected
+							? approval.approver?.name || `Level ${approval.requiredLevel}`
+							: approval.requiredApprover?.name
+								? approval.requiredApprover.name
+								: approval.potentialApprovers &&
+										approval.potentialApprovers.length > 0
+									? approval.potentialApprovers.map((p) => p.name).join(" or ")
+									: `Level ${approval.requiredLevel}`;
+
+					const subLine = isApproved
+						? `Level ${approval.requiredLevel}${approval.approvedAt ? ` · approved ${formatDate(approval.approvedAt)}` : ""}`
+						: isRejected
+							? `Level ${approval.requiredLevel} · rejected${approval.approvedAt ? ` ${formatDate(approval.approvedAt)}` : ""}`
+							: isCurrent
+								? `Level ${approval.requiredLevel} · awaiting approval`
+								: stoppedByRejection
+									? `Level ${approval.requiredLevel} · stopped`
+									: `Level ${approval.requiredLevel} · up next`;
+
+					return (
+						<li
+							key={approval.id}
+							className={cn(
+								"relative flex items-start gap-3 pb-4 last:pb-0",
+								isUpNext && "opacity-70",
+								stoppedByRejection && "opacity-50",
+							)}
+						>
+							{/* Connector line */}
+							{index < chain.length - 1 && (
+								<span
+									aria-hidden
+									className={cn(
+										"absolute left-[9px] top-5 bottom-0 w-0.5 rounded-full",
+										isApproved ? "bg-emerald-300" : "bg-gray-200",
+									)}
+								/>
+							)}
+							{/* Step marker: avatar with status ring */}
+							<UserAvatar
+								name={displayName}
+								size="sm"
+								status={{
+									approved: isApproved,
+									pending: isPending,
+									rejected: isRejected,
+									current: isCurrent,
+								}}
+								className="relative z-10"
+							/>
+							{/* Name + level */}
+							<div className="min-w-0 flex-1 pt-0.5">
+								<p className="truncate text-sm font-medium text-gray-700 leading-tight">
+									{displayName}
+								</p>
+								<p className="mt-0.5 text-xs text-gray-400">{subLine}</p>
+							</div>
+							{/* Status tag */}
+							<span
+								className={cn(
+									"shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold h-fit mt-0.5",
+									isApproved &&
+										"bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-600/20",
+									isPending &&
+										"bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-600/25",
+									isRejected &&
+										"bg-red-50 text-red-700 ring-1 ring-inset ring-red-600/20",
+								)}
+							>
+								{isApproved ? "Approved" : isRejected ? "Rejected" : "Pending"}
+							</span>
+						</li>
+					);
+				})}
+			</ol>
+		</>
+	);
 }
 
 export function ApprovalStatusBadge({
-  approvals,
-  requestStatus,
-  size = 'default',
+	approvals,
+	size = "default",
 }: ApprovalStatusBadgeProps) {
-  // Calculate overall approval state
-  const approvedCount = approvals.filter((a) => a.status === 'approved').length
-  const rejectedCount = approvals.filter((a) => a.status === 'rejected').length
-  const pendingCount = approvals.filter((a) => a.status === 'pending').length
-  const totalCount = approvals.length
+	const [mobileOpen, setMobileOpen] = useState(false);
 
-  // Determine badge display - simplified: only show "Approving" for in-progress, "-" for others
-  const inProgress = approvals.length > 0 && pendingCount > 0 && rejectedCount === 0
+	const rejectedCount = approvals.filter((a) => a.status === "rejected").length;
+	const pendingCount = approvals.filter((a) => a.status === "pending").length;
 
-  // If not in progress, just show "-"
-  if (!inProgress) {
-    return (
-      <div className={cn('text-center text-gray-400', size === 'sm' && 'text-xs')}>
-        —
-      </div>
-    )
-  }
+	// Determine badge display - simplified: only show "Approving" for in-progress, "-" for others
+	const inProgress =
+		approvals.length > 0 && pendingCount > 0 && rejectedCount === 0;
 
-  // Separate approvals by stage to show only current stage
-  const initialStageApprovals = approvals.filter(a => !a.isFinalApproval)
-  const finalStageApprovals = approvals.filter(a => a.isFinalApproval)
+	// If not in progress, just show "-"
+	if (!inProgress) {
+		return (
+			<div
+				className={cn("text-center text-gray-400", size === "sm" && "text-xs")}
+			>
+				—
+			</div>
+		);
+	}
 
-  // Determine which stage to display based on which has pending approvals
-  const hasPendingInFinal = finalStageApprovals.some(a => a.status === 'pending')
-  const currentStageApprovals = hasPendingInFinal ? finalStageApprovals : initialStageApprovals
+	// Separate approvals by stage to show only current stage
+	const initialStageApprovals = approvals.filter((a) => !a.isFinalApproval);
+	const finalStageApprovals = approvals.filter((a) => a.isFinalApproval);
 
-  // Format date for display
-  const formatDate = (date: Date | null | undefined) => {
-    if (!date) return null
-    const d = new Date(date)
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-  }
+	// Determine which stage to display based on which has pending approvals
+	const hasPendingInFinal = finalStageApprovals.some(
+		(a) => a.status === "pending",
+	);
+	const currentStageApprovals = hasPendingInFinal
+		? finalStageApprovals
+		: initialStageApprovals;
 
-  return (
-    <HoverCard openDelay={200}>
-      <HoverCardTrigger asChild>
-        <Badge
-          variant="default"
-          className={cn(
-            'font-normal cursor-help whitespace-nowrap bg-yellow-100 text-yellow-800 hover:bg-yellow-200 border-yellow-300',
-            size === 'sm' && 'text-[10px] px-2 py-0'
-          )}
-        >
-          <span className="flex items-center gap-1.5">
-            <Clock className="h-3 w-3" />
-            Approving
-          </span>
-        </Badge>
-      </HoverCardTrigger>
-      <HoverCardContent
-        className="w-64 p-0"
-        side="bottom"
-        align="center"
-      >
-        <div className="border-b px-3 py-2 bg-gray-50/50">
-          <p className="text-sm font-medium text-gray-700">Approval Hierarchy</p>
-        </div>
-        <div className="p-2">
-          <div className="space-y-0.5">
-            {currentStageApprovals
-              .slice()
-              .sort((a, b) => a.order - b.order)
-              .map((approval) => {
-                const isApproved = approval.status === 'approved'
-                const isRejected = approval.status === 'rejected'
-                const isPending = approval.status === 'pending'
+	// Sorted chain for the timeline
+	const chain = currentStageApprovals.slice().sort((a, b) => a.order - b.order);
+	const currentPendingIndex = chain.findIndex((a) => a.status === "pending");
 
-                return (
-                  <div
-                    key={approval.id}
-                    className={cn(
-                      'flex items-center gap-2 px-2 py-1.5 rounded-md text-sm',
-                      isApproved && 'bg-green-50/50',
-                      isRejected && 'bg-red-50/50',
-                      isPending && 'bg-yellow-50/30'
-                    )}
-                  >
-                    {/* Status icon */}
-                    <div className="flex-shrink-0">
-                      {isApproved && (
-                        <CheckCircle2 className="h-4 w-4 text-green-600" />
-                      )}
-                      {isRejected && (
-                        <XCircle className="h-4 w-4 text-red-600" />
-                      )}
-                      {isPending && (
-                        <Clock className="h-4 w-4 text-yellow-600" />
-                      )}
-                    </div>
+	// Stage progress for the header
+	const stageApprovedCount = chain.filter(
+		(a) => a.status === "approved",
+	).length;
+	const stageProgressPct =
+		chain.length > 0
+			? Math.round((stageApprovedCount / chain.length) * 100)
+			: 0;
+	const currentLevel =
+		currentPendingIndex >= 0 ? chain[currentPendingIndex].requiredLevel : null;
 
-                    {/* Level and status text */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-medium text-gray-700">
-                          {/* Show approver name for approved/rejected, requiredApprover or potential approvers for pending */}
-                          {isApproved || isRejected ? (
-                            approval.approver?.name || `Level ${approval.requiredLevel}`
-                          ) : approval.requiredApprover?.name ? (
-                            approval.requiredApprover.name
-                          ) : approval.potentialApprovers && approval.potentialApprovers.length > 0 ? (
-                            // Show potential approvers (e.g., "User A or User B")
-                            approval.potentialApprovers.map(p => p.name).join(' or ')
-                          ) : (
-                            `Level ${approval.requiredLevel}`
-                          )}
-                        </span>
-                        <span className={cn(
-                          'text-xs capitalize',
-                          isApproved && 'text-green-700',
-                          isRejected && 'text-red-700',
-                          isPending && 'text-yellow-700'
-                        )}>
-                          {approval.status}
-                        </span>
-                      </div>
+	const timeline = (
+		<ApprovalTimeline
+			stageApprovedCount={stageApprovedCount}
+			chainLength={chain.length}
+			stageProgressPct={stageProgressPct}
+			hasPendingInFinal={hasPendingInFinal}
+			currentLevel={currentLevel}
+			chain={chain}
+			currentPendingIndex={currentPendingIndex}
+			rejectedCount={rejectedCount}
+		/>
+	);
 
-                      {/* Approved/rejected date */}
-                      {(isApproved || isRejected) && approval.approvedAt && (
-                        <div className="text-xs text-gray-500">
-                          {formatDate(approval.approvedAt)}
-                        </div>
-                      )}
+	return (
+		<>
+			{/* Mobile: tap-triggered popover. stopPropagation so tapping the pill
+			    opens the chain instead of the parent request card. */}
+			<span className="md:hidden" onClick={(event) => event.stopPropagation()}>
+				<Popover open={mobileOpen} onOpenChange={setMobileOpen}>
+					<PopoverTrigger asChild>
+						<ApprovalPill size={size} />
+					</PopoverTrigger>
+					<PopoverContent className="w-72 p-0" align="start">
+						{timeline}
+					</PopoverContent>
+				</Popover>
+			</span>
 
-                      {/* Pending indicator */}
-                      {isPending && !approval.requiredApprover && !approval.potentialApprovers && (
-                        <div className="text-xs text-gray-500">
-                          Awaiting approval
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )
-              })}
-          </div>
-        </div>
-      </HoverCardContent>
-    </HoverCard>
-  )
+			{/* Desktop: hover card */}
+			<span className="hidden md:inline-flex">
+				<HoverCard openDelay={200}>
+					<HoverCardTrigger asChild>
+						<ApprovalPill size={size} />
+					</HoverCardTrigger>
+					<HoverCardContent
+						className="w-72 p-0 duration-200"
+						side="bottom"
+						align="center"
+					>
+						{timeline}
+					</HoverCardContent>
+				</HoverCard>
+			</span>
+		</>
+	);
 }

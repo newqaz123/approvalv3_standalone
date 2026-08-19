@@ -14,7 +14,7 @@ const NGINX_FORWARDED_HEADERS = [
 it('uses configured production origins and a relative logout callback', () => {
   const navbar = readFileSync('src/components/navigation/navbar.tsx', 'utf8')
   const env = readFileSync('.env.example', 'utf8')
-  assert.match(navbar, /signOut\(\{ callbackUrl: '\/sign-in' \}\)/)
+  assert.match(navbar, /signOut\(\{ callbackUrl: ["']\/sign-in["'] \}\)/)
   assert.doesNotMatch(navbar, /localhost:3000/)
   assert.match(env, /AUTH_URL="https:\/\/approval\.example\.com"/)
   assert.match(env, /NEXTAUTH_URL="https:\/\/approval\.example\.com"/)

@@ -1,5 +1,26 @@
 import { z } from 'zod'
 import { MAX_ATTACHMENTS_PER_FORM } from '@/lib/attachments/policy'
+import {
+  containsRichTextHtml,
+  richTextToPlainText,
+} from '@/lib/rich-text-sanitizer'
+
+/**
+ * Shared description validator: rich HTML may span up to 20000 stored
+ * characters (markup envelope overhead), while the non-empty check runs
+ * against visible text only — so `<p><br></p>` is rejected like whitespace.
+ */
+const visibleNonEmpty = (value: string) => {
+  const visible = containsRichTextHtml(value)
+    ? richTextToPlainText(value)
+    : value
+  return visible.trim().length > 0
+}
+
+export const descriptionSchema = z
+  .string()
+  .max(20000, 'Description too long')
+  .refine(visibleNonEmpty, 'Description is required')
 
 /**
  * Zod schema for solution submission
@@ -7,7 +28,7 @@ import { MAX_ATTACHMENTS_PER_FORM } from '@/lib/attachments/policy'
 export const submitSolutionSchema = z.object({
   requestId: z.string().uuid(),
   title: z.string().min(1, 'Title is required').max(200, 'Title must be less than 200 characters'),
-  description: z.string().min(1, 'Description is required').max(5000, 'Description must be less than 5000 characters'),
+  description: descriptionSchema,
   costEstimate: z
     .number({ message: 'Cost must be a number' })
     .positive('Cost must be greater than 0')
@@ -42,7 +63,7 @@ export type SubmitSolutionInput = z.infer<typeof submitSolutionSchema>
 export const resubmitSolutionSchema = z.object({
   requestId: z.string().uuid(),
   title: z.string().min(1, 'Title is required').max(200, 'Title must be less than 200 characters'),
-  description: z.string().min(1, 'Description is required').max(5000, 'Description must be less than 5000 characters'),
+  description: descriptionSchema,
   cost: z.number({ message: 'Cost must be a number' }).positive('Cost must be greater than 0'),
   currency: z.enum(['THB', 'USD', 'EUR']),
   timeline: z.string().min(1, 'Timeline is required').max(500, 'Timeline must be less than 500 characters'),

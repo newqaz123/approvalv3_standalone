@@ -1,35 +1,13 @@
-import { auth } from '@/lib/auth-config'
-import { redirect } from 'next/navigation'
-import Link from 'next/link'
+import { auth } from "@/lib/auth-config";
+import { redirect } from "next/navigation";
 
 export default async function Home() {
-  const session = await auth()
+	const session = await auth();
 
-  // Redirect authenticated users to dashboard
-  if (session?.user) {
-    redirect('/dashboard')
-  }
-
-  return (
-    <main className="flex min-h-screen flex-col items-center justify-center p-24">
-      <h1 className="text-4xl font-bold">Approval App V2</h1>
-      <p className="mt-4 text-lg text-gray-600">
-        Internal document approval workflow system
-      </p>
-      <div className="mt-8 flex gap-4">
-        <Link
-          href="/sign-in"
-          className="rounded-md bg-blue-600 px-6 py-3 text-white hover:bg-blue-700 transition-colors"
-        >
-          Sign In
-        </Link>
-        <Link
-          href="/sign-up"
-          className="rounded-md border border-gray-300 px-6 py-3 hover:bg-gray-50 transition-colors"
-        >
-          Sign Up
-        </Link>
-      </div>
-    </main>
-  );
+	// Everyone gets routed: authenticated users to their role landing,
+	// everyone else straight to the sign-in form (no marketing page).
+	if (session?.user) {
+		redirect("/requests/my-actions");
+	}
+	redirect("/sign-in");
 }

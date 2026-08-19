@@ -1,12 +1,14 @@
 'use client'
 
 import { useState } from 'react'
-import { Plus } from 'lucide-react'
+import { Download, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { RequestsListWithFilters } from '@/components/requests/requests-list-with-filters'
 import { BulkDeleteByDateRange } from '@/components/requests/bulk-delete-by-date-range'
 import { SubmitterModal } from '@/components/requests/submitter-modal'
-import { createRequest } from '@/server-actions/requests'
+import { createRequest, exportRequestsXlsx } from '@/server-actions/requests'
+import type { GetRequestsFilters } from '@/server-actions/requests'
+import { DEFAULT_WR_FILTER } from '@/components/requests/request-filters'
 import { uploadFileAction } from '@/server-actions/files'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
@@ -24,6 +26,10 @@ export function RequestsListClient({
 }: RequestsListClientProps) {
   const [showNewRequestModal, setShowNewRequestModal] = useState(false)
   const [requestListRefreshSignal, setRequestListRefreshSignal] = useState(0)
+  const [exportFilters, setExportFilters] = useState<GetRequestsFilters>({
+    wrStatus: DEFAULT_WR_FILTER,
+  })
+  const [isExporting, setIsExporting] = useState(false)
   const router = useRouter()
 
   const handleSubmitRequest = async (data: {
@@ -66,19 +72,44 @@ export function RequestsListClient({
     }
   }
 
+  const handleExportXlsx = async () => {
+    setIsExporting(true)
+    try {
+      const result = await exportRequestsXlsx(exportFilters)
+      const link = document.createElement('a')
+      link.href = `data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,${result.base64}`
+      link.download = result.fileName
+      link.click()
+    } catch (error) {
+      console.error('Failed to export requests:', error)
+      toast.error('Failed to export requests')
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Requests</h1>
+          <h1 className="text-3xl font-bold">Requests</h1>
           <p className="text-muted-foreground">
             View and track improvement requests from your department
           </p>
         </div>
         <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
           <BulkDeleteByDateRange />
-          <Button 
+          <Button
+            variant="outline"
             className="w-full sm:w-auto"
+            onClick={handleExportXlsx}
+            disabled={isExporting}
+          >
+            <Download className="mr-2 h-4 w-4" />
+            {isExporting ? 'Exporting…' : 'Export XLSX'}
+          </Button>
+          <Button 
+            className="w-full bg-slate-950 text-white hover:bg-slate-800 sm:w-auto"
             onClick={() => setShowNewRequestModal(true)}
           >
             <Plus className="mr-2 h-4 w-4" />
@@ -92,6 +123,7 @@ export function RequestsListClient({
         departments={departments}
         requesters={requesters}
         refreshSignal={requestListRefreshSignal}
+        onFiltersChange={setExportFilters}
       />
 
       <SubmitterModal

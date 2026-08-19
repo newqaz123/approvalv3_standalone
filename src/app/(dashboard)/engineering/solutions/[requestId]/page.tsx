@@ -64,7 +64,7 @@ export default async function SolutionSubmissionPage({
 
   // Parallel data fetching: Fetch all active users and previous solution concurrently
   // These queries are independent and can execute simultaneously
-  const [allUsers, previousSolution] = await Promise.all([
+  const [allUserRecords, previousSolution] = await Promise.all([
     prisma.user.findMany({
       where: {
         isActive: true,
@@ -74,6 +74,11 @@ export default async function SolutionSubmissionPage({
         name: true,
         email: true,
         level: true,
+        department: {
+          select: {
+            name: true,
+          },
+        },
       },
       orderBy: { name: 'asc' },
     }),
@@ -90,6 +95,11 @@ export default async function SolutionSubmissionPage({
       },
     }),
   ])
+
+  const allUsers = allUserRecords.map(({ department, ...approver }) => ({
+    ...approver,
+    departmentName: department?.name ?? null,
+  }))
 
   // Convert Decimal to number for form compatibility
   const previousSolutionData = previousSolution ? {

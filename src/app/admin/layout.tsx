@@ -3,6 +3,8 @@ import { redirect } from 'next/navigation'
 import { Navbar } from '@/components/navigation/navbar'
 import { MobileNav } from '@/components/mobile/mobile-nav'
 import prisma from '@/lib/prisma'
+import { AUTHENTICATED_SHELL_CLASS } from '@/lib/authenticated-shell'
+import { cn } from '@/lib/utils'
 
 export default async function AdminRouteLayout({
   children,
@@ -30,13 +32,13 @@ export default async function AdminRouteLayout({
       {/* Mobile navigation - visible only on small screens */}
       <MobileNav />
 
-      {/* Desktop navigation - visible only on medium screens and up */}
-      <div className="hidden md:block">
+      {/* Desktop navigation - visible only on large screens and up */}
+      <div className="hidden lg:block">
         <Navbar />
       </div>
 
       {/* Main content with top padding on mobile for fixed nav */}
-      <main className="mx-auto px-6 pt-20 md:pt-12 pb-12 md:py-12 sm:px-8 lg:px-12 max-w-full md:max-w-7xl">
+      <main data-auth-shell className={cn(AUTHENTICATED_SHELL_CLASS, 'pb-12 pt-20 lg:py-12')}>
         <div className="space-y-8">
           {children}
         </div>

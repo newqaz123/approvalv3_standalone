@@ -167,29 +167,6 @@ export default async function AdminPage() {
           </Link>
         </div>
       </div>
-
-      {/* Phase Status */}
-      <div className="rounded-lg border bg-muted/50 p-6">
-        <h2 className="text-lg font-semibold mb-2">System Status</h2>
-        <div className="space-y-2 text-sm">
-          <div className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-green-500" />
-            <span>Phase 1: Authentication & User Management - ✅ Complete</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-green-500" />
-            <span>Phase 2: Request Workflow - ✅ Complete</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-green-500" />
-            <span>Phase 3: Approval Engine - ✅ Complete</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-yellow-500" />
-            <span>Phase 4: Engineering Solutions - 🚧 Pending</span>
-          </div>
-        </div>
-      </div>
     </div>
   )
 }

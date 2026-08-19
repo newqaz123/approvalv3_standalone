@@ -12,16 +12,19 @@ import {
   Command,
   CommandEmpty,
   CommandGroup,
-  CommandInput,
   CommandItem,
+  CommandList,
 } from '@/components/ui/command'
 import { Badge } from '@/components/ui/badge'
+import { ApproverSearchField } from '@/components/approvals/approver-search-field'
+import { filterApproversByQuery } from '@/lib/approver-search'
 import { cn } from '@/lib/utils'
 
 interface User {
   id: string
   name: string
   email: string
+  departmentName: string | null
   level: number | null
 }
 
@@ -63,84 +66,95 @@ export function CustomApprovalPicker({
   }
 
   const handleMoveUp = (index: number) => {
-    console.log('handleMoveUp called for index:', index, 'selectedIds:', selectedIds)
     if (index <= 0) {
-      console.log('handleMoveUp: index <= 0, returning')
       return
     }
     const newIds = [...selectedIds]
     ;[newIds[index - 1], newIds[index]] = [newIds[index], newIds[index - 1]]
-    console.log('handleMoveUp: newIds after swap:', newIds)
     onChange(newIds)
   }
 
   const handleMoveDown = (index: number) => {
-    console.log('handleMoveDown called for index:', index, 'selectedIds:', selectedIds)
     if (index >= selectedIds.length - 1 || index < 0) {
-      console.log('handleMoveDown: index out of bounds, returning')
       return
     }
     const newIds = [...selectedIds]
     ;[newIds[index], newIds[index + 1]] = [newIds[index + 1], newIds[index]]
-    console.log('handleMoveDown: newIds after swap:', newIds)
     onChange(newIds)
   }
 
-  const filteredUsers = availableUsers.filter(
-    (user) =>
-      user.name.toLowerCase().includes(searchValue.toLowerCase()) ||
-      user.email.toLowerCase().includes(searchValue.toLowerCase())
-  )
+  const handleOpenChange = (nextOpen: boolean) => {
+    setOpen(nextOpen)
+    if (!nextOpen) setSearchValue('')
+  }
+
+  const filteredUsers = filterApproversByQuery(availableUsers, searchValue)
 
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <label className="text-sm font-medium">Custom Approval Chain</label>
-        <Popover open={open} onOpenChange={setOpen}>
-          <PopoverTrigger asChild>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={disabled || availableUsers.length === 0}
-              className="gap-2"
-            >
-              <Plus className="h-4 w-4" />
-              Add Approver
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="p-0" align="start" side="bottom">
-            <Command>
-              <CommandInput
-                placeholder="Search users..."
-                value={searchValue}
-                onValueChange={setSearchValue}
-              />
-              <CommandEmpty>No users found.</CommandEmpty>
-              <CommandGroup>
-                {filteredUsers.map((user) => (
-                  <CommandItem
-                    key={user.id}
-                    value={user.id}
-                    onSelect={() => handleSelectUser(user.id)}
-                  >
-                    <User className="mr-2 h-4 w-4" />
-                    <span className="flex-1">{user.name}</span>
-                    <span className="text-xs text-muted-foreground">
-                      {user.email}
-                    </span>
-                    <Check
-                      className={cn(
-                        'ml-2 h-4 w-4',
-                        selectedIds.includes(user.id) ? 'opacity-100' : 'opacity-0'
-                      )}
-                    />
-                  </CommandItem>
-                ))}
-              </CommandGroup>
-            </Command>
-          </PopoverContent>
-        </Popover>
+        <div className="flex items-center gap-2">
+          <Popover open={open} onOpenChange={handleOpenChange}>
+            <PopoverTrigger asChild>
+              <Button
+                data-picker-open
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={disabled || availableUsers.length === 0}
+                className="gap-2"
+              >
+                <Plus className="h-4 w-4" />
+                Add Approver
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="p-0" align="start" side="bottom">
+              <Command data-picker-root shouldFilter={false}>
+                <ApproverSearchField inputKind="command"
+                  value={searchValue}
+                  onChange={setSearchValue}
+                  resultCount={filteredUsers.length}
+                />
+                <CommandList className="max-h-[260px] overflow-y-auto">
+                  {availableUsers.length > 0 && filteredUsers.length === 0 && (
+                    <CommandEmpty>No approvers found</CommandEmpty>
+                  )}
+                  <CommandGroup>
+                    {filteredUsers.map((user) => (
+                      <CommandItem
+                        data-picker-item
+                        key={user.id}
+                        value={user.id}
+                        onSelect={() => handleSelectUser(user.id)}
+                      >
+                        <User className="mr-2 h-4 w-4" />
+                        <span className="flex-1">{user.name}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {user.departmentName ?? 'No department'} • {user.email}
+                        </span>
+                        {user.level != null && (
+                          <span className="text-xs text-muted-foreground">
+                            Level {user.level}
+                          </span>
+                        )}
+                        <Check
+                          className={cn(
+                            'ml-2 h-4 w-4',
+                            selectedIds.includes(user.id) ? 'opacity-100' : 'opacity-0'
+                          )}
+                        />
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
+          {availableUsers.length === 0 && (
+            <p className="text-xs text-muted-foreground">No more users available</p>
+          )}
+        </div>
       </div>
 
       {selectedUsers.length === 0 ? (
@@ -167,7 +181,7 @@ export function CustomApprovalPicker({
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate">{user.name}</p>
                   <p className="text-xs text-muted-foreground truncate">
-                    {user.email}
+                    {user.departmentName ?? 'No department'} • {user.email}
                   </p>
                 </div>
                 <div className="flex items-center gap-1">
@@ -214,3 +228,5 @@ export function CustomApprovalPicker({
     </div>
   )
 }
+
+export { CustomApprovalPicker as SharedApprovalPickerHarness }

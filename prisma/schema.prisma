@@ -215,6 +215,7 @@ model budget_codes {
   id           String     @id @default(uuid())
   code         String     @unique
   displayCode  String
+  name         String?
   budgetAmount Decimal?   @db.Decimal(15, 2)
   departmentId String?
   createdById  String?

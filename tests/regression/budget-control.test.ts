@@ -4,11 +4,20 @@ import { readFileSync } from 'node:fs'
 import {
   buildBudgetCodeGroups,
   buildBudgetExportRows,
+  applyPasteToGrid,
+  classifyBudgetCodePasteRows,
+  emptyPasteGrid,
+  pasteGridToText,
   fuzzyMatchBudgetCode,
-  matchesBudgetMonitorSearch,
+  getBudgetCodeHealth,
+  getBudgetCodeLabel,
   getBudgetProjectEstimateAmount,
   getBudgetUsageAmount,
+  groupBudgetCodesByDepartment,
+  matchesBudgetMonitorSearch,
   normalizeBudgetCode,
+  parseBudgetCodePaste,
+  sumVisibleRemainingBudget,
 } from '../../src/lib/budget-control'
 
 describe('budget control helpers', () => {
@@ -31,6 +40,7 @@ describe('budget control helpers', () => {
         id: 'b1',
         code: 'AYT-PD1-CX-400',
         displayCode: 'AYT-PD1-CX-400',
+        name: null,
         budgetAmount: 10000000,
         department: { id: 'd1', name: 'Production 1' },
       },
@@ -67,6 +77,7 @@ describe('budget control helpers', () => {
           id: 'b1',
           code: 'CAPEX-2026-IT',
           displayCode: 'CAPEX-2026-IT',
+          name: null,
           budgetAmount: 1000,
           department: { id: 'd1', name: 'IT' },
         },
@@ -83,6 +94,7 @@ describe('budget control helpers', () => {
           id: 'b1',
           code: 'CAPEX-2026-IT',
           displayCode: 'CAPEX-2026-IT',
+          name: null,
           budgetAmount: 1000,
           department: { id: 'd1', name: 'IT' },
         },
@@ -109,6 +121,7 @@ describe('budget control helpers', () => {
           id: 'b1',
           code: 'CAPEX-2026-IT',
           displayCode: 'CAPEX-2026-IT',
+          name: null,
           budgetAmount: 1000,
           department: { id: 'd1', name: 'IT' },
         },
@@ -146,6 +159,7 @@ describe('budget control helpers', () => {
           id: 'b1',
           code: 'CAPEX-2026-IT',
           displayCode: 'CAPEX-2026-IT',
+          name: null,
           budgetAmount: 1,
           department: { id: 'd1', name: 'IT' },
         },
@@ -162,6 +176,7 @@ describe('budget control helpers', () => {
           id: 'b1',
           code: 'CAPEX-2026-IT',
           displayCode: 'CAPEX-2026-IT',
+          name: null,
           budgetAmount: 1,
           department: { id: 'd1', name: 'IT' },
         },
@@ -180,6 +195,262 @@ describe('budget control helpers', () => {
     assert.equal(rows[1]['Used Amount'], 0.3)
     assert.equal(rows[1]['Remaining Budget'], 0.7)
   })
+
+  it('matches budget monitor search against budget code name', () => {
+    const request = {
+      title: 'Replace chilled water pump',
+      status: 'Completed',
+      department: { id: 'd1', name: 'Production 1' },
+      budgetCode: {
+        id: 'b1',
+        code: 'AYT-PD1-CX-400',
+        displayCode: 'AYT-PD1-CX-400',
+        name: 'Line 2 filler capex',
+        budgetAmount: 10000000,
+        department: { id: 'd1', name: 'Production 1' },
+      },
+    }
+
+    assert.equal(matchesBudgetMonitorSearch(request, 'filler capex'), true)
+    assert.equal(matchesBudgetMonitorSearch(request, 'warehouse'), false)
+  })
+
+  it('labels a budget code with name and falls back to displayCode', () => {
+    assert.equal(getBudgetCodeLabel({ name: 'Filler upgrade', displayCode: 'AYT-PD1-GF-411' }), 'Filler upgrade')
+    assert.equal(getBudgetCodeLabel({ name: '  ', displayCode: 'AYT-PD1-GF-411' }), 'AYT-PD1-GF-411')
+    assert.equal(getBudgetCodeLabel({ name: null, displayCode: 'AYT-PD1-GF-411' }), 'AYT-PD1-GF-411')
+  })
+
+  it('classifies budget health without blocking', () => {
+    assert.equal(getBudgetCodeHealth(-1, 100), 'Over')
+    assert.equal(getBudgetCodeHealth(10, 100), 'Watch')
+    assert.equal(getBudgetCodeHealth(20, 100), 'Healthy')
+    assert.equal(getBudgetCodeHealth(null, null), 'Healthy')
+    assert.equal(getBudgetCodeHealth(5, 0), 'Healthy')
+  })
+
+  it('groups budget codes by department and sums remaining', () => {
+    const groups = [
+      {
+        budgetCode: {
+          id: 'b1',
+          code: 'A',
+          displayCode: 'A',
+          name: 'Alpha',
+          budgetAmount: 100,
+          department: { id: 'd1', name: 'Production 1' },
+        },
+        usedAmount: 40,
+        remainingBudget: 60,
+        assignedRequestCount: 1,
+        requests: [],
+      },
+      {
+        budgetCode: {
+          id: 'b2',
+          code: 'B',
+          displayCode: 'B',
+          name: 'Beta',
+          budgetAmount: 50,
+          department: null,
+        },
+        usedAmount: 10,
+        remainingBudget: 40,
+        assignedRequestCount: 0,
+        requests: [],
+      },
+      {
+        budgetCode: {
+          id: 'b3',
+          code: 'C',
+          displayCode: 'C',
+          name: null,
+          budgetAmount: null,
+          department: { id: 'd2', name: 'Maintenance' },
+        },
+        usedAmount: 0,
+        remainingBudget: null,
+        assignedRequestCount: 0,
+        requests: [],
+      },
+    ]
+
+    const grouped = groupBudgetCodesByDepartment(groups)
+    assert.deepEqual(
+      grouped.map((entry) => [entry.departmentName, entry.departmentId, entry.groups.length]),
+      [
+        ['Maintenance', 'd2', 1],
+        ['Production 1', 'd1', 1],
+        ['No department', null, 1],
+      ]
+    )
+
+    assert.deepEqual(sumVisibleRemainingBudget(groups), { total: 100, groupCount: 2 })
+  })
+
+  it('parses paste text with headers, aliases, and headerless columns', () => {
+    const headed = parseBudgetCodePaste(
+      'Budget Code,Budget Code Name,Budget Amount\nAYT-PD1-GF-411,Filler,50000\n,Missing name,10\nAYT-PD1-GF-412,No amount,\nAYT-PD1-GF-411,Duplicate,1\nbad,Bad amount,abc'
+    )
+    assert.equal(headed.valid.length, 1)
+    assert.equal(headed.valid[0].code, 'AYT-PD1-GF-411')
+    assert.equal(headed.valid[0].displayCode, 'AYT-PD1-GF-411')
+    assert.equal(headed.valid[0].name, 'Filler')
+    assert.equal(headed.valid[0].budgetAmount, 50000)
+    assert.equal(headed.skipped.length, 4)
+
+    const headerless = parseBudgetCodePaste('AYT-MT-GF-210\tSeal kit\t28000')
+    assert.deepEqual(headerless.valid, [
+      {
+        code: 'AYT-MT-GF-210',
+        displayCode: 'AYT-MT-GF-210',
+        name: 'Seal kit',
+        budgetAmount: 28000,
+      },
+    ])
+    assert.equal(headerless.skipped.length, 0)
+  })
+
+  it('parses Excel tab-separated paste with thousand separators', () => {
+    const excel = parseBudgetCodePaste(
+      ['Budget Code\tBudget Code Name\tBudget Amount', 'AYT-PD1-GF-411\tFiller gauge\t50,000', 'AYT-PD1-HV-207\tHydraulic\t32,000'].join('\n')
+    )
+    assert.equal(excel.valid.length, 2)
+    assert.equal(excel.valid[0].name, 'Filler gauge')
+    assert.equal(excel.valid[0].budgetAmount, 50000)
+    assert.equal(excel.valid[1].budgetAmount, 32000)
+    assert.equal(excel.skipped.length, 0)
+  })
+
+  it('classifies paste rows as creates or updates using normalized codes', () => {
+    const classified = classifyBudgetCodePasteRows(
+      [
+        { code: 'AYT-PD1-GF-411', displayCode: 'AYT-PD1-GF-411', name: 'Filler', budgetAmount: 1 },
+        { code: 'AYT-NEW-001', displayCode: 'AYT-NEW-001', name: 'New', budgetAmount: 2 },
+      ],
+      [{ code: 'AYT-PD1-GF-411' }]
+    )
+    assert.equal(classified.updates[0].code, 'AYT-PD1-GF-411')
+    assert.equal(classified.creates[0].code, 'AYT-NEW-001')
+  })
+
+  it('fills one paste-grid column when Excel pastes a single column', () => {
+    const next = applyPasteToGrid(emptyPasteGrid(2), 0, 1, 'Filler gauge\nHydraulic')
+    assert.equal(next[0].name, 'Filler gauge')
+    assert.equal(next[1].name, 'Hydraulic')
+    assert.equal(next[0].code, '')
+  })
+
+  it('treats single-column formatted amounts as one column, not comma-delimited', () => {
+    const next = applyPasteToGrid(emptyPasteGrid(2), 0, 2, '50,000\n1,250,000')
+    assert.equal(next[0].amount, '50000')
+    assert.equal(next[1].amount, '1250000')
+    assert.equal(next[0].code, '')
+    assert.equal(next[0].name, '')
+  })
+
+  it('splits one-row semicolon paste into multiple columns', () => {
+    const next = applyPasteToGrid(emptyPasteGrid(1), 0, 0, 'AYT-NEW-9;Gauge set;90,000')
+    assert.equal(next[0].code, 'AYT-NEW-9')
+    assert.equal(next[0].name, 'Gauge set')
+    assert.equal(next[0].amount, '90000')
+  })
+
+  it('auto-grows the grid when pasting more rows than exist', () => {
+    const next = applyPasteToGrid(emptyPasteGrid(1), 0, 0, 'A-1\nA-2\nA-3')
+    assert.equal(next.length, 3)
+    assert.equal(next[2].code, 'A-3')
+  })
+
+  it('clamps multi-column paste at the last grid column', () => {
+    const next = applyPasteToGrid(emptyPasteGrid(1), 0, 0, 'AYT-X-1\tGauge\t50,000\textra cell')
+    assert.equal(next[0].code, 'AYT-X-1')
+    assert.equal(next[0].name, 'Gauge')
+    assert.equal(next[0].amount, '50000')
+  })
+
+  it('serializes non-empty grid rows as tab-delimited text', () => {
+    const text = pasteGridToText([
+      { code: 'AYT-1', name: 'Gauge', amount: '50,000' },
+      { code: '', name: '', amount: '' },
+    ])
+    assert.equal(text, 'AYT-1\tGauge\t50,000')
+  })
+})
+
+describe('budget code name field', () => {
+  it('adds a nullable name column and monitor requests list', () => {
+    const schema = readFileSync('prisma/schema.prisma', 'utf8')
+    const types = readFileSync('src/types/budget.ts', 'utf8')
+    const migration = readFileSync(
+      'prisma/migrations/20260817000000_add_budget_code_name/migration.sql',
+      'utf8'
+    )
+
+    assert.match(schema, /model budget_codes[\s\S]*name\s+String\?/)
+    assert.match(migration, /ALTER TABLE "budget_codes" ADD COLUMN "name" TEXT/)
+    assert.match(types, /name: string \| null/)
+    assert.match(types, /requests: BudgetRequestRecord\[\]/)
+  })
+})
+
+describe('budget code dialogs', () => {
+  it('previews paste rows before writing budget codes', () => {
+    const dialog = readFileSync('src/components/budget/budget-code-paste-dialog.tsx', 'utf8')
+    assert.match(dialog, /export function BudgetCodePasteDialog/)
+    assert.match(dialog, /parseBudgetCodePaste/)
+    assert.match(dialog, /applyPasteToGrid/)
+    assert.match(dialog, /Budget code name/)
+    assert.match(dialog, /Confirm/)
+    assert.doesNotMatch(dialog, /type="file"/)
+  })
+
+  it('requires name and amount in create and edit budget code dialogs', () => {
+    const createDialog = readFileSync('src/components/budget/budget-code-create-dialog.tsx', 'utf8')
+    const editDialog = readFileSync('src/components/budget/budget-code-edit-dialog.tsx', 'utf8')
+
+    assert.match(createDialog, /name: string/)
+    assert.match(createDialog, /budgetAmount: number/)
+    assert.match(createDialog, /id="new-budget-code-name"/)
+    assert.match(createDialog, /disabled=\{isSaving \|\| !canSubmit\}/)
+
+    assert.match(editDialog, /name: string/)
+    assert.match(editDialog, /budgetAmount: number/)
+    assert.match(editDialog, /id="budget-code-edit-name"/)
+    assert.match(editDialog, /disabled=\{isSaving \|\| !canSubmit\}/)
+  })
+})
+
+describe('budget department panel', () => {
+  it('renders department-grouped budget cards without drop targets', () => {
+    const card = readFileSync('src/components/budget/budget-code-card.tsx', 'utf8')
+    const panel = readFileSync('src/components/budget/budget-department-panel.tsx', 'utf8')
+    const page = readFileSync('src/components/budget/budget-monitor-page.tsx', 'utf8')
+
+    assert.match(card, /export function BudgetCodeCard/)
+    assert.match(card, /getBudgetCodeHealth/)
+    assert.match(card, /getBudgetCodeLabel/)
+    assert.match(card, /Budget amount/)
+    assert.doesNotMatch(card, /useDroppable|DndContext|Drop remaining request/)
+    assert.match(panel, /groupBudgetCodesByDepartment/)
+    assert.match(page, /Paste budget codes/)
+    assert.match(page, /New budget code/)
+  })
+})
+
+describe('budget request assignment table', () => {
+  it('assigns requests with a group select instead of drag and drop', () => {
+    const table = readFileSync('src/components/budget/budget-request-table.tsx', 'utf8')
+
+    assert.match(table, /export function BudgetRequestTable/)
+    assert.match(table, /Unassigned/)
+    assert.match(table, /Assigned/)
+    assert.match(table, /aria-label="Assign group"/)
+    assert.match(table, /md:hidden/)
+    assert.match(table, /hidden min-w-full table-fixed md:table/)
+    assert.match(table, /getBudgetProjectEstimateAmount/)
+    assert.doesNotMatch(table, /DndContext|useDraggable|useDroppable/)
+  })
 })
 
 describe('budget monitor server actions', () => {
@@ -197,6 +468,7 @@ describe('budget monitor server actions', () => {
       'updateRequestProjectEstimate',
       'updateBudgetCodeAmount',
       'createBudgetCode',
+      'pasteBudgetCodes',
       'exportBudgetMonitorXlsx',
     ]) {
       assert.match(source, new RegExp(`export async function ${exportName}\\b`))
@@ -277,19 +549,42 @@ describe('budget monitor server actions', () => {
     assert.match(assignSchemaBody, /exactly one/i)
   })
 
-  it('renders budget monitor project estimate cells from the approved display amount', () => {
-    const box = readFileSync('src/components/budget/budget-code-box.tsx', 'utf8')
-    const remainingPanel = readFileSync('src/components/budget/remaining-request-panel.tsx', 'utf8')
+  it('returns a flat requests list and maps budget code name', () => {
+    const source = readServerAction()
+    const getDataBody = source.slice(
+      source.indexOf('export async function getBudgetMonitorData'),
+      source.indexOf('export async function assignRequestToBudgetCode')
+    )
+    assert.match(getDataBody, /name: true/)
+    assert.match(getDataBody, /requests,/)
+    assert.match(source, /name: budgetCode\.name \?\? null|name: decimalToNumber|name:/)
+  })
 
-    assert.match(box, /getBudgetProjectEstimateAmount/)
-    assert.match(box, /projectEstimateAmount\?\.toLocaleString\(\) \?\? '-'/)
-    assert.match(box, /const hasApprovedEstimate = request\.engineeringEstimateCost !== null/)
-    assert.match(box, /hasApprovedEstimate \? \(/)
-    assert.match(box, /onClick=\{\(\) => onEditProjectEstimate\(request\.id, request\.projectEstimateCost\)\}/)
-    assert.match(remainingPanel, /getBudgetProjectEstimateAmount/)
-    assert.match(remainingPanel, /Project estimate: \{projectEstimateAmount\?\.toLocaleString\(\) \?\? '-'\}/)
-    assert.match(remainingPanel, /const hasApprovedEstimate = request\.engineeringEstimateCost !== null/)
-    assert.match(remainingPanel, /!hasApprovedEstimate && onEditProjectEstimate/)
+  it('requires name and amount on create, update, and paste', () => {
+    const source = readServerAction()
+    assert.match(source, /export async function pasteBudgetCodes/)
+    assert.match(source, /name: z\.string\(\)[\s\S]*min\(1\)/)
+    const createBody = source.slice(
+      source.indexOf('const createBudgetCodeSchema'),
+      source.indexOf('function buildVisibleRequestWhere')
+    )
+    assert.match(createBody, /name:/)
+    assert.doesNotMatch(
+      source.slice(
+        source.indexOf('const createBudgetCodeSchema'),
+        source.indexOf('function buildVisibleRequestWhere')
+      ),
+      /budgetAmount: moneySchema/
+    )
+  })
+
+  it('renders budget monitor project estimate cells from the approved display amount', () => {
+    const table = readFileSync('src/components/budget/budget-request-table.tsx', 'utf8')
+
+    assert.match(table, /getBudgetProjectEstimateAmount/)
+    assert.match(table, /projectEstimateAmount\?\.toLocaleString\(\) \?\? '—'/)
+    assert.match(table, /const hasApprovedEstimate = request\.engineeringEstimateCost !== null/)
+    assert.match(table, /onEditProjectEstimate\(request\.id, request\.projectEstimateCost\)/)
   })
 
   it('syncs approved engineering solution estimates into the editable project estimate field', () => {

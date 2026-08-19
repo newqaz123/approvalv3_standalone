@@ -2,6 +2,8 @@ import { auth } from '@/lib/auth-config'
 import { redirect } from 'next/navigation'
 import { Navbar } from '@/components/navigation/navbar'
 import { MobileNav } from '@/components/mobile/mobile-nav'
+import { AUTHENTICATED_SHELL_CLASS } from '@/lib/authenticated-shell'
+import { cn } from '@/lib/utils'
 
 export default async function DashboardLayout({
   children,
@@ -19,13 +21,13 @@ export default async function DashboardLayout({
       {/* Mobile navigation - visible only on small screens */}
       <MobileNav />
 
-      {/* Desktop navigation - visible only on medium screens and up */}
-      <div className="hidden md:block">
+      {/* Desktop navigation - visible only on large screens and up */}
+      <div className="hidden lg:block">
         <Navbar />
       </div>
 
       {/* Main content with top padding on mobile for fixed nav */}
-      <main className="mx-auto px-4 pt-20 md:pt-8 pb-8 md:py-8 sm:px-6 lg:px-8 max-w-full md:max-w-7xl">
+      <main data-auth-shell className={cn(AUTHENTICATED_SHELL_CLASS, 'pb-8 pt-20 lg:py-8')}>
         {children}
       </main>
     </div>

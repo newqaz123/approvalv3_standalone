@@ -2,7 +2,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 
 export default function AnalyticsLoading() {
   return (
-    <div className="container py-6">
+    <div className="w-full py-6">
       <h1 className="text-2xl font-bold mb-6">Analytics</h1>
 
       {/* Summary cards skeleton */}

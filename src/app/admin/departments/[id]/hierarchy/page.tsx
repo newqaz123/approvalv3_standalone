@@ -53,7 +53,7 @@ export default async function HierarchyPage({ params }: HierarchyPageProps) {
   const { id } = await params
 
   return (
-    <div className="container mx-auto py-6">
+    <div className="w-full py-6">
       <Suspense fallback={<div>Loading hierarchy...</div>}>
         <HierarchyContent departmentId={id} />
       </Suspense>

@@ -11,24 +11,40 @@ interface BudgetCodeCreateDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   departments: Array<{ id: string; name: string }>
-  onCreate: (input: { budgetCode: string; budgetAmount: number | null; departmentId: string | null }) => Promise<void>
+  onCreate: (input: {
+    budgetCode: string
+    name: string
+    budgetAmount: number
+    departmentId: string | null
+  }) => Promise<void>
 }
 
 export function BudgetCodeCreateDialog({ open, onOpenChange, departments, onCreate }: BudgetCodeCreateDialogProps) {
   const [budgetCode, setBudgetCode] = useState('')
+  const [name, setName] = useState('')
   const [budgetAmount, setBudgetAmount] = useState('')
   const [departmentId, setDepartmentId] = useState<string>('none')
   const [isSaving, setIsSaving] = useState(false)
+
+  const parsedAmount = Number(budgetAmount)
+  const canSubmit =
+    budgetCode.trim() !== '' &&
+    name.trim() !== '' &&
+    budgetAmount.trim() !== '' &&
+    Number.isFinite(parsedAmount) &&
+    parsedAmount >= 0
 
   async function handleCreate() {
     setIsSaving(true)
     try {
       await onCreate({
         budgetCode,
-        budgetAmount: budgetAmount.trim() === '' ? null : Number(budgetAmount),
+        name: name.trim(),
+        budgetAmount: parsedAmount,
         departmentId: departmentId === 'none' ? null : departmentId,
       })
       setBudgetCode('')
+      setName('')
       setBudgetAmount('')
       setDepartmentId('none')
       onOpenChange(false)
@@ -39,17 +55,28 @@ export function BudgetCodeCreateDialog({ open, onOpenChange, departments, onCrea
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>New budget code</DialogTitle>
         </DialogHeader>
-        <div className="space-y-3">
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Add a budget code, name, and amount. Department is optional.
+          </p>
           <div className="space-y-2">
             <Label htmlFor="new-budget-code">Budget code</Label>
             <Input
               id="new-budget-code"
               value={budgetCode}
               onChange={(event) => setBudgetCode(event.target.value)}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="new-budget-code-name">Budget code name</Label>
+            <Input
+              id="new-budget-code-name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
             />
           </div>
           <div className="space-y-2">
@@ -83,7 +110,7 @@ export function BudgetCodeCreateDialog({ open, onOpenChange, departments, onCrea
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="button" onClick={handleCreate} disabled={isSaving || budgetCode.trim() === ''}>
+            <Button type="button" onClick={handleCreate} disabled={isSaving || !canSubmit}>
               Create
             </Button>
           </div>

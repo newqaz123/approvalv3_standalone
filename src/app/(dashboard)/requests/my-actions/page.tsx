@@ -58,7 +58,7 @@ export default async function MyActionsPage({ searchParams }: MyActionsPageProps
   const { requestId } = await searchParams
 
   return (
-    <div className="container mx-auto py-6">
+    <div className="w-full py-6">
       <RequestDeepLinkModal requestId={requestId} returnTo="/requests/my-actions" />
       {requestId ? (
         <ActionItemsList />
