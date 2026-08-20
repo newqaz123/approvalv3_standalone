@@ -1,7 +1,6 @@
 'use server'
 
 import { auth } from '@/lib/auth-config'
-import { RequestStatus } from '@prisma/client'
 import {
   getApprovalLevelsAboveSubmitter,
   MAX_APPROVAL_LEVEL,
@@ -11,7 +10,10 @@ import {
 } from '@/lib/approval-levels'
 import prisma from '@/lib/prisma'
 import { revalidateRequestViews } from './request-view-invalidation'
-import { updateRequestStatusExpecting } from '@/lib/request-status-transition'
+import {
+  approveRequestApproval,
+  type RequestStatusChangeResult,
+} from '@/lib/request-approval-transaction'
 
 /**
  * Check if data is stale based on updatedAt timestamp
@@ -305,40 +307,28 @@ export async function approveRequest(
     }
   }
 
-  // Update approval
-  await prisma.request_approvals.update({
-    where: { id: approval.id },
-    data: {
+  // Approve atomically: the approval mutation, its audit activity, the
+  // remaining-pending count, the guarded status transition, and the
+  // status-change activity all commit together (see
+  // approveRequestApproval). If the requester's cancellation committed
+  // first, the guarded update matches zero rows and throws, so this whole
+  // transaction - including the approval itself - rolls back instead of
+  // leaving a cancelled request with an approved approval row.
+  const result = await prisma.$transaction((tx) =>
+    approveRequestApproval(tx, {
+      requestId,
+      approvalId: approval.id,
       approverId: userId,
-      status: 'approved',
+      requiredLevel: approval.requiredLevel,
       comments,
-      approvedAt: new Date(),
-    },
-  })
+    }),
+  )
 
-  // Log activity
-  await prisma.request_activities.create({
-    data: {
-      requestId,
-      userId,
-      action: 'approved',
-      comments: comments || `Approved at level ${approval.requiredLevel}`,
-    },
-  })
-
-  // Check if this was the last approval
-  const pendingApprovals = await prisma.request_approvals.count({
-    where: {
-      requestId,
-      status: 'pending',
-    },
-  })
-
-  // If no more pending approvals, change status
-  if (pendingApprovals === 0) {
-    await changeRequestStatus(requestId)
-  } else {
-    // Notify next approver
+  // Notifications stay outside the transaction: they fire only on the
+  // committed result, so a rolled-back approval never notifies anyone.
+  if (result.statusChange) {
+    await notifyRequestStatusChange(requestId, result.statusChange)
+  } else if (result.pendingApprovals > 0) {
     await notifyNextApprover(requestId)
   }
 
@@ -434,86 +424,47 @@ export async function rejectRequest(
 }
 
 /**
- * Change request status based on current status
+ * Notify about a status change that the approval transaction committed.
+ *
+ * Notification behavior of the former changeRequestStatus: engineering gets
+ * notified when a request first reaches SentToEngineer; every other status
+ * change notifies the requester. Runs only after the approval transaction
+ * committed, so notifications never escape a rolled-back approval.
  */
-async function changeRequestStatus(requestId: string) {
-  const request = await prisma.requests.findUnique({
-    where: { id: requestId },
-    select: { status: true, requesterId: true, departmentId: true, title: true },
-  })
-
-  if (!request) return
-
-  let newStatus: RequestStatus | null = null
-
-  switch (request.status) {
-    case 'ImprovementRequest':
-      newStatus = 'SentToEngineer'
-      break
-    case 'SentToEngineer':
-      newStatus = 'SendBackToRequester'
-      break
-    case 'SendBackToRequester':
-      newStatus = 'Completed'
-      break
-  }
-
-  if (newStatus) {
-    // Shared expected-status guard: the status was just read above, so a
-    // concurrent transition (e.g. requester cancellation out of
-    // SentToEngineer / SendBackToRequester) that committed in between makes
-    // this match zero rows and throw instead of overwriting the new status.
-    await updateRequestStatusExpecting(prisma, {
-      requestId,
-      expectedStatuses: [request.status],
-      data: { status: newStatus },
-      actionLabel: 'approve the request',
+async function notifyRequestStatusChange(
+  requestId: string,
+  change: RequestStatusChangeResult,
+) {
+  if (change.toStatus === 'SentToEngineer') {
+    // Notify all engineering users
+    const engineeringDept = await prisma.departments.findFirst({
+      where: { type: 'ENGINEERING' },
+      select: { id: true },
     })
 
-    // Log status change
-    await prisma.request_activities.create({
+    if (engineeringDept) {
+      const { notifyUsersInDepartment } = await import('./notifications')
+      await notifyUsersInDepartment(
+        engineeringDept.id,
+        {
+          type: 'request_assigned',
+          title: 'New Task Available',
+          message: `🔧 New Task Available: "${change.title}" has been approved and needs engineering solution.`,
+          requestId,
+        }
+      )
+    }
+  } else {
+    // Other status changes - notify requester
+    await prisma.notifications.create({
       data: {
+        userId: change.requesterId,
+        type: 'status_changed',
+        title: 'Request Status Changed',
+        message: `Your request status changed to ${change.toStatus}`,
         requestId,
-        userId: request.requesterId,
-        action: 'status_changed',
-        fromStatus: request.status as any,
-        toStatus: newStatus as any,
-        comments: `Status changed from ${request.status} to ${newStatus}`,
       },
     })
-
-    // Create notification based on new status
-    if (newStatus === 'SentToEngineer') {
-      // Notify all engineering users
-      const engineeringDept = await prisma.departments.findFirst({
-        where: { type: 'ENGINEERING' },
-        select: { id: true },
-      })
-
-      if (engineeringDept) {
-        const { notifyUsersInDepartment } = await import('./notifications')
-        await notifyUsersInDepartment(
-          engineeringDept.id,
-          {
-            type: 'request_assigned',
-            title: 'New Task Available',
-            message: `🔧 New Task Available: "${request.title}" has been approved and needs engineering solution.`,
-            requestId,
-          }
-        )
-      }
-    } else {
-      // Other status changes - notify requester
-      await prisma.notifications.create({
-        data: {
-          userId: request.requesterId,
-          type: 'status_changed',
-          title: 'Request Status Changed',
-          message: `Your request status changed to ${newStatus}`,
-          requestId,
-        },
-      })
-    }
   }
 }
 
