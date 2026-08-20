@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/dialog";
 import { FormattedText } from "@/components/ui/formatted-text";
 import { Separator } from "@/components/ui/separator";
+import { CancelRequestDialog } from "./cancel-request-dialog";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
 
@@ -107,6 +108,8 @@ interface CompletedSolutionModalProps {
 	userId?: string;
 	isRequesterDepartment?: boolean;
 	onSubmitFinalApproval?: () => void;
+	showCancel?: boolean;
+	onCancelled?: () => void;
 	onDownloadRequestFile?: (fileId: string) => void;
 	onDownloadSolutionFile?: (fileId: string) => void;
 	onPreviewFile?: (fileId: string) => void;
@@ -229,6 +232,8 @@ export function CompletedSolutionModal({
 	userId,
 	isRequesterDepartment = false,
 	onSubmitFinalApproval,
+	showCancel,
+	onCancelled,
 	onDownloadRequestFile,
 	onDownloadSolutionFile,
 	onPreviewFile,
@@ -587,15 +592,24 @@ export function CompletedSolutionModal({
 							{format(new Date(data.lastModified), "MMM d, yyyy")}
 						</span>
 					</div>
-					{isRequesterDepartment && onSubmitFinalApproval && (
-						<button
-							onClick={onSubmitFinalApproval}
-							className="flex items-center gap-2 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold rounded-lg transition-colors"
-						>
-							<Shield className="w-4 h-4" />
-							Submit Final Approval
-						</button>
-					)}
+					<div className="flex items-center gap-2">
+						{showCancel && (
+							<CancelRequestDialog
+								requestId={data.id}
+								requestTitle={data.title}
+								onCancelled={onCancelled}
+							/>
+						)}
+						{isRequesterDepartment && onSubmitFinalApproval && (
+							<button
+								onClick={onSubmitFinalApproval}
+								className="flex items-center gap-2 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold rounded-lg transition-colors"
+							>
+								<Shield className="w-4 h-4" />
+								Submit Final Approval
+							</button>
+						)}
+					</div>
 				</div>
 			</DialogContent>
 		</Dialog>

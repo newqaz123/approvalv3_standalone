@@ -18,6 +18,10 @@ import { Separator } from '@/components/ui/separator'
 import { StatusBadge } from './status-badge'
 import { RejectedBadge } from './rejected-badge'
 import { CancelRequestDialog } from './cancel-request-dialog'
+import {
+  evaluateRequesterCancellation,
+  hasPendingApprovals,
+} from '@/lib/cancellation-policy'
 import { ResubmitRequestDialog } from './resubmit-request-dialog'
 import { DeleteRequestDialog } from './delete-request-dialog'
 import { getRequest } from '@/server-actions/requests'
@@ -106,8 +110,20 @@ export function RequestDetailModal({
   const hasRequestRejection = approvals.some(a => a.status === 'rejected')
   const hasSolutionRejection = solutionApprovals.some(a => a.status === 'rejected')
   const hasRejection = hasRequestRejection || hasSolutionRejection
-  const hasApprovedApprovals = approvals.some(a => a.status === 'approved')
   const currentUserId = user?.id
+  // Requester cancellation eligibility (requester only, SentToEngineer or
+  // SendBackToRequester, no pending request/final or solution approvals).
+  // Approvals include final approval rows; solutionApprovals belong to the
+  // request's solution. The server action re-checks authoritatively.
+  const canCancelRequest =
+    !!request &&
+    evaluateRequesterCancellation({
+      userId: currentUserId,
+      requesterId: request.requesterId,
+      status: request.status,
+      hasPendingRequestApprovals: hasPendingApprovals(approvals),
+      hasPendingSolutionApprovals: hasPendingApprovals(solutionApprovals),
+    }).canCancel
   const [userRole, setUserRole] = useState<string | undefined>(undefined)
 
   // Determine if all approvals are complete for PDF export eligibility
@@ -618,11 +634,7 @@ export function RequestDetailModal({
             )}
 
             {/* Cancel Request (if eligible) */}
-            {currentUserId &&
-             request.requesterId === currentUserId &&
-             !hasApprovedApprovals &&
-             request.status !== 'Completed' &&
-             request.status !== 'Cancelled' && (
+            {canCancelRequest && (
               <>
                 <Separator />
                 <div className="flex justify-start">
@@ -1148,11 +1160,7 @@ export function RequestDetailModal({
             )}
 
             {/* Cancel Request (if eligible) */}
-            {currentUserId &&
-             request.requesterId === currentUserId &&
-             !hasApprovedApprovals &&
-             request.status !== 'Completed' &&
-             request.status !== 'Cancelled' && (
+            {canCancelRequest && (
               <>
                 <Separator />
                 <div className="flex justify-start">

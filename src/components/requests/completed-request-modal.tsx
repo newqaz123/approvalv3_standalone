@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
 import { FormattedText } from "@/components/ui/formatted-text";
+import { CancelRequestDialog } from "./cancel-request-dialog";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
 
@@ -89,6 +90,8 @@ interface CompletedRequestModalProps {
 	};
 	userDepartment?: string;
 	onSubmitSolution?: () => void;
+	showCancel?: boolean;
+	onCancelled?: () => void;
 	onDownloadFile?: (fileId: string) => void;
 	onPreviewFile?: (fileId: string) => void;
 	subTasksElement?: React.ReactNode;
@@ -207,6 +210,8 @@ export function CompletedRequestModal({
 	data,
 	userDepartment,
 	onSubmitSolution,
+	showCancel,
+	onCancelled,
 	onDownloadFile,
 	onPreviewFile,
 	subTasksElement,
@@ -468,15 +473,24 @@ export function CompletedRequestModal({
 							{format(new Date(data.lastModified), "MMM d, yyyy")}
 						</span>
 					</div>
-					{isEngineering && onSubmitSolution && (
-						<button
-							onClick={onSubmitSolution}
-							className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-bold rounded-lg transition-colors"
-						>
-							<CheckCircle2 className="w-4 h-4" />
-							Submit Solution
-						</button>
-					)}
+					<div className="flex items-center gap-2">
+						{showCancel && (
+							<CancelRequestDialog
+								requestId={data.id}
+								requestTitle={data.title}
+								onCancelled={onCancelled}
+							/>
+						)}
+						{isEngineering && onSubmitSolution && (
+							<button
+								onClick={onSubmitSolution}
+								className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-bold rounded-lg transition-colors"
+							>
+								<CheckCircle2 className="w-4 h-4" />
+								Submit Solution
+							</button>
+						)}
+					</div>
 				</div>
 			</DialogContent>
 		</Dialog>

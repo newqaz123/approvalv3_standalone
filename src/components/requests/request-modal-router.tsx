@@ -35,6 +35,10 @@ import {
 	canUserSubmitSolution,
 	canUserSubmitFinalApproval,
 } from "@/lib/permission-checks";
+import {
+	evaluateRequesterCancellation,
+	hasPendingApprovals,
+} from "@/lib/cancellation-policy";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { FilePreviewDialog } from "@/components/requests/file-preview-dialog";
@@ -263,17 +267,24 @@ function RequestModalRouterContent({
 		hasFinalRejection ||
 		hasFinalRejectionInEngineering;
 
-	// Check if current user can cancel (requester only, before any approvals)
+	// Check if current user can cancel (requester only, while the request is
+	// in SentToEngineer or SendBackToRequester and no request/final or solution
+	// approval is still pending; authoritative re-checks run in cancelRequest)
 	const isRequester = user?.id === requestData.requesterId;
-	const hasApprovedApprovals = requestData.approvals?.some(
-		(a: any) => a.status === "approved" && !a.isFinalApproval,
-	);
 	const canCancel =
 		!viewOnly &&
 		isRequester &&
-		!hasApprovedApprovals &&
-		requestData.status !== "Completed" &&
-		requestData.status !== "Cancelled";
+		evaluateRequesterCancellation({
+			userId: user?.id,
+			requesterId: requestData.requesterId,
+			status: requestData.status,
+			hasPendingRequestApprovals: hasPendingApprovals(
+				requestData.approvals,
+			),
+			hasPendingSolutionApprovals: hasPendingApprovals(
+				requestData.solutions?.[0]?.approvals,
+			),
+		}).canCancel;
 	const allowActions = !viewOnly;
 
 	const canManageSubTasks = canManageEngineeringSubTasks(user);
@@ -755,6 +766,8 @@ function RequestModalRouterContent({
 							: undefined
 					}
 					userDepartment={userDepartmentType || undefined}
+					showCancel={canCancel}
+					onCancelled={handleClose}
 					onDownloadFile={handleDownloadFile}
 					onDownloadSolutionFile={handleDownloadSolutionFile}
 					onPreviewFile={handlePreviewFile}
@@ -841,6 +854,8 @@ function RequestModalRouterContent({
 					onSubmitSolution={
 						allowActions ? () => setShowSolutionModal(true) : undefined
 					}
+					showCancel={canCancel}
+					onCancelled={handleClose}
 					onDownloadFile={handleDownloadFile}
 					onPreviewFile={handlePreviewFile}
 					subTasksElement={subTasksElement}
@@ -868,6 +883,8 @@ function RequestModalRouterContent({
 							? () => setShowSubmitFinalApprovalModal(true)
 							: undefined
 					}
+					showCancel={canCancel}
+					onCancelled={handleClose}
 					onDownloadRequestFile={handleDownloadFile}
 					onDownloadSolutionFile={handleDownloadSolutionFile}
 					onPreviewFile={handlePreviewFile}

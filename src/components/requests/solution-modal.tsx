@@ -47,6 +47,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { ApproverSearchField } from "@/components/approvals/approver-search-field";
 import { filterApproversByQuery } from "@/lib/approver-search";
+import { CancelRequestDialog } from "./cancel-request-dialog";
 import { cn } from "@/lib/utils";
 
 // Types
@@ -135,6 +136,8 @@ interface SolutionModalProps {
 	onSubmitFinalApproval?: () => void;
 	userDepartment?: string;
 	availableUsers?: User[];
+	showCancel?: boolean;
+	onCancelled?: () => void;
 	subTasksElement?: React.ReactNode;
 }
 
@@ -624,6 +627,8 @@ export function SolutionModal({
 	onSubmitFinalApproval,
 	userDepartment,
 	availableUsers = [],
+	showCancel,
+	onCancelled,
 	subTasksElement,
 }: SolutionModalProps) {
 	const status = statusConfig[data.status];
@@ -1018,12 +1023,20 @@ export function SolutionModal({
 							{format(new Date(data.lastModified), "MMM d, yyyy")}
 						</span>
 					</div>
-					{data.status === "solution" &&
-						!onApprove &&
-						onSubmitFinalApproval &&
-						(userDepartment === "Requester" ||
-							userDepartment === "Production 1" ||
-							userDepartment === "Production 2") && (
+					<div className="flex items-center gap-2">
+						{showCancel && (
+							<CancelRequestDialog
+								requestId={data.id}
+								requestTitle={data.title}
+								onCancelled={onCancelled}
+							/>
+						)}
+						{data.status === "solution" &&
+							!onApprove &&
+							onSubmitFinalApproval &&
+							(userDepartment === "Requester" ||
+								userDepartment === "Production 1" ||
+								userDepartment === "Production 2") && (
 							<Button
 								onClick={onSubmitFinalApproval}
 								className="flex items-center gap-2 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold rounded-lg transition-colors"
@@ -1032,6 +1045,7 @@ export function SolutionModal({
 								Send Final Approval
 							</Button>
 						)}
+					</div>
 				</div>
 			</DialogContent>
 		</Dialog>

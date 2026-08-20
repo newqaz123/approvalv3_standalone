@@ -11,6 +11,10 @@ import { getCurrentUser, getUserById } from '@/lib/cache/user-cache'
 import { deleteAttachmentFile } from '@/lib/attachments/storage'
 import { descriptionSchema } from '@/lib/schemas/solution-schemas'
 import { buildRequestExportRows } from '@/lib/request-export'
+import {
+  evaluateRequesterCancellation,
+  getCancellationBlockedMessage,
+} from '@/lib/cancellation-policy'
 import * as XLSX from 'xlsx'
 
 // Zod schema for request validation
@@ -982,7 +986,16 @@ const cancelRequestSchema = z.object({
 })
 
 /**
- * Cancel a request (only requester can cancel, only before any approvals)
+ * Cancel a request.
+ *
+ * Policy (see `src/lib/cancellation-policy.ts`):
+ * - Only the original requester can cancel.
+ * - Allowed only while the request status is SentToEngineer or
+ *   SendBackToRequester.
+ * - Blocked while any request approval (including final approval) or any
+ *   solution approval is still pending.
+ * - Approvals, solutions, files, engineer assignments, and subtasks are
+ *   preserved for audit; only the request status changes to Cancelled.
  */
 export async function cancelRequest(input: { requestId: string; reason: string }) {
   const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
@@ -1001,64 +1014,68 @@ export async function cancelRequest(input: { requestId: string; reason: string }
 
   const { requestId, reason } = validatedFields.data
 
-  // Get request with approvals
-  const request = await prisma.requests.findUnique({
-    where: { id: requestId },
-    include: {
-      approvals: {
-        where: { status: 'approved' },
-      },
-    },
-  })
-
-  if (!request) {
-    throw new Error('Request not found')
-  }
-
-  // Check ownership
-  if (request.requesterId !== userId) {
-    throw new Error('Only the requester can cancel their own request')
-  }
-
-  // Check for existing approved approvals
-  // Can cancel as long as ALL approvals are still 'pending' (no one has approved yet)
-  // This applies to ANY status - if approval process hasn't started, requester can cancel
-  if (request.approvals.length > 0) {
-    throw new Error('Cannot cancel - approval process has already started (someone has approved)')
-  }
-
-  // Additional check: Don't allow cancelling completed or cancelled requests
-  if (request.status === 'Completed' || request.status === 'Cancelled') {
-    throw new Error(`Cannot cancel - request is ${request.status}`)
-  }
-
-  // Perform cancellation in transaction
-  await prisma.$transaction([
-    // Update request status
-    prisma.requests.update({
+  // Re-check ownership, status, and pending approvals inside one transaction.
+  // The conditional status update below re-verifies the read status at write
+  // time (TOCTOU guard under READ COMMITTED), so a concurrent transition
+  // (e.g. solution submission or final approval initiation) cannot race past
+  // cancellation.
+  await prisma.$transaction(async (tx) => {
+    const request = await tx.requests.findUnique({
       where: { id: requestId },
+      select: { id: true, requesterId: true, status: true },
+    })
+
+    if (!request) {
+      throw new Error('Request not found')
+    }
+
+    // Pending request approvals (any kind, including final approval rows)
+    // and pending solution approvals of the request's solutions both block.
+    const [pendingRequestApprovals, pendingSolutionApprovals] = await Promise.all([
+      tx.request_approvals.count({
+        where: { requestId, status: 'pending' },
+      }),
+      tx.solution_approvals.count({
+        where: { solution: { requestId }, status: 'pending' },
+      }),
+    ])
+
+    const decision = evaluateRequesterCancellation({
+      userId,
+      requesterId: request.requesterId,
+      status: request.status,
+      hasPendingRequestApprovals: pendingRequestApprovals > 0,
+      hasPendingSolutionApprovals: pendingSolutionApprovals > 0,
+    })
+
+    if (!decision.canCancel) {
+      throw new Error(getCancellationBlockedMessage(decision.reason, request.status))
+    }
+
+    // Only flip the status when it is still the cancellable status we read;
+    // a concurrent transition makes this affect zero rows and rolls back.
+    const cancelled = await tx.requests.updateMany({
+      where: { id: requestId, status: request.status },
       data: { status: 'Cancelled' },
-    }),
-    // Mark all pending approvals as rejected (cleanup)
-    prisma.request_approvals.updateMany({
-      where: {
-        requestId,
-        status: 'pending',
-      },
-      data: { status: 'rejected' },
-    }),
-    // Log activity
-    prisma.request_activities.create({
+    })
+
+    if (cancelled.count !== 1) {
+      throw new Error('Cannot cancel - request changed while cancelling. Please refresh and try again.')
+    }
+
+    // Audit trail with the actual previous status. Approvals, solutions,
+    // files, engineer assignments, and subtasks are intentionally preserved.
+    await tx.request_activities.create({
       data: {
         requestId,
         userId,
         action: 'cancelled',
-        fromStatus: 'ImprovementRequest',
+        fromStatus: request.status,
         toStatus: 'Cancelled',
         comments: reason,
       },
-    }),
-  ])
+    })
+  })
 
   revalidateRequestViews(requestId)
 
