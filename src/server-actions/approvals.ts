@@ -310,10 +310,14 @@ export async function approveRequest(
   // Approve atomically: the approval mutation, its audit activity, the
   // remaining-pending count, the guarded status transition, and the
   // status-change activity all commit together (see
-  // approveRequestApproval). If the requester's cancellation committed
-  // first, the guarded update matches zero rows and throws, so this whole
-  // transaction - including the approval itself - rolls back instead of
-  // leaving a cancelled request with an approved approval row.
+  // approveRequestApproval). The core reads and validates the request
+  // before writing anything, so an already-cancelled or otherwise
+  // out-of-ladder request (or a missing request row) throws the same
+  // conflict and commits nothing. If the requester's cancellation committed
+  // between that read and the guarded status write, the guarded update
+  // matches zero rows and throws, so this whole transaction - including the
+  // approval itself - rolls back instead of leaving a cancelled request
+  // with an approved approval row.
   const result = await prisma.$transaction((tx) =>
     approveRequestApproval(tx, {
       requestId,

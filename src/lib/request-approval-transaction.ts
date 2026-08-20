@@ -1,5 +1,8 @@
 import type { Prisma, RequestStatus } from '@prisma/client'
-import { updateRequestStatusExpecting } from './request-status-transition'
+import {
+  RequestStatusConflictError,
+  updateRequestStatusExpecting,
+} from './request-status-transition'
 
 /**
  * Atomic request-approval core used by `approveRequest()`.
@@ -17,6 +20,13 @@ import { updateRequestStatusExpecting } from './request-status-transition'
  * committed first) makes the guarded update throw inside the transaction,
  * so every write rolls back. The caller sends notifications only after this
  * core commits, based on the returned committed result.
+ *
+ * The core fails closed BEFORE writing anything: it reads the request first
+ * and only proceeds from the legacy ladder origins (ImprovementRequest,
+ * SentToEngineer, SendBackToRequester). A missing request, or a request
+ * already outside that ladder (Cancelled, Completed,
+ * DesignCostEstimationApproval, FinalApproval), throws inside the
+ * transaction, so no approval or activity commits.
  */
 
 /** Minimal structural type satisfied by both `prisma` and a transaction client. */
@@ -66,10 +76,11 @@ export interface ApproveRequestApprovalResult {
   /** Pending request approvals remaining after this one committed. */
   pendingApprovals: number
   /**
-   * Present when approving this approval completed the chain and the guarded
-   * status transition committed. Absent when approvals remain pending, the
-   * request row disappeared, or the status is outside the legacy
-   * request-approval ladder (in which case no transition happens).
+   * Present whenever the core commits with no approvals remaining pending:
+   * the guarded status transition ran and completed the legacy ladder step.
+   * The core throws instead of committing when the request is missing or
+   * outside the legacy request-approval ladder, so a committed result never
+   * silently skips the transition.
    */
   statusChange?: RequestStatusChangeResult
 }
@@ -93,10 +104,14 @@ function nextRequestStatusAfterApproval(status: RequestStatus): RequestStatus | 
  * perform the guarded status transition - atomically.
  *
  * Must run inside a transaction (e.g. `prisma.$transaction((tx) =>
- * approveRequestApproval(tx, ...))`). Throws `RequestStatusConflictError`
- * from the guarded transition when a competing transition (e.g. requester
- * cancellation) committed first; the caller must let the transaction roll
- * back everything this core wrote.
+ * approveRequestApproval(tx, ...))`). Fails closed: it reads and validates
+ * the request BEFORE any approval/activity write, so a missing request or a
+ * status outside the legacy request-approval ladder (e.g. the requester
+ * already cancelled) throws `RequestStatusConflictError` inside the
+ * transaction and nothing commits. The shared guarded transition throws the
+ * same error when a competing transition (e.g. requester cancellation)
+ * committed between the read and the status write; the caller must let the
+ * transaction roll back everything this core wrote.
  */
 export async function approveRequestApproval(
   db: RequestApprovalTransactionDb,
@@ -108,6 +123,29 @@ export async function approveRequestApproval(
     comments?: string
   },
 ): Promise<ApproveRequestApprovalResult> {
+  // Fail closed before writing: a request that is missing or already
+  // outside the legacy request-approval ladder (cancelled, completed, or
+  // moved on to design-cost/final approval) must not gain an approved
+  // approval row or activities.
+  const request = await db.requests.findUnique({
+    where: { id: input.requestId },
+    select: { status: true, requesterId: true, title: true },
+  })
+
+  if (!request) {
+    throw new RequestStatusConflictError(
+      'Cannot approve the request - the request no longer exists. Please refresh and try again.',
+    )
+  }
+
+  const newStatus = nextRequestStatusAfterApproval(request.status)
+
+  if (!newStatus) {
+    throw new RequestStatusConflictError(
+      `Cannot approve the request - it is no longer awaiting request approvals (status: ${request.status}). Please refresh and try again.`,
+    )
+  }
+
   // Approve the approval row
   await db.request_approvals.update({
     where: { id: input.approvalId },
@@ -141,25 +179,10 @@ export async function approveRequestApproval(
     return { pendingApprovals }
   }
 
-  const request = await db.requests.findUnique({
-    where: { id: input.requestId },
-    select: { status: true, requesterId: true, title: true },
-  })
-
-  if (!request) {
-    return { pendingApprovals }
-  }
-
-  const newStatus = nextRequestStatusAfterApproval(request.status)
-
-  if (!newStatus) {
-    return { pendingApprovals }
-  }
-
-  // Shared expected-status guard: if the requester's cancellation committed
-  // after the read above, this matches zero rows and throws, rolling back
-  // the approval write and activities with it instead of overwriting
-  // `Cancelled`.
+  // Shared expected-status guard (compare-and-set): if the requester's
+  // cancellation committed after the read at the top of this core, this
+  // matches zero rows and throws, rolling back the approval write and
+  // activities with it instead of overwriting `Cancelled`.
   await updateRequestStatusExpecting(db, {
     requestId: input.requestId,
     expectedStatuses: [request.status],

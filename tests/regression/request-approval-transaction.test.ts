@@ -17,6 +17,13 @@ import {
  * approval made must roll back - a cancelled request must not keep an
  * approved approval row or approval activities.
  *
+ * The core also fails closed BEFORE any write: it reads and validates the
+ * request first, so a missing request, or a status outside the legacy
+ * request-approval ladder (Cancelled, Completed,
+ * DesignCostEstimationApproval, FinalApproval), throws inside the
+ * transaction and NO approval or activity commits - even when other
+ * approvals would remain pending.
+ *
  * Tests drive the exact production core with a stateful in-memory stand-in
  * at the Prisma boundary: the fake honors `UPDATE ... WHERE status IN (...)`
  * zero-row semantics and emulates `prisma.$transaction` commit/rollback.
@@ -349,7 +356,7 @@ describe('request approval transaction core', () => {
     assert.equal(approvedActivity?.comments, 'Approved at level 4')
   })
 
-  it('walks the legacy approval ladder and leaves other statuses untouched', async () => {
+  it('walks the legacy approval ladder', async () => {
     const ladder: ReadonlyArray<readonly [RequestStatus, RequestStatus]> = [
       ['ImprovementRequest', 'SentToEngineer'],
       ['SentToEngineer', 'SendBackToRequester'],
@@ -374,47 +381,113 @@ describe('request approval transaction core', () => {
       assert.equal(result.statusChange?.toStatus, toStatus)
       assert.equal(db.requests.rows.get(REQUEST.id)?.status, toStatus)
     }
+  })
 
-    // Statuses outside the legacy request-approval ladder transition nowhere.
-    for (const status of ['DesignCostEstimationApproval', 'FinalApproval'] as const) {
-      const db = fakeDb({
-        requests: [{ ...REQUEST, status }],
-        approvals: [{ id: 'a1', requestId: REQUEST.id, requiredLevel: 1, status: 'pending' }],
-      })
+  it('fails closed when the requester cancelled before the core read the request', async () => {
+    // Cancellation committed BEFORE this transaction started: the very
+    // first read observes Cancelled, so the core must throw before writing
+    // anything - not approve the row and silently skip the transition.
+    const db = fakeDb({
+      requests: [{ ...REQUEST, status: 'Cancelled' }],
+      approvals: [{ id: 'a1', requestId: REQUEST.id, requiredLevel: 1, status: 'pending' }],
+    })
 
-      const result = await db.$transaction((tx) =>
+    await assert.rejects(
+      db.$transaction((tx) =>
         approveRequestApproval(tx, {
           requestId: REQUEST.id,
           approvalId: 'a1',
           approverId: 'approver-1',
           requiredLevel: 1,
         }),
+      ),
+      (error: unknown) => error instanceof RequestStatusConflictError,
+    )
+
+    assert.equal(db.request_approvals.rows.get('a1')?.status, 'pending')
+    assert.equal(db.request_approvals.rows.get('a1')?.approverId, undefined)
+    assert.equal(db.request_approvals.rows.get('a1')?.approvedAt, undefined)
+    assert.deepEqual(db.request_activities.rows, [])
+    assert.equal(db.requests.rows.get(REQUEST.id)?.status, 'Cancelled')
+  })
+
+  it('fails closed for statuses outside the legacy request-approval ladder', async () => {
+    for (const status of ['Completed', 'DesignCostEstimationApproval', 'FinalApproval'] as const) {
+      const db = fakeDb({
+        requests: [{ ...REQUEST, status }],
+        approvals: [{ id: 'a1', requestId: REQUEST.id, requiredLevel: 1, status: 'pending' }],
+      })
+
+      await assert.rejects(
+        db.$transaction((tx) =>
+          approveRequestApproval(tx, {
+            requestId: REQUEST.id,
+            approvalId: 'a1',
+            approverId: 'approver-1',
+            requiredLevel: 1,
+          }),
+        ),
+        (error: unknown) => error instanceof RequestStatusConflictError,
       )
 
-      assert.deepEqual(result, { pendingApprovals: 0 })
+      assert.equal(db.request_approvals.rows.get('a1')?.status, 'pending')
+      assert.equal(db.request_approvals.rows.get('a1')?.approverId, undefined)
+      assert.equal(db.request_approvals.rows.get('a1')?.approvedAt, undefined)
+      assert.deepEqual(db.request_activities.rows, [])
       assert.equal(db.requests.rows.get(REQUEST.id)?.status, status)
-      assert.equal(
-        db.request_activities.rows.some((a) => a.action === 'status_changed'),
-        false,
-      )
     }
   })
 
-  it('commits the approval without a status change when the request row disappeared', async () => {
+  it('fails closed when the request row is missing', async () => {
     const db = fakeDb({
       approvals: [{ id: 'a1', requestId: 'missing', requiredLevel: 1, status: 'pending' }],
     })
 
-    const result = await db.$transaction((tx) =>
-      approveRequestApproval(tx, {
-        requestId: 'missing',
-        approvalId: 'a1',
-        approverId: 'approver-1',
-        requiredLevel: 1,
-      }),
+    await assert.rejects(
+      db.$transaction((tx) =>
+        approveRequestApproval(tx, {
+          requestId: 'missing',
+          approvalId: 'a1',
+          approverId: 'approver-1',
+          requiredLevel: 1,
+        }),
+      ),
+      (error: unknown) => error instanceof RequestStatusConflictError,
     )
 
-    assert.deepEqual(result, { pendingApprovals: 0 })
-    assert.equal(db.request_approvals.rows.get('a1')?.status, 'approved')
+    assert.equal(db.request_approvals.rows.get('a1')?.status, 'pending')
+    assert.equal(db.request_approvals.rows.get('a1')?.approverId, undefined)
+    assert.equal(db.request_approvals.rows.get('a1')?.approvedAt, undefined)
+    assert.deepEqual(db.request_activities.rows, [])
+  })
+
+  it('fails closed even when other approvals would remain pending', async () => {
+    // The upfront validation applies to every approval in the chain, not
+    // only the final one: an intermediate approval on a cancelled request
+    // must not commit either.
+    const db = fakeDb({
+      requests: [{ ...REQUEST, status: 'Cancelled' }],
+      approvals: [
+        { id: 'a1', requestId: REQUEST.id, requiredLevel: 2, status: 'pending' },
+        { id: 'a2', requestId: REQUEST.id, requiredLevel: 3, status: 'pending' },
+      ],
+    })
+
+    await assert.rejects(
+      db.$transaction((tx) =>
+        approveRequestApproval(tx, {
+          requestId: REQUEST.id,
+          approvalId: 'a1',
+          approverId: 'approver-1',
+          requiredLevel: 2,
+        }),
+      ),
+      (error: unknown) => error instanceof RequestStatusConflictError,
+    )
+
+    assert.equal(db.request_approvals.rows.get('a1')?.status, 'pending')
+    assert.equal(db.request_approvals.rows.get('a2')?.status, 'pending')
+    assert.deepEqual(db.request_activities.rows, [])
+    assert.equal(db.requests.rows.get(REQUEST.id)?.status, 'Cancelled')
   })
 })
