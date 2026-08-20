@@ -1,6 +1,7 @@
 'use server'
 
 import { auth } from '@/lib/auth-config'
+import { RequestStatus } from '@prisma/client'
 import {
   getApprovalLevelsAboveSubmitter,
   MAX_APPROVAL_LEVEL,
@@ -10,6 +11,7 @@ import {
 } from '@/lib/approval-levels'
 import prisma from '@/lib/prisma'
 import { revalidateRequestViews } from './request-view-invalidation'
+import { updateRequestStatusExpecting } from '@/lib/request-status-transition'
 
 /**
  * Check if data is stale based on updatedAt timestamp
@@ -442,7 +444,7 @@ async function changeRequestStatus(requestId: string) {
 
   if (!request) return
 
-  let newStatus: string | null = null
+  let newStatus: RequestStatus | null = null
 
   switch (request.status) {
     case 'ImprovementRequest':
@@ -457,9 +459,15 @@ async function changeRequestStatus(requestId: string) {
   }
 
   if (newStatus) {
-    await prisma.requests.update({
-      where: { id: requestId },
-      data: { status: newStatus as any },
+    // Shared expected-status guard: the status was just read above, so a
+    // concurrent transition (e.g. requester cancellation out of
+    // SentToEngineer / SendBackToRequester) that committed in between makes
+    // this match zero rows and throw instead of overwriting the new status.
+    await updateRequestStatusExpecting(prisma, {
+      requestId,
+      expectedStatuses: [request.status],
+      data: { status: newStatus },
+      actionLabel: 'approve the request',
     })
 
     // Log status change

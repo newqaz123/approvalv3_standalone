@@ -15,6 +15,7 @@ import {
   evaluateRequesterCancellation,
   getCancellationBlockedMessage,
 } from '@/lib/cancellation-policy'
+import { updateRequestStatusExpecting } from '@/lib/request-status-transition'
 import * as XLSX from 'xlsx'
 
 // Zod schema for request validation
@@ -630,6 +631,20 @@ export async function getRequest(id: string) {
     },
   })
 
+  // Lightweight all-solutions pending-solution-approval aggregate for
+  // requester cancellation eligibility. getRequest only loads the newest
+  // solution's payload (take: 1 above), but the authoritative cancelRequest
+  // action counts pending solution approvals across ALL solutions of the
+  // request, so the UI needs this same aggregate to avoid offering an
+  // action the server would reject. One count query; no historical
+  // solution payloads are loaded.
+  if (request) {
+    const pendingSolutionApprovals = await prisma.solution_approvals.count({
+      where: { solution: { requestId: id }, status: 'pending' },
+    })
+    ;(request as any).hasPendingSolutionApprovals = pendingSolutionApprovals > 0
+  }
+
   // Convert Decimal to number for client components
   if (request?.projectEstimateCost !== null && request?.projectEstimateCost !== undefined) {
     request.projectEstimateCost = Number(request.projectEstimateCost) as any
@@ -1052,16 +1067,17 @@ export async function cancelRequest(input: { requestId: string; reason: string }
       throw new Error(getCancellationBlockedMessage(decision.reason, request.status))
     }
 
-    // Only flip the status when it is still the cancellable status we read;
-    // a concurrent transition makes this affect zero rows and rolls back.
-    const cancelled = await tx.requests.updateMany({
-      where: { id: requestId, status: request.status },
+    // Only flip the status while it is still the cancellable status we read,
+    // via the same shared expected-status protocol every sibling transition
+    // (solution submission/resubmission, completion, final approval)
+    // uses. A concurrent transition makes this match zero rows and throws,
+    // so this transaction rolls back and cannot overwrite it.
+    await updateRequestStatusExpecting(tx, {
+      requestId,
+      expectedStatuses: [request.status],
       data: { status: 'Cancelled' },
+      actionLabel: 'cancel',
     })
-
-    if (cancelled.count !== 1) {
-      throw new Error('Cannot cancel - request changed while cancelling. Please refresh and try again.')
-    }
 
     // Audit trail with the actual previous status. Approvals, solutions,
     // files, engineer assignments, and subtasks are intentionally preserved.

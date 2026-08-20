@@ -13,6 +13,7 @@ import { RequestStatus, UserRole } from '@prisma/client'
 import { submitSolutionSchema, SubmitSolutionInput, resubmitSolutionSchema, ResubmitSolutionInput } from '@/lib/schemas/solution-schemas'
 import { deleteAttachmentFile } from '@/lib/attachments/storage'
 import { revalidateRequestViews } from './request-view-invalidation'
+import { updateRequestStatusExpecting } from '@/lib/request-status-transition'
 
 async function getMaxValidLevelInDepartment(
   tx: { user: { findFirst: Function } },
@@ -198,10 +199,15 @@ export async function submitSolution(input: SubmitSolutionInput) {
     if (validated.useCustomApprovals && validated.customApproverIds && validated.customApproverIds.length > 0) {
       // Custom approval chain (never auto-approved)
       await createCustomApprovalChain(tx, solution.id, validated.customApproverIds, user.id)
-      // Update request status to DesignCostEstimationApproval
-      await tx.requests.update({
-        where: { id: validated.requestId },
+      // Update request status to DesignCostEstimationApproval via the shared
+      // expected-status guard: if a requester cancellation committed after the
+      // pre-transaction read, this matches zero rows and throws, rolling back
+      // the solution and its approval chain instead of overwriting Cancelled.
+      await updateRequestStatusExpecting(tx, {
+        requestId: validated.requestId,
+        expectedStatuses: [RequestStatus.SentToEngineer],
         data: { status: RequestStatus.DesignCostEstimationApproval },
+        actionLabel: 'submit solution',
       })
 
       // Notify custom approvers about the solution submission
@@ -228,13 +234,17 @@ export async function submitSolution(input: SubmitSolutionInput) {
           isCustomChain: false,
         },
       })
-      // Skip approval phase, go directly to SendBackToRequester
-      await tx.requests.update({
-        where: { id: validated.requestId },
+      // Skip approval phase, go directly to SendBackToRequester. Guarded so a
+      // concurrent requester cancellation aborts this transaction instead of
+      // being overwritten (see updateRequestStatusExpecting).
+      await updateRequestStatusExpecting(tx, {
+        requestId: validated.requestId,
+        expectedStatuses: [RequestStatus.SentToEngineer],
         data: {
           status: RequestStatus.SendBackToRequester,
           projectEstimateCost: validated.costEstimate ?? 0,
         },
+        actionLabel: 'submit solution',
       })
       // Log status change
       await tx.request_activities.create({
@@ -264,10 +274,13 @@ export async function submitSolution(input: SubmitSolutionInput) {
         submitterLevel,
         user.id,
       )
-      // Update request status to DesignCostEstimationApproval
-      await tx.requests.update({
-        where: { id: validated.requestId },
+      // Update request status to DesignCostEstimationApproval via the shared
+      // expected-status guard (see updateRequestStatusExpecting).
+      await updateRequestStatusExpecting(tx, {
+        requestId: validated.requestId,
+        expectedStatuses: [RequestStatus.SentToEngineer],
         data: { status: RequestStatus.DesignCostEstimationApproval },
+        actionLabel: 'submit solution',
       })
 
       // Notify engineering department approvers at the first *actual* pending level.
@@ -978,10 +991,14 @@ export async function markRequestComplete(requestId: string, completionNote?: st
 
   // Use transaction for atomicity
   await prisma.$transaction(async (tx) => {
-    // Update request status to Completed
-    await tx.requests.update({
-      where: { id: requestId },
+    // Update request status to Completed via the shared expected-status guard:
+    // a requester cancellation that committed first makes this match zero
+    // rows and throw, so the completion is not written over the cancellation.
+    await updateRequestStatusExpecting(tx, {
+      requestId,
+      expectedStatuses: [RequestStatus.SendBackToRequester],
       data: { status: RequestStatus.Completed },
+      actionLabel: 'mark the request complete',
     })
 
     // Log activity
@@ -1197,10 +1214,15 @@ export async function initiateFinalApproval(
     if (useCustomChain && customApproverIds && customApproverIds.length > 0) {
       // Custom approval chain (never auto-approved)
       await createCustomFinalApprovalChain(tx, requestId, customApproverIds, userId)
-      // Update request status to FinalApproval
-      await tx.requests.update({
-        where: { id: requestId },
+      // Update request status to FinalApproval via the shared expected-status
+      // guard: a requester cancellation that committed first aborts this
+      // transaction (and rolls back the approval chain) instead of being
+      // overwritten.
+      await updateRequestStatusExpecting(tx, {
+        requestId,
+        expectedStatuses: [RequestStatus.SendBackToRequester],
         data: { status: RequestStatus.FinalApproval },
+        actionLabel: 'initiate final approval',
       })
     } else if (isTopLevelInitiator) {
       // Top-level initiator with hierarchy - auto-approve and go directly to Completed
@@ -1217,10 +1239,14 @@ export async function initiateFinalApproval(
           isFinalApproval: true,
         },
       })
-      // Skip approval phase, go directly to Completed
-      await tx.requests.update({
-        where: { id: requestId },
+      // Skip approval phase, go directly to Completed. Guarded so a
+      // concurrent requester cancellation aborts this transaction instead
+      // of being overwritten (see updateRequestStatusExpecting).
+      await updateRequestStatusExpecting(tx, {
+        requestId,
+        expectedStatuses: [RequestStatus.SendBackToRequester],
         data: { status: RequestStatus.Completed },
+        actionLabel: 'initiate final approval',
       })
       // Log status change
       await tx.request_activities.create({
@@ -1246,10 +1272,13 @@ export async function initiateFinalApproval(
     } else {
       // Use department hierarchy
       await createHierarchyFinalApprovalChain(tx, requestId, request.departmentId, userId)
-      // Update request status to FinalApproval
-      await tx.requests.update({
-        where: { id: requestId },
+      // Update request status to FinalApproval via the shared expected-status
+      // guard (see updateRequestStatusExpecting).
+      await updateRequestStatusExpecting(tx, {
+        requestId,
+        expectedStatuses: [RequestStatus.SendBackToRequester],
         data: { status: RequestStatus.FinalApproval },
+        actionLabel: 'initiate final approval',
       })
     }
 
@@ -2049,13 +2078,25 @@ export async function resubmitSolution(input: ResubmitSolutionInput) {
       ? RequestStatus.SendBackToRequester 
       : RequestStatus.DesignCostEstimationApproval
 
-    await tx.requests.update({
-      where: { id: validated.requestId },
+    // Update request status via the shared expected-status guard. Solution
+    // resubmission legitimately starts from SentToEngineer (rejected
+    // solution or rejected final approval) and from the legacy
+    // DesignCostEstimationApproval-with-rejection route; `Cancelled` (and
+    // every other status) is never accepted, so a requester cancellation
+    // that committed first makes this match zero rows and throw, rolling
+    // back the solution update and the new approval chain.
+    await updateRequestStatusExpecting(tx, {
+      requestId: validated.requestId,
+      expectedStatuses: [
+        RequestStatus.SentToEngineer,
+        RequestStatus.DesignCostEstimationApproval,
+      ],
       data: {
         status: newStatus,
         ...(isAutoApproved ? { projectEstimateCost: validated.cost } : {}),
         updatedAt: new Date(),
       },
+      actionLabel: 'resubmit solution',
     })
 
     // Add activity log

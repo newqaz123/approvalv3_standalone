@@ -19,8 +19,7 @@ import { StatusBadge } from './status-badge'
 import { RejectedBadge } from './rejected-badge'
 import { CancelRequestDialog } from './cancel-request-dialog'
 import {
-  evaluateRequesterCancellation,
-  hasPendingApprovals,
+  evaluateRequesterCancelControl,
 } from '@/lib/cancellation-policy'
 import { ResubmitRequestDialog } from './resubmit-request-dialog'
 import { DeleteRequestDialog } from './delete-request-dialog'
@@ -112,17 +111,20 @@ export function RequestDetailModal({
   const hasRejection = hasRequestRejection || hasSolutionRejection
   const currentUserId = user?.id
   // Requester cancellation eligibility (requester only, SentToEngineer or
-  // SendBackToRequester, no pending request/final or solution approvals).
-  // Approvals include final approval rows; solutionApprovals belong to the
-  // request's solution. The server action re-checks authoritatively.
+  // SendBackToRequester, no pending request/final approvals and no pending
+  // solution approval on ANY solution of the request - the server-computed
+  // aggregate from getRequest, matching the authoritative count the
+  // cancelRequest action performs). The server action re-checks.
   const canCancelRequest =
     !!request &&
-    evaluateRequesterCancellation({
+    evaluateRequesterCancelControl({
       userId: currentUserId,
-      requesterId: request.requesterId,
-      status: request.status,
-      hasPendingRequestApprovals: hasPendingApprovals(approvals),
-      hasPendingSolutionApprovals: hasPendingApprovals(solutionApprovals),
+      request: {
+        requesterId: request.requesterId,
+        status: request.status,
+        approvals,
+        hasPendingSolutionApprovals: request.hasPendingSolutionApprovals,
+      },
     }).canCancel
   const [userRole, setUserRole] = useState<string | undefined>(undefined)
 

@@ -36,8 +36,7 @@ import {
 	canUserSubmitFinalApproval,
 } from "@/lib/permission-checks";
 import {
-	evaluateRequesterCancellation,
-	hasPendingApprovals,
+	evaluateRequesterCancelControl,
 } from "@/lib/cancellation-policy";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -268,23 +267,18 @@ function RequestModalRouterContent({
 		hasFinalRejectionInEngineering;
 
 	// Check if current user can cancel (requester only, while the request is
-	// in SentToEngineer or SendBackToRequester and no request/final or solution
-	// approval is still pending; authoritative re-checks run in cancelRequest)
-	const isRequester = user?.id === requestData.requesterId;
-	const canCancel =
-		!viewOnly &&
-		isRequester &&
-		evaluateRequesterCancellation({
-			userId: user?.id,
-			requesterId: requestData.requesterId,
-			status: requestData.status,
-			hasPendingRequestApprovals: hasPendingApprovals(
-				requestData.approvals,
-			),
-			hasPendingSolutionApprovals: hasPendingApprovals(
-				requestData.solutions?.[0]?.approvals,
-			),
-		}).canCancel;
+	// in SentToEngineer or SendBackToRequester and no request/final or
+	// solution approval is still pending; authoritative re-checks run in
+	// cancelRequest). Cancellation visibility follows the cancellation policy
+	// alone - viewOnly (read-only views such as the follow-up dashboard for
+	// SentToEngineer requests) only suppresses other workflow actions, never
+	// the requester's cancel control. Pending solution approvals come from
+	// the server-computed all-solutions aggregate on the getRequest payload.
+	const canCancel = evaluateRequesterCancelControl({
+		userId: user?.id,
+		request: requestData,
+		viewOnly,
+	}).canCancel;
 	const allowActions = !viewOnly;
 
 	const canManageSubTasks = canManageEngineeringSubTasks(user);

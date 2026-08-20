@@ -96,6 +96,63 @@ export function evaluateRequesterCancellation(
   return { canCancel: true, reason: null }
 }
 
+export interface RequesterCancelControlRequest {
+  requesterId?: string | null
+  status?: string | null
+  approvals?: readonly CancellationApprovalSnapshot[] | null
+  /**
+   * Server-computed aggregate: any pending solution approval on ANY solution
+   * of the request (exposed by getRequest). Matches the authoritative count
+   * the server cancellation action performs across all solutions.
+   */
+  hasPendingSolutionApprovals?: boolean | null
+  /** Fallback when the aggregate is unavailable: the newest solution. */
+  solutions?: ReadonlyArray<{
+    approvals?: readonly CancellationApprovalSnapshot[] | null
+  }> | null
+}
+
+export interface RequesterCancelControlInput {
+  userId?: string | null
+  request?: RequesterCancelControlRequest | null
+  /**
+   * Accepted for call-site symmetry but deliberately ignored: read-only
+   * request views (e.g. the follow-up dashboard) suppress other workflow
+   * actions, never the requester's own cancel control.
+   */
+  viewOnly?: boolean | null
+}
+
+/**
+ * Visibility decision for the requester's cancel control.
+ *
+ * Cancellation visibility follows the cancellation policy alone:
+ * - only the original requester sees the control,
+ * - only in `SentToEngineer` / `SendBackToRequester`,
+ * - never while a request (incl. final) approval or ANY solution approval
+ *   across the whole request is still pending (server-computed aggregate,
+ *   falling back to the newest solution's approvals when absent).
+ *
+ * `viewOnly` does not participate in this decision. The authoritative
+ * re-checks still run in `cancelRequest()`.
+ */
+export function evaluateRequesterCancelControl(
+  input: RequesterCancelControlInput,
+): RequesterCancellationDecision {
+  const request = input.request ?? {}
+  const aggregate = request.hasPendingSolutionApprovals
+  const hasPendingSolutionApprovals =
+    aggregate ?? hasPendingApprovals(request.solutions?.[0]?.approvals)
+
+  return evaluateRequesterCancellation({
+    userId: input.userId,
+    requesterId: request.requesterId,
+    status: request.status,
+    hasPendingRequestApprovals: hasPendingApprovals(request.approvals),
+    hasPendingSolutionApprovals,
+  })
+}
+
 /**
  * Map a block reason to the user-facing rejection message thrown by the
  * authoritative server action.
