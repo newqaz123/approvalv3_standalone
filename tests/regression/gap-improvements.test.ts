@@ -244,7 +244,7 @@ describe("Gapforimprove regressions", () => {
 		assert.match(signInPage, /router\.push\(callbackUrl\)/);
 	});
 
-	it("approval and rejection emails include request details and use the email helper", () => {
+	it("approval and rejection emails include request details and use post-commit email helpers", () => {
 		const notifications = read("src/server-actions/notifications.ts");
 		const approvals = read("src/server-actions/approvals.ts");
 		const solutions = read("src/server-actions/solutions.ts");
@@ -265,31 +265,32 @@ describe("Gapforimprove regressions", () => {
 		assert.match(notifyNextApprover, /createNotification/);
 		assert.doesNotMatch(notifyNextApprover, /notifications\.createMany/);
 
-		const notifyNextSolutionApprover =
+		const postCommitDispatcher =
 			solutions.match(
-				/async function notifyNextSolutionApprover[\s\S]*?^}/m,
+				/async function runSolutionTransactionWithNotifications[\s\S]*?^}/m,
 			)?.[0] ?? "";
-		const notifyNextFinalApprover =
+		const queueNextSolutionApprover =
 			solutions.match(
-				/async function notifyNextFinalApprover[\s\S]*?^}/m,
+				/async function queueNextSolutionApproverNotifications[\s\S]*?^}/m,
+			)?.[0] ?? "";
+		const queueNextFinalApprover =
+			solutions.match(
+				/async function queueNextFinalApproverNotifications[\s\S]*?^}/m,
 			)?.[0] ?? "";
 		const rejectSolution =
 			solutions.match(/export async function rejectSolution[\s\S]*?^}/m)?.[0] ??
 			"";
 
-		assert.match(notifyNextSolutionApprover, /createNotification/);
-		assert.doesNotMatch(
-			notifyNextSolutionApprover,
-			/tx\.notifications\.create/,
-		);
-		assert.doesNotMatch(
-			notifyNextSolutionApprover,
-			/notifications\.createMany/,
-		);
-		assert.match(notifyNextFinalApprover, /createNotification/);
-		assert.doesNotMatch(notifyNextFinalApprover, /tx\.notifications\.create/);
-		assert.doesNotMatch(notifyNextFinalApprover, /notifications\.createMany/);
-		assert.match(rejectSolution, /createNotification/);
+		assert.match(postCommitDispatcher, /createNotification/);
+		assert.match(postCommitDispatcher, /notifyUsersInDepartment/);
+		assert.match(queueNextSolutionApprover, /notifications\.user/);
+		assert.doesNotMatch(queueNextSolutionApprover, /createNotification/);
+		assert.doesNotMatch(queueNextSolutionApprover, /tx\.notifications\.create/);
+		assert.match(queueNextFinalApprover, /notifications\.user/);
+		assert.doesNotMatch(queueNextFinalApprover, /createNotification/);
+		assert.doesNotMatch(queueNextFinalApprover, /tx\.notifications\.create/);
+		assert.match(rejectSolution, /notifications\.user/);
+		assert.doesNotMatch(rejectSolution, /createNotification/);
 		assert.doesNotMatch(rejectSolution, /tx\.notifications\.create/);
 
 		const directNotificationCreates =

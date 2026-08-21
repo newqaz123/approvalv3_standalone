@@ -9,11 +9,15 @@ import {
   validateApprovalLevel,
 } from '@/lib/approval-levels'
 import prisma from '@/lib/prisma'
-import { RequestStatus, UserRole } from '@prisma/client'
+import { RequestStatus, UserRole, type Prisma } from '@prisma/client'
 import { submitSolutionSchema, SubmitSolutionInput, resubmitSolutionSchema, ResubmitSolutionInput } from '@/lib/schemas/solution-schemas'
 import { deleteAttachmentFile } from '@/lib/attachments/storage'
 import { revalidateRequestViews } from './request-view-invalidation'
 import { updateRequestStatusExpecting } from '@/lib/request-status-transition'
+import {
+  runTransactionWithPostCommitNotifications,
+  type PostCommitNotificationCollector,
+} from '@/lib/post-commit-notifications'
 
 async function getMaxValidLevelInDepartment(
   tx: { user: { findFirst: Function } },
@@ -44,6 +48,53 @@ function isStaleData(currentUpdatedAt: Date, expectedUpdatedAt?: string | Date):
   if (!expectedUpdatedAt) return false
   const diff = Math.abs(currentUpdatedAt.getTime() - new Date(expectedUpdatedAt).getTime())
   return diff > 1000 // 1-second tolerance for database precision
+}
+
+/**
+ * Run workflow database work atomically, then dispatch its queued in-app and
+ * email notifications only after Prisma confirms the commit. Notification
+ * delivery is best effort: failures are logged by the shared orchestration
+ * primitive and never make an already-committed workflow look rolled back.
+ */
+async function runSolutionTransactionWithNotifications<T>(
+  work: (
+    tx: Prisma.TransactionClient,
+    notifications: PostCommitNotificationCollector,
+  ) => Promise<T>,
+): Promise<T> {
+  return runTransactionWithPostCommitNotifications({
+    runTransaction: (transactionWork) =>
+      prisma.$transaction((tx) => transactionWork(tx)),
+    work,
+    dispatchers: {
+      notifyUser: async (notification) => {
+        const { createNotification } = await import('./notifications')
+        return createNotification(notification)
+      },
+      notifyDepartment: async (
+        departmentId,
+        notification,
+        excludeUserIds,
+      ) => {
+        const { notifyUsersInDepartment } = await import('./notifications')
+        return notifyUsersInDepartment(
+          departmentId,
+          notification,
+          excludeUserIds,
+        )
+      },
+    },
+    onDispatchError: (plan, error) => {
+      const target =
+        plan.target === 'user'
+          ? `user ${plan.notification.userId}`
+          : `department ${plan.departmentId}`
+      console.error(
+        `[solutions] Failed to dispatch post-commit notification to ${target}`,
+        error,
+      )
+    },
+  })
 }
 
 /**
@@ -758,8 +809,9 @@ export async function approveSolution(solutionId: string, comments?: string, exp
     }
   }
 
-  // Use transaction for atomicity
-  await prisma.$transaction(async (tx) => {
+  // Keep workflow writes atomic; notification plans are dispatched only
+  // after this transaction commits.
+  await runSolutionTransactionWithNotifications(async (tx, notifications) => {
     // Update approval
     await tx.solution_approvals.update({
       where: { id: approval.id },
@@ -829,21 +881,22 @@ export async function approveSolution(solutionId: string, comments?: string, exp
           },
         })
 
-        // Notify all users in requester's department
-        const { notifyUsersInDepartment } = await import('./notifications')
-        await notifyUsersInDepartment(
-          request.departmentId,
-          {
-            type: 'solution_ready',
-            title: 'Solution Ready for Review',
-            message: `📤 Ready for Review: "${request.title}" has been completed and awaits your department's final review.`,
-            requestId: solutionData.requestId,
-          }
-        )
+        // Queue requester-department notification for post-commit dispatch.
+        notifications.department(request.departmentId, {
+          type: 'solution_ready',
+          title: 'Solution Ready for Review',
+          message: `📤 Ready for Review: "${request.title}" has been completed and awaits your department's final review.`,
+          requestId: solutionData.requestId,
+        })
       }
     } else {
-      // Notify next approver in chain
-      await notifyNextSolutionApprover(tx, solutionId)
+      // Resolve and queue the next approver notification using transaction
+      // reads only; delivery starts after commit.
+      await queueNextSolutionApproverNotifications(
+        tx,
+        solutionId,
+        notifications,
+      )
     }
   })
 
@@ -882,8 +935,9 @@ export async function rejectSolution(solutionId: string, comments: string, expec
     }
   }
 
-  // Use transaction for atomicity
-  await prisma.$transaction(async (tx) => {
+  // Keep workflow writes atomic; notification plans are dispatched only
+  // after this transaction commits.
+  await runSolutionTransactionWithNotifications(async (tx, notifications) => {
     // Update approval to rejected
     await tx.solution_approvals.update({
       where: { id: approval.id },
@@ -929,9 +983,8 @@ export async function rejectSolution(solutionId: string, comments: string, expec
     })
 
     if (solutionData) {
-      // Create notification for solution submitter
-      const { createNotification } = await import('./notifications')
-      await createNotification({
+      // Queue the submitter notification for post-commit dispatch.
+      notifications.user({
         userId: solutionData.submittedById,
         type: 'approval_rejected',
         title: 'Solution Rejected',
@@ -1072,9 +1125,15 @@ export async function canMarkComplete(requestId: string): Promise<{
 }
 
 /**
- * Notify next approver in solution approval chain
+ * Resolve the next solution approver(s) using transaction reads and enqueue
+ * immutable notification descriptions. Delivery is owned by the caller's
+ * post-commit transaction wrapper.
  */
-async function notifyNextSolutionApprover(tx: any, solutionId: string) {
+async function queueNextSolutionApproverNotifications(
+  tx: Prisma.TransactionClient,
+  solutionId: string,
+  notifications: PostCommitNotificationCollector,
+) {
   const nextApproval = await tx.solution_approvals.findFirst({
     where: {
       solutionId,
@@ -1093,11 +1152,9 @@ async function notifyNextSolutionApprover(tx: any, solutionId: string) {
 
   if (!nextApproval) return
 
-  const { createNotification } = await import('./notifications')
-
   // For custom chain: notify specific requiredApproverId
   if (nextApproval.isCustomChain && nextApproval.requiredApproverId) {
-    await createNotification({
+    notifications.user({
       userId: nextApproval.requiredApproverId,
       type: 'approval_needed',
       title: 'Solution Approval Needed',
@@ -1124,18 +1181,15 @@ async function notifyNextSolutionApprover(tx: any, solutionId: string) {
         select: { id: true },
       })
 
-      // Create notifications for all approvers at this level
-      await Promise.all(
-        approvers.map((approver: { id: string }) =>
-          createNotification({
-            userId: approver.id,
-            type: 'approval_needed',
-            title: 'Solution Approval Needed',
-            message: `Solution "${nextApproval.solution.title}" needs your approval.`,
-            requestId: nextApproval.solution.requestId,
-          })
-        )
-      )
+      for (const approver of approvers) {
+        notifications.user({
+          userId: approver.id,
+          type: 'approval_needed',
+          title: 'Solution Approval Needed',
+          message: `Solution "${nextApproval.solution.title}" needs your approval.`,
+          requestId: nextApproval.solution.requestId,
+        })
+      }
     }
   }
 }
@@ -1200,8 +1254,9 @@ export async function initiateFinalApproval(
   const initiatorLevel = normalizeSubmitterLevel(user.level)
   const isTopLevelInitiator = initiatorLevel >= maxLevel
 
-  // Use transaction for atomicity
-  await prisma.$transaction(async (tx) => {
+  // Keep workflow writes atomic; approver notification plans are dispatched
+  // only after this transaction commits.
+  await runSolutionTransactionWithNotifications(async (tx, notifications) => {
     // Delete old final approval records (in case of resubmission after rejection)
     await tx.request_approvals.deleteMany({
       where: {
@@ -1296,11 +1351,13 @@ export async function initiateFinalApproval(
       },
     })
 
-    // Notify first approver(s) only if not top-level
-    if (!useCustomChain && !isTopLevelInitiator) {
-      await notifyNextFinalApprover(tx, requestId)
-    } else if (useCustomChain) {
-      await notifyNextFinalApprover(tx, requestId)
+    // Resolve and queue first approver notification(s) only if not top-level.
+    if (useCustomChain || !isTopLevelInitiator) {
+      await queueNextFinalApproverNotifications(
+        tx,
+        requestId,
+        notifications,
+      )
     }
   })
 
@@ -1425,9 +1482,14 @@ async function createHierarchyFinalApprovalChain(
 }
 
 /**
- * Notify next final approver in chain
+ * Resolve the next final approver(s) using transaction reads and enqueue
+ * immutable notification descriptions for post-commit dispatch.
  */
-async function notifyNextFinalApprover(tx: any, requestId: string) {
+async function queueNextFinalApproverNotifications(
+  tx: Prisma.TransactionClient,
+  requestId: string,
+  notifications: PostCommitNotificationCollector,
+) {
   const nextApproval = await tx.request_approvals.findFirst({
     where: {
       requestId,
@@ -1447,11 +1509,9 @@ async function notifyNextFinalApprover(tx: any, requestId: string) {
 
   if (!nextApproval) return
 
-  const { createNotification } = await import('./notifications')
-
   // For custom chain: notify specific requiredApproverId
   if (nextApproval.isCustomChain && nextApproval.requiredApproverId) {
-    await createNotification({
+    notifications.user({
       userId: nextApproval.requiredApproverId,
       type: 'final_approval_needed',
       title: 'Final Approval Needed',
@@ -1472,17 +1532,15 @@ async function notifyNextFinalApprover(tx: any, requestId: string) {
       select: { id: true },
     })
 
-    await Promise.all(
-      approvers.map((approver: { id: string }) =>
-        createNotification({
-          userId: approver.id,
-          type: 'final_approval_needed',
-          title: 'Final Approval Needed',
-          message: `Request "${nextApproval.request.title}" needs your final approval.`,
-          requestId,
-        })
-      )
-    )
+    for (const approver of approvers) {
+      notifications.user({
+        userId: approver.id,
+        type: 'final_approval_needed',
+        title: 'Final Approval Needed',
+        message: `Request "${nextApproval.request.title}" needs your final approval.`,
+        requestId,
+      })
+    }
   }
 }
 
@@ -1591,8 +1649,9 @@ export async function approveFinalApproval(requestId: string, comments?: string,
     }
   }
 
-  // Use transaction for atomicity
-  await prisma.$transaction(async (tx) => {
+  // Keep workflow writes atomic; notification plans are dispatched only
+  // after this transaction commits.
+  await runSolutionTransactionWithNotifications(async (tx, notifications) => {
     // Update approval
     await tx.request_approvals.update({
       where: { id: approval.id },
@@ -1668,9 +1727,9 @@ export async function approveFinalApproval(requestId: string, comments?: string,
 
       const engineeringUserIds = engineeringUsers.map(u => u.id)
 
-      // Notify all users in requester's department (except engineering users)
-      const { notifyUsersInDepartment } = await import('./notifications')
-      await notifyUsersInDepartment(
+      // Queue requester-department completion notification for post-commit
+      // dispatch, excluding engineering users.
+      notifications.department(
         request.departmentId,
         {
           type: 'approval_granted',
@@ -1678,11 +1737,16 @@ export async function approveFinalApproval(requestId: string, comments?: string,
           message: `✅ Request Completed: "${request.title}" has been fully approved and completed.`,
           requestId,
         },
-        engineeringUserIds // Exclude engineering users (they don't need completion notification)
+        engineeringUserIds,
       )
     } else {
-      // Notify next approver
-      await notifyNextFinalApprover(tx, requestId)
+      // Resolve and queue the next approver notification using transaction
+      // reads only; delivery starts after commit.
+      await queueNextFinalApproverNotifications(
+        tx,
+        requestId,
+        notifications,
+      )
     }
   })
 
@@ -1722,8 +1786,9 @@ export async function rejectFinalApproval(requestId: string, comments: string, e
     }
   }
 
-  // Use transaction for atomicity
-  await prisma.$transaction(async (tx) => {
+  // Keep workflow writes atomic; both department notification plans are
+  // dispatched concurrently only after this transaction commits.
+  await runSolutionTransactionWithNotifications(async (tx, notifications) => {
     // Update approval to rejected
     await tx.request_approvals.update({
       where: { id: approval.id },
@@ -1780,8 +1845,7 @@ export async function rejectFinalApproval(requestId: string, comments: string, e
     })
 
     if (engineeringDept && request) {
-      const { notifyUsersInDepartment } = await import('./notifications')
-      await notifyUsersInDepartment(
+      notifications.department(
         engineeringDept.id,
         {
           type: 'approval_rejected',
@@ -1789,12 +1853,13 @@ export async function rejectFinalApproval(requestId: string, comments: string, e
           message: `❌ Final Rejection: "${request.title}" was rejected during final approval. Reason: "${comments}". Please revise the solution.`,
           requestId,
         },
-        [userId] // Exclude the person who rejected
+        [userId],
       )
 
-      // Also notify requester's department about the rejection (excluding the rejector if they're in that department)
+      // Also notify requester's department about the rejection (excluding
+      // the rejector if they're in that department).
       if (request.departmentId) {
-        await notifyUsersInDepartment(
+        notifications.department(
           request.departmentId,
           {
             type: 'status_changed',
@@ -1802,7 +1867,7 @@ export async function rejectFinalApproval(requestId: string, comments: string, e
             message: `❌ Final Approval Rejected: "${request.title}" was rejected during final approval. The request has been returned to engineering for revision.`,
             requestId,
           },
-          [userId] // Exclude the person who rejected
+          [userId],
         )
       }
     }
@@ -1896,9 +1961,9 @@ export async function resubmitSolution(input: ResubmitSolutionInput) {
 
   // Single transaction: update solution, validate + link staged attachments,
   // delete selected attachments, reset the approval chain, and transition
-  // status. Physical file cleanup for deleted attachments runs only AFTER this
-  // commits, so an I/O failure there never rolls back a successful resubmit.
-  const result = await prisma.$transaction(async (tx) => {
+  // status. Physical file cleanup and queued notification delivery run only
+  // AFTER this commits, so slow/failing I/O cannot expire or roll back it.
+  const result = await runSolutionTransactionWithNotifications(async (tx, notifications) => {
     // Update solution details
     const updatedSolution = await tx.solutions.update({
       where: { id: solution.id },
@@ -2124,17 +2189,13 @@ export async function resubmitSolution(input: ResubmitSolutionInput) {
         },
       })
 
-      // Notify requester's department
-      const { notifyUsersInDepartment } = await import('./notifications')
-      await notifyUsersInDepartment(
-        request.department.id,
-        {
-          type: 'solution_ready',
-          title: 'Solution Ready for Review',
-          message: `📤 Ready for Review: "${request.title}" solution has been updated and is ready for your department's final review.`,
-          requestId: validated.requestId,
-        }
-      )
+      // Queue requester-department notification for post-commit dispatch.
+      notifications.department(request.department.id, {
+        type: 'solution_ready',
+        title: 'Solution Ready for Review',
+        message: `📤 Ready for Review: "${request.title}" solution has been updated and is ready for your department's final review.`,
+        requestId: validated.requestId,
+      })
     }
 
     const firstPendingApproval = approvalData.find((a) => a.status === 'pending')
