@@ -32,6 +32,7 @@ import {
 	ArrowDown,
 	CheckCircle2,
 	Shield,
+	Loader2,
 } from "lucide-react";
 import {
 	Dialog,
@@ -130,8 +131,9 @@ interface SolutionModalProps {
 	onDownloadSolutionFile?: (fileId: string) => void;
 	onPreviewFile?: (fileId: string) => void;
 	onPreviewSolutionFile?: (fileId: string) => void;
-	onApprove?: () => void;
-	onReject?: (reason: string) => void;
+	isSubmitting?: boolean;
+	onApprove?: () => void | Promise<void>;
+	onReject?: (reason: string) => void | Promise<void>;
 	onResubmit?: () => void;
 	onSubmitFinalApproval?: () => void;
 	userDepartment?: string;
@@ -513,13 +515,24 @@ export { CustomApprovalPicker as SolutionModalApprovalPickerHarness };
 function SolutionApprovalActions({
 	onApprove,
 	onReject,
+	isSubmitting,
 }: {
-	onApprove?: () => void;
-	onReject?: (reason: string) => void;
+	onApprove?: () => void | Promise<void>;
+	onReject?: (reason: string) => void | Promise<void>;
+	isSubmitting: boolean;
 }) {
 	const [showRejectForm, setShowRejectForm] = useState(false);
 	const [rejectReason, setRejectReason] = useState("");
-	const [isSubmitting, setIsSubmitting] = useState(false);
+
+	const handleApprove = async () => {
+		if (isSubmitting) return;
+		await onApprove?.();
+	};
+
+	const handleReject = async () => {
+		if (isSubmitting || !rejectReason.trim()) return;
+		await onReject?.(rejectReason.trim());
+	};
 
 	if (showRejectForm) {
 		return (
@@ -540,6 +553,7 @@ function SolutionApprovalActions({
 						placeholder="Please explain why you're rejecting this solution..."
 						rows={3}
 						className="bg-white dark:bg-slate-900 text-sm"
+						disabled={isSubmitting}
 					/>
 				</div>
 				<div className="flex gap-2">
@@ -549,24 +563,19 @@ function SolutionApprovalActions({
 							setShowRejectForm(false);
 							setRejectReason("");
 						}}
+						disabled={isSubmitting}
 						size="sm"
 					>
 						Cancel
 					</Button>
 					<Button
-						onClick={() => {
-							if (rejectReason.trim()) {
-								setIsSubmitting(true);
-								onReject?.(rejectReason);
-								setIsSubmitting(false);
-								setShowRejectForm(false);
-								setRejectReason("");
-							}
-						}}
+						onClick={handleReject}
 						disabled={!rejectReason.trim() || isSubmitting}
+						aria-busy={isSubmitting}
 						className="bg-red-600 hover:bg-red-700 text-white"
 						size="sm"
 					>
+						{isSubmitting && <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />}
 						{isSubmitting ? "Rejecting..." : "Confirm Rejection"}
 					</Button>
 				</div>
@@ -590,15 +599,22 @@ function SolutionApprovalActions({
 
 				<div className="flex gap-2">
 					<Button
-						onClick={onApprove}
+						onClick={handleApprove}
+						disabled={isSubmitting}
+						aria-busy={isSubmitting}
 						className="bg-emerald-500 hover:bg-emerald-600 text-white"
 						size="sm"
 					>
-						<Check className="w-4 h-4 mr-1.5" />
-						Approve Solution
+						{isSubmitting ? (
+							<Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+						) : (
+							<Check className="w-4 h-4 mr-1.5" />
+						)}
+						{isSubmitting ? "Approving..." : "Approve Solution"}
 					</Button>
 					<Button
 						onClick={() => setShowRejectForm(true)}
+						disabled={isSubmitting}
 						variant="outline"
 						className="border-red-300 text-red-700 hover:bg-red-50"
 						size="sm"
@@ -621,6 +637,7 @@ export function SolutionModal({
 	onDownloadSolutionFile,
 	onPreviewFile,
 	onPreviewSolutionFile,
+	isSubmitting = false,
 	onApprove,
 	onReject,
 	onResubmit,
@@ -634,7 +651,12 @@ export function SolutionModal({
 	const status = statusConfig[data.status];
 
 	return (
-		<Dialog open={open} onOpenChange={onOpenChange}>
+		<Dialog
+			open={open}
+			onOpenChange={(nextOpen) => {
+				if (!isSubmitting) onOpenChange(nextOpen);
+			}}
+		>
 			<DialogContent className="max-w-5xl w-full max-h-[90vh] p-0 gap-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl rounded-xl overflow-hidden">
 				{/* Header with X button */}
 				<DialogHeader className="flex-shrink-0 px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 sticky top-0 z-20">
@@ -678,7 +700,8 @@ export function SolutionModal({
 							{/* X Close Button */}
 							<button
 								onClick={() => onOpenChange(false)}
-								className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors text-slate-400 hover:text-slate-600"
+								disabled={isSubmitting}
+								className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors text-slate-400 hover:text-slate-600 disabled:cursor-not-allowed disabled:opacity-50"
 							>
 								<X className="w-5 h-5" />
 							</button>
@@ -994,6 +1017,7 @@ export function SolutionModal({
 						<SolutionApprovalActions
 							onApprove={onApprove}
 							onReject={onReject}
+							isSubmitting={isSubmitting}
 						/>
 					)}
 
@@ -1039,6 +1063,7 @@ export function SolutionModal({
 								userDepartment === "Production 2") && (
 							<Button
 								onClick={onSubmitFinalApproval}
+								disabled={isSubmitting}
 								className="flex items-center gap-2 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold rounded-lg transition-colors"
 							>
 								<Shield className="w-4 h-4" />

@@ -30,6 +30,7 @@ import {
 	Clock3,
 	Shield,
 	MessageSquare,
+	Loader2,
 } from "lucide-react";
 import {
 	Dialog,
@@ -127,8 +128,9 @@ interface ApproverModalProps {
 		};
 	};
 	canApprove?: boolean;
-	onApprove?: (comment: string) => void;
-	onReject?: (reason: string) => void;
+	isSubmitting?: boolean;
+	onApprove?: (comment: string) => void | Promise<void>;
+	onReject?: (reason: string) => void | Promise<void>;
 	onPreviewFile?: (fileId: string) => void;
 	onPreviewSolutionFile?: (fileId: string) => void;
 	onDownloadRequestFile?: (fileId: string) => void;
@@ -297,15 +299,27 @@ function ApprovalActions({
 	mode,
 	onApprove,
 	onReject,
+	isSubmitting,
 }: {
 	mode: "request" | "solution" | "final";
-	onApprove?: (comment: string) => void;
-	onReject?: (reason: string) => void;
+	onApprove?: (comment: string) => void | Promise<void>;
+	onReject?: (reason: string) => void | Promise<void>;
+	isSubmitting: boolean;
 }) {
 	const [showRejectForm, setShowRejectForm] = useState(false);
 	const [showApproveForm, setShowApproveForm] = useState(false);
 	const [comment, setComment] = useState("");
 	const [rejectReason, setRejectReason] = useState("");
+
+	const handleApprove = async () => {
+		if (isSubmitting) return;
+		await onApprove?.(comment);
+	};
+
+	const handleReject = async () => {
+		if (isSubmitting || !rejectReason.trim()) return;
+		await onReject?.(rejectReason.trim());
+	};
 
 	if (showRejectForm) {
 		return (
@@ -333,6 +347,7 @@ function ApprovalActions({
 						placeholder="Please explain the reason for rejection..."
 						rows={3}
 						className="bg-white dark:bg-slate-900 text-sm"
+						disabled={isSubmitting}
 					/>
 				</div>
 				<div className="flex gap-2">
@@ -342,23 +357,20 @@ function ApprovalActions({
 							setShowRejectForm(false);
 							setRejectReason("");
 						}}
+						disabled={isSubmitting}
 						size="sm"
 					>
 						Cancel
 					</Button>
 					<Button
-						onClick={() => {
-							if (rejectReason.trim()) {
-								onReject?.(rejectReason);
-								setShowRejectForm(false);
-								setRejectReason("");
-							}
-						}}
-						disabled={!rejectReason.trim()}
+						onClick={handleReject}
+						disabled={isSubmitting || !rejectReason.trim()}
+						aria-busy={isSubmitting}
 						className="bg-red-600 hover:bg-red-700 text-white"
 						size="sm"
 					>
-						Confirm Rejection
+						{isSubmitting && <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />}
+						{isSubmitting ? "Rejecting..." : "Confirm Rejection"}
 					</Button>
 				</div>
 			</div>
@@ -417,6 +429,7 @@ function ApprovalActions({
 						placeholder="Add an optional comment for your approval..."
 						rows={3}
 						className="bg-white dark:bg-slate-900 text-sm"
+						disabled={isSubmitting}
 					/>
 				</div>
 				<div className="flex gap-2">
@@ -426,16 +439,15 @@ function ApprovalActions({
 							setShowApproveForm(false);
 							setComment("");
 						}}
+						disabled={isSubmitting}
 						size="sm"
 					>
 						Cancel
 					</Button>
 					<Button
-						onClick={() => {
-							onApprove?.(comment);
-							setShowApproveForm(false);
-							setComment("");
-						}}
+						onClick={handleApprove}
+						disabled={isSubmitting}
+						aria-busy={isSubmitting}
 						className={cn(
 							"text-white",
 							mode === "final"
@@ -444,7 +456,8 @@ function ApprovalActions({
 						)}
 						size="sm"
 					>
-						Confirm Approval
+						{isSubmitting && <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />}
+						{isSubmitting ? "Approving..." : "Confirm Approval"}
 					</Button>
 				</div>
 			</div>
@@ -480,6 +493,7 @@ function ApprovalActions({
 			<div className="flex gap-2">
 				<Button
 					onClick={() => setShowApproveForm(true)}
+					disabled={isSubmitting}
 					className={cn(
 						"text-white",
 						mode === "final"
@@ -493,6 +507,7 @@ function ApprovalActions({
 				</Button>
 				<Button
 					onClick={() => setShowRejectForm(true)}
+					disabled={isSubmitting}
 					variant="outline"
 					className="border-red-300 text-red-700 hover:bg-red-50"
 					size="sm"
@@ -512,6 +527,7 @@ export function ApproverModal({
 	onOpenChange,
 	data,
 	canApprove = false,
+	isSubmitting = false,
 	onApprove,
 	onReject,
 	onPreviewFile,
@@ -541,7 +557,12 @@ export function ApproverModal({
 	}
 
 	return (
-		<Dialog open={open} onOpenChange={onOpenChange}>
+		<Dialog
+			open={open}
+			onOpenChange={(nextOpen) => {
+				if (!isSubmitting) onOpenChange(nextOpen);
+			}}
+		>
 			<DialogContent className="max-w-5xl w-full max-h-[90vh] p-0 gap-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl rounded-xl overflow-hidden">
 				{/* Header */}
 				<DialogHeader className="flex-shrink-0 px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 sticky top-0 z-20">
@@ -584,7 +605,8 @@ export function ApproverModal({
 							</div>
 							<button
 								onClick={() => onOpenChange(false)}
-								className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors text-slate-400 hover:text-slate-600"
+								disabled={isSubmitting}
+								className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors text-slate-400 hover:text-slate-600 disabled:cursor-not-allowed disabled:opacity-50"
 							>
 								<X className="w-5 h-5" />
 							</button>
@@ -984,6 +1006,7 @@ export function ApproverModal({
 							mode={mode}
 							onApprove={onApprove}
 							onReject={onReject}
+							isSubmitting={isSubmitting}
 						/>
 					)}
 

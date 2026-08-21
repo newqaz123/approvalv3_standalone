@@ -32,6 +32,7 @@ import {
 	DollarSign,
 	Play,
 	Clock3,
+	Loader2,
 } from "lucide-react";
 import {
 	Dialog,
@@ -118,10 +119,11 @@ interface SubmitFinalApprovalModalProps {
 		lastModified: string;
 	};
 	availableUsers: User[];
+	isSubmitting?: boolean;
 	onSubmit: (data: {
 		useCustomHierarchy: boolean;
 		customApprovers: string[];
-	}) => void;
+	}) => void | Promise<void>;
 	onDownloadRequestFile?: (fileId: string) => void;
 	onDownloadSolutionFile?: (fileId: string) => void;
 	onPreviewFile?: (fileId: string) => void;
@@ -241,10 +243,12 @@ function CustomApprovalPicker({
 	availableUsers,
 	selectedApprovers,
 	onChange,
+	disabled = false,
 }: {
 	availableUsers: User[];
 	selectedApprovers: string[];
 	onChange: (approvers: string[]) => void;
+	disabled?: boolean;
 }) {
 	const [isOpen, setIsOpen] = useState(false);
 	const [searchQuery, setSearchQuery] = useState("");
@@ -255,6 +259,7 @@ function CustomApprovalPicker({
 	const filteredUsers = filterApproversByQuery(unselectedUsers, searchQuery);
 
 	const setPickerOpen = (nextOpen: boolean) => {
+		if (disabled) return;
 		setIsOpen(nextOpen);
 		if (!nextOpen) {
 			setSearchQuery("");
@@ -266,19 +271,21 @@ function CustomApprovalPicker({
 	};
 
 	const addApprover = (userId: string) => {
+		if (disabled) return;
 		if (!selectedApprovers.includes(userId)) {
 			onChange([...selectedApprovers, userId]);
 		}
 	};
 
 	const removeApprover = (index: number) => {
+		if (disabled) return;
 		const newApprovers = [...selectedApprovers];
 		newApprovers.splice(index, 1);
 		onChange(newApprovers);
 	};
 
 	const moveUp = (index: number) => {
-		if (index === 0) return;
+		if (disabled || index === 0) return;
 		const newApprovers = [...selectedApprovers];
 		[newApprovers[index], newApprovers[index - 1]] = [
 			newApprovers[index - 1],
@@ -288,7 +295,7 @@ function CustomApprovalPicker({
 	};
 
 	const moveDown = (index: number) => {
-		if (index === selectedApprovers.length - 1) return;
+		if (disabled || index === selectedApprovers.length - 1) return;
 		const newApprovers = [...selectedApprovers];
 		[newApprovers[index], newApprovers[index + 1]] = [
 			newApprovers[index + 1],
@@ -326,21 +333,22 @@ function CustomApprovalPicker({
 							<div className="flex items-center gap-1">
 								<button
 									onClick={() => moveUp(index)}
-									disabled={index === 0}
+									disabled={disabled || index === 0}
 									className="p-1.5 text-slate-400 hover:text-slate-600 disabled:opacity-30 rounded"
 								>
 									<ArrowUp className="w-4 h-4" />
 								</button>
 								<button
 									onClick={() => moveDown(index)}
-									disabled={index === selectedApprovers.length - 1}
+									disabled={disabled || index === selectedApprovers.length - 1}
 									className="p-1.5 text-slate-400 hover:text-slate-600 disabled:opacity-30 rounded"
 								>
 									<ArrowDown className="w-4 h-4" />
 								</button>
 								<button
 									onClick={() => removeApprover(index)}
-									className="p-1.5 text-slate-400 hover:text-red-500 rounded"
+									disabled={disabled}
+									className="p-1.5 text-slate-400 hover:text-red-500 rounded disabled:opacity-30"
 								>
 									<Trash2 className="w-4 h-4" />
 								</button>
@@ -354,7 +362,8 @@ function CustomApprovalPicker({
 				<button
 					data-picker-open
 					onClick={() => setPickerOpen(!isOpen)}
-					className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-dashed border-slate-300 dark:border-slate-700 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+					disabled={disabled}
+					className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-dashed border-slate-300 dark:border-slate-700 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
 				>
 					<Plus className="w-4 h-4" />
 					Add Approver
@@ -371,6 +380,7 @@ function CustomApprovalPicker({
 								onChange={setSearchQuery}
 								resultCount={filteredUsers.length}
 								inputRef={searchInputRef}
+								disabled={disabled}
 							/>
 						</div>
 						<div className="max-h-[260px] overflow-y-auto">
@@ -387,6 +397,7 @@ function CustomApprovalPicker({
 									<button
 										data-picker-item
 										key={user.id}
+										disabled={disabled}
 										onClick={() => {
 											addApprover(user.id);
 											setPickerOpen(false);
@@ -425,6 +436,7 @@ export function SubmitFinalApprovalModal({
 	onOpenChange,
 	data,
 	availableUsers,
+	isSubmitting = false,
 	onSubmit,
 	onDownloadRequestFile,
 	onDownloadSolutionFile,
@@ -436,7 +448,12 @@ export function SubmitFinalApprovalModal({
 	const [customApprovers, setCustomApprovers] = useState<string[]>([]);
 
 	return (
-		<Dialog open={open} onOpenChange={onOpenChange}>
+		<Dialog
+			open={open}
+			onOpenChange={(nextOpen) => {
+				if (!isSubmitting) onOpenChange(nextOpen);
+			}}
+		>
 			<DialogContent className="max-w-5xl w-full max-h-[90vh] p-0 gap-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl rounded-xl overflow-hidden">
 				{/* Header */}
 				<DialogHeader className="flex-shrink-0 px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 sticky top-0 z-20">
@@ -469,7 +486,8 @@ export function SubmitFinalApprovalModal({
 							</div>
 							<button
 								onClick={() => onOpenChange(false)}
-								className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors text-slate-400 hover:text-slate-600"
+								disabled={isSubmitting}
+								className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors text-slate-400 hover:text-slate-600 disabled:cursor-not-allowed disabled:opacity-50"
 							>
 								<X className="w-5 h-5" />
 							</button>
@@ -755,6 +773,7 @@ export function SubmitFinalApprovalModal({
 									</span>
 									<button
 										onClick={() => setUseCustomHierarchy(!useCustomHierarchy)}
+										disabled={isSubmitting}
 										className={cn(
 											"relative inline-flex h-5 w-9 items-center rounded-full transition-colors",
 											useCustomHierarchy
@@ -783,6 +802,7 @@ export function SubmitFinalApprovalModal({
 										availableUsers={availableUsers}
 										selectedApprovers={customApprovers}
 										onChange={setCustomApprovers}
+										disabled={isSubmitting}
 									/>
 								</div>
 							)}
@@ -816,21 +836,31 @@ export function SubmitFinalApprovalModal({
 						</span>
 					</div>
 					<div className="flex gap-2">
-						<Button variant="outline" onClick={() => onOpenChange(false)}>
+						<Button
+							variant="outline"
+							onClick={() => onOpenChange(false)}
+							disabled={isSubmitting}
+						>
 							Cancel
 						</Button>
 						<Button
-							onClick={() => {
-								onSubmit({
+							onClick={async () => {
+								if (isSubmitting) return;
+								await onSubmit({
 									useCustomHierarchy,
 									customApprovers,
 								});
-								onOpenChange(false);
 							}}
+							disabled={isSubmitting}
+							aria-busy={isSubmitting}
 							className="bg-amber-600 hover:bg-amber-700 text-white"
 						>
-							<Play className="w-4 h-4 mr-1.5" />
-							Start Final Approval
+							{isSubmitting ? (
+								<Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+							) : (
+								<Play className="w-4 h-4 mr-1.5" />
+							)}
+							{isSubmitting ? "Starting..." : "Start Final Approval"}
 						</Button>
 					</div>
 				</div>

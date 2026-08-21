@@ -688,6 +688,7 @@ function RequestModalRouterContent({
 						status: requestData.status,
 					}}
 					canApprove={allowActions && canApprove}
+					isSubmitting={isSubmitting}
 					onApprove={allowActions ? handleApprove : undefined}
 					onReject={allowActions ? handleReject : undefined}
 					onPreviewFile={handlePreviewFile}
@@ -709,6 +710,7 @@ function RequestModalRouterContent({
 				<SolutionModal
 					open={open && !showResubmitSolutionModal}
 					onOpenChange={onOpenChange}
+					isSubmitting={isSubmitting}
 					data={{
 						...modalData,
 						status:
@@ -953,6 +955,7 @@ function RequestModalRouterContent({
 						},
 					}}
 					availableUsers={[]} // TODO: Fetch available users
+					isSubmitting={isSubmitting}
 					onRestart={(data) =>
 						handleRestartFinalApproval({
 							useCustomChain: data.useCustomHierarchy,
@@ -975,6 +978,7 @@ function RequestModalRouterContent({
 						solution: modalData.solution,
 					}}
 					availableUsers={[]} // TODO: Fetch available users
+					isSubmitting={isSubmitting}
 					onSubmit={(data) =>
 						handleSubmitFinalApproval({
 							useCustomChain: data.useCustomHierarchy,
@@ -1113,7 +1117,9 @@ function RequestModalRouterContent({
 						solution: modalData.solution,
 					}}
 					availableUsers={availableUsers}
+					isSubmitting={isSubmitting}
 					onSubmit={async (data) => {
+						if (isSubmitting) return;
 						setIsSubmitting(true);
 						try {
 							const result = await initiateFinalApproval(

@@ -14,6 +14,7 @@ interface ApproverSearchFieldProps {
   autoFocus?: boolean
   className?: string
   inputKind?: 'input' | 'command'
+  disabled?: boolean
 }
 
 export function ApproverSearchField({
@@ -24,6 +25,7 @@ export function ApproverSearchField({
   autoFocus,
   className,
   inputKind = 'input',
+  disabled = false,
 }: ApproverSearchFieldProps) {
   const inputId = useId()
   const countLabel = resultCount === 1 ? '1 approver' : `${resultCount} approvers`
@@ -40,6 +42,7 @@ export function ApproverSearchField({
           autoFocus={autoFocus}
           value={value}
           onValueChange={onChange}
+          disabled={disabled}
           placeholder="Search by name, email, department, role, or level"
           className="min-h-11 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         />
@@ -52,6 +55,7 @@ export function ApproverSearchField({
             autoFocus={autoFocus}
             value={value}
             onChange={(event) => onChange(event.target.value)}
+            disabled={disabled}
             placeholder="Search by name, email, department, role, or level"
             className="min-h-11 pl-9 focus-visible:ring-1"
           />
