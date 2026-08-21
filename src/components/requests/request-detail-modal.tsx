@@ -110,9 +110,10 @@ export function RequestDetailModal({
   const hasSolutionRejection = solutionApprovals.some(a => a.status === 'rejected')
   const hasRejection = hasRequestRejection || hasSolutionRejection
   const currentUserId = user?.id
-  // Requester cancellation eligibility (requester only, SentToEngineer or
-  // SendBackToRequester, no pending request/final approvals and no pending
-  // solution approval on ANY solution of the request - the server-computed
+  // Requester cancellation eligibility (requester only, SentToEngineer,
+  // SendBackToRequester, or a rejected ImprovementRequest; no pending
+  // request/final approvals and no pending solution approval on ANY solution
+  // of the request - the server-computed
   // aggregate from getRequest, matching the authoritative count the
   // cancelRequest action performs). The server action re-checks.
   const canCancelRequest =

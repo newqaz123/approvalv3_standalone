@@ -11,12 +11,12 @@ import {
  *
  * Approved policy:
  * - Only the original requester can cancel.
- * - Cancellation is allowed only in request statuses SentToEngineer and
- *   SendBackToRequester.
+ * - Cancellation is allowed in SentToEngineer, SendBackToRequester, and a
+ *   rejected ImprovementRequest awaiting requester resubmission.
  * - Cancellation is blocked while any request approval (including final
  *   approval) or any solution approval is pending.
- * - Completed, Cancelled, ImprovementRequest, DesignCostEstimationApproval,
- *   and FinalApproval are not cancellable.
+ * - An active/non-rejected ImprovementRequest, Completed, Cancelled,
+ *   DesignCostEstimationApproval, and FinalApproval are not cancellable.
  */
 
 const REQUESTER_ID = 'requester-1'
@@ -33,6 +33,28 @@ describe('requester cancellation policy', () => {
       canCancel: true,
       reason: null,
     })
+  })
+
+  it('allows the requester to cancel a rejected ImprovementRequest awaiting resubmission', () => {
+    assert.deepEqual(
+      evaluateRequesterCancellation({
+        ...eligible,
+        status: 'ImprovementRequest',
+        hasRejectedRequestApproval: true,
+      }),
+      { canCancel: true, reason: null },
+    )
+  })
+
+  it('blocks an ImprovementRequest that has not been rejected', () => {
+    assert.deepEqual(
+      evaluateRequesterCancellation({
+        ...eligible,
+        status: 'ImprovementRequest',
+        hasRejectedRequestApproval: false,
+      }),
+      { canCancel: false, reason: 'status-not-cancellable' },
+    )
   })
 
   it('allows cancellation in SendBackToRequester even with fully approved request, solution, and final approval chains', () => {
@@ -67,7 +89,6 @@ describe('requester cancellation policy', () => {
 
   it('blocks every non-cancellable status', () => {
     const blockedStatuses = [
-      'ImprovementRequest',
       'Completed',
       'Cancelled',
       'DesignCostEstimationApproval',
@@ -94,6 +115,18 @@ describe('requester cancellation policy', () => {
     assert.deepEqual(
       evaluateRequesterCancellation({ ...eligible, status: 'SentToEngineer', userId: undefined }),
       { canCancel: false, reason: 'not-requester' },
+    )
+  })
+
+  it('blocks a rejected ImprovementRequest when any request approval is pending', () => {
+    assert.deepEqual(
+      evaluateRequesterCancellation({
+        ...eligible,
+        status: 'ImprovementRequest',
+        hasRejectedRequestApproval: true,
+        hasPendingRequestApprovals: true,
+      }),
+      { canCancel: false, reason: 'pending-request-approval' },
     )
   })
 

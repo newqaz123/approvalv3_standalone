@@ -7,7 +7,8 @@
  *
  * Approved policy:
  * - Only the original requester can cancel.
- * - Cancellation is allowed only in `SentToEngineer` and `SendBackToRequester`.
+ * - Cancellation is allowed in `SentToEngineer`, `SendBackToRequester`, and
+ *   a rejected `ImprovementRequest` awaiting requester resubmission.
  * - Cancellation is blocked while any request approval (including final
  *   approval) or any solution approval is pending.
  * - Approvals, solutions, files, engineer assignments, and subtasks are
@@ -27,6 +28,7 @@ export function isCancellableRequestStatus(status: string): boolean {
 
 export interface CancellationApprovalSnapshot {
   status?: string | null
+  isFinalApproval?: boolean | null
 }
 
 /**
@@ -44,6 +46,7 @@ export interface RequesterCancellationCheck {
   userId?: string | null
   requesterId?: string | null
   status?: string | null
+  hasRejectedRequestApproval?: boolean
   hasPendingRequestApprovals?: boolean
   hasPendingSolutionApprovals?: boolean
 }
@@ -81,7 +84,13 @@ export function evaluateRequesterCancellation(
     return { canCancel: false, reason: 'not-requester' }
   }
 
-  if (!check.status || !isCancellableRequestStatus(check.status)) {
+  const isRejectedImprovementRequest =
+    check.status === 'ImprovementRequest' && check.hasRejectedRequestApproval === true
+
+  if (
+    !check.status ||
+    (!isCancellableRequestStatus(check.status) && !isRejectedImprovementRequest)
+  ) {
     return { canCancel: false, reason: 'status-not-cancellable' }
   }
 
@@ -128,7 +137,8 @@ export interface RequesterCancelControlInput {
  *
  * Cancellation visibility follows the cancellation policy alone:
  * - only the original requester sees the control,
- * - only in `SentToEngineer` / `SendBackToRequester`,
+ * - in `SentToEngineer` / `SendBackToRequester`, or in a rejected
+ *   `ImprovementRequest` awaiting resubmission,
  * - never while a request (incl. final) approval or ANY solution approval
  *   across the whole request is still pending (server-computed aggregate,
  *   falling back to the newest solution's approvals when absent).
@@ -148,6 +158,10 @@ export function evaluateRequesterCancelControl(
     userId: input.userId,
     requesterId: request.requesterId,
     status: request.status,
+    hasRejectedRequestApproval: request.approvals?.some(
+      (approval) =>
+        approval?.status === 'rejected' && approval?.isFinalApproval !== true,
+    ),
     hasPendingRequestApprovals: hasPendingApprovals(request.approvals),
     hasPendingSolutionApprovals,
   })

@@ -153,6 +153,60 @@ describe('guarded request status transition', () => {
     )
     assert.equal(requests.rows.get('cancelled')?.status, 'Cancelled')
   })
+
+  it('honors the rejected-state version predicate when cancellation races resubmission', async () => {
+    let status = 'ImprovementRequest'
+    let receivedWhere: Prisma.requestsWhereInput | undefined
+    const rejectedState = {
+      AND: [
+        { updatedAt: new Date('2026-08-10T09:30:00.000Z') },
+        {
+          approvals: {
+            some: { status: 'rejected' as const, isFinalApproval: false },
+          },
+        },
+      ],
+    }
+    const requests = {
+      async updateMany(args: Prisma.requestsUpdateManyArgs): Promise<{ count: number }> {
+        receivedWhere = args.where
+        const conditions = Array.isArray(args.where?.AND)
+          ? args.where.AND
+          : [args.where]
+        const preservedRejectedState = conditions.some((condition) => {
+          try {
+            assert.deepEqual(condition, rejectedState)
+            return true
+          } catch {
+            return false
+          }
+        })
+
+        if (!preservedRejectedState) {
+          status = 'Cancelled'
+          return { count: 1 }
+        }
+        return { count: 0 }
+      },
+    }
+
+    await assert.rejects(
+      updateRequestStatusExpecting(
+        { requests },
+        {
+          requestId: 'rejected-request',
+          expectedStatuses: ['ImprovementRequest'],
+          additionalWhere: rejectedState,
+          data: { status: 'Cancelled' },
+          actionLabel: 'cancel',
+        },
+      ),
+      /changed by someone else|refresh/i,
+    )
+
+    assert.ok(receivedWhere, 'the guarded update must reach the database')
+    assert.equal(status, 'ImprovementRequest')
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -173,6 +227,32 @@ describe('requester cancel control visibility', () => {
       viewOnly: true,
     })
     assert.deepEqual(decision, { canCancel: true, reason: null })
+  })
+
+  it('shows the cancel control for the requester on a rejected ImprovementRequest', () => {
+    const decision = evaluateRequesterCancelControl({
+      userId: REQUESTER_ID,
+      request: {
+        requesterId: REQUESTER_ID,
+        status: 'ImprovementRequest',
+        approvals: [{ status: 'rejected', isFinalApproval: false }],
+        hasPendingSolutionApprovals: false,
+      },
+    })
+    assert.deepEqual(decision, { canCancel: true, reason: null })
+  })
+
+  it('does not treat a final-only rejection as a rejected ImprovementRequest', () => {
+    const decision = evaluateRequesterCancelControl({
+      userId: REQUESTER_ID,
+      request: {
+        requesterId: REQUESTER_ID,
+        status: 'ImprovementRequest',
+        approvals: [{ status: 'rejected', isFinalApproval: true }],
+        hasPendingSolutionApprovals: false,
+      },
+    })
+    assert.deepEqual(decision, { canCancel: false, reason: 'status-not-cancellable' })
   })
 
   it('never lets viewOnly change the cancellation decision', () => {

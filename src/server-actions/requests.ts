@@ -15,7 +15,12 @@ import {
   evaluateRequesterCancellation,
   getCancellationBlockedMessage,
 } from '@/lib/cancellation-policy'
-import { updateRequestStatusExpecting } from '@/lib/request-status-transition'
+import {
+  buildRejectedRequestCancellationWhere,
+  buildRejectedRequestResubmissionWhere,
+  updateRequestStatusExpecting,
+} from '@/lib/request-status-transition'
+import type { Prisma } from '@prisma/client'
 import * as XLSX from 'xlsx'
 
 // Zod schema for request validation
@@ -1005,8 +1010,8 @@ const cancelRequestSchema = z.object({
  *
  * Policy (see `src/lib/cancellation-policy.ts`):
  * - Only the original requester can cancel.
- * - Allowed only while the request status is SentToEngineer or
- *   SendBackToRequester.
+ * - Allowed in SentToEngineer, SendBackToRequester, or a rejected
+ *   ImprovementRequest awaiting requester resubmission.
  * - Blocked while any request approval (including final approval) or any
  *   solution approval is still pending.
  * - Approvals, solutions, files, engineer assignments, and subtasks are
@@ -1029,15 +1034,15 @@ export async function cancelRequest(input: { requestId: string; reason: string }
 
   const { requestId, reason } = validatedFields.data
 
-  // Re-check ownership, status, and pending approvals inside one transaction.
-  // The conditional status update below re-verifies the read status at write
-  // time (TOCTOU guard under READ COMMITTED), so a concurrent transition
-  // (e.g. solution submission or final approval initiation) cannot race past
-  // cancellation.
+  // Re-check ownership, status, and approval state inside one transaction.
+  // The conditional update below re-verifies the status and, for a rejected
+  // ImprovementRequest, its version/rejected state at write time (TOCTOU guard
+  // under READ COMMITTED), so a concurrent transition or resubmission cannot
+  // race past cancellation.
   await prisma.$transaction(async (tx) => {
     const request = await tx.requests.findUnique({
       where: { id: requestId },
-      select: { id: true, requesterId: true, status: true },
+      select: { id: true, requesterId: true, status: true, updatedAt: true },
     })
 
     if (!request) {
@@ -1046,12 +1051,19 @@ export async function cancelRequest(input: { requestId: string; reason: string }
 
     // Pending request approvals (any kind, including final approval rows)
     // and pending solution approvals of the request's solutions both block.
-    const [pendingRequestApprovals, pendingSolutionApprovals] = await Promise.all([
+    const [
+      pendingRequestApprovals,
+      pendingSolutionApprovals,
+      rejectedRequestApprovals,
+    ] = await Promise.all([
       tx.request_approvals.count({
         where: { requestId, status: 'pending' },
       }),
       tx.solution_approvals.count({
         where: { solution: { requestId }, status: 'pending' },
+      }),
+      tx.request_approvals.count({
+        where: { requestId, status: 'rejected', isFinalApproval: false },
       }),
     ])
 
@@ -1059,6 +1071,7 @@ export async function cancelRequest(input: { requestId: string; reason: string }
       userId,
       requesterId: request.requesterId,
       status: request.status,
+      hasRejectedRequestApproval: rejectedRequestApprovals > 0,
       hasPendingRequestApprovals: pendingRequestApprovals > 0,
       hasPendingSolutionApprovals: pendingSolutionApprovals > 0,
     })
@@ -1067,14 +1080,20 @@ export async function cancelRequest(input: { requestId: string; reason: string }
       throw new Error(getCancellationBlockedMessage(decision.reason, request.status))
     }
 
-    // Only flip the status while it is still the cancellable status we read,
-    // via the same shared expected-status protocol every sibling transition
-    // (solution submission/resubmission, completion, final approval)
-    // uses. A concurrent transition makes this match zero rows and throws,
-    // so this transaction rolls back and cannot overwrite it.
+    // Only flip the status while the expected state still matches. The
+    // rejected-request path also compares updatedAt and the approval state,
+    // coordinating its same-status resubmission with cancellation. A
+    // concurrent workflow makes this match zero rows and throws, so this
+    // transaction rolls back and cannot overwrite it.
+    const rejectedImprovementRequestGuard =
+      request.status === 'ImprovementRequest'
+        ? buildRejectedRequestCancellationWhere(request.updatedAt)
+        : undefined
+
     await updateRequestStatusExpecting(tx, {
       requestId,
       expectedStatuses: [request.status],
+      additionalWhere: rejectedImprovementRequestGuard,
       data: { status: 'Cancelled' },
       actionLabel: 'cancel',
     })
@@ -2094,7 +2113,9 @@ export async function resubmitRequest(input: {
   }
 
   // Verify request has rejections
-  const hasRejection = request.approvals.some((a) => a.status === 'rejected')
+  const hasRejection = request.approvals.some(
+    (approval) => approval.status === 'rejected' && !approval.isFinalApproval,
+  )
   if (!hasRejection) {
     throw new Error('Request does not have any rejections')
   }
@@ -2127,15 +2148,25 @@ export async function resubmitRequest(input: {
 
   // Perform resubmit in transaction
   const result = await prisma.$transaction(async (tx) => {
-    // Update request if title/description provided
-    const updateData: any = {}
+    // The same-status guarded update locks the request row and requires the
+    // rejected approval to still exist. If cancellation committed first, the
+    // status no longer matches; if resubmission removed the rejection first,
+    // a racing cancellation's rejected-state predicate no longer matches.
+    const updateData: Prisma.requestsUpdateManyMutationInput = {
+      // Always advance the compare-and-set token, even in the unlikely case
+      // the prior write and this resubmission occur in the same millisecond.
+      updatedAt: new Date(Math.max(Date.now(), request.updatedAt.getTime() + 1)),
+    }
     if (input.title !== undefined) updateData.title = input.title
     if (input.description !== undefined)
       updateData.description = input.description
 
-    const updatedRequest = await tx.requests.update({
-      where: { id: input.requestId },
+    await updateRequestStatusExpecting(tx, {
+      requestId: input.requestId,
+      expectedStatuses: ['ImprovementRequest'],
+      additionalWhere: buildRejectedRequestResubmissionWhere(request.updatedAt),
       data: updateData,
+      actionLabel: 'resubmit request',
     })
 
     // Delete all existing approvals
@@ -2156,7 +2187,9 @@ export async function resubmitRequest(input: {
       },
     })
 
-    return updatedRequest
+    return tx.requests.findUniqueOrThrow({
+      where: { id: input.requestId },
+    })
   })
 
   // Create fresh approval chain

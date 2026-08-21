@@ -224,6 +224,7 @@ function RequestModalRouterContent({
 
 	// Determine permissions
 	const isEngineering = canUserSubmitSolution(userDepartmentType, user?.role);
+	const isOriginalRequester = user?.id === requestData.requesterId;
 	const isRequesterDepartment = canUserSubmitFinalApproval(
 		user?.id || "",
 		requestData.requesterId,
@@ -267,9 +268,9 @@ function RequestModalRouterContent({
 		hasFinalRejectionInEngineering;
 
 	// Check if current user can cancel (requester only, while the request is
-	// in SentToEngineer or SendBackToRequester and no request/final or
-	// solution approval is still pending; authoritative re-checks run in
-	// cancelRequest). Cancellation visibility follows the cancellation policy
+	// in SentToEngineer, SendBackToRequester, or a rejected ImprovementRequest
+	// with no request/final or solution approval still pending; authoritative
+	// re-checks run in cancelRequest). Cancellation visibility follows the policy
 	// alone - viewOnly (read-only views such as the follow-up dashboard for
 	// SentToEngineer requests) only suppresses other workflow actions, never
 	// the requester's cancel control. Pending solution approvals come from
@@ -929,7 +930,7 @@ function RequestModalRouterContent({
 						rejectedAt: modalData.rejection?.rejectedAt || "",
 						files: modalData.requestFiles,
 					}}
-					onResubmit={handleResubmitRequest}
+					onResubmit={isOriginalRequester ? handleResubmitRequest : undefined}
 					showCancel={canCancel}
 					requestId={requestData.id}
 					requestTitle={requestData.title}

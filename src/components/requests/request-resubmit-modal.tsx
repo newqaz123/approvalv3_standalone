@@ -54,12 +54,12 @@ interface RequestResubmitModalProps {
 		rejectedAt: string;
 		files: FileAttachment[];
 	};
-	onResubmit: (data: {
+	onResubmit?: (data: {
 		title: string;
 		description: string;
 		files: File[];
 		deletedFileIds?: string[];
-	}) => void;
+	}) => void | Promise<void>;
 	showCancel?: boolean;
 	requestId?: string;
 	requestTitle?: string;
@@ -92,6 +92,7 @@ export function RequestResubmitModal({
 	requestTitle,
 	onCancelled,
 }: RequestResubmitModalProps) {
+	const canResubmit = Boolean(onResubmit);
 	const [title, setTitle] = useState(initialData.title);
 	const [description, setDescription] = useState(initialData.description);
 	const [existingFiles, setExistingFiles] = useState<FileAttachment[]>(
@@ -129,6 +130,7 @@ export function RequestResubmitModal({
 	};
 
 	const handleSubmit = () => {
+		if (!onResubmit) return;
 		onResubmit({
 			title,
 			description,
@@ -147,7 +149,7 @@ export function RequestResubmitModal({
 						<div className="flex items-center gap-3">
 							<RotateCcw className="w-5 h-5 text-amber-600" />
 							<DialogTitle className="text-lg font-bold text-slate-900 dark:text-slate-100 tracking-tight m-0">
-								Resubmit Request
+								{canResubmit ? "Resubmit Request" : "Rejected Request"}
 							</DialogTitle>
 						</div>
 						<button
@@ -191,6 +193,7 @@ export function RequestResubmitModal({
 							<Input
 								id="title"
 								value={title}
+								disabled={!canResubmit}
 								onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
 									setTitle(e.target.value)
 								}
@@ -206,6 +209,7 @@ export function RequestResubmitModal({
 								id="description"
 								value={description}
 								onChange={setDescription}
+								disabled={!canResubmit}
 								minHeight={140}
 							/>
 						</div>
@@ -237,109 +241,117 @@ export function RequestResubmitModal({
 												</p>
 											)}
 										</div>
-										<button
-											onClick={() => removeExistingFile(file.id)}
-											className="p-1 text-slate-400 hover:text-red-500 transition-colors"
-											title="Remove file"
-										>
-											<Trash2 className="w-4 h-4" />
-										</button>
+										{canResubmit ? (
+											<button
+												onClick={() => removeExistingFile(file.id)}
+												className="p-1 text-slate-400 hover:text-red-500 transition-colors"
+												title="Remove file"
+											>
+												<Trash2 className="w-4 h-4" />
+											</button>
+										) : null}
 									</div>
 								))}
 							</div>
-							<p className="text-xs text-slate-400 mt-2 italic">
-								Removed files will be deleted when you resubmit
-							</p>
+							{canResubmit ? (
+								<p className="text-xs text-slate-400 mt-2 italic">
+									Removed files will be deleted when you resubmit
+								</p>
+							) : null}
 						</section>
 					)}
 
 					{/* New File Upload */}
-					<section>
-						<h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-3 flex items-center gap-2">
-							<FileUp className="w-4 h-4" />
-							Add New Attachments
-						</h3>
+					{canResubmit ? (
+						<section>
+							<h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-3 flex items-center gap-2">
+								<FileUp className="w-4 h-4" />
+								Add New Attachments
+							</h3>
 
-						<div className="mb-4">
-							<label className="flex items-center justify-center gap-2 px-4 py-3 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
-								<FileUp className="w-5 h-5 text-slate-400" />
-								<span className="text-sm font-medium text-slate-600 dark:text-slate-400">
-									Click to upload additional files
-								</span>
-								<input
-									type="file"
-									multiple
-									onChange={handleFileChange}
-									accept={ACCEPTED_UPLOAD_EXTENSIONS}
-									className="hidden"
-								/>
-							</label>
-							<p className="mt-2 text-xs text-slate-500">
-								Allowed: {ACCEPTED_UPLOAD_TYPES}. Maximum size: 10MB per file.
-							</p>
-						</div>
-
-						{newFiles.length > 0 && (
-							<div className="space-y-2">
-								{newFiles.map((file: File, index: number) => (
-									<div
-										key={`${file.name}-${index}`}
-										className="flex items-start gap-3 p-3 border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900"
-									>
-										{getFileIcon(
-											file.name.split(".").pop()?.toLowerCase() || "",
-										)}
-										<div className="flex-1 min-w-0 space-y-2">
-											<div className="flex items-center justify-between">
-												<p className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">
-													{file.name}
-												</p>
-												<button
-													onClick={() => removeFile(index)}
-													className="p-1 text-slate-400 hover:text-red-500 transition-colors"
-												>
-													<Trash2 className="w-4 h-4" />
-												</button>
-											</div>
-											<input
-												type="text"
-												value={fileDescriptions[file.name] || ""}
-												onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-													updateFileDescription(file.name, e.target.value)
-												}
-												placeholder="Add a description for this file..."
-												className="w-full text-xs px-2 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded"
-											/>
-										</div>
-									</div>
-								))}
+							<div className="mb-4">
+								<label className="flex items-center justify-center gap-2 px-4 py-3 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+									<FileUp className="w-5 h-5 text-slate-400" />
+									<span className="text-sm font-medium text-slate-600 dark:text-slate-400">
+										Click to upload additional files
+									</span>
+									<input
+										type="file"
+										multiple
+										onChange={handleFileChange}
+										accept={ACCEPTED_UPLOAD_EXTENSIONS}
+										className="hidden"
+									/>
+								</label>
+								<p className="mt-2 text-xs text-slate-500">
+									Allowed: {ACCEPTED_UPLOAD_TYPES}. Maximum size: 10MB per file.
+								</p>
 							</div>
-						)}
-					</section>
+
+							{newFiles.length > 0 && (
+								<div className="space-y-2">
+									{newFiles.map((file: File, index: number) => (
+										<div
+											key={`${file.name}-${index}`}
+											className="flex items-start gap-3 p-3 border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900"
+										>
+											{getFileIcon(
+												file.name.split(".").pop()?.toLowerCase() || "",
+											)}
+											<div className="flex-1 min-w-0 space-y-2">
+												<div className="flex items-center justify-between">
+													<p className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">
+														{file.name}
+													</p>
+													<button
+														onClick={() => removeFile(index)}
+														className="p-1 text-slate-400 hover:text-red-500 transition-colors"
+													>
+														<Trash2 className="w-4 h-4" />
+													</button>
+												</div>
+												<input
+													type="text"
+													value={fileDescriptions[file.name] || ""}
+													onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+														updateFileDescription(file.name, e.target.value)
+													}
+													placeholder="Add a description for this file..."
+													className="w-full text-xs px-2 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded"
+												/>
+											</div>
+										</div>
+									))}
+								</div>
+							)}
+						</section>
+					) : null}
 				</div>
 
 				{/* Footer Actions */}
 				<div className="px-6 py-4 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0">
 					<div className="flex items-center gap-2">
 						<Button variant="outline" onClick={() => onOpenChange(false)}>
-							Cancel
+							{canResubmit ? "Cancel" : "Close"}
 						</Button>
-						{showCancel && requestId && requestTitle && (
+						{canResubmit && showCancel && requestId && requestTitle ? (
 							<CancelRequestDialog
 								requestId={requestId}
 								requestTitle={requestTitle}
 								onCancelled={onCancelled}
 							/>
-						)}
+						) : null}
 					</div>
-					<Button
-						onClick={handleSubmit}
-						disabled={!title.trim() || !description.trim()}
-						className="bg-amber-600 hover:bg-amber-700 text-white"
-					>
-						<RotateCcw className="w-4 h-4 mr-1.5" />
-						Resubmit Request
-					</Button>
+					{canResubmit ? (
+						<Button
+							onClick={handleSubmit}
+							disabled={!title.trim() || !description.trim()}
+							className="bg-amber-600 hover:bg-amber-700 text-white"
+						>
+							<RotateCcw className="w-4 h-4 mr-1.5" />
+							Resubmit Request
+						</Button>
+					) : null}
 				</div>
 			</DialogContent>
 		</Dialog>
