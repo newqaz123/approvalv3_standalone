@@ -563,7 +563,7 @@ test('main online update path proves rollback and backup precede build and prese
     'docker image tag sha256:appimage approval-app:rollback\n',
     'docker image tag sha256:migrateimage approval-migrate:rollback\n',
     stateCaptureMarker,
-    'docker exec approval-db sh -c psql -Atqc "select id, \\"filePath\\" from file_attachments order by id;"\n',
+    'docker exec approval-db psql -U deployuser -d app_db -Atc select id, "filePath" from file_attachments order by id;\n',
     'backup\n',
     'docker build --target runner -t approval-app:latest ',
     'docker build --target migrator -t approval-migrate:latest ',
@@ -844,4 +844,17 @@ test('mount detection survives real docker Go-template newline escaping', async 
   )
   assert.equal(result.status, 0, `stderr: ${result.stderr}`)
   assert.equal(result.stdout.trim(), 'approval-app_db_data\napproval-app_uploads_data')
+})
+
+test('state capture psql probes authenticate explicitly instead of as the exec OS user', async () => {
+  const fixture = await fakeBin()
+  // The fake docker exec rejects psql without -U, mirroring the official
+  // postgres image where `docker exec` runs as root and role "root" absent.
+  const result = runShell(
+    'source scripts/lib/deploy-common.sh; capture_deployment_state "$STATE_FILE" && grep -q "^PRE_USERS=19$" "$STATE_FILE"',
+    { PATH: `${fixture.bin}:${process.env.PATH}`, STATE_FILE: join(fixture.dir, 'auth-state'), COMMAND_LOG: fixture.log },
+  )
+  assert.equal(result.status, 0, `stderr: ${result.stderr}`)
+  const log = await readFile(fixture.log, 'utf8')
+  assert.match(log, /docker exec approval-db psql -U \S+ -d \S+ -Atqc select count\(\*\) from users;/)
 })

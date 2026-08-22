@@ -181,6 +181,19 @@ state_value() {
   sed -n "s/^$1=//p" "$2" | tail -n 1
 }
 
+# Read KEY=VALUE from the production env file (tolerating quotes), so database
+# queries use the same credentials the compose file passes to the containers.
+env_file_value() {
+  local key="$1" line
+  [ -f "$ENV_FILE" ] || return 1
+  line="$(sed -n "s/^${key}=//p" "$ENV_FILE" | tail -n 1)" || return 1
+  [ -n "$line" ] || return 1
+  printf '%s\n' "$line" | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//"
+}
+
+postgres_user() { env_file_value POSTGRES_USER || printf 'postgres'; }
+postgres_db() { env_file_value POSTGRES_DB || printf 'app_db'; }
+
 stat_owner_uid() {
   local uid
   uid="$(stat -c '%u' "$1" 2>/dev/null || true)"
@@ -199,7 +212,7 @@ ensure_root_owned() {
 
 query_count() {
   local container="$1" query="$2" value
-  if ! value="$(docker exec "$container" sh -c "psql -Atqc '$query'" 2>/dev/null)"; then
+  if ! value="$(docker exec "$container" psql -U "$(postgres_user)" -d "$(postgres_db)" -Atqc "$query" 2>/dev/null)"; then
     fail "Database count query failed for $container"
     return 1
   fi
@@ -307,7 +320,7 @@ audit_attachment_integrity() {
   [ -n "$output" ] || { fail 'Attachment audit output file is required'; return 1; }
   mkdir -p "$(dirname "$output")" || return 1
   : >"$output" || return 1
-  if ! rows="$(docker exec approval-db sh -c 'psql -Atqc "select id, \"filePath\" from file_attachments order by id;"' 2>/dev/null)"; then
+  if ! rows="$(docker exec approval-db psql -U "$(postgres_user)" -d "$(postgres_db)" -Atc 'select id, "filePath" from file_attachments order by id;' 2>/dev/null)"; then
     fail 'Attachment audit database query failed'
     return 1
   fi

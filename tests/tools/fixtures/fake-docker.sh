@@ -123,16 +123,26 @@ exec)
 	shift || true
 	if [ "$container" = "approval-db" ]; then
 		has_pgdump=0
+		has_psql=0
+		has_user=0
 		query=""
 		prev=""
 		for a in "$@"; do
 			[ "$a" = "pg_dump" ] && has_pgdump=1
-			if [ "$prev" = "-c" ]; then query="$a"; fi
+			[ "$a" = "psql" ] && has_psql=1
+			[ "$a" = "-U" ] && has_user=1
+			if [ "$prev" = "-c" ] || [ "$prev" = "-Atqc" ] || [ "$prev" = "-Atc" ]; then query="$a"; fi
 			prev="$a"
 		done
 		if [ "$has_pgdump" = "1" ]; then
 			printf 'PG_DUMP dummy content\n'
 			exit 0
+		fi
+		# Emulate the official postgres image: `docker exec` runs as root, so
+		# psql without -U tries role "root" and fails. Scripts must pass -U.
+		if [ "$has_psql" = "1" ] && [ "$has_user" = "0" ]; then
+			printf 'psql: error: FATAL: role "root" does not exist\n' >&2
+			exit 1
 		fi
 		if [ "${QUERY_FAILURE:-0}" = "1" ]; then
 			exit 1
