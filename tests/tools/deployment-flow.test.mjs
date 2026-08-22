@@ -558,7 +558,7 @@ test('main online update path proves rollback and backup precede build and prese
   }, fixture.dir)
   assert.equal(result.status, 0, result.stderr)
   const log = await readFile(fixture.log, 'utf8')
-  const stateCaptureMarker = 'docker inspect -f {{range .Mounts}}{{.Name}} {{.Destination}}{{"\\\\n"}}{{end}} approval-db\n'
+  const stateCaptureMarker = 'docker inspect -f {{range .Mounts}}{{.Name}} {{.Destination}}{{"\\n"}}{{end}} approval-db\n'
   assertLogSequence(log, [
     'docker image tag sha256:appimage approval-app:rollback\n',
     'docker image tag sha256:migrateimage approval-migrate:rollback\n',
