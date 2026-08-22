@@ -19,17 +19,17 @@ import { Textarea } from '@/components/ui/textarea'
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
   FormMessage,
 } from '@/components/ui/form'
+import { cancellationReasonSchema } from '@/lib/schemas/cancellation-schemas'
 import { cancelRequest } from '@/server-actions/requests'
 
 const cancelSchema = z.object({
-  reason: z.string()
-    .min(10, 'Reason must be at least 10 characters')
-    .max(500, 'Reason too long'),
+  reason: cancellationReasonSchema,
 })
 
 type CancelFormValues = z.infer<typeof cancelSchema>
@@ -38,18 +38,27 @@ interface CancelRequestDialogProps {
   requestId: string
   requestTitle: string
   onCancelled?: () => void
+  /**
+   * Cancellation submission. Defaults to the authoritative server action;
+   * non-production hosts (the E2E UI harness) may inject their own callback.
+   */
+  onCancelRequest?: typeof cancelRequest
 }
 
 export function CancelRequestDialog({
   requestId,
   requestTitle,
   onCancelled,
+  onCancelRequest = cancelRequest,
 }: CancelRequestDialogProps) {
   const [open, setOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const form = useForm<CancelFormValues>({
+    // Validate while the requester types so the submit button's isValid gate
+    // tracks the 5-character minimum live (4 characters stay blocked).
+    mode: 'onChange',
     resolver: zodResolver(cancelSchema),
     defaultValues: { reason: '' },
   })
@@ -59,7 +68,7 @@ export function CancelRequestDialog({
     setError(null)
 
     try {
-      const result = await cancelRequest({
+      const result = await onCancelRequest({
         requestId,
         reason: data.reason,
       })
@@ -108,6 +117,7 @@ export function CancelRequestDialog({
                       rows={3}
                     />
                   </FormControl>
+                  <FormDescription>Minimum 5 characters.</FormDescription>
                   <FormMessage />
                 </FormItem>
               )}

@@ -2,7 +2,7 @@
 
 import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
-import { subDays, startOfDay, endOfDay, differenceInMinutes, format } from 'date-fns'
+import { subDays, startOfDay, endOfDay, differenceInMinutes } from 'date-fns'
 import type {
   AnalyticsData,
   AnalyticsFilters,
@@ -10,12 +10,17 @@ import type {
   TimeMetrics,
   SummaryMetrics,
   TrendData,
-  TimelinePoint,
+  EngineeringResolutionTrendPoint,
   Bottleneck,
   EngineeringMetrics,
   EngineeringCycle,
   DepartmentApprovalSpeed,
 } from '@/types/analytics'
+import {
+  ENGINEERING_LIFECYCLE_ACTIONS,
+  ENGINEERING_LIFECYCLE_STATUSES,
+  buildEngineeringResolutionTrend,
+} from '@/lib/engineering-resolution-trend'
 
 /**
  * Get analytics data with applied filters
@@ -50,14 +55,25 @@ export async function getAnalyticsData(filters: AnalyticsFilters): Promise<Analy
     ...(filters.requesterId && { requesterId: filters.requesterId }),
   }
 
+  // Scoping for the engineering resolution trend. Unlike the other widgets
+  // it must NOT filter by createdAt: cycles opened before the visible window
+  // have to contribute carry-in backlog, so the date range only controls the
+  // displayed periods (passed separately).
+  const trendScopeWhere: any = {
+    isDeleted: false,
+    ...(filters.departmentId && { departmentId: filters.departmentId }),
+    ...(filters.status && { status: filters.status }),
+    ...(filters.requesterId && { requesterId: filters.requesterId }),
+  }
+
   // Fetch all data sources in parallel to eliminate waterfalls
-  const [pipeline, departments, timeMetrics, summary, prevSummary, timeline, bottlenecks, engineeringMetrics, departmentSpeeds] = await Promise.all([
+  const [pipeline, departments, timeMetrics, summary, prevSummary, engineeringResolutionTrend, bottlenecks, engineeringMetrics, departmentSpeeds] = await Promise.all([
     fetchPipelineData(whereClause),
     fetchDepartmentData(whereClause),
     fetchTimeMetrics(whereClause),
     fetchSummaryMetrics(whereClause),
     fetchSummaryMetrics(prevWhereClause),
-    fetchTimeline(whereClause, filters.dateRange),
+    fetchEngineeringResolutionTrend(trendScopeWhere, filters.dateRange),
     fetchBottlenecks(),
     fetchEngineeringMetrics(whereClause),
     fetchDepartmentSpeeds(whereClause),
@@ -72,7 +88,7 @@ export async function getAnalyticsData(filters: AnalyticsFilters): Promise<Analy
     timeMetrics,
     summary,
     trends,
-    timeline,
+    engineeringResolutionTrend,
     bottlenecks,
     engineeringMetrics,
     departmentSpeeds,
@@ -417,54 +433,75 @@ function getPreviousPeriodFilter(preset: AnalyticsFilters['dateRange']) {
 }
 
 /**
- * Fetch request volume timeline data
- * Returns daily created/completed counts for the date range
+ * Fetch the Engineering Resolution Trend series.
+ *
+ * Uses request_activities status-transition history (toStatus events) for
+ * historical correctness: SentToEngineer / SendBackToRequester / Completed
+ * transitions are recorded as `status_changed`, requester cancellation as
+ * `cancelled`, and manual completion as `manually_completed` - all of which
+ * carry the authoritative toStatus, so the query selects by toStatus.
+ *
+ * Matching requests without any lifecycle events (legacy rows) fall back to
+ * the conservative snapshot fallback inside the pure aggregation helper.
  */
-async function fetchTimeline(
-  whereClause: any,
+async function fetchEngineeringResolutionTrend(
+  trendScopeWhere: any,
   dateRange: AnalyticsFilters['dateRange']
-): Promise<TimelinePoint[]> {
+): Promise<EngineeringResolutionTrendPoint[]> {
   const requests = await prisma.requests.findMany({
-    where: whereClause,
+    where: trendScopeWhere,
     select: {
-      createdAt: true,
+      id: true,
       status: true,
+      createdAt: true,
       updatedAt: true,
     },
   })
 
-  // Determine the number of days to show
-  const daysMap: Record<string, number> = { '7days': 7, '30days': 30, '90days': 90, 'all': 90 }
-  const days = daysMap[dateRange] || 30
-
-  // Build day-by-day map
-  const timeline: TimelinePoint[] = []
-  const now = new Date()
-
-  for (let i = days - 1; i >= 0; i--) {
-    const date = subDays(now, i)
-    const dateStr = format(date, 'MMM dd')
-    const dayStart = startOfDay(date)
-    const dayEnd = endOfDay(date)
-
-    const created = requests.filter(
-      (r) =>
-        r.status !== 'Cancelled' &&
-        r.createdAt >= dayStart &&
-        r.createdAt <= dayEnd
-    ).length
-
-    const completed = requests.filter(
-      (r) =>
-        r.status === 'Completed' &&
-        r.updatedAt >= dayStart &&
-        r.updatedAt <= dayEnd
-    ).length
-
-    timeline.push({ date: dateStr, created, completed })
+  if (requests.length === 0) {
+    return []
   }
 
-  return timeline
+  const requestIds = requests.map((request) => request.id)
+
+  const activities = await prisma.request_activities.findMany({
+    where: {
+      requestId: { in: requestIds },
+      // Only authoritative lifecycle transitions count: other audit actions
+      // (soft delete, restore, archive) copy `toStatus` from the current
+      // status, which must neither fabricate lifecycle events nor suppress
+      // the legacy fallback in the aggregation helper.
+      action: { in: [...ENGINEERING_LIFECYCLE_ACTIONS] as any },
+      toStatus: { in: [...ENGINEERING_LIFECYCLE_STATUSES] as any },
+    },
+    select: {
+      requestId: true,
+      action: true,
+      toStatus: true,
+      createdAt: true,
+    },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+  })
+
+  const events = activities
+    .filter((activity) => activity.requestId)
+    .map((activity) => ({
+      requestId: activity.requestId as string,
+      toStatus: activity.toStatus as string,
+      at: activity.createdAt,
+      action: activity.action,
+    }))
+
+  return buildEngineeringResolutionTrend({
+    events,
+    snapshots: requests.map((request) => ({
+      requestId: request.id,
+      status: request.status,
+      createdAt: request.createdAt,
+      updatedAt: request.updatedAt,
+    })),
+    dateRange,
+  })
 }
 
 /**

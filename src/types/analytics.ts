@@ -99,15 +99,23 @@ export interface TrendData {
 }
 
 /**
- * Timeline data point for request volume chart
+ * Engineering resolution trend data point.
+ *
+ * Derived from the engineering lifecycle state machine
+ * (`src/lib/engineering-resolution-trend.ts`):
+ * - `SentToEngineer` opens an engineering cycle.
+ * - `SendBackToRequester` or `Completed` closes an open cycle (resolved).
+ *   `Completed` after a `SendBackToRequester` closure cannot double-count.
+ * - `Cancelled` closes an open cycle without resolving it.
+ * - A later `SentToEngineer` opens a new rework cycle.
  */
-export interface TimelinePoint {
-  /** Date label (e.g., "Jan 15") */
-  date: string
-  /** Number of requests created on this date */
-  created: number
-  /** Number of requests completed on this date */
-  completed: number
+export interface EngineeringResolutionTrendPoint {
+  /** Period label (daily "Jan 15", weekly "Jan 15", or monthly "Jan 2026") */
+  period: string
+  /** Open engineering cycles at period end (includes carry-in backlog) */
+  engineeringUnresolved: number
+  /** Cycles resolved by Engineering during the period */
+  resolvedByEngineering: number
 }
 
 /**
@@ -176,8 +184,8 @@ export interface AnalyticsData {
   summary: SummaryMetrics
   /** Trend comparison vs previous period */
   trends: TrendData
-  /** Request volume timeline */
-  timeline: TimelinePoint[]
+  /** Engineering resolution trend (backlog vs resolved per period) */
+  engineeringResolutionTrend: EngineeringResolutionTrendPoint[]
   /** Bottleneck alerts for stuck requests */
   bottlenecks: Bottleneck[]
   /** Engineering KPI metrics */

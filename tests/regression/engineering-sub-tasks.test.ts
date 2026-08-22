@@ -375,7 +375,7 @@ describe("engineering sub-task request and filter wiring", () => {
 			requestFilters,
 			/wrStatus\?: ['"]all['"] \| ['"]not-received['"] \| ['"]received['"]/,
 		);
-		assert.match(requestFilters, /DEFAULT_WR_FILTER = ["']all["']/);
+		assert.match(requestFilters, /DEFAULT_WR_FILTER = ["']not-received["']/);
 		assert.match(requestFilters, /Show only no WR/);
 		assert.match(requestFilters, /h-10 min-h-10/);
 		assert.match(requestFilters, /className=\{cn\(\s*['"]h-10 min-h-10 w-full/);
@@ -397,8 +397,8 @@ describe("engineering sub-task request and filter wiring", () => {
 			"src/components/requests/request-table.tsx",
 			"utf8",
 		);
-		assert.match(requestPage, /wrStatus: 'all'/);
-		assert.doesNotMatch(requestPage, /wrStatus: 'not-received'/);
+		assert.doesNotMatch(requestPage, /wrStatus: 'all'/);
+		assert.match(requestPage, /wrStatus: 'not-received'/);
 		assert.match(requestTable, /workRequisitionReceived\?: boolean/);
 		assert.match(requestTable, /bg-sky-50/);
 		assert.doesNotMatch(requestTable, /bg-emerald-50/);

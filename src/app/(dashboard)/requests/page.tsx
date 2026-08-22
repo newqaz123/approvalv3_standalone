@@ -9,7 +9,11 @@ interface RequestsPageProps {
 
 async function RequestsList() {
   const [requests, filterOptions] = await Promise.all([
-    getMyRequests({ wrStatus: 'all' }),
+    // Default to the no-WR filter so the server-rendered first page already
+    // matches the client default ("Show only no WR" enabled) and there is no
+    // unfiltered first render. Keep in sync with DEFAULT_WR_FILTER in
+    // request-filters.tsx (cannot be imported here: it is a client module).
+    getMyRequests({ wrStatus: 'not-received' }),
     getRequestFilterOptions(),
   ])
 

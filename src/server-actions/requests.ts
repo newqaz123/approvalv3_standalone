@@ -10,6 +10,7 @@ import { requireAdmin } from '@/lib/auth'
 import { getCurrentUser, getUserById } from '@/lib/cache/user-cache'
 import { deleteAttachmentFile } from '@/lib/attachments/storage'
 import { descriptionSchema } from '@/lib/schemas/solution-schemas'
+import { cancellationReasonSchema } from '@/lib/schemas/cancellation-schemas'
 import { buildRequestExportRows } from '@/lib/request-export'
 import {
   evaluateRequesterCancellation,
@@ -1002,7 +1003,7 @@ export async function getMyActionItems() {
 
 const cancelRequestSchema = z.object({
   requestId: z.string().min(1),
-  reason: z.string().min(10, 'Reason must be at least 10 characters').max(500, 'Reason too long'),
+  reason: cancellationReasonSchema,
 })
 
 /**

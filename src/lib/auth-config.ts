@@ -153,6 +153,19 @@ const authConfig: NextAuthConfig = {
         return true
       }
 
+      // Behavioral UI harness routes (/test-harness/*) are public only when
+      // explicitly opted in with E2E_UI_HARNESS=1, so Playwright can drive
+      // the harness without a session. Without the flag these routes stay
+      // behind authentication here and additionally 404 in the page
+      // components themselves (src/app/test-harness/**/page.tsx). No other
+      // route is affected by this gate.
+      if (
+        pathname.startsWith('/test-harness') &&
+        process.env.E2E_UI_HARNESS === '1'
+      ) {
+        return true
+      }
+
       // Everything else requires authentication
       return isLoggedIn
     },

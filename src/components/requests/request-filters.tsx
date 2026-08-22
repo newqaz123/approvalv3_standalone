@@ -27,7 +27,12 @@ export interface RequestFilters {
 	wrStatus?: "all" | "not-received" | "received";
 }
 
-export const DEFAULT_WR_FILTER = "all" as const;
+/**
+ * Default WR filter for /requests: the page opens with "Show only no WR"
+ * enabled, so the initial state (and Clear All) shows only requests whose
+ * work requisition has not been received yet.
+ */
+export const DEFAULT_WR_FILTER = "not-received" as const;
 
 interface RequestFiltersProps {
 	departments: Array<{ id: string; name: string }>;
@@ -94,7 +99,7 @@ export function RequestFilters({
 	const toggleNoWrFilter = () => {
 		updateFilter(
 			"wrStatus",
-			filters.wrStatus === "not-received" ? DEFAULT_WR_FILTER : "not-received",
+			filters.wrStatus === "not-received" ? "all" : "not-received",
 		);
 	};
 

@@ -13,8 +13,8 @@ import { BarChart3, Building2, Clock, Activity, AlertTriangle, Wrench, Flag } fr
 import { cn } from '@/lib/utils'
 
 // Dynamic imports for heavy chart components
-const RequestTimelineChart = dynamic(
-  () => import('@/components/analytics/request-timeline-chart').then(mod => ({ default: mod.RequestTimelineChart })),
+const EngineeringResolutionTrendChart = dynamic(
+  () => import('@/components/analytics/engineering-resolution-trend-chart').then(mod => ({ default: mod.EngineeringResolutionTrendChart })),
   { loading: () => <Skeleton className="h-[280px] w-full rounded-lg" /> }
 )
 
@@ -57,20 +57,27 @@ interface AnalyticsPageProps {
  */
 function SectionCard({
   title,
+  subtitle,
   icon: Icon,
   children,
   className,
 }: {
   title: string
+  subtitle?: string
   icon: React.ComponentType<{ className?: string }>
   children: React.ReactNode
   className?: string
 }) {
   return (
     <div className={cn('rounded-xl border bg-card shadow-sm', className)}>
-      <div className="flex items-center gap-2 border-b px-5 py-3.5">
-        <Icon className="h-4 w-4 text-muted-foreground" />
-        <h2 className="text-sm font-semibold">{title}</h2>
+      <div className="flex items-start gap-2 border-b px-5 py-3.5">
+        <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold">{title}</h2>
+          {subtitle && (
+            <p className="mt-0.5 text-xs font-normal text-muted-foreground">{subtitle}</p>
+          )}
+        </div>
       </div>
       <div className="p-5">{children}</div>
     </div>
@@ -199,17 +206,18 @@ export function AnalyticsPage({ initialData, filters, userId }: AnalyticsPagePro
             <SummaryCards summary={data.summary} trends={data.trends} />
           )}
 
-          {/* Row 2: Timeline (wide) + Department Breakdown (side) */}
+          {/* Row 2: Engineering Resolution Trend (wide) + Department Breakdown (side) */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <SectionCard
-              title="Request Volume"
+              title="Engineering Resolution Trend"
+              subtitle="Open Engineering backlog at period end versus requests resolved by Engineering during each period."
               icon={Activity}
               className="lg:col-span-2"
             >
               {showSkeleton ? (
                 <Skeleton className="h-[280px] w-full rounded-lg" />
               ) : (
-                <RequestTimelineChart data={data.timeline} />
+                <EngineeringResolutionTrendChart data={data.engineeringResolutionTrend} />
               )}
             </SectionCard>
 

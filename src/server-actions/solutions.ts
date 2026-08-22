@@ -1838,6 +1838,23 @@ export async function rejectFinalApproval(requestId: string, comments: string, e
       data: { status: RequestStatus.SentToEngineer },
     })
 
+    // Atomic status-change audit for the reopened engineering cycle. The
+    // engineering resolution trend aggregates status_changed activities, so
+    // this row (written in the same transaction as the status update) makes
+    // the rejection visible as a new rework cycle for that request.
+    // canUserApproveFinalApproval guarantees the request is in FinalApproval,
+    // recorded here as the authoritative fromStatus.
+    await tx.request_activities.create({
+      data: {
+        requestId,
+        userId,
+        action: 'status_changed',
+        fromStatus: RequestStatus.FinalApproval,
+        toStatus: RequestStatus.SentToEngineer,
+        comments: `Final approval rejected. Request returned to engineering for revision. Reason: "${comments}"`,
+      },
+    })
+
     // Get engineering department to notify all engineers
     const engineeringDept = await tx.departments.findFirst({
       where: { type: 'ENGINEERING' },
