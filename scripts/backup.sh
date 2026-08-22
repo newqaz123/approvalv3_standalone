@@ -40,7 +40,7 @@ resolve_uploads_volume() {
 	local mount_info mount_name mount_destination candidate count candidates
 	# Inspect first, including stopped containers. This preserves the actual
 	# named volume instead of guessing from the current checkout.
-	mount_info="$(docker inspect -f '{{range .Mounts}}{{.Name}} {{.Destination}}{{"\\n"}}{{end}}' "$APP_CONTAINER" 2>/dev/null || true)"
+	mount_info="$(docker inspect -f '{{range .Mounts}}{{.Name}} {{.Destination}}{{"\n"}}{{end}}' "$APP_CONTAINER" 2>/dev/null || true)"
 	while read -r mount_name mount_destination; do
 		if [ "$mount_destination" = "/app/uploads" ] && [ -n "$mount_name" ]; then
 			printf '%s\n' "$mount_name"

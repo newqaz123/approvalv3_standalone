@@ -835,3 +835,13 @@ test('attachment audit reports existing gaps and blocks newly missing paths', as
   assert.match(`${result.stdout}\n${result.stderr}`, /new-id/)
   assert.equal(await readFile(pre, 'utf8'), 'old-id\n')
 })
+
+test('mount detection survives real docker Go-template newline escaping', async () => {
+  const fixture = await fakeBin()
+  const result = runShell(
+    'source scripts/lib/deploy-common.sh; mount_for_destination approval-db /var/lib/postgresql/data && mount_for_destination approval-app /app/uploads',
+    { PATH: `${fixture.bin}:${process.env.PATH}` },
+  )
+  assert.equal(result.status, 0, `stderr: ${result.stderr}`)
+  assert.equal(result.stdout.trim(), 'approval-app_db_data\napproval-app_uploads_data')
+})

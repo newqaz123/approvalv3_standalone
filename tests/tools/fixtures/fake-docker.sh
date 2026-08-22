@@ -95,9 +95,17 @@ inspect)
 		case "$fmt" in
 		*Config.Labels*) echo 'approval-app'; exit 0 ;;
 		*Mounts*)
+			# Emulate docker's Go-template string literals faithfully:
+			# "\\n" (two backslashes) renders as a literal backslash-n,
+			# only "\n" renders as an actual newline.
+			bs=$(printf '\\')
+			case "$fmt" in
+			*"${bs}${bs}n"*) mount_sep="${bs}n" ;;
+			*) mount_sep=$(printf '\n') ;;
+			esac
 			case "$target" in
-			approval-db) printf '%s %s\n' "${DB_VOLUME:-approval-app_db_data}" '/var/lib/postgresql/data' ;;
-			approval-app) printf '%s %s\n' "${UPLOADS_VOLUME:-approval-app_uploads_data}" '/app/uploads' ;;
+			approval-db) printf '%s %s%s' "${DB_VOLUME:-approval-app_db_data}" '/var/lib/postgresql/data' "$mount_sep" ;;
+			approval-app) printf '%s %s%s' "${UPLOADS_VOLUME:-approval-app_uploads_data}" '/app/uploads' "$mount_sep" ;;
 			esac
 			exit 0
 			;;

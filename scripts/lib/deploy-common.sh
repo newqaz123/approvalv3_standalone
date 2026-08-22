@@ -157,7 +157,7 @@ run_verified_backup() {
 }
 
 container_mounts() {
-  docker inspect -f '{{range .Mounts}}{{.Name}} {{.Destination}}{{"\\n"}}{{end}}' "$1" 2>/dev/null || true
+  docker inspect -f '{{range .Mounts}}{{.Name}} {{.Destination}}{{"\n"}}{{end}}' "$1" 2>/dev/null || true
 }
 
 container_project_label() {
