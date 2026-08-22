@@ -296,3 +296,54 @@ test("createPrompt exposes pause and resume for interactive child scripts", asyn
 		prompt.close();
 	}
 });
+
+test("suspendTerminalInput restores canonical mode for interactive children", async () => {
+	const { suspendTerminalInput, restoreTerminalInput } = await import(
+		"../../tools/manage.mjs"
+	);
+	const calls = [];
+	const fakeTty = {
+		isTTY: true,
+		isRaw: true,
+		setRawMode(mode) {
+			this.isRaw = mode;
+			calls.push(`raw:${mode}`);
+		},
+		pause() {
+			calls.push("pause");
+		},
+		resume() {
+			calls.push("resume");
+		},
+	};
+
+	const state = suspendTerminalInput(fakeTty);
+	assert.deepEqual(calls, ["raw:false", "pause"]);
+	assert.equal(fakeTty.isRaw, false);
+
+	restoreTerminalInput(fakeTty, state);
+	assert.deepEqual(calls, ["raw:false", "pause", "resume", "raw:true"]);
+	assert.equal(fakeTty.isRaw, true);
+});
+
+test("suspendTerminalInput does not force raw mode on non-tty or non-raw stdin", async () => {
+	const { suspendTerminalInput, restoreTerminalInput } = await import(
+		"../../tools/manage.mjs"
+	);
+	const calls = [];
+	const fakePipe = {
+		isTTY: false,
+		pause() {
+			calls.push("pause");
+		},
+		resume() {
+			calls.push("resume");
+		},
+	};
+
+	const state = suspendTerminalInput(fakePipe);
+	assert.deepEqual(calls, ["pause"]);
+
+	restoreTerminalInput(fakePipe, state);
+	assert.deepEqual(calls, ["pause", "resume"]);
+});

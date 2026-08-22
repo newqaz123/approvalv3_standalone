@@ -69,6 +69,7 @@ export function createPrompt() {
 	const rl = createInterface({ input, output });
 	const lines = rl[Symbol.asyncIterator]();
 	let closed = false;
+	let handoffState = null;
 
 	return {
 		async ask(question) {
@@ -86,23 +87,54 @@ export function createPrompt() {
 			return String(nextLine.value).trim();
 		},
 		pause() {
-			// Stop draining stdin so an interactive child process (spawned with
-			// stdio: "inherit") receives terminal input instead of this readline
-			// interface consuming every keystroke.
-			if (!closed) {
-				rl.pause();
+			// Hand terminal ownership to an interactive child process (spawned
+			// with stdio: "inherit"). readline keeps the TTY in raw mode
+			// (-icanon -echo -icrnl); if left that way, bash `read` in the child
+			// never sees Enter translated to a newline and hangs silently.
+			// Pausing alone is not enough — the line discipline must be restored.
+			if (closed || handoffState) {
+				return;
 			}
+			handoffState = suspendTerminalInput(input);
+			rl.pause();
 		},
 		resume() {
-			if (!closed) {
-				rl.resume();
+			if (closed || !handoffState) {
+				return;
 			}
+			rl.resume();
+			restoreTerminalInput(input, handoffState);
+			handoffState = null;
 		},
 		close() {
 			closed = true;
 			rl.close();
 		},
 	};
+}
+
+// Restore the terminal to canonical mode and stop reading stdin so an
+// interactive child process can prompt the user through the shared TTY.
+export function suspendTerminalInput(input) {
+	const state = { wasRaw: Boolean(input?.isTTY && input.isRaw) };
+	if (state.wasRaw) {
+		input.setRawMode(false);
+	}
+	if (typeof input?.pause === "function") {
+		input.pause();
+	}
+	return state;
+}
+
+// Undo suspendTerminalInput: resume reading and re-enable raw mode only if
+// the interface was using it before the handoff.
+export function restoreTerminalInput(input, state) {
+	if (typeof input?.resume === "function") {
+		input.resume();
+	}
+	if (state?.wasRaw && input?.isTTY) {
+		input.setRawMode(true);
+	}
 }
 
 // Run a child script while temporarily handing stdin ownership to it.
