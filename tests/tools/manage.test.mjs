@@ -227,3 +227,72 @@ test("manage cli renders menu and exits on option 8", async () => {
 
 	assert.match(stdout, /Approval App Manager/);
 });
+
+test("updateExistingInstall pauses the prompt while deploy.sh owns the terminal", async () => {
+	const { updateExistingInstall } = await import("../../tools/manage.mjs");
+	const paths = { scripts: { deploy: "/repo/scripts/deploy.sh" } };
+	const events = [];
+
+	await updateExistingInstall({
+		paths,
+		log: () => {},
+		io: {
+			pause: () => events.push("pause"),
+			resume: () => events.push("resume"),
+		},
+		run: async () => events.push("run"),
+	});
+
+	assert.deepEqual(events, ["pause", "run", "resume"]);
+});
+
+test("updateExistingInstall resumes the prompt even when deploy.sh fails", async () => {
+	const { updateExistingInstall } = await import("../../tools/manage.mjs");
+	const events = [];
+
+	await assert.rejects(
+		updateExistingInstall({
+			paths: { scripts: { deploy: "/repo/scripts/deploy.sh" } },
+			log: () => {},
+			io: {
+				pause: () => events.push("pause"),
+				resume: () => events.push("resume"),
+			},
+			run: async () => {
+				events.push("run");
+				throw new Error("deploy failed");
+			},
+		}),
+		/deploy failed/,
+	);
+
+	assert.deepEqual(events, ["pause", "run", "resume"]);
+});
+
+test("rollback pauses the prompt while rollback.sh owns the terminal", async () => {
+	const { rollback } = await import("../../tools/manage.mjs");
+	const events = [];
+
+	await rollback({
+		paths: { scripts: { rollback: "/repo/scripts/rollback.sh" } },
+		log: () => {},
+		io: {
+			pause: () => events.push("pause"),
+			resume: () => events.push("resume"),
+		},
+		run: async () => events.push("run"),
+	});
+
+	assert.deepEqual(events, ["pause", "run", "resume"]);
+});
+
+test("createPrompt exposes pause and resume for interactive child scripts", async () => {
+	const { createPrompt } = await import("../../tools/manage.mjs");
+	const prompt = createPrompt();
+	try {
+		assert.equal(typeof prompt.pause, "function");
+		assert.equal(typeof prompt.resume, "function");
+	} finally {
+		prompt.close();
+	}
+});

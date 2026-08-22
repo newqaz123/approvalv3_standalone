@@ -85,11 +85,34 @@ export function createPrompt() {
 
 			return String(nextLine.value).trim();
 		},
+		pause() {
+			// Stop draining stdin so an interactive child process (spawned with
+			// stdio: "inherit") receives terminal input instead of this readline
+			// interface consuming every keystroke.
+			if (!closed) {
+				rl.pause();
+			}
+		},
+		resume() {
+			if (!closed) {
+				rl.resume();
+			}
+		},
 		close() {
 			closed = true;
 			rl.close();
 		},
 	};
+}
+
+// Run a child script while temporarily handing stdin ownership to it.
+export async function withPausedPrompt(io, operation) {
+	if (io?.pause) io.pause();
+	try {
+		return await operation();
+	} finally {
+		if (io?.resume) io.resume();
+	}
 }
 
 export function logEnvironmentReport(report, log = console.log) {
@@ -236,28 +259,43 @@ export async function runScript(
 	});
 }
 
-export async function backupData(options = {}) {
-	const paths = options.paths ?? defaultPaths;
-	await runScript(paths.scripts.backup, [], { paths, log: options.log });
+export async function backupData({
+	paths = defaultPaths,
+	log = console.log,
+	run = runScript,
+	io,
+} = {}) {
+	await withPausedPrompt(io, () => run(paths.scripts.backup, [], { paths, log }));
 }
 
-export async function healthCheck(options = {}) {
-	const paths = options.paths ?? defaultPaths;
-	await runScript(paths.scripts.health, [], { paths, log: options.log });
+export async function healthCheck({
+	paths = defaultPaths,
+	log = console.log,
+	run = runScript,
+	io,
+} = {}) {
+	await withPausedPrompt(io, () => run(paths.scripts.health, [], { paths, log }));
 }
 
-export async function rollback(options = {}) {
-	const paths = options.paths ?? defaultPaths;
-	await runScript(paths.scripts.rollback, [], { paths, log: options.log });
+export async function rollback({
+	paths = defaultPaths,
+	log = console.log,
+	run = runScript,
+	io,
+} = {}) {
+	await withPausedPrompt(io, () =>
+		run(paths.scripts.rollback, [], { paths, log }),
+	);
 }
 
 export async function updateExistingInstall({
 	paths = defaultPaths,
 	log = console.log,
 	run = runScript,
+	io,
 } = {}) {
 	log("\nStarting unified deployment workflow.");
-	await run(paths.scripts.deploy, [], { paths, log });
+	await withPausedPrompt(io, () => run(paths.scripts.deploy, [], { paths, log }));
 }
 
 export async function restoreBackup({
@@ -265,6 +303,7 @@ export async function restoreBackup({
 	ask = async () => "",
 	log = console.log,
 	run = runScript,
+	io,
 } = {}) {
 	const dbBackup = await ask("Database backup path: ");
 	if (!dbBackup) {
@@ -283,7 +322,9 @@ export async function restoreBackup({
 	}
 
 	const args = uploadsBackup ? [dbBackup, uploadsBackup] : [dbBackup];
-	await run(paths.scripts.restore, args, { paths, log });
+	await withPausedPrompt(io, () =>
+		run(paths.scripts.restore, args, { paths, log }),
+	);
 }
 
 export async function showMenu(log = console.log, ask = async () => "") {
@@ -307,6 +348,10 @@ export async function main({
 	const prompt = ask ?? createPrompt();
 	const askQuestion =
 		typeof prompt === "function" ? prompt : prompt.ask.bind(prompt);
+	// Interactive child scripts must own stdin while they run; the prompt is
+	// paused around each spawn so bash `read` receives the keystrokes.
+	const io =
+		typeof prompt === "function" || !prompt.pause ? undefined : prompt;
 
 	try {
 		while (true) {
@@ -315,17 +360,17 @@ export async function main({
 			if (choice === "1") {
 				await envDoctor({ paths, ask: askQuestion, log });
 			} else if (choice === "2") {
-				await updateExistingInstall({ paths, ask: askQuestion, log });
+				await updateExistingInstall({ paths, ask: askQuestion, log, io });
 			} else if (choice === "3") {
-				await backupData({ paths, log });
+				await backupData({ paths, log, io });
 			} else if (choice === "4") {
-				await restoreBackup({ paths, ask: askQuestion, log });
+				await restoreBackup({ paths, ask: askQuestion, log, io });
 			} else if (choice === "5") {
-				await healthCheck({ paths, log });
+				await healthCheck({ paths, log, io });
 			} else if (choice === "6") {
 				await envDoctor({ paths, ask: askQuestion, log });
 			} else if (choice === "7") {
-				await rollback({ paths, log });
+				await rollback({ paths, log, io });
 			} else if (choice === "8") {
 				break;
 			} else {
