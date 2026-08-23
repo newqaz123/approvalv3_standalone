@@ -99,7 +99,7 @@ Rollback restores only the previous app image. It does not reverse database migr
 - **Analytics Dashboard** — Pipeline charts, approval time metrics, department breakdowns
 - **Request Templates** — Predefined templates for common submissions
 - **Mobile-Responsive** — Touch-friendly UI across all screen sizes
-- **Email Notifications** — Optional SMTP-based notifications (works without configuration)
+- **Email Notifications** — Configure SMTP in Admin → Email notifications (provider presets, master toggle, test send); `SMTP_*` env values are the fallback until the first save
 
 ## Tech Stack
 
@@ -136,6 +136,10 @@ Rollback restores only the previous app image. It does not reverse database migr
 | `SMTP_USER` | No | SMTP username |
 | `SMTP_PASS` | No | SMTP password |
 | `SMTP_FROM` | No | Sender email address |
+
+SMTP_* values are used only until an admin saves Email notifications.
+After that, Admin settings win and rotating NEXTAUTH_SECRET requires
+re-entering the SMTP password.
 
 ### Authentication Origin and Logout
 
