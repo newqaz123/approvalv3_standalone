@@ -18,14 +18,20 @@ deployment_failed() {
 trap deployment_failed ERR
 
 select_mode() {
-	printf '%s\n' '1. Ubuntu VPS / GitHub update' '2. Offline intranet package' '3. Cancel' >&2
-	read -r choice
-	case "$choice" in
-	1) printf '%s\n' online ;;
-	2) printf '%s\n' offline ;;
-	3) return 2 ;;
-	*) fail 'Choose 1, 2, or 3' ;;
-	esac
+	local choice
+	while :; do
+		printf '%s\n' '1. Ubuntu VPS / GitHub update' '2. Offline intranet package' '3. Cancel' >&2
+		if ! read -r choice; then
+			printf '\n' >&2
+			return 0
+		fi
+		case "$choice" in
+		1) printf '%s\n' online; return 0 ;;
+		2) printf '%s\n' offline; return 0 ;;
+		3) return 0 ;;
+		*) printf '%s\n' 'Choose 1, 2, or 3' >&2 ;;
+		esac
+	done
 }
 usage() { printf 'Usage: %s [--online|--offline <package-dir>]\n' "$0"; }
 
@@ -151,7 +157,13 @@ main() {
 		}
 		DEPLOY_ROOT="$(cd "$package_dir" && pwd -P)"
 		;;
-	'') mode="$(select_mode)" ;;
+	'')
+		mode="$(select_mode)"
+		[ -n "$mode" ] || {
+			printf 'Deployment cancelled.\n'
+			exit 0
+		}
+		;;
 	-h | --help)
 		usage
 		return 0

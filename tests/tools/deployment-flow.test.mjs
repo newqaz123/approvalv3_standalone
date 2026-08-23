@@ -858,3 +858,30 @@ test('state capture psql probes authenticate explicitly instead of as the exec O
   const log = await readFile(fixture.log, 'utf8')
   assert.match(log, /docker exec approval-db psql -U \S+ -d \S+ -Atqc select count\(\*\) from users;/)
 })
+
+test('interactive cancel exits cleanly without running deployment commands', async () => {
+  const fixture = await fakeBin()
+  const deployRoot = join(fixture.dir, 'cancel-root')
+  await installDeployRoot(deployRoot)
+  const result = runDeployment(join(root, 'scripts/deploy.sh'), [], {
+    PATH: `${fixture.bin}:${process.env.PATH}`, COMMAND_LOG: fixture.log, DEPLOY_ROOT: deployRoot,
+  }, fixture.dir, { input: '3\n' })
+  assert.equal(result.status, 0, `stdout: ${result.stdout}\nstderr: ${result.stderr}`)
+  assert.match(result.stdout + result.stderr, /[Cc]ancel+ed/)
+  assert.doesNotMatch(result.stdout + result.stderr, /Deployment failed/)
+  const log = await readFile(fixture.log, 'utf8').catch(() => '')
+  assert.equal(log, '')
+})
+
+test('invalid menu choice re-prompts instead of aborting', async () => {
+  const fixture = await fakeBin()
+  const deployRoot = join(fixture.dir, 'reprompt-root')
+  await installDeployRoot(deployRoot)
+  const result = runDeployment(join(root, 'scripts/deploy.sh'), [], {
+    PATH: `${fixture.bin}:${process.env.PATH}`, COMMAND_LOG: fixture.log, DEPLOY_ROOT: deployRoot,
+  }, fixture.dir, { input: '9\n3\n' })
+  assert.equal(result.status, 0, `stdout: ${result.stdout}\nstderr: ${result.stderr}`)
+  assert.doesNotMatch(result.stdout + result.stderr, /Deployment failed/)
+  const log = await readFile(fixture.log, 'utf8').catch(() => '')
+  assert.equal(log, '')
+})
