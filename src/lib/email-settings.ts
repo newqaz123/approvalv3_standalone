@@ -1,4 +1,11 @@
 import { buildEmailSecretAad, decryptEmailSecret } from './email-crypto'
+import type { EmailProvider } from './email-presets'
+
+// Presets and public types stay client-safe in ./email-presets so the admin
+// form never pulls this (node:crypto-dependent) module into the browser
+// build. Re-exported here so server callers can import from either module.
+export { EMAIL_PROVIDERS, applyEmailPreset } from './email-presets'
+export type { EmailProvider, EmailSettingsPublic } from './email-presets'
 
 /**
  * Pure SMTP settings logic: identity binding, validation, password-reuse
@@ -6,9 +13,6 @@ import { buildEmailSecretAad, decryptEmailSecret } from './email-crypto'
  * Server-only callers pass the row/env in; nothing here touches Prisma or
  * Nodemailer so every rule stays unit-testable.
  */
-
-export const EMAIL_PROVIDERS = ['resend', 'gmail', 'outlook', 'custom'] as const
-export type EmailProvider = (typeof EMAIL_PROVIDERS)[number]
 
 export type EmailIdentity = {
   host: string
@@ -23,19 +27,6 @@ export type ResolvedEmailConfig = {
   password: string
   fromAddress: string
   source: 'env' | 'db'
-}
-
-export type EmailSettingsPublic = {
-  source: 'env' | 'admin' | 'none'
-  enabled: boolean
-  provider: EmailProvider
-  host: string
-  port: number
-  username: string
-  fromAddress: string
-  hasPassword: boolean
-  needsPasswordReset: boolean
-  noAuth: boolean
 }
 
 export type EnvEmailConfig = {
@@ -74,27 +65,6 @@ export type TransporterOptions = {
 
 const SMTP_TIMEOUT_MS = 10_000
 const DEFAULT_SMTP_PORT = 587
-
-const PRESETS: Record<
-  Exclude<EmailProvider, 'custom'>,
-  { host: string; port: number; username?: string }
-> = {
-  resend: { host: 'smtp.resend.com', port: 587, username: 'resend' },
-  gmail: { host: 'smtp.gmail.com', port: 587 },
-  outlook: { host: 'smtp.office365.com', port: 587 },
-}
-
-export function applyEmailPreset(provider: EmailProvider): {
-  provider: EmailProvider
-  host?: string
-  port?: number
-  username?: string
-} {
-  if (provider === 'custom') {
-    return { provider }
-  }
-  return { provider, ...PRESETS[provider] }
-}
 
 export function normalizeEmailIdentity({
   host,
@@ -220,6 +190,10 @@ export function decidePasswordOnSave({
   env: (PasswordIdentitySource & { hasPass: boolean }) | null
 }): PasswordDecision {
   const identity = normalizeEmailIdentity({ host, port, username })
+  // Whitespace decides whether the field is blank, but the credential is
+  // stored exactly as typed — SMTP secrets may legitimately contain
+  // leading/trailing whitespace, and trimming would silently save a
+  // different password than the admin entered.
   const trimmedPassword = (password ?? '').trim()
 
   if (noAuth && provider !== 'custom') {
@@ -238,8 +212,8 @@ export function decidePasswordOnSave({
     return { ok: true, action: 'none' }
   }
 
-  if (trimmedPassword) {
-    return { ok: true, action: 'encrypt', password: trimmedPassword }
+  if (trimmedPassword && password) {
+    return { ok: true, action: 'encrypt', password }
   }
 
   // A stored password may be reused only for the SMTP identity it was
@@ -352,8 +326,19 @@ export function sanitizeSmtpError(error: unknown): string {
       ? error.message
       : String(error ?? '')
   const redacted = message
+    // URI credentials: scheme://user:secret@host → scheme://user:[redacted]@host
     .replace(
-      /\b(pass(word)?|passwd|pwd|api_?key|token|secret)\s*[=:]\s*\S+/gi,
+      /([a-z][a-z0-9+.-]*:\/\/)([^:@/\s]+):([^@\s]+)@/gi,
+      '$1$2:[redacted]@',
+    )
+    // Quoted JSON-style credentials: "password":"secret" (value may contain spaces)
+    .replace(
+      /(["']?)(pass(word)?|passwd|pwd|api_?key|token|secret)\1\s*:\s*(["'])(.*?)\4/gi,
+      '$1$2$1:$4[redacted]$4',
+    )
+    // Bare key=value / key:value credentials
+    .replace(
+      /\b(pass(word)?|passwd|pwd|api_?key|token|secret)\b['"]?\s*[=:]\s*['"]?[^\s,'"\]}]+/gi,
       '$1=[redacted]',
     )
     .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')

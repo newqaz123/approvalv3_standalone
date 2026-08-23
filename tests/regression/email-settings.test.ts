@@ -1,5 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import {
   applyEmailPreset,
   decidePasswordOnSave,
@@ -169,6 +171,63 @@ describe('email-settings', () => {
     const message = sanitizeSmtpError(new Error('Invalid login pass=super-secret-value host=smtp.resend.com'))
     assert.ok(message.length <= 300)
     assert.doesNotMatch(message, /super-secret-value/)
+  })
+
+  it('preserves leading and trailing whitespace in passwords', () => {
+    const withSpaces = decidePasswordOnSave({
+      host: 'smtp.resend.com',
+      port: 587,
+      username: 'resend',
+      password: ' pad ded ',
+      noAuth: false,
+      provider: 'resend',
+      existing: null,
+      env: null,
+    })
+    assert.deepEqual(withSpaces, {
+      ok: true,
+      action: 'encrypt',
+      password: ' pad ded ',
+    })
+
+    // Whitespace-only input still counts as blank.
+    const whitespaceOnly = decidePasswordOnSave({
+      host: 'smtp.resend.com',
+      port: 587,
+      username: 'resend',
+      password: '   ',
+      noAuth: false,
+      provider: 'resend',
+      existing: null,
+      env: null,
+    })
+    assert.equal(whitespaceOnly.ok, false)
+  })
+
+  it('sanitizes URI and quoted JSON credentials', () => {
+    const uri = sanitizeSmtpError(
+      new Error('connect failed for smtp://resend:re_abc123_secret@smtp.example.com:587'),
+    )
+    assert.doesNotMatch(uri, /re_abc123_secret/)
+    assert.match(uri, /smtp:\/\/resend:\[redacted\]@/)
+
+    const json = sanitizeSmtpError(
+      new Error('535 auth failed {"password":"hunter2 secret","user":"resend"}'),
+    )
+    assert.doesNotMatch(json, /hunter2/)
+  })
+
+  it('keeps presets client-safe with no node-only imports', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'src/lib/email-presets.ts'),
+      'utf8',
+    )
+    // Assert on import/export statements, not prose: a comment mentioning
+    // "nodemailer" is harmless, an import of it would break the browser build.
+    const imports = source.match(/^(?:import|export)[^;]*;/gm) ?? []
+    const importText = imports.join('\n')
+    assert.doesNotMatch(importText, /node:crypto|email-crypto|email-settings|nodemailer|@prisma/)
+    assert.ok(imports.length > 0, 'expected at least the provider export to exist')
   })
 
   it('fills Resend/Gmail/Outlook presets and leaves custom alone', () => {
