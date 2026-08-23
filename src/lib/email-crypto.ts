@@ -7,6 +7,8 @@ import {
 
 const INFO = 'approval-app:email-settings:v1'
 const ALGO = 'aes-256-gcm'
+const GCM_NONCE_BYTES = 12
+const GCM_TAG_BYTES = 16
 
 type EnvelopeV1 = { v: 1; n: string; t: string; c: string }
 
@@ -58,10 +60,19 @@ export function decryptEmailSecret(envelopeJson: string, aad: string) {
   if (parsed.v !== 1 || !parsed.n || !parsed.t || !parsed.c) {
     throw new Error('Unsupported email secret envelope')
   }
+  const nonce = Buffer.from(parsed.n, 'base64')
+  const tag = Buffer.from(parsed.t, 'base64')
+  // Node's GCM API accepts shorter auth tags unless restricted, which would
+  // let a truncated tag authenticate with reduced integrity strength.
+  if (nonce.length !== GCM_NONCE_BYTES || tag.length !== GCM_TAG_BYTES) {
+    throw new Error('Invalid email secret envelope lengths')
+  }
   const key = deriveKey()
-  const decipher = createDecipheriv(ALGO, key, Buffer.from(parsed.n, 'base64'))
+  const decipher = createDecipheriv(ALGO, key, nonce, {
+    authTagLength: GCM_TAG_BYTES,
+  })
   decipher.setAAD(Buffer.from(aad, 'utf8'))
-  decipher.setAuthTag(Buffer.from(parsed.t, 'base64'))
+  decipher.setAuthTag(tag)
   return Buffer.concat([
     decipher.update(Buffer.from(parsed.c, 'base64')),
     decipher.final(),

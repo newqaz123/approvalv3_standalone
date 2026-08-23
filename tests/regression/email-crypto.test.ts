@@ -48,6 +48,22 @@ describe('email-crypto', () => {
     assert.throws(() => decryptEmailSecret(encryptEmailSecret('re_test_key', aad), otherAad))
   })
 
+  it('rejects truncated GCM auth tags and non-standard nonce lengths', () => {
+    const aad = buildEmailSecretAad({ host: 'smtp.resend.com', port: 587, username: 'resend' })
+    const envelope = JSON.parse(encryptEmailSecret('re_test_key', aad))
+    const tag = Buffer.from(envelope.t, 'base64')
+    assert.equal(tag.length, 16)
+    // Truncated tags are still accepted by Node's raw GCM API with reduced
+    // integrity strength; decryption must reject them up front.
+    envelope.t = tag.subarray(0, 15).toString('base64')
+    assert.throws(() => decryptEmailSecret(JSON.stringify(envelope), aad))
+    const nonce = Buffer.from(envelope.n, 'base64')
+    assert.equal(nonce.length, 12)
+    envelope.t = tag.toString('base64')
+    envelope.n = Buffer.concat([nonce, Buffer.from([0])]).toString('base64')
+    assert.throws(() => decryptEmailSecret(JSON.stringify(envelope), aad))
+  })
+
   it('fails closed without NEXTAUTH_SECRET and does not include the secret in errors', () => {
     const secret = process.env.NEXTAUTH_SECRET
     delete process.env.NEXTAUTH_SECRET
