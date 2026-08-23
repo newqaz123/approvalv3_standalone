@@ -14,7 +14,7 @@ import {
   normalizeEmailIdentity,
   parseEmailPort,
   readEnvEmailConfig,
-  sanitizeSmtpError,
+  sanitizeSmtpErrorWithSecrets,
   validateFromAddress,
 } from '@/lib/email-settings'
 import {
@@ -323,6 +323,9 @@ export async function sendTestEmail(
     return { success: false, error: validated.error }
   }
 
+  let resolvedPassword = validated.value.password
+  let importedEnvPassword = ''
+
   try {
     const value = validated.value
     const [admin, existing] = await Promise.all([
@@ -367,10 +370,9 @@ export async function sendTestEmail(
 
     const identity = normalizeEmailIdentity(value)
     const aad = buildEmailSecretAad(identity)
-    let password: string
     switch (decision.action) {
       case 'encrypt':
-        password = decision.password
+        resolvedPassword = decision.password
         break
       case 'keep':
         if (!existing?.passwordEncrypted) {
@@ -381,7 +383,7 @@ export async function sendTestEmail(
         }
         try {
           const encryptedPassword = existing.passwordEncrypted
-          password = decryptEmailSecret(encryptedPassword, aad)
+          resolvedPassword = decryptEmailSecret(encryptedPassword, aad)
         } catch {
           return {
             success: false,
@@ -396,10 +398,11 @@ export async function sendTestEmail(
             error: 'Re-enter the password for this SMTP server',
           }
         }
-        password = env.password
+        importedEnvPassword = env.password
+        resolvedPassword = importedEnvPassword
         break
       case 'none':
-        password = ''
+        resolvedPassword = ''
         break
     }
 
@@ -408,7 +411,7 @@ export async function sendTestEmail(
         host: identity.host,
         port: identity.port,
         username: identity.username,
-        password,
+        password: resolvedPassword,
         fromAddress: value.fromAddress,
         source: 'db',
       }),
@@ -423,6 +426,12 @@ export async function sendTestEmail(
 
     return { success: true }
   } catch (error) {
-    return { success: false, error: sanitizeSmtpError(error) }
+    return {
+      success: false,
+      error: sanitizeSmtpErrorWithSecrets(error, [
+        resolvedPassword,
+        importedEnvPassword,
+      ]),
+    }
   }
 }

@@ -320,12 +320,46 @@ export function buildTransporterOptions(
   return options
 }
 
+function smtpErrorMessage(error: unknown): string {
+  return error instanceof Error && error.message
+    ? error.message
+    : String(error ?? '')
+}
+
+export function redactExactSmtpSecrets(
+  message: string,
+  secrets: ReadonlyArray<string | null | undefined>,
+): string {
+  const exactSecrets = [
+    ...new Set(
+      secrets.filter((secret): secret is string => Boolean(secret)),
+    ),
+  ].sort((a, b) => b.length - a.length)
+
+  if (exactSecrets.length === 0) return message
+
+  // Replace all exact credentials in one scan. A single pass prevents a
+  // short credential from matching inside the [redacted] placeholder that
+  // was inserted for a longer credential.
+  let result = ''
+  let cursor = 0
+  while (cursor < message.length) {
+    const matched = exactSecrets.find((secret) =>
+      message.startsWith(secret, cursor),
+    )
+    if (matched) {
+      result += '[redacted]'
+      cursor += matched.length
+    } else {
+      result += message[cursor]
+      cursor += 1
+    }
+  }
+  return result
+}
+
 export function sanitizeSmtpError(error: unknown): string {
-  const message =
-    error instanceof Error && error.message
-      ? error.message
-      : String(error ?? '')
-  const redacted = message
+  const redacted = smtpErrorMessage(error)
     // URI credentials: scheme://user:secret@host → scheme://user:[redacted]@host
     .replace(
       /([a-z][a-z0-9+.-]*:\/\/)([^:@/\s]+):([^@\s]+)@/gi,
@@ -345,4 +379,17 @@ export function sanitizeSmtpError(error: unknown): string {
   return redacted.length > 300
     ? `${redacted.slice(0, 297)}...`
     : redacted
+}
+
+export function sanitizeSmtpErrorWithSecrets(
+  error: unknown,
+  secrets: ReadonlyArray<string | null | undefined>,
+): string {
+  // Redact before the 300-character cap so a long credential cannot be
+  // truncated into a plaintext prefix that no longer equals the full secret.
+  const exactRedacted = redactExactSmtpSecrets(smtpErrorMessage(error), secrets)
+  const sanitized = sanitizeSmtpError(exactRedacted)
+  // Apply exact redaction again after the structured sanitizer as the final
+  // boundary before this diagnostic can cross a Server Action response.
+  return redactExactSmtpSecrets(sanitized, secrets)
 }

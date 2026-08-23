@@ -52,4 +52,15 @@ describe('email-settings server actions', () => {
       /prisma\.email_settings\.(create|update|upsert)/,
     )
   })
+
+  it('redacts resolved and imported env credentials from test-send errors', () => {
+    const start = source.indexOf('export async function sendTestEmail')
+    const slice = source.slice(start)
+    assert.match(slice, /let resolvedPassword/)
+    assert.match(slice, /let importedEnvPassword/)
+    assert.match(
+      slice,
+      /sanitizeSmtpErrorWithSecrets\(\s*error,\s*\[\s*resolvedPassword,\s*importedEnvPassword,?\s*\]/,
+    )
+  })
 })

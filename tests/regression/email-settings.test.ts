@@ -11,6 +11,7 @@ import {
   readEnvEmailConfig,
   resolveRuntimeEmailConfig,
   sanitizeSmtpError,
+  sanitizeSmtpErrorWithSecrets,
   validateFromAddress,
   buildTransporterOptions,
 } from '../../src/lib/email-settings'
@@ -171,6 +172,34 @@ describe('email-settings', () => {
     const message = sanitizeSmtpError(new Error('Invalid login pass=super-secret-value host=smtp.resend.com'))
     assert.ok(message.length <= 300)
     assert.doesNotMatch(message, /super-secret-value/)
+  })
+
+  it('redacts exact SMTP credentials from unstructured provider errors', () => {
+    const resolvedPassword = 'super-secret-value'
+    const envPassword = 'env-secret-value'
+    const message = sanitizeSmtpErrorWithSecrets(
+      new Error(
+        `Authentication failed for ${resolvedPassword}; fallback was ${envPassword}`,
+      ),
+      [resolvedPassword, envPassword],
+    )
+
+    assert.equal(
+      message,
+      'Authentication failed for [redacted]; fallback was [redacted]',
+    )
+    assert.doesNotMatch(message, /super-secret-value|env-secret-value/)
+  })
+
+  it('redacts an exact credential before SMTP error truncation', () => {
+    const longPassword = 'x'.repeat(350)
+    const message = sanitizeSmtpErrorWithSecrets(
+      new Error(`Authentication failed for ${longPassword}`),
+      [longPassword],
+    )
+
+    assert.equal(message, 'Authentication failed for [redacted]')
+    assert.doesNotMatch(message, /x{20}/)
   })
 
   it('preserves leading and trailing whitespace in passwords', () => {
