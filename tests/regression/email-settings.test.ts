@@ -228,7 +228,10 @@ describe('email-settings', () => {
     // import statements never end in ';' — match specifiers instead of
     // statements, and only after stripping comments.
     const withoutComments = source
-      .replace(/\/*[\s\S]*?\*\//g, '')
+      // Opener must be a literal `/*` — `\/*` is `\/` + `*` quantifier
+      // (zero-or-more slashes) and would strip a banned import placed above
+      // this file's header comment along with the comment itself.
+      .replace(/\/\*[\s\S]*?\*\//g, '')
       .replace(/^[ \t]*\/\/.*$/gm, '')
     const specifiers = [
       ...(withoutComments.match(/from\s+['"][^'"]+['"]/g) ?? []),
