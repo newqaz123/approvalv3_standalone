@@ -276,26 +276,31 @@ describe("attachment preview sheet budget", () => {
 		assert.doesNotMatch(dialog, /(?<![-:\w])h-\[88vh\]/);
 		assert.doesNotMatch(dialog, /(?<![-:\w])min-h-\[70vh\]/);
 
-		// Desktop keeps its tall card; phones get an svh-scoped budget that
-		// clears the sheet header while the preview area scrolls itself.
+		// Desktop keeps its tall card. Phones fill the 92svh sheet so the
+		// document, not the chrome, gets the leftover height.
 		assert.match(dialog, /pointer-fine:h-\[88vh\]/);
 		assert.match(dialog, /pointer-fine:max-h-\[88vh\]/);
-		assert.match(dialog, /max-h-\[calc\(92svh-180px\)\]/);
-		assert.match(dialog, /pointer-fine:max-h-none/);
+		assert.match(dialog, /pointer-coarse:h-\[92svh\]/);
+		assert.doesNotMatch(dialog, /max-h-\[calc\(92svh-180px\)\]/);
 		assert.doesNotMatch(dialog, /min-h-\[60svh\]/);
 		assert.match(dialog, /pointer-fine:min-h-\[70vh\]|pointer-fine:h-full/);
 	});
 
-	it("stacks the preview header so the filename and Download do not collide with close", () => {
+	it("uses a compact document-first header on phones", () => {
 		const dialog = read("src/components/requests/file-preview-dialog.tsx");
 
-		assert.match(
-			dialog,
-			/flex flex-col gap-3[\s\S]*?sm:flex-row|flex-col[\s\S]*?Download/,
-		);
-		assert.match(dialog, /break-words|break-all/);
-		assert.doesNotMatch(dialog, /DialogTitle className="truncate"/);
-		assert.match(dialog, /w-full sm:w-auto/);
+		// Filename clamps after two lines instead of pushing the document down.
+		assert.match(dialog, /DialogTitle[^>]*line-clamp-2/);
+		assert.match(dialog, /getFilePreviewTypeLabel/);
+		assert.doesNotMatch(dialog, /file\?\.fileType \|\| previewKind/);
+
+		// Download is a 44px icon in the header, not a full-width button.
+		assert.match(dialog, /sr-only[\s\S]*?Download|Download[\s\S]*?sr-only/);
+		assert.match(dialog, /h-11 w-11|size-11/);
+		assert.doesNotMatch(dialog, /w-full sm:w-auto/);
+
+		// This sheet owns Close so the default 16px X does not fight the title.
+		assert.match(dialog, /hideClose/);
 	});
 });
 

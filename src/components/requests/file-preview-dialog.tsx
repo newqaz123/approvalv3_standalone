@@ -1,16 +1,22 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { Download, FileText, Loader2 } from 'lucide-react'
+import { Download, FileText, Loader2, X } from 'lucide-react'
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { getFilePreviewKind, type FilePreviewKind } from '@/lib/file-preview'
+import {
+  getFilePreviewKind,
+  getFilePreviewTypeLabel,
+  type FilePreviewKind,
+} from '@/lib/file-preview'
+import { cn } from '@/lib/utils'
 
 interface PreviewFile {
   id: string
@@ -54,6 +60,10 @@ export function FilePreviewDialog({
   const [loadState, setLoadState] = useState<LoadState>({ status: 'idle' })
   const previewKind = useMemo<FilePreviewKind>(
     () => (file ? getFilePreviewKind(file) : 'unsupported'),
+    [file]
+  )
+  const fileTypeLabel = useMemo(
+    () => (file ? getFilePreviewTypeLabel(file) : 'File'),
     [file]
   )
 
@@ -118,50 +128,72 @@ export function FilePreviewDialog({
   }, [file, open, previewKind, url])
 
   const fileSizeLabel = file?.fileSize && formatFileSize ? formatFileSize(file.fileSize) : null
-  const fileTypeLabel = file?.fileType || previewKind.toUpperCase()
-
-  const downloadButton = file ? (
-    <Button
-      size="sm"
-      variant="outline"
-      className="w-full sm:w-auto"
-      onClick={() => onDownload(file)}
-    >
-      <Download className="h-4 w-4 mr-1" />
-      Download
-    </Button>
-  ) : null
+  const showCanvasDownload =
+    Boolean(file) && (previewKind === 'unsupported' || loadState.status === 'error' || !url)
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl grid-rows-[auto_minmax(0,1fr)] overflow-hidden pointer-fine:h-[88vh] pointer-fine:max-h-[88vh]">
-        <DialogHeader className="pr-10 shrink-0">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div className="min-w-0">
-              <DialogTitle className="break-words">
-                {file?.fileName || 'File preview'}
-              </DialogTitle>
-              <DialogDescription className="mt-1 flex flex-wrap items-center gap-2">
-                {fileSizeLabel && <span>{fileSizeLabel}</span>}
-                {fileSizeLabel && <span aria-hidden="true">•</span>}
-                <span>{fileTypeLabel}</span>
-              </DialogDescription>
-            </div>
-            <div className="w-full shrink-0 sm:w-auto">{downloadButton}</div>
+      <DialogContent
+        hideClose
+        className="max-w-5xl gap-0 overflow-hidden p-0 grid-rows-[auto_minmax(0,1fr)] pointer-coarse:h-[92svh] pointer-fine:h-[88vh] pointer-fine:max-h-[88vh]"
+      >
+        <DialogHeader className="flex flex-row items-center gap-3 space-y-0 border-b px-3.5 pb-2 pt-7 text-left shrink-0 pointer-fine:pt-3">
+          <div
+            className={cn(
+              'flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] text-[9.5px] font-bold tracking-wider',
+              previewKind === 'pdf' ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-600'
+            )}
+          >
+            {fileTypeLabel}
           </div>
+          <div className="min-w-0 flex-1">
+            <DialogTitle className="line-clamp-2 break-words text-[15.5px] font-semibold leading-snug tracking-tight">
+              {file?.fileName || 'File preview'}
+            </DialogTitle>
+            <DialogDescription className="mt-0.5 text-[12.5px] text-slate-500">
+              {fileTypeLabel}
+              {fileSizeLabel ? ` · ${fileSizeLabel}` : ''}
+            </DialogDescription>
+          </div>
+          {file ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-11 w-11 shrink-0 text-slate-700"
+              onClick={() => onDownload(file)}
+            >
+              <Download className="h-5 w-5" />
+              <span className="sr-only">Download</span>
+            </Button>
+          ) : null}
+          <DialogClose className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-slate-700 transition-colors hover:bg-slate-100">
+            <X className="h-5 w-5" />
+            <span className="sr-only">Close</span>
+          </DialogClose>
         </DialogHeader>
 
-        <div className="min-h-0 overflow-auto rounded-lg border bg-slate-50 max-h-[calc(92svh-180px)] pointer-fine:max-h-none">
-          {renderPreviewContent(previewKind, url, loadState)}
+        <div className="min-h-0 overflow-auto bg-slate-100">
+          {renderPreviewContent(
+            previewKind,
+            url,
+            loadState,
+            showCanvasDownload && file ? () => onDownload(file) : undefined
+          )}
         </div>
       </DialogContent>
     </Dialog>
   )
 }
 
-function renderPreviewContent(kind: FilePreviewKind, url: string | null, loadState: LoadState) {
+function renderPreviewContent(
+  kind: FilePreviewKind,
+  url: string | null,
+  loadState: LoadState,
+  onDownload?: () => void
+) {
   if (!url) {
-    return <PreviewMessage message={DEFAULT_ERROR} />
+    return <PreviewMessage message={DEFAULT_ERROR} onDownload={onDownload} />
   }
 
   if (kind === 'pdf') {
@@ -180,12 +212,17 @@ function renderPreviewContent(kind: FilePreviewKind, url: string | null, loadSta
   }
 
   if (kind === 'unsupported') {
-    return <PreviewMessage message="Preview is not available for this file type. Download the file to view it." />
+    return (
+      <PreviewMessage
+        message="Preview is not available for this file type. Download the file to view it."
+        onDownload={onDownload}
+      />
+    )
   }
 
   if (loadState.status === 'loading') {
     return (
-      <div className="flex min-h-[50vh] items-center justify-center gap-2 text-sm text-slate-600">
+      <div className="flex min-h-full items-center justify-center gap-2 text-sm text-slate-600">
         <Loader2 className="h-4 w-4 animate-spin" />
         Loading preview...
       </div>
@@ -193,7 +230,7 @@ function renderPreviewContent(kind: FilePreviewKind, url: string | null, loadSta
   }
 
   if (loadState.status === 'error') {
-    return <PreviewMessage message={loadState.message} />
+    return <PreviewMessage message={loadState.message} onDownload={onDownload} />
   }
 
   if (loadState.status === 'text') {
@@ -211,11 +248,23 @@ function renderPreviewContent(kind: FilePreviewKind, url: string | null, loadSta
   return <PreviewMessage message="Preparing preview..." />
 }
 
-function PreviewMessage({ message }: { message: string }) {
+function PreviewMessage({
+  message,
+  onDownload,
+}: {
+  message: string
+  onDownload?: () => void
+}) {
   return (
-    <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 p-6 text-center text-slate-600">
+    <div className="flex min-h-full flex-col items-center justify-center gap-3 p-6 text-center text-slate-600">
       <FileText className="h-10 w-10 text-slate-400" />
       <p className="max-w-md text-sm">{message}</p>
+      {onDownload ? (
+        <Button type="button" className="mt-2" onClick={onDownload}>
+          <Download className="h-4 w-4" />
+          Download
+        </Button>
+      ) : null}
     </div>
   )
 }

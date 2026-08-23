@@ -21,6 +21,24 @@ export function getFileExtension(fileName: string): string {
   return normalizedName.slice(lastDotIndex + 1)
 }
 
+const PREVIEW_TYPE_LABELS: Record<Exclude<FilePreviewKind, 'unsupported'>, string> = {
+  pdf: 'PDF',
+  image: 'Image',
+  text: 'Text',
+  docx: 'Word',
+  xlsx: 'Excel',
+}
+
+export function getFilePreviewTypeLabel(file: PreviewableFileMetadata): string {
+  const kind = getFilePreviewKind(file)
+  if (kind !== 'unsupported') {
+    return PREVIEW_TYPE_LABELS[kind]
+  }
+
+  const extension = getFileExtension(file.fileName)
+  return extension ? extension.toUpperCase() : 'File'
+}
+
 export function getFilePreviewKind(file: PreviewableFileMetadata): FilePreviewKind {
   const fileType = file.fileType?.toLowerCase() ?? ''
   const extension = getFileExtension(file.fileName)

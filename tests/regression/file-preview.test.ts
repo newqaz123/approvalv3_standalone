@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import {
   getFileDownloadUrl,
   getFilePreviewKind,
+  getFilePreviewTypeLabel,
   getFilePreviewUrl,
   isPreviewableFile,
 } from '../../src/lib/file-preview'
@@ -15,6 +16,21 @@ describe('file preview type detection', () => {
     assert.equal(getFilePreviewKind({ fileName: 'notes.txt', fileType: 'text/plain' }), 'text')
     assert.equal(getFilePreviewKind({ fileName: 'spec.docx', fileType: '' }), 'docx')
     assert.equal(getFilePreviewKind({ fileName: 'budget.xlsx', fileType: '' }), 'xlsx')
+  })
+
+  it('shows a short human file type instead of a raw MIME string', () => {
+    assert.equal(getFilePreviewTypeLabel({ fileName: 'drawing.pdf', fileType: 'application/pdf' }), 'PDF')
+    assert.equal(getFilePreviewTypeLabel({ fileName: 'photo.PNG', fileType: '' }), 'Image')
+    assert.equal(getFilePreviewTypeLabel({ fileName: 'notes.txt', fileType: 'text/plain' }), 'Text')
+    assert.equal(getFilePreviewTypeLabel({ fileName: 'spec.docx', fileType: '' }), 'Word')
+    assert.equal(getFilePreviewTypeLabel({ fileName: 'budget.xlsx', fileType: '' }), 'Excel')
+    assert.equal(getFilePreviewTypeLabel({ fileName: 'slides.pptx', fileType: '' }), 'PPTX')
+    assert.equal(getFilePreviewTypeLabel({ fileName: 'archive.zip', fileType: 'application/zip' }), 'ZIP')
+    assert.equal(getFilePreviewTypeLabel({ fileName: 'untitled', fileType: '' }), 'File')
+    assert.notEqual(
+      getFilePreviewTypeLabel({ fileName: 'sheet.pdf', fileType: 'application/pdf' }),
+      'application/pdf'
+    )
   })
 
   it('routes pptx and unknown files to unsupported preview state', () => {
