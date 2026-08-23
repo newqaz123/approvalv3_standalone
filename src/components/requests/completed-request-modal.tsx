@@ -29,6 +29,7 @@ import { RequestModalHeader } from "./request-modal-header";
 import { Separator } from "@/components/ui/separator";
 import { FormattedText } from "@/components/ui/formatted-text";
 import { CancelRequestDialog } from "./cancel-request-dialog";
+import { canUserSubmitSolution } from "@/lib/permission-checks";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
 
@@ -89,6 +90,7 @@ interface CompletedRequestModalProps {
 		engineerAssigned?: string;
 	};
 	userDepartment?: string;
+	userRole?: string;
 	onSubmitSolution?: () => void;
 	showCancel?: boolean;
 	onCancelled?: () => void;
@@ -209,6 +211,7 @@ export function CompletedRequestModal({
 	onOpenChange,
 	data,
 	userDepartment,
+	userRole,
 	onSubmitSolution,
 	showCancel,
 	onCancelled,
@@ -216,7 +219,7 @@ export function CompletedRequestModal({
 	onPreviewFile,
 	subTasksElement,
 }: CompletedRequestModalProps) {
-	const isEngineering = userDepartment === "ENGINEERING";
+	const isEngineering = canUserSubmitSolution(userDepartment, userRole);
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
 			<DialogContent className="max-w-5xl w-full max-h-[90vh] p-0 gap-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl rounded-xl overflow-hidden">
@@ -238,7 +241,7 @@ export function CompletedRequestModal({
 			/>
 
 				{/* Scrollable Content */}
-				<div className="min-h-0 flex-1 overflow-y-auto p-6 space-y-6 max-h-[calc(92svh-140px)] pointer-fine:max-h-[calc(90vh-140px)]">
+				<div className="min-h-0 flex-1 overflow-y-auto p-6 space-y-6 max-h-[calc(92svh-260px)] pointer-fine:max-h-[calc(90vh-260px)]">
 					{/* Completed Banner - Sent to Engineer */}
 					<div className="bg-emerald-50 dark:bg-emerald-900/10 rounded-xl p-4 border border-emerald-200 dark:border-emerald-800/30">
 						<div className="flex items-start gap-3">
@@ -439,8 +442,8 @@ export function CompletedRequestModal({
 				</div>
 
 				{/* Footer */}
-				<div className="px-6 py-3 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-slate-400 font-medium shrink-0">
-					<div className="flex items-center gap-4">
+				<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between shrink-0 px-6 py-4 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-100 dark:border-slate-800 text-xs text-slate-400 font-medium">
+					<div className="flex flex-wrap items-center gap-x-4 gap-y-1">
 						<span className="flex items-center gap-1.5">
 							<CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
 							Request Approved
@@ -451,7 +454,7 @@ export function CompletedRequestModal({
 							{format(new Date(data.lastModified), "MMM d, yyyy")}
 						</span>
 					</div>
-					<div className="flex items-center gap-2">
+					<div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
 						{showCancel && (
 							<CancelRequestDialog
 								requestId={data.id}
@@ -462,7 +465,7 @@ export function CompletedRequestModal({
 						{isEngineering && onSubmitSolution && (
 							<button
 								onClick={onSubmitSolution}
-								className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-bold rounded-lg transition-colors"
+								className="flex w-full sm:w-auto items-center justify-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-bold rounded-lg transition-colors"
 							>
 								<CheckCircle2 className="w-4 h-4" />
 								Submit Solution

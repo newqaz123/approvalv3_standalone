@@ -121,7 +121,12 @@ export function FilePreviewDialog({
   const fileTypeLabel = file?.fileType || previewKind.toUpperCase()
 
   const downloadButton = file ? (
-    <Button size="sm" variant="outline" onClick={() => onDownload(file)}>
+    <Button
+      size="sm"
+      variant="outline"
+      className="w-full sm:w-auto"
+      onClick={() => onDownload(file)}
+    >
       <Download className="h-4 w-4 mr-1" />
       Download
     </Button>
@@ -130,17 +135,19 @@ export function FilePreviewDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-5xl grid-rows-[auto_minmax(0,1fr)] overflow-hidden pointer-fine:h-[88vh] pointer-fine:max-h-[88vh]">
-        <DialogHeader className="pr-8 shrink-0">
-          <div className="flex items-start justify-between gap-4">
+        <DialogHeader className="pr-10 shrink-0">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
-              <DialogTitle className="truncate">{file?.fileName || 'File preview'}</DialogTitle>
+              <DialogTitle className="break-words">
+                {file?.fileName || 'File preview'}
+              </DialogTitle>
               <DialogDescription className="mt-1 flex flex-wrap items-center gap-2">
                 {fileSizeLabel && <span>{fileSizeLabel}</span>}
                 {fileSizeLabel && <span aria-hidden="true">•</span>}
                 <span>{fileTypeLabel}</span>
               </DialogDescription>
             </div>
-            <div className="shrink-0 pr-8">{downloadButton}</div>
+            <div className="w-full shrink-0 sm:w-auto">{downloadButton}</div>
           </div>
         </DialogHeader>
 
@@ -160,7 +167,7 @@ function renderPreviewContent(kind: FilePreviewKind, url: string | null, loadSta
   if (kind === 'pdf') {
     // Phones get an svh floor so iOS toolbars cannot crop the document; the
     // desktop iframe keeps filling the tall fixed-height card.
-    return <iframe src={url} title="PDF preview" className="min-h-[60svh] w-full bg-white pointer-fine:h-full pointer-fine:min-h-[70vh]" />
+    return <iframe src={url} title="PDF preview" className="h-full min-h-0 w-full bg-white pointer-fine:h-full pointer-fine:min-h-[70vh]" />
   }
 
   if (kind === 'image') {

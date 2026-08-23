@@ -143,7 +143,7 @@ describe("mobile modal content budgets", () => {
 		["src/components/requests/approver-modal.tsx", "140"],
 		["src/components/requests/request-resubmit-modal.tsx", "180"],
 		["src/components/requests/submitter-modal.tsx", "180"],
-		["src/components/requests/completed-request-modal.tsx", "140"],
+		["src/components/requests/completed-request-modal.tsx", "260"],
 		["src/components/requests/completed-solution-modal.tsx", "140"],
 		["src/components/requests/completed-final-modal.tsx", "260"],
 		["src/components/requests/final-approval-modal.tsx", "140"],
@@ -178,6 +178,20 @@ describe("mobile modal content budgets", () => {
 			/flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between/,
 		);
 		assert.match(source, /w-full sm:w-auto/);
+	});
+
+	it("stacks the completed-request footer so Submit Solution stays on screen", () => {
+		const source = read("src/components/requests/completed-request-modal.tsx");
+		const router = read("src/components/requests/request-modal-router.tsx");
+
+		assert.match(
+			source,
+			/flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between/,
+		);
+		assert.match(source, /Submit Solution[\s\S]*?w-full sm:w-auto|w-full sm:w-auto[\s\S]*?Submit Solution/);
+		assert.match(source, /canUserSubmitSolution/);
+		assert.match(source, /userRole/);
+		assert.match(router, /userRole=\{user\?\.role/);
 	});
 });
 
@@ -268,8 +282,20 @@ describe("attachment preview sheet budget", () => {
 		assert.match(dialog, /pointer-fine:max-h-\[88vh\]/);
 		assert.match(dialog, /max-h-\[calc\(92svh-180px\)\]/);
 		assert.match(dialog, /pointer-fine:max-h-none/);
-		assert.match(dialog, /min-h-\[60svh\]/);
-		assert.match(dialog, /pointer-fine:min-h-\[70vh\]/);
+		assert.doesNotMatch(dialog, /min-h-\[60svh\]/);
+		assert.match(dialog, /pointer-fine:min-h-\[70vh\]|pointer-fine:h-full/);
+	});
+
+	it("stacks the preview header so the filename and Download do not collide with close", () => {
+		const dialog = read("src/components/requests/file-preview-dialog.tsx");
+
+		assert.match(
+			dialog,
+			/flex flex-col gap-3[\s\S]*?sm:flex-row|flex-col[\s\S]*?Download/,
+		);
+		assert.match(dialog, /break-words|break-all/);
+		assert.doesNotMatch(dialog, /DialogTitle className="truncate"/);
+		assert.match(dialog, /w-full sm:w-auto/);
 	});
 });
 

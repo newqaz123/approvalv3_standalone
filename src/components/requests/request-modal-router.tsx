@@ -848,6 +848,7 @@ function RequestModalRouterContent({
 						engineerAssigned: "Engineering Team",
 					}}
 					userDepartment={userDepartmentType || undefined}
+					userRole={user?.role}
 					onSubmitSolution={
 						allowActions ? () => setShowSolutionModal(true) : undefined
 					}
