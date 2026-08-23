@@ -32,22 +32,25 @@ describe('profile and approval-chain user menu', () => {
     assert.match(mobileNav, /<UserMenu variant="mobile"/)
   })
 
-  it('drops the nav transform while the menu is open so iOS can tap the items', () => {
-    const mobileNav = readFileSync('src/components/mobile/mobile-nav.tsx', 'utf8')
+  it('portals the menu to the document so it sits above the page layer', () => {
     const userMenu = readFileSync('src/components/navigation/user-menu.tsx', 'utf8')
+    const mobileNav = readFileSync('src/components/mobile/mobile-nav.tsx', 'utf8')
 
-    // Overflowing descendants of a transformed ancestor do not receive
-    // touches on iOS. The hide animation must be transform-none while open.
+    // An absolute panel inside the fixed nav paints on top but loses
+    // hit-testing to the page on iOS. Radix portals the panel to body.
+    assert.match(userMenu, /DropdownMenuContent/)
+    assert.match(userMenu, /from ['"]@\/components\/ui\/dropdown-menu['"]/)
+    assert.match(userMenu, /z-\[100\]/)
+    assert.doesNotMatch(userMenu, /absolute right-0 mt-2/)
+
+    // Keep the nav transform off while open so the trigger stays live.
     assert.match(mobileNav, /onOpenChange=\{setMenuOpen\}/)
     assert.match(mobileNav, /menuOpen \? ['"]transform-none['"]/)
-    assert.match(userMenu, /onOpenChange\?:/)
-    assert.match(userMenu, /onOpenChange\?\.\(next\)/)
 
-    // Menu actions themselves must meet the 44px touch target.
     assert.match(userMenu, /href="\/profile"[\s\S]*?min-h-\[44px\]/)
     assert.match(userMenu, /href="\/approval-chain"[\s\S]*?min-h-\[44px\]/)
     assert.match(userMenu, /href="\/change-password"[\s\S]*?min-h-\[44px\]/)
-    assert.match(userMenu, /onClick=\{handleSignOut\}[\s\S]*?min-h-\[44px\]/)
+    assert.match(userMenu, /handleSignOut[\s\S]*?min-h-\[44px\]|min-h-\[44px\][\s\S]*?handleSignOut/)
   })
 
   it('makes the mobile avatar a tappable menu button instead of a dead circle', () => {
