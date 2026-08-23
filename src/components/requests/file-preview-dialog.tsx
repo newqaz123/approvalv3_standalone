@@ -129,8 +129,8 @@ export function FilePreviewDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl h-[88vh] max-h-[88vh] grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
-        <DialogHeader className="pr-8">
+      <DialogContent className="max-w-5xl grid-rows-[auto_minmax(0,1fr)] overflow-hidden pointer-fine:h-[88vh] pointer-fine:max-h-[88vh]">
+        <DialogHeader className="pr-8 shrink-0">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
               <DialogTitle className="truncate">{file?.fileName || 'File preview'}</DialogTitle>
@@ -144,7 +144,7 @@ export function FilePreviewDialog({
           </div>
         </DialogHeader>
 
-        <div className="min-h-0 overflow-auto rounded-lg border bg-slate-50">
+        <div className="min-h-0 overflow-auto rounded-lg border bg-slate-50 max-h-[calc(92svh-180px)] pointer-fine:max-h-none">
           {renderPreviewContent(previewKind, url, loadState)}
         </div>
       </DialogContent>
@@ -158,7 +158,9 @@ function renderPreviewContent(kind: FilePreviewKind, url: string | null, loadSta
   }
 
   if (kind === 'pdf') {
-    return <iframe src={url} title="PDF preview" className="h-full min-h-[70vh] w-full bg-white" />
+    // Phones get an svh floor so iOS toolbars cannot crop the document; the
+    // desktop iframe keeps filling the tall fixed-height card.
+    return <iframe src={url} title="PDF preview" className="min-h-[60svh] w-full bg-white pointer-fine:h-full pointer-fine:min-h-[70vh]" />
   }
 
   if (kind === 'image') {

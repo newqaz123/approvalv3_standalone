@@ -240,6 +240,26 @@ describe("mobile Safari date filters", () => {
 	});
 });
 
+describe("attachment preview sheet budget", () => {
+	it("keeps the file preview inside the mobile sheet instead of forcing vh heights", () => {
+		const dialog = read("src/components/requests/file-preview-dialog.tsx");
+
+		// The shared bottom sheet owns the height on touch devices; the preview
+		// must not fight it with an unprefixed 88vh card or a 70vh iframe floor.
+		assert.doesNotMatch(dialog, /(?<![-:\w])h-\[88vh\]/);
+		assert.doesNotMatch(dialog, /(?<![-:\w])min-h-\[70vh\]/);
+
+		// Desktop keeps its tall card; phones get an svh-scoped budget that
+		// clears the sheet header while the preview area scrolls itself.
+		assert.match(dialog, /pointer-fine:h-\[88vh\]/);
+		assert.match(dialog, /pointer-fine:max-h-\[88vh\]/);
+		assert.match(dialog, /max-h-\[calc\(92svh-180px\)\]/);
+		assert.match(dialog, /pointer-fine:max-h-none/);
+		assert.match(dialog, /min-h-\[60svh\]/);
+		assert.match(dialog, /pointer-fine:min-h-\[70vh\]/);
+	});
+});
+
 describe("sign-in mobile layout", () => {
 	it("uses dynamic viewport height and hides the decorative circles on phones", () => {
 		const page = read("src/app/(auth)/sign-in/[[...sign-in]]/page.tsx");
