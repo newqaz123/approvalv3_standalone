@@ -114,4 +114,30 @@ describe("follow-up dashboard UI", () => {
 		const readyIdx = board.indexOf("Engineer solution ready");
 		assert.ok(awaitingIdx > 0 && noWrIdx > awaitingIdx && readyIdx > noWrIdx);
 	});
+
+	it("never mounts the Vaul sheet and the desktop aside at the same time", () => {
+		const board = read("src/components/dashboard/follow-up-dashboard.tsx");
+
+		// Pointer type decides which list surface mounts — CSS-only hiding left
+		// the Vaul sheet open on desktop, and its open overlay ate every click so
+		// rows in the visible list never opened the request detail.
+		assert.match(board, /useMediaQuery\(["']\(pointer: fine\)["']\)/);
+		assert.match(board, /\{!isFinePointer && \([\s\S]*?Drawer\.Root/);
+		assert.match(board, /\{isFinePointer && drawer && \([\s\S]*?<aside/);
+	});
+
+	it("closes the list drawer before opening the selected request", () => {
+		const board = read("src/components/dashboard/follow-up-dashboard.tsx");
+
+		// Tapping a row inside either list surface must dismiss the list first,
+		// then open the request modal, so the sheet can never sit on top of it.
+		const matches = board.match(
+			/onSelect=\{\(row\) => \{[\s\S]*?setDrawer\(null\);[\s\S]*?setSelected\(row\);[\s\S]*?\}\}/g,
+		);
+		assert.equal(
+			matches?.length,
+			2,
+			"both drawer surfaces must close the list then open the request",
+		);
+	});
 });

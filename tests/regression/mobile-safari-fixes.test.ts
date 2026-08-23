@@ -114,11 +114,14 @@ describe("mobile Safari dialog sheet", () => {
 		assert.doesNotMatch(requestDrawer, /dvh/);
 		assert.doesNotMatch(followUp, /dvh/);
 
-		// The dashboard drawer must key on pointer, not width (md:), so a phone
-		// in landscape or pinch-zoomed out keeps the bottom sheet.
+		// Mounting is JS-gated on pointer type so the Vaul sheet and the desktop
+		// aside are never both open at once. CSS-only hiding left the Vaul sheet
+		// open and it stole pointer events from the visible list, so tapping a
+		// request never opened the detail modal.
 		assert.doesNotMatch(followUp, /md:hidden/);
-		assert.match(followUp, /pointer-fine:hidden/);
-		assert.match(followUp, /hidden pointer-fine:block/);
+		assert.match(followUp, /useMediaQuery\(["']\(pointer: fine\)["']\)/);
+		assert.match(followUp, /\{!isFinePointer && \(/);
+		assert.match(followUp, /\{isFinePointer && drawer && \(/);
 	});
 
 	it("lets dialog children shrink instead of overflowing the sheet", () => {

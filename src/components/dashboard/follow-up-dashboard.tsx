@@ -6,6 +6,7 @@ import { Plus, X } from "lucide-react";
 import { Drawer } from "vaul";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import { RequestModalRouter } from "@/components/requests/request-modal-router";
 import { StatusBadge } from "@/components/requests/status-badge";
 import { SubmitterModal } from "@/components/requests/submitter-modal";
@@ -47,6 +48,10 @@ export function FollowUpDashboard({ data }: { data: FollowUpDashboardData }) {
 	} | null>(null);
 	const [selected, setSelected] = useState<FollowUpRow | null>(null);
 	const [showAllActivity, setShowAllActivity] = useState(false);
+	// Pointer type decides which list surface mounts. CSS-only hiding left the
+	// Vaul sheet mounted and open on fine-pointer devices, where it stole the
+	// clicks meant for the visible rows — requests stopped opening entirely.
+	const isFinePointer = useMediaQuery("(pointer: fine)");
 
 	const handleSubmitRequest = async (form: {
 		title: string;
@@ -330,34 +335,39 @@ export function FollowUpDashboard({ data }: { data: FollowUpDashboardData }) {
 				)}
 			</Card>
 
-			<Drawer.Root
-				handleOnly
-				open={!!drawer}
-				onOpenChange={(open) => {
-					if (!open) setDrawer(null);
-				}}
-			>
-				<Drawer.Portal>
-					<Drawer.Overlay className="fixed inset-0 z-50 bg-slate-900/20 pointer-fine:hidden" />
-					<Drawer.Content className="fixed inset-x-0 bottom-0 z-50 flex h-[88svh] flex-col overflow-hidden rounded-t-[28px] border border-slate-200 bg-white outline-none pointer-fine:hidden">
-						{drawer && (
-							<FollowUpDrawerPanel
-								drawer={drawer}
-								handle={
-									<Drawer.Handle className="mx-auto mt-3 mb-1 h-1.5 w-12 shrink-0 rounded-full bg-slate-300" />
-								}
-								onClose={() => setDrawer(null)}
-								onSelect={setSelected}
-								titleAs={Drawer.Title}
-								descriptionAs={Drawer.Description}
-							/>
-						)}
-					</Drawer.Content>
-				</Drawer.Portal>
-			</Drawer.Root>
+			{!isFinePointer && (
+				<Drawer.Root
+					handleOnly
+					open={!!drawer}
+					onOpenChange={(open) => {
+						if (!open) setDrawer(null);
+					}}
+				>
+					<Drawer.Portal>
+						<Drawer.Overlay className="fixed inset-0 z-50 bg-slate-900/20" />
+						<Drawer.Content className="fixed inset-x-0 bottom-0 z-50 flex h-[88svh] flex-col overflow-hidden rounded-t-[28px] border border-slate-200 bg-white outline-none">
+							{drawer && (
+								<FollowUpDrawerPanel
+									drawer={drawer}
+									handle={
+										<Drawer.Handle className="mx-auto mt-3 mb-1 h-1.5 w-12 shrink-0 rounded-full bg-slate-300" />
+									}
+									onClose={() => setDrawer(null)}
+									onSelect={(row) => {
+										setDrawer(null);
+										setSelected(row);
+									}}
+									titleAs={Drawer.Title}
+									descriptionAs={Drawer.Description}
+								/>
+							)}
+						</Drawer.Content>
+					</Drawer.Portal>
+				</Drawer.Root>
+			)}
 
-			{drawer && (
-				<div className="fixed inset-0 z-50 hidden pointer-fine:block">
+			{isFinePointer && drawer && (
+				<div className="fixed inset-0 z-50">
 					<button
 						type="button"
 						className="absolute inset-0 bg-slate-900/20"
@@ -368,7 +378,10 @@ export function FollowUpDashboard({ data }: { data: FollowUpDashboardData }) {
 						<FollowUpDrawerPanel
 							drawer={drawer}
 							onClose={() => setDrawer(null)}
-							onSelect={setSelected}
+							onSelect={(row) => {
+								setDrawer(null);
+								setSelected(row);
+							}}
 						/>
 					</aside>
 				</div>
