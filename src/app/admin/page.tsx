@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { Users, Building2, FileText, Trash2, ClipboardList, LayoutTemplate, ListChecks } from 'lucide-react'
+import { Users, Building2, FileText, Trash2, ClipboardList, LayoutTemplate, ListChecks, Mail } from 'lucide-react'
 import prisma from '@/lib/prisma'
 
 async function getStats() {
@@ -161,6 +161,23 @@ export default async function AdminPage() {
                 <h3 className="font-semibold">Sub-task Stages</h3>
                 <p className="text-sm text-muted-foreground">
                   Manage engineering follow-up stage options
+                </p>
+              </div>
+            </div>
+          </Link>
+
+          <Link
+            href="/admin/email"
+            className="rounded-lg border bg-card p-6 hover:bg-accent transition-colors cursor-pointer"
+          >
+            <div className="flex items-center gap-4">
+              <div className="rounded-full bg-primary/10 p-3">
+                <Mail className="h-6 w-6 text-primary" />
+              </div>
+              <div>
+                <h3 className="font-semibold">Email notifications</h3>
+                <p className="text-sm text-muted-foreground">
+                  Configure SMTP and switch email providers
                 </p>
               </div>
             </div>

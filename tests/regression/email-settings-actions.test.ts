@@ -63,4 +63,17 @@ describe('email-settings server actions', () => {
       /sanitizeSmtpErrorWithSecrets\(\s*error,\s*\[\s*resolvedPassword,\s*importedEnvPassword,?\s*\]/,
     )
   })
+
+  it('shows provider setup instructions without exposing password placeholders as values', () => {
+    const form = readFileSync(
+      resolve(process.cwd(), 'src/components/admin/email-settings-form.tsx'),
+      'utf8',
+    )
+    assert.match(form, /resend.com\/api-keys/)
+    assert.match(form, /myaccount.google.com\/apppasswords/)
+    assert.match(form, /SMTP AUTH/)
+    assert.match(form, /OAuth/)
+    assert.match(form, /placeholder=\{.*hasPassword/)
+    assert.doesNotMatch(form, /value=\{['"]••••/)
+  })
 })
