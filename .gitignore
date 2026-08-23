@@ -26,3 +26,6 @@ graphify-out/
 playwright-report/
 test-results/
 image*.png
+
+# Playwright MCP session logs
+.playwright-mcp/
