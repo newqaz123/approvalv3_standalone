@@ -206,7 +206,7 @@ export function EmailSettingsForm({
     if (preset.host !== undefined) setHost(preset.host)
     if (preset.port !== undefined) setPort(String(preset.port))
     if (nextProvider !== 'custom') {
-      setUsername(preset.username ?? '')
+      if (preset.username !== undefined) setUsername(preset.username)
       setNoAuth(false)
     }
   }

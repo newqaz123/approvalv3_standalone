@@ -50,7 +50,20 @@ export type ResolvedRuntimeEmailConfig =
   | { status: 'ready'; config: ResolvedEmailConfig }
   | { status: 'unconfigured' }
   | { status: 'disabled' }
+  | { status: 'invalid' }
   | { status: 'needsPasswordReset' }
+
+export type ResolvedEmailTransport<TTransport> =
+  | {
+      ok: true
+      from: string
+      password: string
+      transporter: TTransport
+    }
+  | {
+      ok: false
+      reason: Exclude<ResolvedRuntimeEmailConfig['status'], 'ready'>
+    }
 
 export type TransporterOptions = {
   host: string
@@ -271,9 +284,26 @@ export function resolveRuntimeEmailConfig({
     return { status: 'disabled' }
   }
 
-  // A saved row is authoritative: decrypt failure never falls back to env,
-  // or a replaced/disabled provider would silently keep sending.
+  // A saved row is authoritative: invalid configuration and decrypt failure
+  // both fail closed rather than silently falling back to the old env provider.
   const identity = normalizeEmailIdentity(row)
+  const parsedPort = parseEmailPort(row.port)
+  const fromAddress = row.fromAddress.trim()
+  if (
+    !identity.host ||
+    !parsedPort.ok ||
+    !validateFromAddress(fromAddress).ok
+  ) {
+    return { status: 'invalid' }
+  }
+
+  // A username means this row expects SMTP authentication. Without a bound
+  // ciphertext there is no credential to use, and env credentials must never
+  // be substituted after an admin row exists.
+  if (identity.username && !row.passwordEncrypted) {
+    return { status: 'needsPasswordReset' }
+  }
+
   let password = ''
   if (row.passwordEncrypted) {
     try {
@@ -290,12 +320,35 @@ export function resolveRuntimeEmailConfig({
     status: 'ready',
     config: {
       host: identity.host,
-      port: identity.port,
+      port: parsedPort.port,
       username: identity.username,
       password,
-      fromAddress: row.fromAddress,
+      fromAddress,
       source: 'db',
     },
+  }
+}
+
+export function resolveRuntimeEmailTransport<TTransport>({
+  row,
+  env,
+  decrypt,
+  createTransport,
+}: {
+  row: EmailSettingsRowInput | null
+  env: EnvEmailConfig
+  decrypt?: (envelope: string, aad: string) => string
+  createTransport: (options: TransporterOptions) => TTransport
+}): ResolvedEmailTransport<TTransport> {
+  const resolved = resolveRuntimeEmailConfig({ row, env, decrypt })
+  if (resolved.status !== 'ready') {
+    return { ok: false, reason: resolved.status }
+  }
+  return {
+    ok: true,
+    from: resolved.config.fromAddress,
+    password: resolved.config.password,
+    transporter: createTransport(buildTransporterOptions(resolved.config)),
   }
 }
 

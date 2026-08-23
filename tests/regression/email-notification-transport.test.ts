@@ -11,7 +11,7 @@ describe('notification SMTP transport', () => {
 
   it('does not create a module-level transporter from env', () => {
     assert.doesNotMatch(source, /const transporter = process\.env\.SMTP_HOST/)
-    assert.match(source, /resolveRuntimeEmailConfig/)
+    assert.match(source, /resolveRuntimeEmailTransport/)
     assert.match(source, /nodemailer\.createTransport/)
   })
 
@@ -22,7 +22,10 @@ describe('notification SMTP transport', () => {
   it('uses the resolved sender and creates one transporter per send', () => {
     assert.match(source, /from: resolved\.from/)
     assert.match(source, /await resolveNotificationTransport\(\)/)
-    assert.match(source, /nodemailer\.createTransport\(\s*buildTransporterOptions\(resolved\.config\)\s*,?\s*\)/)
+    assert.match(
+      source,
+      /createTransport:\s*\(options\)\s*=>\s*nodemailer\.createTransport\(options\)/,
+    )
   })
 
   it('reads saved settings by the singleton id', () => {

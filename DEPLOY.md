@@ -61,6 +61,8 @@ AUTH_TRUST_HOST=true
 
 The deploy script runs the production environment gate before it mutates images or services. It reports field names only and never prints secret values.
 
+`SMTP_*` values are an optional fallback until an admin first saves **Admin → Email notifications**. After admin settings exist, they remain authoritative, and provider changes apply to the next outgoing email without restarting the app process or containers.
+
 ## Online Ubuntu VPS update
 
 Requirements:

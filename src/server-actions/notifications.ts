@@ -10,9 +10,8 @@ import { revalidatePath } from "next/cache";
 import nodemailer from "nodemailer";
 import { decryptEmailSecret } from "@/lib/email-crypto";
 import {
-	buildTransporterOptions,
 	readEnvEmailConfig,
-	resolveRuntimeEmailConfig,
+	resolveRuntimeEmailTransport,
 	sanitizeSmtpErrorWithSecrets,
 } from "@/lib/email-settings";
 
@@ -20,22 +19,12 @@ async function resolveNotificationTransport() {
 	const row = await prisma.email_settings.findUnique({
 		where: { id: "default" },
 	});
-	const resolved = resolveRuntimeEmailConfig({
+	return resolveRuntimeEmailTransport({
 		row,
 		env: readEnvEmailConfig(process.env),
 		decrypt: (envelope, aad) => decryptEmailSecret(envelope, aad),
+		createTransport: (options) => nodemailer.createTransport(options),
 	});
-	if (resolved.status !== "ready") {
-		return { ok: false as const, reason: resolved.status };
-	}
-	return {
-		ok: true as const,
-		from: resolved.config.fromAddress,
-		password: resolved.config.password,
-		transporter: nodemailer.createTransport(
-			buildTransporterOptions(resolved.config),
-		),
-	};
 }
 
 type NotificationRequestLinkInput = {

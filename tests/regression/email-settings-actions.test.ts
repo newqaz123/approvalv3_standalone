@@ -2,17 +2,111 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import {
+  requireEmailSettingsAdmin,
+  sendTestEmailCore,
+  type EmailSettingsActionInput,
+} from '../../src/lib/email-settings-action-core'
+
+const testInput: EmailSettingsActionInput = {
+  enabled: false,
+  provider: 'custom',
+  host: 'smtp.example.com',
+  port: 587,
+  username: 'smtp-user',
+  password: 'smtp-secret',
+  fromAddress: 'Approval App <no-reply@example.com>',
+  noAuth: false,
+}
 
 describe('email-settings server actions', () => {
   const source = readFileSync(
     resolve(process.cwd(), 'src/server-actions/email-settings.ts'),
     'utf8',
   )
+  const coreSource = readFileSync(
+    resolve(process.cwd(), 'src/lib/email-settings-action-core.ts'),
+    'utf8',
+  )
+
+  it('behaviorally rejects a missing admin id', async () => {
+    await assert.rejects(
+      requireEmailSettingsAdmin(async () => null),
+      /Admin access required/,
+    )
+    assert.equal(
+      await requireEmailSettingsAdmin(async () => 'admin-1'),
+      'admin-1',
+    )
+  })
+
+  it('sends a test while notifications are disabled to the DB admin without writes', async () => {
+    let lookedUpAdminId = ''
+    let settingsWrites = 0
+    let sentMail: { to: string; from: string } | undefined
+    const store = {
+      findAdminEmail: async (adminId: string) => {
+        lookedUpAdminId = adminId
+        return 'db-admin@example.com'
+      },
+      findEmailSettings: async () => null,
+      upsertEmailSettings: async () => {
+        settingsWrites += 1
+      },
+    }
+
+    const result = await sendTestEmailCore('admin-42', testInput, {
+      store,
+      env: {},
+      createTransport: () => ({
+        sendMail: async (message) => {
+          sentMail = { to: message.to, from: message.from }
+        },
+      }),
+    })
+
+    assert.deepEqual(result, { success: true })
+    assert.equal(lookedUpAdminId, 'admin-42')
+    assert.deepEqual(sentMail, {
+      to: 'db-admin@example.com',
+      from: 'Approval App <no-reply@example.com>',
+    })
+    assert.equal(settingsWrites, 0)
+  })
+
+  it('returns a sanitized test-delivery failure without writing settings', async () => {
+    let settingsWrites = 0
+    const store = {
+      findAdminEmail: async () => 'db-admin@example.com',
+      findEmailSettings: async () => null,
+      upsertEmailSettings: async () => {
+        settingsWrites += 1
+      },
+    }
+
+    const result = await sendTestEmailCore('admin-42', testInput, {
+      store,
+      env: {},
+      createTransport: () => ({
+        sendMail: async () => {
+          throw new Error(`Authentication failed for ${testInput.password}`)
+        },
+      }),
+    })
+
+    assert.equal(result.success, false)
+    if (!result.success) {
+      assert.match(result.error, /Authentication failed/)
+      assert.doesNotMatch(result.error, /smtp-secret/)
+    }
+    assert.equal(settingsWrites, 0)
+  })
 
   it('rejects a null requireAdmin result in every exported action', () => {
     assert.match(source, /async function requireAdminUser/)
+    assert.match(source, /requireEmailSettingsAdmin\(requireAdmin\)/)
     assert.match(
-      source,
+      coreSource,
       /if \(!adminId\) \{[\s\S]*?throw new Error\('Admin access required'\)/,
     )
     assert.match(source, /export async function getEmailSettingsForAdmin/)
@@ -54,12 +148,10 @@ describe('email-settings server actions', () => {
   })
 
   it('redacts resolved and imported env credentials from test-send errors', () => {
-    const start = source.indexOf('export async function sendTestEmail')
-    const slice = source.slice(start)
-    assert.match(slice, /let resolvedPassword/)
-    assert.match(slice, /let importedEnvPassword/)
+    assert.match(coreSource, /let resolvedPassword/)
+    assert.match(coreSource, /let importedEnvPassword/)
     assert.match(
-      slice,
+      coreSource,
       /sanitizeSmtpErrorWithSecrets\(\s*error,\s*\[\s*resolvedPassword,\s*importedEnvPassword,?\s*\]/,
     )
   })
@@ -75,5 +167,10 @@ describe('email-settings server actions', () => {
     assert.match(form, /OAuth/)
     assert.match(form, /placeholder=\{.*hasPassword/)
     assert.doesNotMatch(form, /value=\{['"]••••/)
+    assert.match(
+      form,
+      /if \(preset\.username !== undefined\) setUsername\(preset\.username\)/,
+    )
+    assert.doesNotMatch(form, /setUsername\(preset\.username \?\? ['"]['"]\)/)
   })
 })

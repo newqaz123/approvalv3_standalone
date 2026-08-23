@@ -10,6 +10,7 @@ import {
   parseEmailPort,
   readEnvEmailConfig,
   resolveRuntimeEmailConfig,
+  resolveRuntimeEmailTransport,
   sanitizeSmtpError,
   sanitizeSmtpErrorWithSecrets,
   validateFromAddress,
@@ -149,6 +150,88 @@ describe('email-settings', () => {
     })
     assert.equal(decryptFailed.status, 'needsPasswordReset')
     assert.notEqual(decryptFailed.status, 'ready')
+  })
+
+  it('fails closed for invalid saved DB settings without creating a transport or using env', () => {
+    const env = {
+      host: 'smtp.resend.com',
+      port: 587,
+      username: 'resend',
+      password: 'env-pass',
+      fromAddress: 'App <no-reply@example.com>',
+    }
+    const invalidRows = [
+      {
+        enabled: true,
+        host: '',
+        port: 587,
+        username: 'resend',
+        fromAddress: 'App <db@example.com>',
+        passwordEncrypted: 'encrypted',
+      },
+      {
+        enabled: true,
+        host: 'smtp.db.example.com',
+        port: 0,
+        username: 'resend',
+        fromAddress: 'App <db@example.com>',
+        passwordEncrypted: 'encrypted',
+      },
+      {
+        enabled: true,
+        host: 'smtp.db.example.com',
+        port: 587,
+        username: 'resend',
+        fromAddress: 'App <db@example.com>\nBcc: leak@example.com',
+        passwordEncrypted: 'encrypted',
+      },
+    ]
+
+    for (const row of invalidRows) {
+      let createTransportCalls = 0
+      const resolved = resolveRuntimeEmailTransport({
+        row,
+        env,
+        decrypt: () => 'db-pass',
+        createTransport: () => {
+          createTransportCalls += 1
+          return { marker: 'transport' }
+        },
+      })
+      assert.equal(resolved.ok, false)
+      if (!resolved.ok) assert.equal(resolved.reason, 'invalid')
+      assert.equal(createTransportCalls, 0)
+    }
+  })
+
+  it('requires a password reset for an authenticated saved row without ciphertext', () => {
+    const env = {
+      host: 'smtp.resend.com',
+      port: 587,
+      username: 'resend',
+      password: 'env-pass',
+      fromAddress: 'App <no-reply@example.com>',
+    }
+    let createTransportCalls = 0
+    const resolved = resolveRuntimeEmailTransport({
+      row: {
+        enabled: true,
+        host: 'smtp.db.example.com',
+        port: 587,
+        username: 'db-user',
+        fromAddress: 'App <db@example.com>',
+        passwordEncrypted: null,
+      },
+      env,
+      createTransport: () => {
+        createTransportCalls += 1
+        return { marker: 'transport' }
+      },
+    })
+
+    assert.equal(resolved.ok, false)
+    if (!resolved.ok) assert.equal(resolved.reason, 'needsPasswordReset')
+    assert.equal(createTransportCalls, 0)
   })
 
   it('requires STARTTLS and timeouts for authenticated non-465 SMTP', () => {
