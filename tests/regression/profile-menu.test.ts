@@ -3,14 +3,47 @@ import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 
 describe('profile and approval-chain user menu', () => {
-  it('adds Profile and Approval Chain entries to the top-right user dropdown', () => {
-    const navbar = readFileSync('src/components/navigation/navbar.tsx', 'utf8')
+  it('adds Profile and Approval Chain entries to the shared user dropdown', () => {
+    const userMenu = readFileSync('src/components/navigation/user-menu.tsx', 'utf8')
 
-    assert.match(navbar, /href="\/profile"/)
-    assert.match(navbar, />\s*Profile\s*</)
-    assert.match(navbar, /href="\/approval-chain"/)
-    assert.match(navbar, />\s*Approval Chain\s*</)
-    assert.match(navbar, /href="\/change-password"/)
+    assert.match(userMenu, /href="\/profile"/)
+    assert.match(userMenu, />\s*Profile\s*</)
+    assert.match(userMenu, /href="\/approval-chain"/)
+    assert.match(userMenu, />\s*Approval Chain\s*</)
+    assert.match(userMenu, /href="\/change-password"/)
+    assert.match(userMenu, />\s*Sign Out\s*</)
+    assert.match(userMenu, /callbackUrl: ['"]\/sign-in['"]/
+    )
+  })
+
+  it('shares the dropdown between both shells so they cannot drift', () => {
+    const navbar = readFileSync('src/components/navigation/navbar.tsx', 'utf8')
+    const mobileNav = readFileSync('src/components/mobile/mobile-nav.tsx', 'utf8')
+
+    assert.match(
+      navbar,
+      /import \{ UserMenu \} from ['"]@\/components\/navigation\/user-menu['"]/,
+    )
+    assert.match(navbar, /<UserMenu\b/)
+    assert.match(
+      mobileNav,
+      /import \{ UserMenu \} from ['"]@\/components\/navigation\/user-menu['"]/,
+    )
+    assert.match(mobileNav, /<UserMenu variant="mobile"\s*\/>/)
+  })
+
+  it('makes the mobile avatar a tappable menu button instead of a dead circle', () => {
+    const mobileNav = readFileSync('src/components/mobile/mobile-nav.tsx', 'utf8')
+    const userMenu = readFileSync('src/components/navigation/user-menu.tsx', 'utf8')
+
+    // The old dead div avatar (h-9 w-9 circle) must be gone.
+    assert.doesNotMatch(mobileNav, /h-9 w-9 rounded-full bg-blue-600/)
+
+    // The mobile trigger is a real button meeting the 44px touch target.
+    assert.match(userMenu, /<button[\s\S]*?aria-label="Open user menu"/)
+    assert.match(userMenu, /min-h-\[44px\]/)
+    assert.match(userMenu, /min-w-\[44px\]/)
+    assert.match(userMenu, /aria-expanded=\{menuOpen\}/)
   })
 
   it('exposes self-service profile actions that only edit the current user display name', () => {

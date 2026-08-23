@@ -1,6 +1,6 @@
 "use client";
 
-import { useSession, signOut } from "next-auth/react";
+import { useSession } from "next-auth/react";
 import Link from "next/link";
 import {
 	FileText,
@@ -8,19 +8,16 @@ import {
 	Bell,
 	Wrench,
 	BarChart3,
-	LogOut,
-	Lock,
 	LayoutDashboard,
 	WalletCards,
-	User,
-	GitBranch,
 } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { UserAvatar } from "@/components/ui/user-avatar";
+import { UserMenu } from "@/components/navigation/user-menu";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import { AUTHENTICATED_SHELL_CLASS } from "@/lib/authenticated-shell";
 import { cn } from "@/lib/utils";
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect } from "react";
 
 const NAV_LINK_BASE =
 	"flex items-center gap-2 min-h-[44px] rounded-md px-2.5 text-sm font-medium transition-colors whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2";
@@ -38,10 +35,8 @@ export function Navbar() {
 	const { data: session } = useSession();
 	const user = session?.user;
 	const pathname = usePathname();
-	const [menuOpen, setMenuOpen] = useState(false);
 	const [pendingCount, setPendingCount] = useState(0);
 	const [departmentName, setDepartmentName] = useState<string | null>(null);
-	const menuRef = useRef<HTMLDivElement>(null);
 
 	const userRole = user?.role || null;
 	const isAdmin = userRole === "admin";
@@ -53,17 +48,6 @@ export function Navbar() {
 	const isDashboardActive = pathname === "/dashboard";
 	const isEngineeringActive = Boolean(pathname?.startsWith("/engineering"));
 	const isAdminActive = Boolean(pathname?.startsWith("/admin"));
-
-	// Close menu when clicking outside
-	useEffect(() => {
-		function handleClickOutside(event: MouseEvent) {
-			if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-				setMenuOpen(false);
-			}
-		}
-		document.addEventListener("mousedown", handleClickOutside);
-		return () => document.removeEventListener("mousedown", handleClickOutside);
-	}, []);
 
 	useEffect(() => {
 		if (!user?.id) {
@@ -122,19 +106,6 @@ export function Navbar() {
 
 		fetchDepartmentName();
 	}, [user?.id]);
-
-	// Sign out always redirects to the relative /sign-in route so the browser
-	// stays on the configured trusted origin — no absolute environment URL is
-	// baked into client code. Errors are logged without inventing a fallback
-	// origin.
-	const handleSignOut = async () => {
-		setMenuOpen(false);
-		try {
-			await signOut({ callbackUrl: "/sign-in" });
-		} catch (error) {
-			console.error("Sign out failed:", error);
-		}
-	};
 
 	return (
 		<nav className="border-b bg-white">
@@ -247,56 +218,10 @@ export function Navbar() {
 							</span>
 						</div>
 
-						{/* User avatar with dropdown */}
-						<div className="relative" ref={menuRef}>
-							<button
-								onClick={() => setMenuOpen(!menuOpen)}
-								className="flex items-center justify-center rounded-full transition-all duration-200 ease-out hover:ring-2 hover:ring-blue-500 hover:ring-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
-								title="User menu"
-								aria-label="Open user menu"
-								aria-expanded={menuOpen}
-							>
-								<UserAvatar name={user?.name} size="lg" />
-							</button>
-
-							{menuOpen && (
-								<div className="absolute right-0 mt-2 w-56 rounded-md bg-white shadow-lg ring-1 ring-black ring-opacity-5 z-50">
-									<div className="py-1">
-										<Link
-											href="/profile"
-											onClick={() => setMenuOpen(false)}
-											className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-										>
-											<User className="h-4 w-4" />
-											Profile
-										</Link>
-										<Link
-											href="/approval-chain"
-											onClick={() => setMenuOpen(false)}
-											className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-										>
-											<GitBranch className="h-4 w-4" />
-											Approval Chain
-										</Link>
-										<Link
-											href="/change-password"
-											onClick={() => setMenuOpen(false)}
-											className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-										>
-											<Lock className="h-4 w-4" />
-											Change Password
-										</Link>
-										<button
-											onClick={handleSignOut}
-											className="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left"
-										>
-											<LogOut className="h-4 w-4" />
-											Sign Out
-										</button>
-									</div>
-								</div>
-							)}
-						</div>
+						{/* User avatar with dropdown (shared UserMenu) */}
+						<UserMenu>
+							<UserAvatar name={user?.name} size="lg" />
+						</UserMenu>
 					</div>
 				</div>
 			</div>

@@ -7,6 +7,7 @@ import { useSession } from 'next-auth/react'
 import { LayoutDashboard, FileText, Bell, BarChart3, WalletCards, Wrench } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useScrollDirection } from '@/hooks/use-scroll-direction'
+import { UserMenu } from '@/components/navigation/user-menu'
 
 interface Tab {
   name: string
@@ -76,9 +77,6 @@ export function MobileNav() {
     }
   }, [user?.id])
 
-  // Get user first initial for profile icon
-  const userInitial = user?.name?.[0] || user?.email?.[0] || 'U'
-
   return (
     <nav
       className={cn(
@@ -118,11 +116,9 @@ export function MobileNav() {
           })}
         </div>
 
-        {/* Right side - User profile icon */}
+        {/* Right side - User profile menu (tappable avatar) */}
         <div className="flex items-center">
-          <div className="h-9 w-9 rounded-full bg-blue-600 flex items-center justify-center text-white font-semibold text-sm">
-            {userInitial}
-          </div>
+          <UserMenu variant="mobile" />
         </div>
       </div>
     </nav>

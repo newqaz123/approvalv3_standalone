@@ -76,7 +76,9 @@ describe("authenticated shell and navigation", () => {
 		assert.doesNotMatch(source, /absolute -right-1 -top-1/);
 		assert.match(source, /data-user-secondary/);
 		assert.match(source, /hidden 2xl:inline/);
-		assert.match(source, /callbackUrl: ['"]\/sign-in['"]/);
+		// Sign-out moved into the shared UserMenu used by both shells.
+		const userMenu = read("src/components/navigation/user-menu.tsx");
+		assert.match(userMenu, /callbackUrl: ['"]\/sign-in['"]/);
 		assert.match(source, /setInterval\(fetchPendingCount, 30000\)/);
 	});
 
