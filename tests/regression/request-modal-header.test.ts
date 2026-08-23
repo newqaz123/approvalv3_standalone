@@ -21,23 +21,27 @@ const copyPasteModals = [
 ];
 
 describe("request modal header", () => {
-	it("exports a shared header that stacks on phones and clears the built-in close", () => {
+	it("exports a shared header that is a 2-line strip on phones and unchanged on md", () => {
 		const source = read(header);
 
 		assert.match(source, /export function RequestModalHeader\b/);
 
-		// Phones stack: title block over submitter; md restores the row.
+		// Phones: compact column; md restores the side-by-side row.
 		assert.match(
 			source,
-			/flex flex-col gap-3 pr-10 md:flex-row md:items-start md:justify-between/,
-		);
-		assert.match(
-			source,
-			/flex-col gap-2 md:flex-row md:items-center md:gap-3/,
+			/flex flex-col gap-1\.5 pr-10 md:flex-row md:items-start md:justify-between/,
 		);
 
-		// The title wraps instead of truncating on phones and truncates on md.
-		assert.match(source, /break-words[\s\S]*?md:truncate/);
+		// Title + badge share one row on phones (title truncates; chip stays).
+		assert.match(source, /flex min-w-0 items-center gap-2 md:gap-3/);
+		assert.match(source, /min-w-0 flex-1 truncate/);
+		assert.doesNotMatch(source, /flex-col gap-2 md:flex-row/);
+		assert.doesNotMatch(source, /DialogTitle className="[^"]*break-words/);
+
+		// Mobile submitter is one truncated name · email line; desktop stays stacked.
+		assert.match(source, /md:hidden/);
+		assert.match(source, /hidden[\s\S]*?md:flex/);
+		assert.match(source, /\{submitter\.name\} · \{submitter\.email\}/);
 
 		// No custom X button: DialogContent already renders a close button, and
 		// the old duplicate stacked on top of it on phones.
