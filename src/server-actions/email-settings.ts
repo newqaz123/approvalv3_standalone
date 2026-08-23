@@ -49,7 +49,12 @@ function inferEmailProvider(host: string, username: string): EmailProvider {
 }
 
 export async function getEmailSettingsForAdmin(): Promise<EmailSettingsPublic> {
-  await requireAdminUser()
+  const adminId = await requireAdminUser()
+  const admin = await prisma.user.findUnique({
+    where: { id: adminId },
+    select: { email: true },
+  })
+  const adminEmail = admin?.email ?? ''
 
   const row = await prisma.email_settings.findUnique({
     where: { id: EMAIL_SETTINGS_ID },
@@ -78,6 +83,7 @@ export async function getEmailSettingsForAdmin(): Promise<EmailSettingsPublic> {
       hasPassword: Boolean(env.password),
       needsPasswordReset: false,
       noAuth: !env.username && !env.password,
+      adminEmail,
     }
   }
 
@@ -98,6 +104,7 @@ export async function getEmailSettingsForAdmin(): Promise<EmailSettingsPublic> {
     hasPassword,
     needsPasswordReset,
     noAuth: !(row.username || row.passwordEncrypted),
+    adminEmail,
   }
 }
 

@@ -74,6 +74,53 @@ describe('email-settings server actions', () => {
     assert.equal(settingsWrites, 0)
   })
 
+  it('sends the test to an explicit recipient instead of the admin email', async () => {
+    let sentTo = ''
+    const result = await sendTestEmailCore(
+      'admin-42',
+      { ...testInput, toAddress: 'you@new-flows.com' },
+      {
+        store: {
+          findAdminEmail: async () => 'admin@example.com',
+          findEmailSettings: async () => null,
+        },
+        env: {},
+        createTransport: () => ({
+          sendMail: async (message) => {
+            sentTo = message.to
+          },
+        }),
+      },
+    )
+
+    assert.deepEqual(result, { success: true })
+    assert.equal(sentTo, 'you@new-flows.com')
+  })
+
+  it('explains Resend example.com recipient rejections', async () => {
+    const result = await sendTestEmailCore('admin-42', testInput, {
+      store: {
+        findAdminEmail: async () => 'admin@example.com',
+        findEmailSettings: async () => null,
+      },
+      env: {},
+      createTransport: () => ({
+        sendMail: async () => {
+          throw new Error(
+            'Message failed: 550 Invalid `to` field. Please use our testing email address instead of domains like `example.com`.',
+          )
+        },
+      }),
+    })
+
+    assert.equal(result.success, false)
+    if (!result.success) {
+      assert.match(result.error, /Resend rejected the recipient/i)
+      assert.match(result.error, /example\.com/)
+      assert.match(result.error, /Send test to/i)
+    }
+  })
+
   it('returns a sanitized test-delivery failure without writing settings', async () => {
     let settingsWrites = 0
     const store = {
@@ -161,6 +208,7 @@ describe('email-settings server actions', () => {
       resolve(process.cwd(), 'src/components/admin/email-settings-form.tsx'),
       'utf8',
     )
+    assert.match(form, /Send test to/)
     assert.match(form, /resend.com\/api-keys/)
     assert.match(form, /myaccount.google.com\/apppasswords/)
     assert.match(form, /SMTP AUTH/)

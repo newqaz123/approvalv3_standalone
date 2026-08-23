@@ -92,6 +92,10 @@ function ProviderInstructions({ provider }: { provider: EmailProvider }) {
             (<code>re_...</code>).
           </li>
           <li>From must use a domain verified in Resend → Domains.</li>
+          <li>
+            Resend will not deliver to <code>example.com</code>. Use a real
+            inbox in Send test to.
+          </li>
         </ul>
       )}
       {provider === 'gmail' && (
@@ -165,6 +169,7 @@ export function EmailSettingsForm({
   const [username, setUsername] = useState(initial.username)
   const [password, setPassword] = useState('')
   const [fromAddress, setFromAddress] = useState(initial.fromAddress)
+  const [testTo, setTestTo] = useState(initial.adminEmail)
   const [noAuth, setNoAuth] = useState(
     initial.provider === 'custom' ? initial.noAuth : false,
   )
@@ -245,14 +250,14 @@ export function EmailSettingsForm({
   }
 
   const handleTest = () => {
-    const input = buildInput()
+    const input = { ...buildInput(), toAddress: testTo }
     startTesting(async () => {
       const result = await sendTestEmail(input)
       if (!result.success) {
         toast.error(result.error)
         return
       }
-      toast.success('Test email sent to your admin address')
+      toast.success(`Test email sent to ${testTo.trim() || initial.adminEmail}`)
     })
   }
 
@@ -432,6 +437,25 @@ export function EmailSettingsForm({
                 Must be allowed by the provider
               </FieldHint>
             </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="smtp-test-to">Send test to</Label>
+            <Input
+              id="smtp-test-to"
+              type="email"
+              value={testTo}
+              onChange={(event) => setTestTo(event.target.value)}
+              placeholder="you@your-domain.com"
+              disabled={busy}
+              autoComplete="email"
+            />
+            <FieldHint>
+              Defaults to your admin login email. Resend rejects
+              example.com addresses such as admin@example.com — use the
+              inbox you registered with Resend, or one on your verified
+              domain.
+            </FieldHint>
           </div>
 
           {provider === 'custom' && (

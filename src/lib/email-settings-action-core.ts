@@ -30,6 +30,7 @@ export type EmailSettingsActionInput = {
   password: string
   fromAddress: string
   noAuth: boolean
+  toAddress?: string
 }
 
 export type ValidatedEmailSettingsInput = Omit<
@@ -133,6 +134,29 @@ export function passwordIdentity(row: StoredPasswordRow | null) {
   }
 }
 
+export function explainTestEmailError(message: string) {
+  if (/550/i.test(message) && /example\.com/i.test(message) && /\bto\b/i.test(message)) {
+    return 'Resend rejected the recipient. It will not deliver to example.com addresses. Enter a real inbox in “Send test to” — usually the email you used to sign up for Resend, or an address on your verified domain.'
+  }
+  return message
+}
+
+function resolveTestRecipient(toAddress: string | undefined, adminEmail: string) {
+  const explicit = toAddress?.trim() ?? ''
+  if (!explicit) {
+    return { ok: true as const, email: adminEmail }
+  }
+  const validation = validateFromAddress(explicit)
+  if (!validation.ok) {
+    return {
+      ok: false as const,
+      error: validation.error.replace(/From address/g, 'Test recipient'),
+    }
+  }
+  const angled = explicit.match(/<([^>]+)>$/)
+  return { ok: true as const, email: angled ? angled[1].trim() : explicit }
+}
+
 export async function requireEmailSettingsAdmin(
   checkAdmin: () => Promise<string | null>,
 ) {
@@ -189,6 +213,11 @@ export async function sendTestEmailCore(
 
     if (!adminEmail) {
       return { success: false, error: 'Your admin account has no email address' }
+    }
+
+    const recipient = resolveTestRecipient(input.toAddress, adminEmail)
+    if (!recipient.ok) {
+      return { success: false, error: recipient.error }
     }
 
     const envConfig = readEnvEmailConfig(env)
@@ -263,7 +292,7 @@ export async function sendTestEmailCore(
 
     await transporter.sendMail({
       from: value.fromAddress,
-      to: adminEmail,
+      to: recipient.email,
       subject: 'Approval App test email',
       text: 'SMTP test from Admin → Email notifications.',
     })
@@ -272,10 +301,12 @@ export async function sendTestEmailCore(
   } catch (error) {
     return {
       success: false,
-      error: sanitizeSmtpErrorWithSecrets(error, [
-        resolvedPassword,
-        importedEnvPassword,
-      ]),
+      error: explainTestEmailError(
+        sanitizeSmtpErrorWithSecrets(error, [
+          resolvedPassword,
+          importedEnvPassword,
+        ]),
+      ),
     }
   }
 }

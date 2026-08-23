@@ -20,6 +20,7 @@ export type EmailSettingsPublic = {
   hasPassword: boolean
   needsPasswordReset: boolean
   noAuth: boolean
+  adminEmail: string
 }
 
 const PRESETS: Record<
