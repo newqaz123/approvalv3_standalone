@@ -792,6 +792,9 @@ function FollowUpRequestRow({
 	formatLastUpdate: (value: Date | string) => string;
 }) {
 	const summary = getSubTaskSummary(request.subTasks);
+	// Hover never fires on touch: the progress row also toggles an inline
+	// sub-task list below md.
+	const [subTasksOpen, setSubTasksOpen] = useState(false);
 	const progressValue =
 		summary.total === 0
 			? 0
@@ -819,11 +822,11 @@ function FollowUpRequestRow({
 		>
 			<div
 				data-testid="follow-up-request-primary"
-				className="flex min-w-0 items-start justify-between gap-4"
+				className="flex min-w-0 flex-col gap-3 md:flex-row md:items-start md:justify-between md:gap-4"
 			>
 				<div className="min-w-0 flex-1">
-					<div className="flex min-w-0 items-center gap-2">
-						<h3 className="truncate text-base font-semibold text-gray-900">
+					<div className="flex min-w-0 flex-wrap items-start gap-x-2 gap-y-1 md:flex-nowrap md:items-center">
+						<h3 className="min-w-0 break-words line-clamp-2 text-base font-semibold text-gray-900 md:line-clamp-none md:truncate">
 							{request.title}
 						</h3>
 						<StatusBadge
@@ -852,7 +855,7 @@ function FollowUpRequestRow({
 						{request.requester?.name || "Unknown"}
 					</p>
 				</div>
-				<div className="flex shrink-0 items-center gap-2">
+				<div className="flex w-full flex-col items-start gap-2 md:w-auto md:flex-row md:items-center md:shrink-0">
 					<div onClick={(event) => event.stopPropagation()}>
 						<EngineerPicPicker
 							requestId={request.id}
@@ -866,7 +869,7 @@ function FollowUpRequestRow({
 					{showSubmitSolution && request.status === "SentToEngineer" && (
 						<Button
 							size="sm"
-							className="rounded-full bg-gray-900 px-4 text-white transition-all duration-200 hover:bg-gray-800 motion-safe:hover:-translate-y-0.5 motion-safe:hover:scale-[1.02] motion-safe:hover:shadow-md motion-reduce:transform-none"
+							className="w-full rounded-full bg-gray-900 px-4 text-white transition-all duration-200 hover:bg-gray-800 motion-safe:hover:-translate-y-0.5 motion-safe:hover:scale-[1.02] motion-safe:hover:shadow-md motion-reduce:transform-none md:w-auto"
 							onClick={(event) => {
 								event.stopPropagation();
 								onSubmitSolution(request.id);
@@ -884,7 +887,11 @@ function FollowUpRequestRow({
 						data-testid="follow-up-request-progress"
 						className="group/progress mt-4 flex w-full items-center gap-3 rounded-md px-0 text-left transition-colors"
 						aria-label={`Sub-task progress ${summary.completed} of ${summary.total} completed`}
-						onClick={(event) => event.stopPropagation()}
+						aria-expanded={subTasksOpen}
+						onClick={(event) => {
+							event.stopPropagation();
+							setSubTasksOpen((open) => !open);
+						}}
 					>
 						<Progress
 							value={progressValue}
@@ -897,67 +904,24 @@ function FollowUpRequestRow({
 						</span>
 					</button>
 				</HoverCardTrigger>
-				<HoverCardContent align="start" className="w-96">
-					<div className="space-y-2">
-						<p className="text-sm font-semibold text-gray-900">
-							Sub-task items
-						</p>
-						<div className="max-h-72 overflow-y-auto space-y-2 pr-1">
-							{request.subTasks.length === 0 ? (
-								<div className="rounded-md border border-dashed p-3 text-sm text-gray-500">
-									No sub-tasks yet
-								</div>
-							) : (
-								request.subTasks.map((subTask) => {
-									const stageName =
-										subTask.stage.isOthers && subTask.customStageText
-											? subTask.customStageText
-											: subTask.stage.name;
-
-									return (
-										<div
-											key={subTask.id}
-											className="rounded-md border p-3 text-sm"
-										>
-											<div className="flex items-start justify-between gap-2">
-												<p className="font-medium text-gray-900">
-													{subTask.description}
-												</p>
-												<Badge
-													className={cn(
-														"shrink-0",
-														stageName.toLowerCase() === "completed"
-															? "bg-emerald-100 text-emerald-700 hover:bg-emerald-100"
-															: "bg-gray-100 text-gray-600 hover:bg-gray-100",
-													)}
-													aria-label="Stage badge"
-												>
-													{stageName}
-												</Badge>
-											</div>
-											<p className="mt-2 text-xs text-gray-500">
-												<span
-													className={cn(
-														"font-medium",
-														subTask.isCompleted
-															? "text-emerald-700"
-															: "text-gray-500",
-													)}
-												>
-													{subTask.isCompleted ? "Completed" : "Not completed"}
-												</span>
-												{" • "}
-												{subTask.subContractor?.name ?? "No subcontractor"} •
-												Last update {formatLastUpdate(subTask.updatedAt)}
-											</p>
-										</div>
-									);
-								})
-							)}
-						</div>
-					</div>
+				<HoverCardContent align="start" className="hidden w-96 md:block">
+					<SubTaskList
+						subTasks={request.subTasks}
+						formatLastUpdate={formatLastUpdate}
+					/>
 				</HoverCardContent>
 			</HoverCard>
+			{subTasksOpen && (
+				<div
+					data-testid="follow-up-subtasks-inline"
+					className="mt-3 rounded-xl border border-gray-100 bg-gray-50 p-3 md:hidden"
+				>
+					<SubTaskList
+						subTasks={request.subTasks}
+						formatLastUpdate={formatLastUpdate}
+					/>
+				</div>
+			)}
 			{subContractorNames.length > 0 && (
 				<div
 					data-testid="follow-up-request-contractors"
@@ -980,6 +944,75 @@ function FollowUpRequestRow({
 					)}
 				</div>
 			)}
+		</div>
+	);
+}
+
+function SubTaskList({
+	subTasks,
+	formatLastUpdate,
+}: {
+	subTasks: FollowUpRequest["subTasks"];
+	formatLastUpdate: (value: Date | string) => string;
+}) {
+	return (
+		<div className="space-y-2">
+			<p className="text-sm font-semibold text-gray-900">
+				Sub-task items
+			</p>
+			<div className="max-h-72 overflow-y-auto space-y-2 pr-1">
+				{subTasks.length === 0 ? (
+					<div className="rounded-md border border-dashed p-3 text-sm text-gray-500">
+						No sub-tasks yet
+					</div>
+				) : (
+					subTasks.map((subTask) => {
+						const stageName =
+							subTask.stage.isOthers && subTask.customStageText
+								? subTask.customStageText
+								: subTask.stage.name;
+
+						return (
+							<div
+								key={subTask.id}
+								className="rounded-md border p-3 text-sm"
+							>
+								<div className="flex items-start justify-between gap-2">
+									<p className="font-medium text-gray-900">
+										{subTask.description}
+									</p>
+									<Badge
+										className={cn(
+											"shrink-0",
+											stageName.toLowerCase() === "completed"
+												? "bg-emerald-100 text-emerald-700 hover:bg-emerald-100"
+												: "bg-gray-100 text-gray-600 hover:bg-gray-100",
+										)}
+										aria-label="Stage badge"
+									>
+										{stageName}
+									</Badge>
+								</div>
+								<p className="mt-2 text-xs text-gray-500">
+									<span
+										className={cn(
+											"font-medium",
+											subTask.isCompleted
+												? "text-emerald-700"
+												: "text-gray-500",
+										)}
+									>
+										{subTask.isCompleted ? "Completed" : "Not completed"}
+									</span>
+									{" • "}
+									{subTask.subContractor?.name ?? "No subcontractor"} •
+									Last update {formatLastUpdate(subTask.updatedAt)}
+								</p>
+							</div>
+						);
+					})
+				)}
+			</div>
 		</div>
 	);
 }

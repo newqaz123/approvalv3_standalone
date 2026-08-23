@@ -842,6 +842,54 @@ describe("engineering stale sub-task filters", () => {
 		assert.doesNotMatch(tabs, /isComplete \? "Completed" : "Not completed"/);
 	});
 
+	it("stacks the Follow up card vertically on phones so the title is not crushed", () => {
+		const tabs = readFileSync(
+			"src/components/engineering/engineering-dashboard-tabs.tsx",
+			"utf8",
+		);
+
+		// One row on desktop, stacked column below md: the title must not share a
+		// flex row with the shrink-0 PIC picker and Submit button.
+		assert.match(
+			tabs,
+			/flex-col gap-3 md:flex-row md:items-start md:justify-between/,
+		);
+		// Badges wrap below the title instead of squeezing it to one letter.
+		assert.match(tabs, /flex-wrap items-start gap-x-2 gap-y-1 md:flex-nowrap/);
+		// The title wraps to at most two lines on phones and truncates on desktop.
+		assert.match(tabs, /break-words line-clamp-2/);
+		// PIC picker sits on its own line and Submit goes full width on phones.
+		assert.match(tabs, /w-full[^"]*md:w-auto/);
+		assert.match(
+			tabs,
+		/flex-col items-start gap-2 md:[^"]*md:flex-row md:items-center md:shrink-0/,
+		);
+	});
+
+	it("expands Follow up sub-tasks by tapping the progress row on phones", () => {
+		const tabs = readFileSync(
+			"src/components/engineering/engineering-dashboard-tabs.tsx",
+			"utf8",
+		);
+
+		// Hover does nothing on touch: the progress trigger must toggle an
+		// inline expandable list, and the hover card stays desktop-only.
+		assert.match(tabs, /const \[subTasksOpen, setSubTasksOpen\] = useState\(false\)/);
+		assert.match(
+			tabs,
+			/setSubTasksOpen\(\(open\) => !open\)/,
+		);
+		assert.match(tabs, /aria-expanded=\{subTasksOpen\}/);
+		assert.match(
+			tabs,
+			/\{subTasksOpen && \([\s\S]*?md:hidden[\s\S]*?Sub-task items/,
+		);
+		assert.match(
+			tabs,
+			/HoverCardContent align="start" className="[^"]*\bhidden\b[^"]*\bmd:block\b/,
+		);
+	});
+
 	it("adds hover motion on Follow up progress, PIC, and submit controls", () => {
 		const tabs = readFileSync(
 			"src/components/engineering/engineering-dashboard-tabs.tsx",
