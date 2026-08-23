@@ -2,7 +2,6 @@
 
 import { format } from "date-fns";
 import {
-	X,
 	Download,
 	Eye,
 	Info,
@@ -26,6 +25,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
+import { RequestModalHeader } from "./request-modal-header";
 import { Separator } from "@/components/ui/separator";
 import { FormattedText } from "@/components/ui/formatted-text";
 import { CancelRequestDialog } from "./cancel-request-dialog";
@@ -221,43 +221,21 @@ export function CompletedRequestModal({
 		<Dialog open={open} onOpenChange={onOpenChange}>
 			<DialogContent className="max-w-5xl w-full max-h-[90vh] p-0 gap-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl rounded-xl overflow-hidden">
 				{/* Header */}
-				<DialogHeader className="flex-shrink-0 px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 sticky top-0 z-20">
-					<div className="flex items-center justify-between">
-						<div className="flex flex-col gap-1">
-							<div className="flex items-center gap-3">
-								<DialogTitle className="text-lg font-bold text-slate-900 dark:text-slate-100 tracking-tight m-0">
-									{data.title}
-								</DialogTitle>
-								<span className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-bold uppercase tracking-wider bg-emerald-100 text-emerald-700">
-									<span className="size-2 rounded-full mr-1.5 bg-emerald-500" />
-									Improvement Request
-								</span>
-							</div>
-						</div>
-
-						<div className="flex items-center gap-3">
-							<div className="flex items-center gap-2 pr-4 border-r border-slate-100 dark:border-slate-800 mr-2">
-								<div className="size-8 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-slate-500 dark:text-slate-400 font-bold text-xs">
-									{data.submitter.initials}
-								</div>
-								<div className="flex flex-col">
-									<span className="text-sm font-bold text-slate-900 dark:text-slate-100 leading-tight">
-										{data.submitter.name}
-									</span>
-									<span className="text-xs text-slate-500 dark:text-slate-400 leading-tight">
-										{data.submitter.role} • {data.submitter.email}
-									</span>
-								</div>
-							</div>
-							<button
-								onClick={() => onOpenChange(false)}
-								className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors text-slate-400 hover:text-slate-600"
-							>
-								<X className="w-5 h-5" />
-							</button>
-						</div>
-					</div>
-				</DialogHeader>
+				<RequestModalHeader
+				title={data.title}
+				badge={(
+					<span className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-bold uppercase tracking-wider bg-emerald-100 text-emerald-700">
+					<span className="size-2 rounded-full mr-1.5 bg-emerald-500" />
+					Improvement Request
+					</span>
+				)}
+				submitter={{
+					name: data.submitter.name,
+					role: data.submitter.role,
+					email: data.submitter.email,
+					initials: data.submitter.initials,
+				}}
+			/>
 
 				{/* Scrollable Content */}
 				<div className="min-h-0 flex-1 overflow-y-auto p-6 space-y-6 max-h-[calc(92svh-140px)] pointer-fine:max-h-[calc(90vh-140px)]">
