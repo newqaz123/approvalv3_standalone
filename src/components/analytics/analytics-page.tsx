@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import type { AnalyticsData, AnalyticsFilters, DateRangePreset } from '@/types/analytics'
@@ -18,10 +18,8 @@ const EngineeringResolutionTrendChart = dynamic(
   { loading: () => <Skeleton className="h-[280px] w-full rounded-lg" /> }
 )
 
-const WorkflowPipelineChart = dynamic(
-  () => import('@/components/analytics/workflow-pipeline-chart').then(mod => ({ default: mod.WorkflowPipelineChart })),
-  { loading: () => <Skeleton className="h-[280px] w-full rounded-lg" /> }
-)
+import { WorkflowPipelineChart, WorkflowPipelineExits } from '@/components/analytics/workflow-pipeline-chart'
+import { buildWorkflowPipelineView } from '@/lib/workflow-pipeline'
 
 const DepartmentBreakdownChart = dynamic(
   () => import('@/components/analytics/department-breakdown-chart').then(mod => ({ default: mod.DepartmentBreakdownChart })),
@@ -59,25 +57,30 @@ function SectionCard({
   title,
   subtitle,
   icon: Icon,
+  actions,
   children,
   className,
 }: {
   title: string
   subtitle?: string
   icon: React.ComponentType<{ className?: string }>
+  actions?: React.ReactNode
   children: React.ReactNode
   className?: string
 }) {
   return (
     <div className={cn('rounded-xl border bg-card shadow-sm', className)}>
-      <div className="flex items-start gap-2 border-b px-5 py-3.5">
-        <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-        <div className="min-w-0">
-          <h2 className="text-sm font-semibold">{title}</h2>
-          {subtitle && (
-            <p className="mt-0.5 text-xs font-normal text-muted-foreground">{subtitle}</p>
-          )}
+      <div className="flex flex-wrap items-start justify-between gap-2 border-b px-5 py-3.5">
+        <div className="flex min-w-0 items-start gap-2">
+          <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+          <div className="min-w-0">
+            <h2 className="text-sm font-semibold">{title}</h2>
+            {subtitle && (
+              <p className="mt-0.5 text-xs font-normal text-muted-foreground">{subtitle}</p>
+            )}
+          </div>
         </div>
+        {actions}
       </div>
       <div className="p-5">{children}</div>
     </div>
@@ -90,6 +93,7 @@ export function AnalyticsPage({ initialData, filters, userId }: AnalyticsPagePro
   const [data, setData] = useState(initialData)
   const [isLoading, setIsLoading] = useState(false)
   const [isInitialLoad, setIsInitialLoad] = useState(true)
+  const pipelineView = useMemo(() => buildWorkflowPipelineView(data.pipeline), [data.pipeline])
 
   const getActiveFilters = useCallback((): AnalyticsFilters => {
     const dateRange = searchParams.get('dateRange')
@@ -263,9 +267,16 @@ export function AnalyticsPage({ initialData, filters, userId }: AnalyticsPagePro
           </SectionCard>
 
           {/* Row 5: Workflow Pipeline */}
-          <SectionCard title="Workflow Pipeline" icon={BarChart3}>
+          <SectionCard
+            title="Workflow pipeline"
+            subtitle="Where open requests sit along the path"
+            icon={BarChart3}
+            actions={
+              data.pipeline.length > 0 ? <WorkflowPipelineExits view={pipelineView} /> : null
+            }
+          >
             {showSkeleton ? (
-              <Skeleton className="h-[280px] w-full rounded-lg" />
+              <Skeleton className="h-[160px] w-full rounded-lg" />
             ) : (
               <WorkflowPipelineChart data={data.pipeline} />
             )}

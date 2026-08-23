@@ -23,6 +23,11 @@ export interface AnalyticsFilters {
  * Workflow pipeline segment data
  * Represents status distribution at a single workflow step
  */
+export interface PipelineRequestPreview {
+  id: string
+  title: string
+}
+
 export interface WorkflowPipelineSegment {
   /** Workflow step name (e.g., "ImprovementRequest", "SentToEngineer") */
   step: string
@@ -32,6 +37,8 @@ export interface WorkflowPipelineSegment {
   approved: number
   /** Count of rejected requests at this step */
   rejected: number
+  /** Most recently updated requests at this step (capped by the chart) */
+  previews: PipelineRequestPreview[]
 }
 
 /**

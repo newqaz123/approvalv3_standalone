@@ -16,6 +16,7 @@ import type {
   EngineeringCycle,
   DepartmentApprovalSpeed,
 } from '@/types/analytics'
+import { PIPELINE_PREVIEW_LIMIT } from '@/lib/workflow-pipeline'
 import {
   ENGINEERING_LIFECYCLE_ACTIONS,
   ENGINEERING_LIFECYCLE_STATUSES,
@@ -173,20 +174,24 @@ async function fetchPipelineData(
   const requests = await prisma.requests.findMany({
     where: whereClause,
     select: {
+      id: true,
+      title: true,
       status: true,
+    },
+    orderBy: {
+      updatedAt: 'desc',
     },
   })
 
-  // Group by status
-  const statusCounts = requests.reduce(
+  const grouped = requests.reduce(
     (acc, req) => {
-      acc[req.status] = (acc[req.status] || 0) + 1
+      if (!acc[req.status]) acc[req.status] = []
+      acc[req.status].push({ id: req.id, title: req.title || 'Untitled' })
       return acc
     },
-    {} as Record<string, number>
+    {} as Record<string, Array<{ id: string; title: string }>>,
   )
 
-  // Map to workflow segments
   const statusMap: Record<string, 'pending' | 'approved' | 'rejected'> = {
     ImprovementRequest: 'pending',
     SentToEngineer: 'pending',
@@ -197,14 +202,16 @@ async function fetchPipelineData(
     Cancelled: 'rejected',
   }
 
-  // Build pipeline segments for each status
-  const segments: WorkflowPipelineSegment[] = Object.keys(statusCounts).map((status) => {
+  const segments: WorkflowPipelineSegment[] = Object.keys(grouped).map((status) => {
+    const items = grouped[status]
     const statusType = statusMap[status] || 'pending'
+    const count = items.length
     return {
       step: status,
-      pending: statusType === 'pending' ? statusCounts[status] : 0,
-      approved: statusType === 'approved' ? statusCounts[status] : 0,
-      rejected: statusType === 'rejected' ? statusCounts[status] : 0,
+      pending: statusType === 'pending' ? count : 0,
+      approved: statusType === 'approved' ? count : 0,
+      rejected: statusType === 'rejected' ? count : 0,
+      previews: items.slice(0, PIPELINE_PREVIEW_LIMIT),
     }
   })
 
