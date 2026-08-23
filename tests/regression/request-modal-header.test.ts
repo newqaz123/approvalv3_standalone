@@ -9,6 +9,7 @@ const header = "src/components/requests/request-modal-header.tsx";
 // Modals that shipped the copy-pasted "title + badge + submitter + custom X"
 // header that overlaps itself on phones.
 const copyPasteModals = [
+	"src/components/requests/completed-final-modal.tsx",
 	"src/components/requests/completed-request-modal.tsx",
 	"src/components/requests/completed-solution-modal.tsx",
 	"src/components/requests/approver-modal.tsx",
