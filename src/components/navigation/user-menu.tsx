@@ -16,15 +16,22 @@ import { cn } from "@/lib/utils";
  */
 export function UserMenu({
 	variant = "desktop",
+	onOpenChange,
 	children,
 }: {
 	variant?: "desktop" | "mobile";
+	onOpenChange?: (open: boolean) => void;
 	children?: React.ReactNode;
 }) {
 	const { data: session } = useSession();
 	const user = session?.user;
 	const [menuOpen, setMenuOpen] = useState(false);
 	const menuRef = useRef<HTMLDivElement>(null);
+
+	const setOpen = (next: boolean) => {
+		setMenuOpen(next);
+		onOpenChange?.(next);
+	};
 
 	const isMobile = variant === "mobile";
 	const userInitial = user?.name?.[0] || user?.email?.[0] || "U";
@@ -33,7 +40,7 @@ export function UserMenu({
 	useEffect(() => {
 		function handleClickOutside(event: MouseEvent) {
 			if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-				setMenuOpen(false);
+				setOpen(false);
 			}
 		}
 		document.addEventListener("mousedown", handleClickOutside);
@@ -45,7 +52,7 @@ export function UserMenu({
 	// baked into client code. Errors are logged without inventing a fallback
 	// origin.
 	const handleSignOut = async () => {
-		setMenuOpen(false);
+		setOpen(false);
 		try {
 			await signOut({ callbackUrl: "/sign-in" });
 		} catch (error) {
@@ -56,7 +63,7 @@ export function UserMenu({
 	return (
 		<div className="relative" ref={menuRef}>
 			<button
-				onClick={() => setMenuOpen(!menuOpen)}
+				onClick={() => setOpen(!menuOpen)}
 				className={cn(
 					"flex items-center justify-center rounded-full transition-all duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2",
 					isMobile
@@ -77,31 +84,31 @@ export function UserMenu({
 					<div className="py-1">
 						<Link
 							href="/profile"
-							onClick={() => setMenuOpen(false)}
-							className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+							onClick={() => setOpen(false)}
+							className="flex min-h-[44px] items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
 						>
 							<User className="h-4 w-4" />
 							Profile
 						</Link>
 						<Link
 							href="/approval-chain"
-							onClick={() => setMenuOpen(false)}
-							className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+							onClick={() => setOpen(false)}
+							className="flex min-h-[44px] items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
 						>
 							<GitBranch className="h-4 w-4" />
 							Approval Chain
 						</Link>
 						<Link
 							href="/change-password"
-							onClick={() => setMenuOpen(false)}
-							className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+							onClick={() => setOpen(false)}
+							className="flex min-h-[44px] items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
 						>
 							<Lock className="h-4 w-4" />
 							Change Password
 						</Link>
 						<button
 							onClick={handleSignOut}
-							className="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left"
+							className="flex min-h-[44px] w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left"
 						>
 							<LogOut className="h-4 w-4" />
 							Sign Out

@@ -274,7 +274,7 @@ export function CompletedFinalModal({
 			/>
 
 				{/* Scrollable Content */}
-				<div className="min-h-0 flex-1 overflow-y-auto p-6 space-y-6 max-h-[calc(92svh-180px)] pointer-fine:max-h-[calc(90vh-180px)]">
+				<div className="min-h-0 flex-1 overflow-y-auto p-6 space-y-6 max-h-[calc(92svh-260px)] pointer-fine:max-h-[calc(90vh-260px)]">
 					{/* Completed Banner */}
 					<div className="bg-emerald-50 dark:bg-emerald-900/10 rounded-xl p-4 border border-emerald-200 dark:border-emerald-800/30">
 						<div className="flex items-start gap-3">
@@ -585,8 +585,8 @@ export function CompletedFinalModal({
 				</div>
 
 				{/* Footer - Only Export Button */}
-				<div className="px-6 py-4 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0">
-					<div className="flex items-center gap-4 text-xs text-slate-400 font-medium">
+				<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between shrink-0 px-6 py-4 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-100 dark:border-slate-800">
+					<div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400 font-medium">
 						<span className="flex items-center gap-1.5">
 							<CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
 							All Approvals Complete
@@ -599,7 +599,7 @@ export function CompletedFinalModal({
 					<Button
 						onClick={handleExportClick}
 						disabled={!onExport && !onExportPackage}
-						className="bg-emerald-600 hover:bg-emerald-700 text-white"
+						className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white"
 					>
 						<Printer className="w-4 h-4 mr-1.5" />
 						Export Report

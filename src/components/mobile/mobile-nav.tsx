@@ -42,6 +42,7 @@ export function MobileNav() {
   const { data: session } = useSession()
   const user = session?.user
   const isVisible = useScrollDirection()
+  const [menuOpen, setMenuOpen] = useState(false)
   const [pendingCount, setPendingCount] = useState(0)
   const isEngineering = user?.role === 'engineering'
   const visibleTabs = isEngineering ? engineeringTabs : tabs
@@ -81,7 +82,9 @@ export function MobileNav() {
     <nav
       className={cn(
         'fixed top-0 left-0 right-0 z-50 bg-white border-b border-gray-200 transition-transform duration-300 lg:hidden',
-        isVisible ? 'translate-y-0' : '-translate-y-full'
+        // translate-y-0 is still a transform and blocks iOS taps on the
+        // overflowing dropdown. Drop the transform entirely while open.
+        menuOpen ? 'transform-none' : isVisible ? 'translate-y-0' : '-translate-y-full'
       )}
     >
       <div className="flex items-center justify-between px-2 sm:px-4 h-16">
@@ -118,7 +121,7 @@ export function MobileNav() {
 
         {/* Right side - User profile menu (tappable avatar) */}
         <div className="flex items-center">
-          <UserMenu variant="mobile" />
+          <UserMenu variant="mobile" onOpenChange={setMenuOpen} />
         </div>
       </div>
     </nav>

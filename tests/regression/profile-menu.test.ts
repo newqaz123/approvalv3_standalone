@@ -29,7 +29,25 @@ describe('profile and approval-chain user menu', () => {
       mobileNav,
       /import \{ UserMenu \} from ['"]@\/components\/navigation\/user-menu['"]/,
     )
-    assert.match(mobileNav, /<UserMenu variant="mobile"\s*\/>/)
+    assert.match(mobileNav, /<UserMenu variant="mobile"/)
+  })
+
+  it('drops the nav transform while the menu is open so iOS can tap the items', () => {
+    const mobileNav = readFileSync('src/components/mobile/mobile-nav.tsx', 'utf8')
+    const userMenu = readFileSync('src/components/navigation/user-menu.tsx', 'utf8')
+
+    // Overflowing descendants of a transformed ancestor do not receive
+    // touches on iOS. The hide animation must be transform-none while open.
+    assert.match(mobileNav, /onOpenChange=\{setMenuOpen\}/)
+    assert.match(mobileNav, /menuOpen \? ['"]transform-none['"]/)
+    assert.match(userMenu, /onOpenChange\?:/)
+    assert.match(userMenu, /onOpenChange\?\.\(next\)/)
+
+    // Menu actions themselves must meet the 44px touch target.
+    assert.match(userMenu, /href="\/profile"[\s\S]*?min-h-\[44px\]/)
+    assert.match(userMenu, /href="\/approval-chain"[\s\S]*?min-h-\[44px\]/)
+    assert.match(userMenu, /href="\/change-password"[\s\S]*?min-h-\[44px\]/)
+    assert.match(userMenu, /onClick=\{handleSignOut\}[\s\S]*?min-h-\[44px\]/)
   })
 
   it('makes the mobile avatar a tappable menu button instead of a dead circle', () => {

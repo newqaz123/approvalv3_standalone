@@ -145,7 +145,7 @@ describe("mobile modal content budgets", () => {
 		["src/components/requests/submitter-modal.tsx", "180"],
 		["src/components/requests/completed-request-modal.tsx", "140"],
 		["src/components/requests/completed-solution-modal.tsx", "140"],
-		["src/components/requests/completed-final-modal.tsx", "180"],
+		["src/components/requests/completed-final-modal.tsx", "260"],
 		["src/components/requests/final-approval-modal.tsx", "140"],
 		["src/components/requests/final-approval-resubmit-modal.tsx", "180"],
 		["src/components/requests/solution-modal.tsx", "140"],
@@ -169,6 +169,16 @@ describe("mobile modal content budgets", () => {
 			assert.doesNotMatch(source, /style=\{\{\s*maxHeight:\s*["']calc\(90vh/);
 		});
 	}
+
+	it("stacks the completed-final export footer on phones so Export Report stays on screen", () => {
+		const source = read("src/components/requests/completed-final-modal.tsx");
+
+		assert.match(
+			source,
+			/flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between/,
+		);
+		assert.match(source, /w-full sm:w-auto/);
+	});
 });
 
 describe("mobile Safari input zoom", () => {
