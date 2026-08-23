@@ -222,12 +222,28 @@ describe('email-settings', () => {
       resolve(process.cwd(), 'src/lib/email-presets.ts'),
       'utf8',
     )
-    // Assert on import/export statements, not prose: a comment mentioning
-    // "nodemailer" is harmless, an import of it would break the browser build.
-    const imports = source.match(/^(?:import|export)[^;]*;/gm) ?? []
-    const importText = imports.join('\n')
-    assert.doesNotMatch(importText, /node:crypto|email-crypto|email-settings|nodemailer|@prisma/)
-    assert.ok(imports.length > 0, 'expected at least the provider export to exist')
+    // Assert on import module specifiers, not prose: the doc comment
+    // legitimately names node-only modules, but only an actual import would
+    // pull them into the browser bundle. This repo is semicolon-free, so
+    // import statements never end in ';' — match specifiers instead of
+    // statements, and only after stripping comments.
+    const withoutComments = source
+      .replace(/\/*[\s\S]*?\*\//g, '')
+      .replace(/^[ \t]*\/\/.*$/gm, '')
+    const specifiers = [
+      ...(withoutComments.match(/from\s+['"][^'"]+['"]/g) ?? []),
+      ...(withoutComments.match(/import\s+['"][^'"]+['"]/g) ?? []),
+      ...(withoutComments.match(/require\(\s*['"][^'"]+['"]\s*\)/g) ?? []),
+    ].join('\n')
+    assert.doesNotMatch(
+      specifiers,
+      /node:|email-crypto|email-settings|nodemailer|prisma/,
+    )
+    // Non-vacuous: the module must still export the preset API the form uses,
+    // so an emptied file cannot pass on zero specifiers alone.
+    assert.match(source, /export function applyEmailPreset/)
+    assert.match(source, /export const EMAIL_PROVIDERS/)
+    assert.match(source, /export type EmailSettingsPublic/)
   })
 
   it('fills Resend/Gmail/Outlook presets and leaves custom alone', () => {
