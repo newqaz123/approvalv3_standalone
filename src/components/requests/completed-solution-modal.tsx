@@ -246,12 +246,12 @@ export function CompletedSolutionModal({
 				{/* Header */}
 				<RequestModalHeader
 				title={data.title}
-				badge={(
+				badge={
 					<span className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-bold uppercase tracking-wider bg-purple-100 text-purple-700">
-					<span className="size-2 rounded-full mr-1.5 bg-purple-500" />
-					Design & Cost Approval
+						<span className="size-2 rounded-full mr-1.5 bg-purple-500" />
+						Design & Cost Approval
 					</span>
-				)}
+				}
 				submitter={{
 					name: data.submitter.name,
 					role: data.submitter.role,

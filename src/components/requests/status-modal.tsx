@@ -492,22 +492,22 @@ export function StatusModal({
 				{/* Header with X button - Ref ID removed */}
 				<RequestModalHeader
 				title={data.title}
-				badge={(
+				badge={
 					<span
-					className={cn(
-					"inline-flex items-center rounded-full px-2.5 py-1 text-xs font-bold uppercase tracking-wider",
-					status.className,
-					)}
+						className={cn(
+							"inline-flex items-center rounded-full px-2.5 py-1 text-xs font-bold uppercase tracking-wider",
+							status.className,
+						)}
 					>
-					<span
-					className={cn(
-					"size-2 rounded-full mr-1.5",
-					status.dotClass,
-					)}
-					/>
-					{status.label}
+						<span
+							className={cn(
+								"size-2 rounded-full mr-1.5",
+								status.dotClass,
+							)}
+						/>
+						{status.label}
 					</span>
-				)}
+				}
 				submitter={{
 					name: data.submitter.name,
 					role: data.submitter.role,

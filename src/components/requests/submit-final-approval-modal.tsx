@@ -458,12 +458,12 @@ export function SubmitFinalApprovalModal({
 				{/* Header */}
 				<RequestModalHeader
 				title={data.title}
-				badge={(
+				badge={
 					<span className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-bold uppercase tracking-wider bg-amber-100 text-amber-700">
-					<span className="size-2 rounded-full mr-1.5 bg-amber-500" />
-					Final Approval
+						<span className="size-2 rounded-full mr-1.5 bg-amber-500" />
+						Final Approval
 					</span>
-				)}
+				}
 				submitter={{
 					name: data.submitter.name,
 					role: data.submitter.role,

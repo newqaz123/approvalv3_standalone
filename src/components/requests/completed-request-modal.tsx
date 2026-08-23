@@ -223,12 +223,12 @@ export function CompletedRequestModal({
 				{/* Header */}
 				<RequestModalHeader
 				title={data.title}
-				badge={(
+				badge={
 					<span className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-bold uppercase tracking-wider bg-emerald-100 text-emerald-700">
-					<span className="size-2 rounded-full mr-1.5 bg-emerald-500" />
-					Improvement Request
+						<span className="size-2 rounded-full mr-1.5 bg-emerald-500" />
+						Improvement Request
 					</span>
-				)}
+				}
 				submitter={{
 					name: data.submitter.name,
 					role: data.submitter.role,
