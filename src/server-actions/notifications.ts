@@ -8,18 +8,35 @@ import {
 import prisma from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
 import nodemailer from "nodemailer";
+import { decryptEmailSecret } from "@/lib/email-crypto";
+import {
+	buildTransporterOptions,
+	readEnvEmailConfig,
+	resolveRuntimeEmailConfig,
+	sanitizeSmtpErrorWithSecrets,
+} from "@/lib/email-settings";
 
-// Initialize SMTP transporter if configured
-const transporter = process.env.SMTP_HOST
-	? nodemailer.createTransport({
-			host: process.env.SMTP_HOST,
-			port: parseInt(process.env.SMTP_PORT || "587"),
-			secure: process.env.SMTP_PORT === "465",
-			auth: process.env.SMTP_USER
-				? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
-				: undefined,
-		})
-	: null;
+async function resolveNotificationTransport() {
+	const row = await prisma.email_settings.findUnique({
+		where: { id: "default" },
+	});
+	const resolved = resolveRuntimeEmailConfig({
+		row,
+		env: readEnvEmailConfig(process.env),
+		decrypt: (envelope, aad) => decryptEmailSecret(envelope, aad),
+	});
+	if (resolved.status !== "ready") {
+		return { ok: false as const, reason: resolved.status };
+	}
+	return {
+		ok: true as const,
+		from: resolved.config.fromAddress,
+		password: resolved.config.password,
+		transporter: nodemailer.createTransport(
+			buildTransporterOptions(resolved.config),
+		),
+	};
+}
 
 type NotificationRequestLinkInput = {
 	type: string;
@@ -526,17 +543,16 @@ async function sendEmailNotification(
 	},
 	userEmail: string | string[],
 ) {
-	// Skip if SMTP is not configured
-	if (!transporter) {
-		console.warn("Email notification skipped: SMTP_HOST not configured");
-		return { success: false, error: "Email not configured" };
-	}
-
-	// Also skip if from email is not configured
-	const fromEmail = process.env.SMTP_FROM;
-	if (!fromEmail) {
-		console.warn("Email notification skipped: SMTP_FROM not configured");
-		return { success: false, error: "From email not configured" };
+	const resolved = await resolveNotificationTransport();
+	if (!resolved.ok) {
+		console.warn(`Email notification skipped: ${resolved.reason}`);
+		const error =
+			resolved.reason === "disabled"
+				? "Email notifications disabled"
+				: resolved.reason === "needsPasswordReset"
+					? "Email password needs to be reset"
+					: "Email not configured";
+		return { success: false, error };
 	}
 
 	const baseUrl = (
@@ -577,8 +593,8 @@ async function sendEmailNotification(
 	}
 
 	try {
-		await transporter.sendMail({
-			from: fromEmail,
+		await resolved.transporter.sendMail({
+			from: resolved.from,
 			to: userEmail,
 			subject,
 			html: buildNotificationEmailHtml({
@@ -597,7 +613,8 @@ async function sendEmailNotification(
 
 		return { success: true };
 	} catch (error) {
-		console.error("Failed to send email:", error);
-		return { success: false, error: String(error) };
+		const safeError = sanitizeSmtpErrorWithSecrets(error, [resolved.password]);
+		console.error("Failed to send email:", safeError);
+		return { success: false, error: safeError };
 	}
 }
