@@ -39,7 +39,7 @@ async function requireAdminUser() {
 
 function inferEmailProvider(host: string, username: string): EmailProvider {
   const identity = normalizeEmailIdentity({ host, port: 587, username })
-  for (const provider of ['resend', 'gmail', 'outlook'] as const) {
+  for (const provider of ['resend', 'mailgun', 'gmail', 'outlook'] as const) {
     const preset = applyEmailPreset(provider)
     if (identity.host !== preset.host) continue
     if (preset.username && identity.username !== preset.username) continue

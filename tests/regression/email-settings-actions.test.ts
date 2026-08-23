@@ -210,6 +210,8 @@ describe('email-settings server actions', () => {
     )
     assert.match(form, /Send test to/)
     assert.match(form, /resend.com\/api-keys/)
+    assert.match(form, /smtp.mailgun.org/)
+    assert.match(form, /Mailgun Domains/)
     assert.match(form, /myaccount.google.com\/apppasswords/)
     assert.match(form, /SMTP AUTH/)
     assert.match(form, /OAuth/)

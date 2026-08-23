@@ -55,6 +55,7 @@ const SOURCE_LABELS: Record<EmailSettingsPublic['source'], string> = {
 
 const PROVIDER_LABELS: Record<EmailProvider, string> = {
   resend: 'Resend',
+  mailgun: 'Mailgun',
   gmail: 'Gmail',
   outlook: 'Outlook / Microsoft 365',
   custom: 'Custom',
@@ -96,6 +97,32 @@ function ProviderInstructions({ provider }: { provider: EmailProvider }) {
             Resend will not deliver to <code>example.com</code>. Use a real
             inbox in Send test to.
           </li>
+        </ul>
+      )}
+      {provider === 'mailgun' && (
+        <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
+          <li>Host/port fill automatically: smtp.mailgun.org, 587.</li>
+          <li>
+            EU region: change host to <code>smtp.eu.mailgun.org</code>.
+          </li>
+          <li>
+            Username and password come from Mailgun → Sending → Domain
+            settings → SMTP credentials (often{' '}
+            <code>postmaster@your-domain</code>).
+          </li>
+          <li>
+            From must use a domain verified in{' '}
+            <a
+              className="font-medium text-primary underline underline-offset-4"
+              href="https://app.mailgun.com/app/sending/domains"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Mailgun Domains
+            </a>
+            .
+          </li>
+          <li>Free plan is about 100 emails/day. Switch back to Resend the same way.</li>
         </ul>
       )}
       {provider === 'gmail' && (
@@ -343,6 +370,7 @@ export function EmailSettingsForm({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="resend">Resend</SelectItem>
+                <SelectItem value="mailgun">Mailgun</SelectItem>
                 <SelectItem value="gmail">Gmail</SelectItem>
                 <SelectItem value="outlook">
                   Outlook / Microsoft 365

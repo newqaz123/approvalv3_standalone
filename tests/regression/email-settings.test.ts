@@ -361,7 +361,7 @@ describe('email-settings', () => {
     assert.match(source, /export type EmailSettingsPublic/)
   })
 
-  it('fills Resend/Gmail/Outlook presets and leaves custom alone', () => {
+  it('fills Resend/Gmail/Outlook/Mailgun presets and leaves custom alone', () => {
     assert.deepEqual(applyEmailPreset('resend'), {
       provider: 'resend',
       host: 'smtp.resend.com',
@@ -370,6 +370,11 @@ describe('email-settings', () => {
     })
     assert.deepEqual(applyEmailPreset('gmail').host, 'smtp.gmail.com')
     assert.deepEqual(applyEmailPreset('outlook').host, 'smtp.office365.com')
+    assert.deepEqual(applyEmailPreset('mailgun'), {
+      provider: 'mailgun',
+      host: 'smtp.mailgun.org',
+      port: 587,
+    })
     assert.equal(applyEmailPreset('custom').host, undefined)
   })
 })

@@ -6,7 +6,7 @@
  * resolution and crypto live in `./email-settings` and `./email-crypto`.
  */
 
-export const EMAIL_PROVIDERS = ['resend', 'gmail', 'outlook', 'custom'] as const
+export const EMAIL_PROVIDERS = ['resend', 'mailgun', 'gmail', 'outlook', 'custom'] as const
 export type EmailProvider = (typeof EMAIL_PROVIDERS)[number]
 
 export type EmailSettingsPublic = {
@@ -28,6 +28,7 @@ const PRESETS: Record<
   { host: string; port: number; username?: string }
 > = {
   resend: { host: 'smtp.resend.com', port: 587, username: 'resend' },
+  mailgun: { host: 'smtp.mailgun.org', port: 587 },
   gmail: { host: 'smtp.gmail.com', port: 587 },
   outlook: { host: 'smtp.office365.com', port: 587 },
 }
