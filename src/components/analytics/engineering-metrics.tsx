@@ -137,7 +137,37 @@ export function EngineeringMetricsPanel({ data }: EngineeringMetricsProps) {
           {data.recentCycles.length > 0 && (
             <div className="space-y-2">
               <p className="text-xs font-medium text-muted-foreground">Recent Engineering Cycles</p>
-              <div className="rounded-lg border overflow-hidden">
+              {/* Phones: the 3-column table overflows a narrow screen, so each
+                  cycle becomes a stacked card with the same data. */}
+              <div className="space-y-2 md:hidden">
+                {data.recentCycles.map((cycle) => (
+                  <div
+                    key={cycle.requestId}
+                    data-testid="recent-cycle-card"
+                    className="rounded-lg border p-3"
+                  >
+                    <p className="break-words text-sm font-medium" title={cycle.title}>
+                      {cycle.title}
+                    </p>
+                    <div className="mt-2 flex items-center justify-between gap-3">
+                      <span className="text-sm font-medium tabular-nums">
+                        {cycle.cycleHours !== null ? formatDuration(cycle.cycleHours) : '—'}
+                      </span>
+                      {cycle.sentBackAt ? (
+                        <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                          Done
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
+                          In Progress
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {/* md up: keep the compact table. */}
+              <div className="hidden md:block rounded-lg border overflow-hidden">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-muted/50 text-xs text-muted-foreground">
