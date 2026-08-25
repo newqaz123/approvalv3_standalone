@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import {
   AlertDialog,
@@ -13,8 +14,8 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
-import { Archive, Trash2 } from 'lucide-react'
-import { archiveRequest, permanentDeleteRequest } from '@/server-actions/requests'
+import { Archive, ArchiveRestore, Trash2 } from 'lucide-react'
+import { archiveRequest, unarchiveRequest } from '@/server-actions/requests'
 import { toast } from 'sonner'
 
 interface RetentionControlsProps {
@@ -23,6 +24,7 @@ interface RetentionControlsProps {
 }
 
 export function RetentionControls({ requestId, isArchived }: RetentionControlsProps) {
+  const router = useRouter()
   const [archiving, setArchiving] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
@@ -31,9 +33,27 @@ export function RetentionControls({ requestId, isArchived }: RetentionControlsPr
     try {
       const result = await archiveRequest(requestId)
       if (result.success) {
-        toast.success('Request archived successfully')
+        toast.success('Request archived. It is hidden from normal lists.')
+        router.refresh()
       } else {
         toast.error(result.error || 'Failed to archive request')
+      }
+    } catch {
+      toast.error('An unexpected error occurred')
+    } finally {
+      setArchiving(false)
+    }
+  }
+
+  async function handleUnarchive() {
+    setArchiving(true)
+    try {
+      const result = await unarchiveRequest(requestId)
+      if (result.success) {
+        toast.success('Request unarchived. It is visible in normal lists again.')
+        router.refresh()
+      } else {
+        toast.error(result.error || 'Failed to unarchive request')
       }
     } catch {
       toast.error('An unexpected error occurred')
@@ -45,12 +65,18 @@ export function RetentionControls({ requestId, isArchived }: RetentionControlsPr
   async function handleDelete() {
     setDeleting(true)
     try {
-      const result = await permanentDeleteRequest(requestId)
-      if (result.success) {
-        toast.success('Request permanently deleted')
-      } else {
+      const response = await fetch('/api/admin/retention/hard-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestIds: [requestId] }),
+      })
+      const result = await response.json()
+      if (!response.ok || !result.success) {
         toast.error(result.error || 'Failed to delete request')
+        return
       }
+      toast.success('Request permanently deleted')
+      router.refresh()
     } catch {
       toast.error('An unexpected error occurred')
     } finally {
@@ -60,29 +86,41 @@ export function RetentionControls({ requestId, isArchived }: RetentionControlsPr
 
   return (
     <div className="flex items-center gap-2">
-      {!isArchived && (
+      {isArchived ? (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleUnarchive}
+          disabled={archiving}
+          title="Show this request in normal lists again"
+        >
+          <ArchiveRestore className="h-4 w-4 mr-1" />
+          {archiving ? 'Unarchiving...' : 'Unarchive'}
+        </Button>
+      ) : (
         <Button
           variant="outline"
           size="sm"
           onClick={handleArchive}
           disabled={archiving}
-          title="Archive request"
+          title="Hide this request from normal lists"
         >
           <Archive className="h-4 w-4 mr-1" />
           {archiving ? 'Archiving...' : 'Archive'}
         </Button>
       )}
 
+      {isArchived ? (
       <AlertDialog>
         <AlertDialogTrigger asChild>
           <Button
             variant="destructive"
             size="sm"
             disabled={deleting}
-            title="Permanently delete request"
+            title="Permanently delete archived request"
           >
             <Trash2 className="h-4 w-4 mr-1" />
-            {deleting ? 'Deleting...' : 'Delete'}
+            {deleting ? 'Deleting...' : 'Hard-delete'}
           </Button>
         </AlertDialogTrigger>
         <AlertDialogContent>
@@ -105,6 +143,7 @@ export function RetentionControls({ requestId, isArchived }: RetentionControlsPr
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      ) : null}
     </div>
   )
 }

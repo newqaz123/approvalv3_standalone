@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { Users, Building2, FileText, Trash2, ClipboardList, LayoutTemplate, ListChecks, Mail } from 'lucide-react'
+import { Users, Building2, FileText, Trash2, Archive, ClipboardList, LayoutTemplate, ListChecks, Mail, HardDrive } from 'lucide-react'
 import prisma from '@/lib/prisma'
 
 async function getStats() {
@@ -99,17 +99,17 @@ export default async function AdminPage() {
           </Link>
 
           <Link
-            href="/admin/deleted-requests"
+            href="/admin/retention"
             className="rounded-lg border bg-card p-6 hover:bg-accent transition-colors cursor-pointer"
           >
             <div className="flex items-center gap-4">
-              <div className="rounded-full bg-destructive/10 p-3">
-                <Trash2 className="h-6 w-6 text-destructive" />
+              <div className="rounded-full bg-primary/10 p-3">
+                <Archive className="h-6 w-6 text-primary" />
               </div>
               <div>
-                <h3 className="font-semibold">Deleted Requests</h3>
+                <h3 className="font-semibold">Request Retention</h3>
                 <p className="text-sm text-muted-foreground">
-                  View and restore deleted requests
+                  Archive policy, backup zip, and hard-delete archived requests
                 </p>
               </div>
             </div>
@@ -178,6 +178,23 @@ export default async function AdminPage() {
                 <h3 className="font-semibold">Email notifications</h3>
                 <p className="text-sm text-muted-foreground">
                   Configure SMTP and switch email providers
+                </p>
+              </div>
+            </div>
+          </Link>
+
+          <Link
+            href="/admin/storage"
+            className="rounded-lg border bg-card p-6 hover:bg-accent transition-colors cursor-pointer"
+          >
+            <div className="flex items-center gap-4">
+              <div className="rounded-full bg-primary/10 p-3">
+                <HardDrive className="h-6 w-6 text-primary" />
+              </div>
+              <div>
+                <h3 className="font-semibold">Data storage</h3>
+                <p className="text-sm text-muted-foreground">
+                  See disk, uploads, and database size
                 </p>
               </div>
             </div>

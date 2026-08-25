@@ -852,6 +852,7 @@ export async function getMyActionItems() {
       status: 'pending',
       request: {
         isDeleted: false, // Exclude soft-deleted requests
+        isArchived: false, // Archived requests are not actionable
       },
     },
     include: {
@@ -924,6 +925,7 @@ export async function getMyActionItems() {
       solution: {
         request: {
           isDeleted: false,
+          isArchived: false,
         },
       },
     },
@@ -1529,9 +1531,9 @@ export async function previewDeleteByDateRange(input: {
 }
 
 /**
- * Bulk soft delete requests by creation date range (ADMIN ONLY)
- * - Preview mode: shows count and list of requests that would be deleted
- * - Delete mode: performs soft delete on all matching requests
+ * Bulk archive requests by creation date range (ADMIN ONLY)
+ * - Preview mode: shows count and list of requests that would be archived
+ * - Delete mode: archives all matching requests (reversible on /admin/retention)
  */
 export async function bulkDeleteRequestsByDateRange(input: {
   mode: 'preview' | 'delete'
@@ -1552,10 +1554,11 @@ export async function bulkDeleteRequestsByDateRange(input: {
     // Include entire end date by setting to end of day
     toDate.setHours(23, 59, 59, 999)
 
-    // Find requests created within date range (excluding already deleted ones)
+    // Find requests created within date range (excluding already deleted/archived ones)
     const requests = await prisma.requests.findMany({
       where: {
         isDeleted: false,
+        isArchived: false,
         createdAt: {
           gte: fromDate,
           lte: toDate,
@@ -1591,28 +1594,46 @@ export async function bulkDeleteRequestsByDateRange(input: {
       }
     }
 
-    // Delete mode - perform soft delete
-    const result = await prisma.requests.updateMany({
-      where: {
-        id: { in: requests.map(r => r.id) },
-      },
-      data: {
-        isDeleted: true,
-        deletedAt: new Date(),
-        deletedBy: adminUserId,
-      },
-    })
+    // Archive mode - per-row guarded updates inside one transaction. Each
+    // updateMany re-checks isArchived under READ COMMITTED, so rows archived by
+    // a concurrent worker between our read and write are skipped here AND
+    // excluded from the audit log (no false attribution).
+    const result = await prisma.$transaction(async (tx) => {
+      const updatedIds: string[] = []
+      for (const r of requests) {
+        const updated = await tx.requests.updateMany({
+          where: {
+            id: r.id,
+            isDeleted: false,
+            isArchived: false,
+          },
+          data: {
+            isArchived: true,
+          },
+        })
+        if (updated.count === 1) {
+          updatedIds.push(r.id)
+        }
+      }
 
-    // Log deletion for each request
-    await prisma.request_activities.createMany({
-      data: requests.map(r => ({
-        requestId: r.id,
-        action: 'deleted',
-        fromStatus: r.status,
-        toStatus: r.status,
-        comments: `Bulk deleted by admin. Created: ${new Date(r.createdAt).toLocaleString()}`,
-        userId: adminUserId,
-      })),
+      if (updatedIds.length > 0) {
+        const candidates = new Map(requests.map(r => [r.id, r]))
+        await tx.request_activities.createMany({
+          data: updatedIds.map(id => {
+            const r = candidates.get(id)!
+            return {
+              requestId: id,
+              action: 'archived',
+              fromStatus: r.status,
+              toStatus: r.status,
+              comments: `Bulk archived by admin. Created: ${new Date(r.createdAt).toLocaleString()}`,
+              userId: adminUserId,
+            }
+          }),
+        })
+      }
+
+      return { count: updatedIds.length }
     })
 
     revalidateRequestViews()
@@ -1620,13 +1641,13 @@ export async function bulkDeleteRequestsByDateRange(input: {
     return {
       success: true,
       count: result.count,
-      message: `Soft deleted ${result.count} requests`,
+      message: `Archived ${result.count} requests`,
     }
   } catch (error) {
-    console.error('Error bulk deleting requests:', error)
+    console.error('Error bulk archiving requests:', error)
     return {
       success: false,
-      error: 'Failed to bulk delete requests',
+      error: 'Failed to bulk archive requests',
     }
   }
 }
@@ -1676,6 +1697,7 @@ export async function getRequestsNeedingEngineeringAction(userId: string): Promi
     where: {
       status: 'SentToEngineer',
       isDeleted: false,
+      isArchived: false,
     },
     include: {
       department: {
@@ -1743,6 +1765,7 @@ export async function getRequestsNeedingEngineeringAction(userId: string): Promi
       request: {
         status: 'DesignCostEstimationApproval',
         isDeleted: false,
+        isArchived: false,
       },
     },
     include: {
@@ -1987,6 +2010,7 @@ export async function getRequestsForEngineering(filters?: GetRequestsForEngineer
       in: ['SentToEngineer', 'DesignCostEstimationApproval'],
     },
     isDeleted: false,
+    isArchived: false,
   }
 
   // Apply filters
@@ -2259,6 +2283,57 @@ export async function archiveRequest(requestId: string) {
   } catch (error) {
     console.error('Error archiving request:', error)
     return { success: false, error: 'Failed to archive request' }
+  }
+}
+
+export async function unarchiveRequest(requestId: string) {
+  const adminUserId = await requireAdmin()
+  if (!adminUserId) {
+    return {
+      success: false,
+      error: 'Unauthorized - Admin access required',
+    }
+  }
+
+  try {
+    const request = await prisma.requests.findUnique({
+      where: { id: requestId },
+      select: { id: true, isArchived: true, isDeleted: true },
+    })
+
+    if (!request) {
+      return { success: false, error: 'Request not found' }
+    }
+
+    if (request.isDeleted) {
+      return { success: false, error: 'Cannot unarchive a deleted request' }
+    }
+
+    if (!request.isArchived) {
+      return { success: false, error: 'Request is not archived' }
+    }
+
+    await prisma.$transaction([
+      prisma.requests.update({
+        where: { id: requestId },
+        data: { isArchived: false },
+      }),
+      prisma.request_activities.create({
+        data: {
+          requestId,
+          action: 'unarchived',
+          comments: 'Request unarchived by admin',
+          userId: adminUserId,
+        },
+      }),
+    ])
+
+    revalidateRequestViews(requestId)
+
+    return { success: true }
+  } catch (error) {
+    console.error('Error unarchiving request:', error)
+    return { success: false, error: 'Failed to unarchive request' }
   }
 }
 

@@ -333,6 +333,32 @@ model templates {
   @@index([isDefault])
 }
 
+model retention_settings {
+  id               String   @id @default("default")
+  archiveEnabled   Boolean  @default(true)
+  archiveAfterDays Int      @default(90)
+  archiveStatuses  Json
+  cleanupAfterDays Int      @default(365)
+  archiveHour      Int      @default(2)
+  archiveMinute    Int      @default(0)
+  lastArchiveRunOn String?
+  updatedById      String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model storage_plan_events {
+  id          String   @id @default(uuid())
+  label       String
+  plannedDate DateTime @db.Date
+  createdById String
+  createdAt   DateTime @default(now())
+  createdBy   User     @relation("storage_plan_events_createdByIdTousers", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([createdById])
+  @@index([plannedDate])
+}
+
 model email_settings {
   id                String   @id @default("default")
   enabled           Boolean  @default(true)
@@ -379,6 +405,7 @@ model User {
   approvedSolutions                                              solution_approvals[]           @relation("solution_approvals_approverIdTousers")
   requiredApprovalSolutions                                      solution_approvals[]           @relation("solution_approvals_requiredApproverIdTousers")
   solutions                                                       solutions[]
+  createdStoragePlanEvents                                        storage_plan_events[]         @relation("storage_plan_events_createdByIdTousers")
   department                                                     departments?                   @relation(fields: [departmentId], references: [id])
 
   @@index([departmentId])

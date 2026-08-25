@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useSession } from 'next-auth/react'
-import { Trash2, AlertTriangle, Calendar, Search } from 'lucide-react'
+import { Archive, AlertTriangle, Calendar, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import {
@@ -86,8 +86,8 @@ export function BulkDeleteByDateRange() {
     e.preventDefault()
     setError(null)
 
-    if (confirmText !== 'DELETE') {
-      setError('Please type "DELETE" to confirm')
+    if (confirmText !== 'ARCHIVE') {
+      setError('Please type "ARCHIVE" to confirm')
       return
     }
 
@@ -116,23 +116,23 @@ export function BulkDeleteByDateRange() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="destructive" size="sm">
-          <Trash2 className="h-4 w-4 mr-1" />
-          Bulk Delete by Date
+        <Button variant="outline" size="sm">
+          <Archive className="h-4 w-4 mr-1" />
+          Bulk Archive by Date
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-destructive">
-            <Trash2 className="h-5 w-5" />
-            Bulk Delete Requests by Date
+          <DialogTitle className="flex items-center gap-2">
+            <Archive className="h-5 w-5" />
+            Bulk Archive Requests by Date
           </DialogTitle>
           <DialogDescription className="space-y-2">
             <span className="block">
-              Soft delete multiple requests that were created within a specific date range.
+              Archive multiple requests that were created within a specific date range.
             </span>
-            <span className="block font-semibold text-destructive">
-              ⚠️ This will mark requests as deleted!
+            <span className="block font-semibold text-amber-600 dark:text-amber-400">
+              ⚠️ This will archive requests — hidden from lists, reversible on Retention.
             </span>
           </DialogDescription>
         </DialogHeader>
@@ -219,7 +219,7 @@ export function BulkDeleteByDateRange() {
           <form onSubmit={handleDelete} className="space-y-4">
             <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
               <h3 className="font-semibold text-blue-900 mb-2">
-                Found {preview?.count || 0} requests to delete:
+                Found {preview?.count || 0} requests to archive:
               </h3>
               <div className="max-h-60 overflow-y-auto space-y-2">
                 {preview?.requests.map((request: any, index: number) => (
@@ -239,24 +239,24 @@ export function BulkDeleteByDateRange() {
               </div>
             </div>
 
-            <div className="bg-destructive/10 border border-destructive/20 rounded-md p-3">
-              <p className="text-sm font-semibold text-destructive">
-                ⚠️ Warning: This will soft delete {preview?.count || 0} requests!
+            <div className="bg-amber-50 border border-amber-200 rounded-md p-3">
+              <p className="text-sm font-semibold text-amber-700 dark:text-amber-400">
+                ⚠️ Warning: This will archive {preview?.count || 0} requests!
               </p>
-              <p className="text-xs text-destructive mt-1">
-                Requests will be marked as deleted but can be restored from /admin/deleted-requests
+              <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
+                Requests will be hidden from normal lists and can be unarchived from /admin/retention
               </p>
             </div>
 
             <div className="space-y-2">
               <Label>
-                Type &ldquo;DELETE&rdquo; to confirm
+                Type &ldquo;ARCHIVE&rdquo; to confirm
               </Label>
               <input
                 type="text"
                 value={confirmText}
                 onChange={(e) => setConfirmText(e.target.value)}
-                placeholder="DELETE"
+                placeholder="ARCHIVE"
                 className="w-full px-3 py-2 border rounded-md"
                 required
               />
@@ -279,10 +279,9 @@ export function BulkDeleteByDateRange() {
               </Button>
               <Button
                 type="submit"
-                variant="destructive"
-                disabled={isSubmitting || confirmText !== 'DELETE'}
+                disabled={isSubmitting || confirmText !== 'ARCHIVE'}
               >
-                {isSubmitting ? 'Deleting...' : `Delete ${preview?.count || 0} Requests`}
+                {isSubmitting ? 'Archiving...' : `Archive ${preview?.count || 0} Requests`}
               </Button>
             </DialogFooter>
           </form>

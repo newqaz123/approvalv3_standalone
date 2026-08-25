@@ -281,6 +281,7 @@ export async function getStaleSubTaskRequests(input: { olderThanDays?: number; s
   return prisma.requests.findMany({
     where: {
       isDeleted: false,
+      isArchived: false,
       status: { in: ['SentToEngineer', 'SendBackToRequester', 'FinalApproval', 'Completed'] as any },
       subTasks: {
         some: {

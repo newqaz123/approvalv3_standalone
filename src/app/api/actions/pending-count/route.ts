@@ -59,14 +59,14 @@ export async function GET() {
         where: {
           OR: requestOrConditions,
           status: 'pending',
-          request: { isDeleted: false },
+          request: { isDeleted: false, isArchived: false },
         },
       }),
       prisma.solution_approvals.count({
         where: {
           OR: solutionOrConditions,
           status: 'pending',
-          solution: { request: { isDeleted: false } },
+          solution: { request: { isDeleted: false, isArchived: false } },
         },
       }),
     ])

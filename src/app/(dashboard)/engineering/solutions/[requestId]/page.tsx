@@ -42,6 +42,7 @@ export default async function SolutionSubmissionPage({
       id: requestId,
       status: RequestStatus.SentToEngineer,
       isDeleted: false,
+      isArchived: false,
     },
     include: {
       requester: {

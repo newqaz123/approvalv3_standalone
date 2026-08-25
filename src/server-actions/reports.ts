@@ -214,7 +214,11 @@ function buildApprovalPhases(request: ExportableRequest): RequestPDFData['approv
   return phases
 }
 
-async function buildRequestPDFData(requestId: string, userId: string): Promise<{
+async function buildRequestPDFData(
+  requestId: string,
+  userId: string,
+  options?: { allowIncomplete?: boolean }
+): Promise<{
   pdfData: RequestPDFData
   request: ExportableRequest
   generatedBy: string
@@ -233,16 +237,18 @@ async function buildRequestPDFData(requestId: string, userId: string): Promise<{
     throw new Error('You are not authorized to export this request.')
   }
 
-  if (request.status !== 'Completed') {
-    throw new Error(`PDF export is only available after the request is completed. Current status: ${request.status}`)
-  }
+  if (!options?.allowIncomplete) {
+    if (request.status !== 'Completed') {
+      throw new Error(`PDF export is only available after the request is completed. Current status: ${request.status}`)
+    }
 
-  if (request.approvals.some((approval) => approval.status !== 'approved')) {
-    throw new Error('PDF export is only available after all approvals are completed. Please wait for all approvals to be processed.')
-  }
+    if (request.approvals.some((approval) => approval.status !== 'approved')) {
+      throw new Error('PDF export is only available after all approvals are completed. Please wait for all approvals to be processed.')
+    }
 
-  if (request.solutions[0]?.approvals.some((approval) => approval.status !== 'approved')) {
-    throw new Error('PDF export is only available after all solution approvals are completed. Please wait for all approvals to be processed.')
+    if (request.solutions[0]?.approvals.some((approval) => approval.status !== 'approved')) {
+      throw new Error('PDF export is only available after all solution approvals are completed. Please wait for all approvals to be processed.')
+    }
   }
 
   const completedActivity = request.activities.find(
@@ -426,4 +432,9 @@ export async function exportRequestPackageAsPDF(requestId: string, items: Export
         : 'An unexpected error occurred while generating the PDF package. Please try again.',
     }
   }
+}
+
+export async function generateAdminBackupPdf(requestId: string, adminId: string): Promise<Buffer> {
+  const { pdfData } = await buildRequestPDFData(requestId, adminId, { allowIncomplete: true })
+  return generateRequestPDF(pdfData)
 }

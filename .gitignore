@@ -29,3 +29,7 @@ image*.png
 
 # Playwright MCP session logs
 .playwright-mcp/
+
+# Pi session artifacts
+.pi/
+.pi-subagents/

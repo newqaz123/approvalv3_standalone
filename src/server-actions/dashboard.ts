@@ -88,6 +88,7 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
 			status: "pending",
 			request: {
 				isDeleted: false,
+				isArchived: false,
 			},
 		},
 		include: {
@@ -278,6 +279,7 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
 			solution: {
 				request: {
 					isDeleted: false,
+					isArchived: false,
 				},
 			},
 		},
@@ -445,6 +447,7 @@ export async function getMyCreatedRequests(): Promise<RequestListRow[]> {
 		where: {
 			requesterId: userId,
 			isDeleted: false,
+			isArchived: false,
 		},
 		select: {
 			id: true,
@@ -658,11 +661,11 @@ export async function getAllRequests(): Promise<RequestListRow[]> {
 	let whereClause: any;
 
 	if (currentUser.role === "admin") {
-		// Admins see all non-deleted requests
-		whereClause = { isDeleted: false };
+		// Admins see all non-deleted, non-archived requests
+		whereClause = { isDeleted: false, isArchived: false };
 	} else if (currentUser.department?.type === "ENGINEERING") {
-		// Engineering users see all non-deleted requests for monitoring purposes
-		whereClause = { isDeleted: false };
+		// Engineering users see all non-deleted, non-archived requests for monitoring purposes
+		whereClause = { isDeleted: false, isArchived: false };
 	} else {
 		// General dept users see:
 		// 1. Requests from their own department, OR
@@ -670,6 +673,7 @@ export async function getAllRequests(): Promise<RequestListRow[]> {
 		// 3. Requests where they are a required approver in solution approval chain
 		whereClause = {
 			isDeleted: false,
+			isArchived: false,
 			OR: [
 				// Requests from user's own department
 				{ departmentId: currentUser.departmentId ?? undefined },

@@ -53,6 +53,7 @@ export default async function EngineeringDashboardPage() {
 				in: ["SentToEngineer", "SendBackToRequester", "FinalApproval"],
 			},
 			isDeleted: false,
+			isArchived: false,
 			OR: [
 				{ workRequisitionReceived: false },
 				{ subTasks: { some: { isCompleted: false } } },
@@ -159,6 +160,7 @@ export default async function EngineeringDashboardPage() {
 				],
 			},
 			isDeleted: false,
+			isArchived: false,
 		},
 	});
 
@@ -166,6 +168,7 @@ export default async function EngineeringDashboardPage() {
 		where: {
 			status: "SentToEngineer",
 			isDeleted: false,
+			isArchived: false,
 		},
 	});
 
@@ -173,6 +176,7 @@ export default async function EngineeringDashboardPage() {
 		where: {
 			status: "DesignCostEstimationApproval",
 			isDeleted: false,
+			isArchived: false,
 		},
 	});
 
@@ -193,21 +197,24 @@ export default async function EngineeringDashboardPage() {
 						],
 					},
 					isDeleted: false,
-					createdAt: { gte: startOfYesterday },
+					createdAt: { gte: startOfYesterday },					isArchived: false,
+
 				},
 			}),
 			prisma.requests.count({
 				where: {
 					status: "SentToEngineer",
 					isDeleted: false,
-					createdAt: { gte: startOfYesterday },
+					createdAt: { gte: startOfYesterday },					isArchived: false,
+
 				},
 			}),
 			prisma.requests.count({
 				where: {
 					status: "DesignCostEstimationApproval",
 					isDeleted: false,
-					createdAt: { gte: startOfYesterday },
+					createdAt: { gte: startOfYesterday },					isArchived: false,
+
 				},
 			}),
 		]);

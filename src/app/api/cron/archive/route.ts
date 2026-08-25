@@ -1,18 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import prisma from '@/lib/prisma'
+import { applyRetentionArchive } from '@/lib/retention-archive'
 
-// Number of days after which completed/cancelled requests are archived
-const ARCHIVE_AFTER_DAYS = parseInt(process.env.ARCHIVE_AFTER_DAYS || '90', 10)
-
-/**
- * Archival cron endpoint - called by Vercel Cron
- * Marks old completed/cancelled requests as archived to keep active queries fast.
- *
- * Authorization: Vercel automatically sets Authorization header with CRON_SECRET.
- * In local dev, pass the header manually.
- */
 export async function GET(request: NextRequest) {
-  // Verify authorization
   const authHeader = request.headers.get('authorization')
   const cronSecret = process.env.CRON_SECRET
 
@@ -32,33 +21,14 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const cutoffDate = new Date()
-    cutoffDate.setDate(cutoffDate.getDate() - ARCHIVE_AFTER_DAYS)
-
-    // Find requests that should be archived:
-    // - Status is Completed or Cancelled
-    // - Last updated more than ARCHIVE_AFTER_DAYS ago
-    // - Not already archived
-    // - Not deleted
-    const result = await prisma.requests.updateMany({
-      where: {
-        status: { in: ['Completed', 'Cancelled'] },
-        updatedAt: { lt: cutoffDate },
-        isArchived: false,
-        isDeleted: false,
-      },
-      data: {
-        isArchived: true,
-      },
-    })
-
-    console.log(`[cron/archive] Archived ${result.count} requests older than ${ARCHIVE_AFTER_DAYS} days`)
-
+    const result = await applyRetentionArchive('cron')
     return NextResponse.json({
       success: true,
-      archived: result.count,
-      cutoffDate: cutoffDate.toISOString(),
-      archiveAfterDays: ARCHIVE_AFTER_DAYS,
+      archived: result.archived,
+      skipped: result.skipped,
+      archiveAfterDays: result.policy.archiveAfterDays,
+      archiveStatuses: result.policy.archiveStatuses,
+      cutoffDate: result.cutoffDate?.toISOString(),
     })
   } catch (error) {
     console.error('[cron/archive] Error during archival:', error)
