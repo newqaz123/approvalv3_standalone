@@ -19,6 +19,7 @@ import {
 import {
   diskUsedPercent,
   formatStorageBytes,
+  resolveVolumeStripShares,
   type AttachmentOwner,
 } from '@/lib/storage-dashboard'
 import type { StorageDashboardData } from '@/server-actions/storage-dashboard'
@@ -62,21 +63,14 @@ function VolumeStrip({ data }: { data: StorageDashboardData }) {
   const otherOnDisk =
     usedBytes == null ? 0 : Math.max(0, usedBytes - recorded)
   const capacity = data.diskTotalBytes
-  const usedPercent = diskUsedPercent(
-    usedBytes,
-    capacity ?? (usedBytes != null && usedBytes > 0 ? usedBytes : null)
-  )
-  const recordedShare = capacity && capacity > 0 ? (recorded / capacity) * 100 : 0
-  const otherShare = capacity && capacity > 0 ? (otherOnDisk / capacity) * 100 : 0
-  const folderShare =
-    usedBytes != null && usedBytes > 0
-      ? {
-          recorded: (recorded / usedBytes) * 100,
-          other: (otherOnDisk / usedBytes) * 100,
-        }
-      : { recorded: 0, other: 0 }
+  const usedPercent = diskUsedPercent(usedBytes, capacity)
 
-  const showCapacity = capacity != null && usedPercent != null
+  const shares = resolveVolumeStripShares({
+    uploadDirBytes: usedBytes,
+    recordedBytes: recorded,
+    capacityBytes: capacity,
+  })
+  const showCapacity = shares.mode === 'capacity'
 
   return (
     <section className="rounded-lg border bg-card p-6">
@@ -91,7 +85,7 @@ function VolumeStrip({ data }: { data: StorageDashboardData }) {
         </div>
         {showCapacity ? (
           <p className="font-mono text-sm tabular-nums text-muted-foreground">
-            {usedPercent}% of {formatStorageBytes(capacity)} · {formatStorageBytes(data.diskFreeBytes ?? 0)} free
+            {usedPercent ?? 0}% of {formatStorageBytes(capacity ?? 0)} · {formatStorageBytes(data.diskFreeBytes ?? 0)} free
           </p>
         ) : null}
       </div>
@@ -111,18 +105,15 @@ function VolumeStrip({ data }: { data: StorageDashboardData }) {
                 : 'Share of files on the upload disk'
             }
           >
-            {showCapacity ? (
-              <>
-                <span className="bg-slate-800" style={{ width: `${recordedShare}%` }} />
-                <span className="bg-amber-500" style={{ width: `${otherShare}%` }} />
-              </>
-            ) : (
-              <>
-                <span className="bg-slate-800" style={{ width: `${folderShare.recorded}%` }} />
-                <span className="bg-amber-500" style={{ width: `${folderShare.other}%` }} />
-              </>
-            )}
+            <span className="bg-slate-800" style={{ width: `${shares.recordedPct}%` }} />
+            <span className="bg-amber-500" style={{ width: `${shares.otherPct}%` }} />
           </div>
+          {!showCapacity ? (
+            <p className="text-xs text-muted-foreground">
+              Uploads use {usedPercent == null ? 'an unknown share' : `${usedPercent}%`} of this disk —
+              the bar above shows the split inside the uploads folder so it stays visible.
+            </p>
+          ) : null}
           <dl className="grid gap-2 text-sm sm:grid-cols-3">
             <div className="flex items-center gap-2">
               <span className="h-2.5 w-2.5 rounded-[2px] bg-slate-800" />

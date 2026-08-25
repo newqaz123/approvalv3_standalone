@@ -118,6 +118,105 @@ export function diskUsedPercent(
   return Math.min(100, Math.max(0, Math.round((usedBytes / totalBytes) * 100)))
 }
 
+const VISIBLE_SHARE_THRESHOLD_PCT = 1.5
+const MIN_SEGMENT_PCT = 2
+
+export type VolumeStripShares = {
+  /** capacity = share of whole disk; folder = split within the upload folder */
+  mode: 'capacity' | 'folder'
+  recordedPct: number
+  otherPct: number
+  freePct: number | null
+}
+
+function withVisibleFloor(recordedPct: number, otherPct: number): [number, number] {
+  const flooredRecorded = recordedPct > 0 ? Math.max(recordedPct, MIN_SEGMENT_PCT) : 0
+  const flooredOther = otherPct > 0 ? Math.max(otherPct, MIN_SEGMENT_PCT) : 0
+  if (flooredRecorded + flooredOther <= 100) return [flooredRecorded, flooredOther]
+  // Over 100% after flooring: shrink the larger segment so the floored
+  // minimum stays exactly at its floor (never rescale the small one away).
+  return flooredRecorded <= flooredOther
+    ? [flooredRecorded, Math.max(0, 100 - flooredRecorded)]
+    : [Math.max(0, 100 - flooredOther), flooredOther]
+}
+
+export function resolveVolumeStripShares(input: {
+  uploadDirBytes: number | null
+  recordedBytes: number
+  capacityBytes: number | null
+}): VolumeStripShares {
+  const used = input.uploadDirBytes
+  if (used == null || !Number.isFinite(used) || used <= 0) {
+    return { mode: 'folder', recordedPct: 0, otherPct: 0, freePct: null }
+  }
+
+  // Robustness guards: strip math only sees finite recorded bytes clamped to
+  // [0, used] so NaN/negative/oversized inputs can never produce NaN widths
+  // or shares over 100%. Textual reporting keeps the raw values elsewhere.
+  const recorded =
+    Number.isFinite(input.recordedBytes)
+      ? Math.min(Math.max(input.recordedBytes, 0), used)
+      : 0
+  const other = used - recorded
+
+  const capacity = input.capacityBytes
+  if (capacity != null && Number.isFinite(capacity) && capacity > 0) {
+    const usedShare = (used / capacity) * 100
+    if (usedShare >= VISIBLE_SHARE_THRESHOLD_PCT) {
+      return {
+        mode: 'capacity',
+        recordedPct: (recorded / capacity) * 100,
+        otherPct: (other / capacity) * 100,
+        freePct: Math.max(0, 100 - usedShare),
+      }
+    }
+  }
+
+  // Disk share is invisible (<1.5%): show the split inside the upload folder
+  // instead, keeping every non-zero segment at least 2% wide so colors render.
+  const [recordedPct, otherPct] = withVisibleFloor(
+    (input.recordedBytes / used) * 100,
+    (other / used) * 100
+  )
+  return { mode: 'folder', recordedPct, otherPct, freePct: null }
+}
+
+export type RetentionDatedRow = {
+  id: string
+  updatedAt: Date | string
+}
+
+function parseLocalDay(value: string | undefined, endOfDay: boolean): Date | null {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null
+  const [year, month, day] = value.split('-').map(Number)
+  const date = new Date(year, month - 1, day, endOfDay ? 23 : 0, endOfDay ? 59 : 0, endOfDay ? 59 : 0, endOfDay ? 999 : 0)
+  // Reject calendar-invalid strings like 2026-02-30 that JS silently rolls
+  // over to the next month instead of reporting Invalid Date.
+  if (
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) {
+    return null
+  }
+  return date
+}
+
+export function filterRetentionRowsByUpdatedDate<
+  T extends RetentionDatedRow
+>(rows: T[], dateFrom?: string, dateTo?: string): T[] {
+  const from = parseLocalDay(dateFrom, false)
+  const to = parseLocalDay(dateTo, true)
+  if (!from && !to) return rows
+
+  return rows.filter((row) => {
+    const updated = new Date(row.updatedAt)
+    if (from && updated < from) return false
+    if (to && updated > to) return false
+    return true
+  })
+}
+
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const
 const DEFAULT_MONTHS_AHEAD = 12
 const DEFAULT_SLOPE_WINDOW = 6

@@ -7,6 +7,8 @@ import { useRouter } from 'next/navigation'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -21,6 +23,7 @@ import {
 import { RetentionControls } from '@/components/admin/retention-controls'
 import { AdminCard, AdminCardsEmptyState } from '@/components/mobile/admin-card'
 import { Calendar, FileText, Hash } from 'lucide-react'
+import { filterRetentionRowsByUpdatedDate } from '@/lib/storage-dashboard'
 
 export type RetentionRequestRow = {
   id: string
@@ -31,6 +34,8 @@ export type RetentionRequestRow = {
   departmentName: string | null
   eligible: boolean
 }
+
+const MAX_BATCH_DOWNLOAD = 10
 
 async function downloadBackup(requestIds: string[]) {
   const response = await fetch('/api/admin/retention/backup', {
@@ -67,10 +72,24 @@ export function RetentionRequestList({ requests }: { requests: RetentionRequestR
   const [selected, setSelected] = useState<string[]>([])
   const [downloading, setDownloading] = useState(false)
   const [deleting, setDeleting] = useState(false)
-  const selectedSet = useMemo(() => new Set(selected), [selected])
-  const selectedArchived = selected.filter((id) =>
-    requests.some((request) => request.id === id && request.isArchived)
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+
+  const visible = useMemo(
+    () => filterRetentionRowsByUpdatedDate(requests, dateFrom, dateTo),
+    [requests, dateFrom, dateTo]
   )
+  const visibleIds = useMemo(() => visible.map((request) => request.id), [visible])
+
+  const selectedSet = useMemo(() => new Set(selected), [selected])
+  const selectedVisible = visibleIds.filter((id) => selectedSet.has(id))
+  const selectedArchived = visible.filter(
+    (request) => request.isArchived && selectedSet.has(request.id)
+  )
+
+  const allVisibleSelected = visibleIds.length > 0 && selectedVisible.length === visibleIds.length
+  const someVisibleSelected = selectedVisible.length > 0 && !allVisibleSelected
+  const dateFilterActive = dateFrom !== '' || dateTo !== ''
 
   function toggle(id: string, checked: boolean) {
     setSelected((current) =>
@@ -78,7 +97,32 @@ export function RetentionRequestList({ requests }: { requests: RetentionRequestR
     )
   }
 
+  function toggleAllVisible() {
+    setSelected((current) => {
+      if (allVisibleSelected) {
+        const remove = new Set(visibleIds)
+        return current.filter((id) => !remove.has(id))
+      }
+      return [...new Set([...current, ...visibleIds])]
+    })
+  }
+
+  function clearVisibleSelection() {
+    setSelected((current) => {
+      const remove = new Set(visibleIds)
+      return current.filter((id) => !remove.has(id))
+    })
+  }
+
+  function clearAllSelection() {
+    setSelected([])
+  }
+
   async function handleDownload(ids: string[]) {
+    if (ids.length > MAX_BATCH_DOWNLOAD) {
+      toast.error(`Download up to ${MAX_BATCH_DOWNLOAD} requests at a time`)
+      return
+    }
     setDownloading(true)
     try {
       await downloadBackup(ids)
@@ -90,21 +134,87 @@ export function RetentionRequestList({ requests }: { requests: RetentionRequestR
     }
   }
 
+  async function handleHardDelete() {
+    setDeleting(true)
+    try {
+      const response = await fetch('/api/admin/retention/hard-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestIds: selectedArchived.map((request) => request.id) }),
+      })
+      const result = await response.json()
+      if (!response.ok || !result.success) {
+        toast.error(result.error || 'Failed to hard-delete')
+        return
+      }
+      toast.success(`Deleted ${result.deleted} archived request${result.deleted === 1 ? '' : 's'}`)
+      if (Array.isArray(result.fileWarnings) && result.fileWarnings.length > 0) {
+        toast.warning(`${result.fileWarnings.length} file(s) could not be removed from disk — see server logs`)
+      }
+      setSelected([])
+      router.refresh()
+    } catch {
+      toast.error('Failed to hard-delete')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-muted-foreground">
-          Download a zip with one folder per request: report.pdf plus original attachments.
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="date-from">Updated from</Label>
+            <Input
+              id="date-from"
+              type="date"
+              value={dateFrom}
+              onChange={(event) => setDateFrom(event.target.value)}
+              className="w-40"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="date-to">Updated to</Label>
+            <Input
+              id="date-to"
+              type="date"
+              value={dateTo}
+              onChange={(event) => setDateTo(event.target.value)}
+              className="w-40"
+            />
+          </div>
+          {dateFilterActive ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setDateFrom('')
+                setDateTo('')
+              }}
+            >
+              Clear dates
+            </Button>
+          ) : null}
+          <p className="text-sm text-muted-foreground pb-2">
+            {visible.length} of {requests.length} request{visible.length === 1 ? '' : 's'} shown
+          </p>
+        </div>
         <div className="flex flex-wrap gap-2">
           <Button
             type="button"
             variant="outline"
-            disabled={downloading || selected.length === 0}
-            onClick={() => handleDownload(selected)}
+            disabled={downloading || selectedVisible.length === 0}
+            title={
+              selectedVisible.length > MAX_BATCH_DOWNLOAD
+                ? `Up to ${MAX_BATCH_DOWNLOAD} per download`
+                : undefined
+            }
+            onClick={() => handleDownload(selectedVisible)}
           >
             <Download className="mr-1 h-4 w-4" />
-            {downloading ? 'Preparing…' : `Download selected (${selected.length})`}
+            {downloading ? 'Preparing…' : `Download selected (${selectedVisible.length})`}
           </Button>
           <AlertDialog>
             <AlertDialogTrigger asChild>
@@ -125,31 +235,7 @@ export function RetentionRequestList({ requests }: { requests: RetentionRequestR
                 <AlertDialogCancel>Cancel</AlertDialogCancel>
                 <AlertDialogAction
                   className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                  onClick={async () => {
-                    setDeleting(true)
-                    try {
-                      const response = await fetch('/api/admin/retention/hard-delete', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ requestIds: selectedArchived }),
-                      })
-                      const result = await response.json()
-                      if (!response.ok || !result.success) {
-                        toast.error(result.error || 'Failed to hard-delete')
-                        return
-                      }
-                      toast.success(`Deleted ${result.deleted} archived request${result.deleted === 1 ? '' : 's'}`)
-                      if (Array.isArray(result.fileWarnings) && result.fileWarnings.length > 0) {
-                        toast.warning(`${result.fileWarnings.length} file(s) could not be removed from disk — see server logs`)
-                      }
-                      setSelected([])
-                      router.refresh()
-                    } catch {
-                      toast.error('Failed to hard-delete')
-                    } finally {
-                      setDeleting(false)
-                    }
-                  }}
+                  onClick={handleHardDelete}
                 >
                   Hard-delete
                 </AlertDialogAction>
@@ -160,8 +246,28 @@ export function RetentionRequestList({ requests }: { requests: RetentionRequestR
       </div>
 
       <div className="md:hidden space-y-3">
-        {requests.length > 0 ? (
-          requests.map((request) => (
+        <div className="flex flex-wrap items-center gap-3 rounded-md border px-3 py-2">
+          <label className="flex items-center gap-2 text-sm">
+            <Checkbox
+              aria-label="Select all shown requests"
+              checked={allVisibleSelected ? true : someVisibleSelected ? 'indeterminate' : false}
+              onCheckedChange={() => toggleAllVisible()}
+            />
+            Select all shown
+          </label>
+          {selectedVisible.length > 0 ? (
+            <Button type="button" variant="ghost" size="sm" onClick={clearVisibleSelection}>
+              Clear shown selection ({selectedVisible.length})
+            </Button>
+          ) : null}
+          {selected.length > selectedVisible.length ? (
+            <Button type="button" variant="ghost" size="sm" onClick={clearAllSelection}>
+              Clear all selection ({selected.length})
+            </Button>
+          ) : null}
+        </div>
+        {visible.length > 0 ? (
+          visible.map((request) => (
             <div key={request.id} className="space-y-2">
               <label className="flex items-center gap-2 text-sm">
                 <Checkbox
@@ -215,7 +321,10 @@ export function RetentionRequestList({ requests }: { requests: RetentionRequestR
             </div>
           ))
         ) : (
-          <AdminCardsEmptyState message="No requests found" />
+          <AdminCardsEmptyState
+            message="No requests match the selected dates"
+            submessage="Clear the date filters to see everything."
+          />
         )}
       </div>
 
@@ -223,7 +332,14 @@ export function RetentionRequestList({ requests }: { requests: RetentionRequestR
         <table className="w-full text-sm">
           <thead className="bg-muted">
             <tr>
-              <th className="px-4 py-3 w-10" />
+              <th className="px-4 py-3 w-10">
+                <Checkbox
+                  aria-label="Select all shown requests"
+                  checked={allVisibleSelected ? true : someVisibleSelected ? 'indeterminate' : false}
+                  onCheckedChange={() => toggleAllVisible()}
+                  disabled={visibleIds.length === 0}
+                />
+              </th>
               <th className="text-left px-4 py-3 font-medium">ID</th>
               <th className="text-left px-4 py-3 font-medium">Title</th>
               <th className="text-left px-4 py-3 font-medium">Status</th>
@@ -234,14 +350,14 @@ export function RetentionRequestList({ requests }: { requests: RetentionRequestR
             </tr>
           </thead>
           <tbody className="divide-y">
-            {requests.length === 0 ? (
+            {visible.length === 0 ? (
               <tr>
                 <td colSpan={8} className="text-center py-8 text-muted-foreground">
-                  No requests found
+                  No requests match the selected dates
                 </td>
               </tr>
             ) : (
-              requests.map((request) => (
+              visible.map((request) => (
                 <tr key={request.id} className={request.isArchived ? 'bg-muted/30' : ''}>
                   <td className="px-4 py-3">
                     <Checkbox
