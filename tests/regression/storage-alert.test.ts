@@ -1,6 +1,8 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, existsSync } from 'node:fs'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import {
   parseStorageAlertThreshold,
   shouldSendStorageAlert,
@@ -8,6 +10,8 @@ import {
   runStorageAlertCheck,
   type StorageAlertDependencies,
 } from '../../src/lib/storage-alert'
+import { resolveStorageAlertVisualState } from '../../src/lib/storage-alert-visual'
+import { StorageAlertRail } from '../../src/components/admin/storage-alert-rail'
 
 describe('parseStorageAlertThreshold', () => {
   it('returns 0 for off and clamps into the allowed band', () => {
@@ -156,6 +160,78 @@ describe('runStorageAlertCheck orchestration', () => {
   })
 })
 
+describe('resolveStorageAlertVisualState', () => {
+  it('omits meter semantics when disk usage is unknown', () => {
+    const state = resolveStorageAlertVisualState({
+      usedPercent: null,
+      thresholdPct: 80,
+    })
+
+    assert.equal(state.meterRole, undefined)
+    assert.equal(state.meterValue, undefined)
+    assert.equal(state.tone, 'slate')
+    assert.equal(state.markerPct, 80)
+    assert.equal(state.ariaValueText, 'Disk usage unknown. Alert threshold 80%.')
+  })
+
+  it('uses slate normally, amber within ten points, and red at the limit', () => {
+    assert.equal(
+      resolveStorageAlertVisualState({ usedPercent: 69, thresholdPct: 80 }).tone,
+      'slate'
+    )
+    assert.equal(
+      resolveStorageAlertVisualState({ usedPercent: 70, thresholdPct: 80 }).tone,
+      'amber'
+    )
+    const breached = resolveStorageAlertVisualState({
+      usedPercent: 80,
+      thresholdPct: 80,
+    })
+    assert.equal(breached.tone, 'destructive')
+    assert.equal(breached.wouldAlertNow, true)
+    assert.equal(breached.ariaValueText, 'Disk 80% full. Alert threshold 80%; would alert now.')
+  })
+
+  it('removes the marker and announces alerts off at zero', () => {
+    const state = resolveStorageAlertVisualState({
+      usedPercent: 65,
+      thresholdPct: 0,
+    })
+
+    assert.equal(state.markerPct, null)
+    assert.equal(state.wouldAlertNow, false)
+    assert.equal(state.ariaValueText, 'Disk 65% full. Alerts off.')
+  })
+})
+
+describe('StorageAlertRail rendered semantics', () => {
+  it('renders a valid meter with current and threshold context when known', () => {
+    const html = renderToStaticMarkup(
+      createElement(StorageAlertRail, { usedPercent: 65, thresholdPct: 80 })
+    )
+
+    assert.match(html, /role="meter"/)
+    assert.match(html, /aria-valuenow="65"/)
+    assert.match(
+      html,
+      /aria-valuetext="Disk 65% full\. Alert threshold 80%\."/
+    )
+  })
+
+  it('uses visible text without invalid meter ARIA when usage is unknown', () => {
+    const html = renderToStaticMarkup(
+      createElement(StorageAlertRail, { usedPercent: null, thresholdPct: 80 })
+    )
+
+    assert.doesNotMatch(html, /role="meter"/)
+    assert.doesNotMatch(html, /aria-valuenow|aria-valuemin|aria-valuemax|aria-valuetext/)
+    assert.match(html, /Current disk/)
+    assert.match(html, /unknown/)
+    assert.match(html, /Alert threshold/)
+    assert.match(html, /80%/)
+  })
+})
+
 describe('storage alert wiring', () => {
   it('stores the threshold and last-alert day on retention_settings', () => {
     const schema = readFileSync('prisma/schema.prisma', 'utf8')
@@ -195,9 +271,12 @@ describe('storage alert wiring', () => {
 
     const card = readFileSync('src/components/admin/storage-alert-card.tsx', 'utf8')
     assert.match(card, /Email all admins/)
-    assert.match(card, /Checked regularly; at most one alert attempt per day\./)
-    assert.doesNotMatch(card, /Checked once a day/)
+    assert.match(card, /Checked every minute · at most one alert attempt per day\./)
+    assert.doesNotMatch(card, /Checked once a day|Checked regularly/)
     assert.match(card, /aria-live=["']polite["']/)
+    assert.match(card, /<h2/)
+    assert.match(card, /StorageAlertRail/)
+    assert.match(card, /from '@\/components\/admin\/storage-alert-rail'/)
     assert.match(dashboard, /from '@\/components\/admin\/storage-alert-card'/, 'card is imported, not inline')
   })
 
