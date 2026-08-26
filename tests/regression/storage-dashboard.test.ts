@@ -425,6 +425,13 @@ describe('admin storage dashboard wiring', () => {
     assert.doesNotMatch(ungated, /diskFreeBytes/)
   })
 
+  it('keeps each legend value adjacent to its label instead of far right', () => {
+    const dashboard = readFileSync('src/components/admin/storage-dashboard.tsx', 'utf8')
+    const legendStart = dashboard.indexOf('grid gap-2 text-sm sm:grid-cols-3')
+    const legend = dashboard.slice(legendStart, dashboard.indexOf('</dl>', legendStart))
+    assert.doesNotMatch(legend, /ml-auto/, 'values must not be pushed to the far edge of the card')
+  })
+
   it('gives the retention list select-all and date filtering for batch actions', () => {
     const list = readFileSync('src/components/admin/retention-request-list.tsx', 'utf8')
     assert.match(list, /filterRetentionRowsByUpdatedDate/)
