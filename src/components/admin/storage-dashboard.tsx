@@ -125,13 +125,15 @@ function VolumeStrip({ data }: { data: StorageDashboardData }) {
               <dt className="text-muted-foreground">Other on disk</dt>
               <dd className="ml-auto font-mono tabular-nums">{formatStorageBytes(otherOnDisk)}</dd>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="h-2.5 w-2.5 rounded-[2px] bg-stone-200" />
-              <dt className="text-muted-foreground">Free</dt>
-              <dd className="ml-auto font-mono tabular-nums">
-                {data.diskFreeBytes == null ? '—' : formatStorageBytes(data.diskFreeBytes)}
-              </dd>
-            </div>
+            {showCapacity ? (
+              <div className="flex items-center gap-2">
+                <span className="h-2.5 w-2.5 rounded-[2px] bg-stone-200" />
+                <dt className="text-muted-foreground">Free</dt>
+                <dd className="ml-auto font-mono tabular-nums">
+                  {data.diskFreeBytes == null ? '—' : formatStorageBytes(data.diskFreeBytes)}
+                </dd>
+              </div>
+            ) : null}
           </dl>
         </div>
       )}

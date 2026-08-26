@@ -405,6 +405,26 @@ describe('admin storage dashboard wiring', () => {
     assert.match(dashboard, /mode === 'capacity'/)
   })
 
+  it('scopes the volume legend to the folder in folder mode', () => {
+    const dashboard = readFileSync('src/components/admin/storage-dashboard.tsx', 'utf8')
+    const legendStart = dashboard.indexOf('grid gap-2 text-sm sm:grid-cols-3')
+    assert.notEqual(legendStart, -1, 'legend grid should exist')
+    const legend = dashboard.slice(legendStart, dashboard.indexOf('</dl>', legendStart))
+
+    // Exactly two unconditional rows (Recorded, Other); Free is gated.
+    const rows = legend.match(/<dt className="text-muted-foreground">/g) ?? []
+    const gated = legend.match(/\{showCapacity \? \([\s\S]*?\) : null\}/g) ?? []
+    assert.equal(rows.length, 3, 'three legend rows total')
+    assert.equal(gated.length, 1, 'exactly one gated legend row')
+    const gatedBlock = gated[0]
+    assert.match(gatedBlock, />Free</, 'the gated row is Free')
+    assert.match(gatedBlock, /diskFreeBytes/, 'the gated row shows disk free bytes')
+    // Ungated portion must not mention Free or disk free space
+    const ungated = legend.replace(/\{showCapacity \? \([\s\S]*?\) : null\}/, '')
+    assert.doesNotMatch(ungated, /Free/)
+    assert.doesNotMatch(ungated, /diskFreeBytes/)
+  })
+
   it('gives the retention list select-all and date filtering for batch actions', () => {
     const list = readFileSync('src/components/admin/retention-request-list.tsx', 'utf8')
     assert.match(list, /filterRetentionRowsByUpdatedDate/)
