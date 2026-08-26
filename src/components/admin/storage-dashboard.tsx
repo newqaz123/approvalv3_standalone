@@ -24,6 +24,7 @@ import {
 } from '@/lib/storage-dashboard'
 import type { StorageDashboardData } from '@/server-actions/storage-dashboard'
 import { StorageTrendChart } from '@/components/admin/storage-trend-chart'
+import { StorageAlertCard } from '@/components/admin/storage-alert-card'
 import { cn } from '@/lib/utils'
 
 const OWNER_LABEL: Record<AttachmentOwner, string> = {
@@ -180,6 +181,17 @@ export function StorageDashboard({ data }: { data: StorageDashboardData }) {
   return (
     <div className="space-y-6">
       <VolumeStrip data={data} />
+
+      <StorageAlertCard
+        thresholdPct={data.alertThresholdPct}
+        usedPercent={diskUsedPercent(
+          data.diskTotalBytes != null && data.diskFreeBytes != null
+            ? Math.max(0, data.diskTotalBytes - data.diskFreeBytes)
+            : null,
+          data.diskTotalBytes
+        )}
+        lastAlertOn={data.lastStorageAlertOn}
+      />
 
       <StorageTrendChart points={data.trend} planEvents={data.planEvents} />
 

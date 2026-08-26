@@ -1,9 +1,10 @@
-import {
-  createCipheriv,
-  createDecipheriv,
-  hkdfSync,
-  randomBytes,
-} from 'node:crypto'
+function nodeCrypto(): typeof import('node:crypto') {
+  // This module can be reached from Next instrumentation, whose webpack
+  // compiler cannot resolve node: scheme imports. It always executes in the
+  // Node runtime, so resolve the built-in there instead.
+  const runtimeRequire = eval('require') as NodeRequire
+  return runtimeRequire('node:crypto') as typeof import('node:crypto')
+}
 
 const INFO = 'approval-app:email-settings:v1'
 const ALGO = 'aes-256-gcm'
@@ -21,7 +22,7 @@ function requireSecret() {
 }
 
 function deriveKey() {
-  return Buffer.from(hkdfSync('sha256', requireSecret(), '', INFO, 32))
+  return Buffer.from(nodeCrypto().hkdfSync('sha256', requireSecret(), '', INFO, 32))
 }
 
 export function buildEmailSecretAad(identity: {
@@ -33,9 +34,10 @@ export function buildEmailSecretAad(identity: {
 }
 
 export function encryptEmailSecret(plaintext: string, aad: string) {
+  const crypto = nodeCrypto()
   const key = deriveKey()
-  const nonce = randomBytes(12)
-  const cipher = createCipheriv(ALGO, key, nonce)
+  const nonce = crypto.randomBytes(GCM_NONCE_BYTES)
+  const cipher = crypto.createCipheriv(ALGO, key, nonce)
   cipher.setAAD(Buffer.from(aad, 'utf8'))
   const ciphertext = Buffer.concat([
     cipher.update(plaintext, 'utf8'),
@@ -68,7 +70,7 @@ export function decryptEmailSecret(envelopeJson: string, aad: string) {
     throw new Error('Invalid email secret envelope lengths')
   }
   const key = deriveKey()
-  const decipher = createDecipheriv(ALGO, key, nonce, {
+  const decipher = nodeCrypto().createDecipheriv(ALGO, key, nonce, {
     authTagLength: GCM_TAG_BYTES,
   })
   decipher.setAAD(Buffer.from(aad, 'utf8'))

@@ -334,17 +334,19 @@ model templates {
 }
 
 model retention_settings {
-  id               String   @id @default("default")
-  archiveEnabled   Boolean  @default(true)
-  archiveAfterDays Int      @default(90)
-  archiveStatuses  Json
-  cleanupAfterDays Int      @default(365)
-  archiveHour      Int      @default(2)
-  archiveMinute    Int      @default(0)
-  lastArchiveRunOn String?
-  updatedById      String?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id                        String   @id @default("default")
+  archiveEnabled            Boolean  @default(true)
+  archiveAfterDays          Int      @default(90)
+  archiveStatuses           Json
+  cleanupAfterDays          Int      @default(365)
+  archiveHour               Int      @default(2)
+  archiveMinute             Int      @default(0)
+  lastArchiveRunOn          String?
+  storageAlertThresholdPct  Int      @default(0)
+  lastStorageAlertOn        String?
+  updatedById               String?
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
 }
 
 model storage_plan_events {

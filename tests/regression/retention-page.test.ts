@@ -28,7 +28,10 @@ it('lets an admin unarchive a request and run archive now', () => {
   assert.match(retention, /export async function runArchiveNow/)
   assert.match(form, /runArchiveNow/)
   assert.match(form, /archiveClock/)
-  assert.match(readFileSync('src/instrumentation.ts', 'utf8'), /startRetentionArchiveClock/)
+  const instrumentation = readFileSync('src/instrumentation.ts', 'utf8')
+  const nodeInstrumentation = readFileSync('src/instrumentation.node.ts', 'utf8')
+  assert.match(instrumentation, /instrumentation\.node/)
+  assert.match(nodeInstrumentation, /startRetentionArchiveClock/)
 })
 
 it('treats archive as hide and hard-deletes only archived selections', () => {

@@ -16,10 +16,14 @@ import {
   type UploadVolumeUsage,
 } from '@/lib/storage-dashboard'
 import { measureUploadVolume } from '@/lib/storage-volume'
+import { parseStorageAlertThreshold } from '@/lib/storage-alert'
+import { RETENTION_DEFAULTS } from '@/lib/retention-policy'
 
 export type StorageDashboardData = AttachmentStorageTotals &
   UploadVolumeUsage & {
     databaseBytes: number | null
+    alertThresholdPct: number
+    lastStorageAlertOn: string | null
     trend: StorageTrendPoint[]
     planEvents: StoragePlanEventView[]
   }
@@ -76,13 +80,28 @@ function parsePlanDate(value: string): Date | null {
   return Number.isNaN(date.getTime()) ? null : date
 }
 
+async function readAlertSettings(): Promise<{ thresholdPct: number; lastAlertOn: string | null }> {
+  try {
+    const row = await prisma.retention_settings.findUnique({
+      where: { id: 'default' },
+      select: { storageAlertThresholdPct: true, lastStorageAlertOn: true },
+    })
+    return {
+      thresholdPct: row?.storageAlertThresholdPct ?? 0,
+      lastAlertOn: row?.lastStorageAlertOn ?? null,
+    }
+  } catch {
+    return { thresholdPct: 0, lastAlertOn: null }
+  }
+}
+
 export async function getStorageDashboardData(): Promise<StorageDashboardData> {
   const adminId = await requireAdmin()
   if (!adminId) {
     throw new Error('Unauthorized')
   }
 
-  const [attachments, volume, databaseBytes, planRows] = await Promise.all([
+  const [attachments, volume, databaseBytes, planRows, alert] = await Promise.all([
     prisma.file_attachments.findMany({
       select: {
         id: true,
@@ -97,6 +116,7 @@ export async function getStorageDashboardData(): Promise<StorageDashboardData> {
     measureUploadVolume(getUploadRoot()),
     readDatabaseBytes(),
     loadPlanEvents(),
+    readAlertSettings(),
   ])
 
   const now = new Date()
@@ -110,9 +130,45 @@ export async function getStorageDashboardData(): Promise<StorageDashboardData> {
     ...aggregateAttachmentStorage(attachments),
     ...volume,
     databaseBytes,
+    alertThresholdPct: alert.thresholdPct,
+    lastStorageAlertOn: alert.lastAlertOn,
     trend: buildStorageTrendChart(attachments, now, { monthsAhead }),
     planEvents: planRows.map(toStoragePlanEventView),
   }
+}
+
+export async function saveStorageAlertThreshold(thresholdPct: number): Promise<
+  { success: true; thresholdPct: number } | { success: false; error: string }
+> {
+  const adminId = await requireAdmin()
+  if (!adminId) {
+    return { success: false, error: 'Unauthorized - Admin access required' }
+  }
+
+  const normalized = parseStorageAlertThreshold(thresholdPct)
+
+  try {
+    await prisma.retention_settings.upsert({
+      where: { id: 'default' },
+      update: {
+        storageAlertThresholdPct: normalized,
+        // Preserve lastStorageAlertOn: changing the threshold must not permit
+        // a second alert attempt on the same local day.
+        updatedById: adminId,
+      },
+      create: {
+        id: 'default',
+        archiveStatuses: RETENTION_DEFAULTS.archiveStatuses,
+        storageAlertThresholdPct: normalized,
+        updatedById: adminId,
+      },
+    })
+  } catch {
+    return { success: false, error: 'Could not save the alert threshold' }
+  }
+
+  revalidatePath('/admin/storage')
+  return { success: true, thresholdPct: normalized }
 }
 
 export async function createStoragePlanEvent(input: {
