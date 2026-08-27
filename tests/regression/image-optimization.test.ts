@@ -24,6 +24,23 @@ async function createImage(
   return input.png({ compressionLevel: 9 }).toBuffer()
 }
 
+const EXIF_FIXTURE_ARTIST = 'Image optimization regression fixture'
+
+async function createExifOrientedJpegFixture() {
+  return sharp({
+    create: {
+      width: 3000,
+      height: 2000,
+      channels: 3,
+      background: { r: 30, g: 90, b: 150 },
+    },
+  })
+    .jpeg({ quality: 100 })
+    .withMetadata({ orientation: 6 })
+    .withExif({ IFD0: { Artist: EXIF_FIXTURE_ARTIST } })
+    .toBuffer()
+}
+
 describe('optimizeImageAttachment', () => {
   it('caps landscape and portrait images at a 2048px longest edge', async () => {
     for (const [fileName, mimeType, format, width, height] of [
@@ -62,6 +79,26 @@ describe('optimizeImageAttachment', () => {
     assert.equal(metadata.format, 'png')
     assert.equal(metadata.hasAlpha, true)
     assert.equal(result.storedSize, result.bytes.length)
+  })
+
+  it('normalizes EXIF orientation and strips metadata from optimized output', async () => {
+    const input = await createExifOrientedJpegFixture()
+    const inputMetadata = await sharp(input).metadata()
+    assert.equal(inputMetadata.orientation, 6)
+    assert.equal(inputMetadata.exif?.includes(Buffer.from(EXIF_FIXTURE_ARTIST)), true)
+
+    const result = await optimizeImageAttachment({
+      bytes: input,
+      fileName: 'exif-oriented.jpg',
+      mimeType: 'image/jpeg',
+    })
+    const outputMetadata = await sharp(result.bytes).metadata()
+
+    assert.equal(result.optimized, true)
+    assert.equal(outputMetadata.width, 1365)
+    assert.equal(outputMetadata.height, 2048)
+    assert.equal(outputMetadata.orientation, undefined)
+    assert.equal(outputMetadata.exif, undefined)
   })
 
   it('falls back to original bytes when optimization is larger', async () => {
