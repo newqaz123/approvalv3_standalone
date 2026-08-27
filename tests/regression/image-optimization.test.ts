@@ -26,11 +26,11 @@ async function createImage(
 
 describe('optimizeImageAttachment', () => {
   it('caps landscape and portrait images at a 2048px longest edge', async () => {
-    for (const [fileName, mimeType, format] of [
-      ['landscape.jpg', 'image/jpeg', 'jpeg'],
-      ['portrait.webp', 'image/webp', 'webp'],
+    for (const [fileName, mimeType, format, width, height] of [
+      ['landscape.jpg', 'image/jpeg', 'jpeg', 4000, 3000],
+      ['portrait.webp', 'image/webp', 'webp', 3000, 4000],
     ] as const) {
-      const input = await createImage(4000, 3000, 3, format)
+      const input = await createImage(width, height, 3, format)
       const result = await optimizeImageAttachment({ bytes: input, fileName, mimeType })
       const metadata = await sharp(result.bytes).metadata()
       assert.ok(Math.max(metadata.width ?? 0, metadata.height ?? 0) <= 2048)
