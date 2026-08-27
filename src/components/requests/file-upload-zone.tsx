@@ -11,6 +11,7 @@ interface UploadedFile {
   file: File
   status: 'pending' | 'uploading' | 'success' | 'error'
   progress: number
+  storedSize?: number
   error?: string
   description?: string
 }
@@ -85,7 +86,14 @@ export function FileUploadZone({
       if (result.success && result.fileAttachment) {
         setFiles((prev) =>
           prev.map((f) =>
-            f.id === uploadedFile.id ? { ...f, status: 'success', progress: 100 } : f
+            f.id === uploadedFile.id
+              ? {
+                  ...f,
+                  status: 'success',
+                  progress: 100,
+                  storedSize: result.fileAttachment.fileSize,
+                }
+              : f
           )
         )
         onFilesUploaded?.([{
@@ -132,7 +140,7 @@ export function FileUploadZone({
           multiple
           onChange={(e) => e.target.files && handleFileSelect(e.target.files)}
           disabled={disabled}
-          accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.gif"
+          accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.gif,.webp"
           className="hidden"
         />
         <label
@@ -152,47 +160,54 @@ export function FileUploadZone({
       {/* File list */}
       {files.length > 0 && (
         <div className="space-y-2">
-          {files.map((file) => (
-            <div
-              key={file.id}
-              className="flex items-center gap-3 p-3 border rounded-lg bg-white"
-            >
-              {file.status === 'success' ? (
-                <Check className="h-5 w-5 text-green-500 flex-shrink-0" />
-              ) : file.status === 'error' ? (
-                <X className="h-5 w-5 text-red-500 flex-shrink-0" />
-              ) : (
-                <File className="h-5 w-5 text-gray-400 flex-shrink-0" />
-              )}
+          {files.map((file) => {
+            const storedSize = file.storedSize ?? file.file.size
+            const isOptimized = file.status === 'success' && storedSize < file.file.size
 
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{file.file.name}</p>
-                <p className="text-xs text-gray-500">
-                  {formatFileSize(file.file.size)}
-                  {file.status === 'uploading' && ` - ${file.progress}%`}
-                </p>
-                {file.status === 'error' && (
-                  <p className="text-xs text-red-500">{file.error}</p>
-                )}
-              </div>
-
-              {file.status === 'uploading' && (
-                <div className="w-24">
-                  <Progress value={file.progress} className="h-2" />
-                </div>
-              )}
-
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => removeFile(file.id)}
-                disabled={file.status === 'uploading'}
+            return (
+              <div
+                key={file.id}
+                className="flex items-center gap-3 p-3 border rounded-lg bg-white"
               >
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-          ))}
+                {file.status === 'success' ? (
+                  <Check className="h-5 w-5 text-green-500 flex-shrink-0" />
+                ) : file.status === 'error' ? (
+                  <X className="h-5 w-5 text-red-500 flex-shrink-0" />
+                ) : (
+                  <File className="h-5 w-5 text-gray-400 flex-shrink-0" />
+                )}
+
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{file.file.name}</p>
+                  <p className="text-xs text-gray-500">
+                    {isOptimized
+                      ? `${formatFileSize(file.file.size)} → ${formatFileSize(storedSize)} · optimized`
+                      : formatFileSize(storedSize)}
+                    {file.status === 'uploading' && ` - ${file.progress}%`}
+                  </p>
+                  {file.status === 'error' && (
+                    <p className="text-xs text-red-500">{file.error}</p>
+                  )}
+                </div>
+
+                {file.status === 'uploading' && (
+                  <div className="w-24">
+                    <Progress value={file.progress} className="h-2" />
+                  </div>
+                )}
+
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => removeFile(file.id)}
+                  disabled={file.status === 'uploading'}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            )
+          })}
         </div>
       )}
     </div>

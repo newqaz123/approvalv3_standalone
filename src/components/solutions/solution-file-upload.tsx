@@ -290,6 +290,8 @@ export function SolutionFileUpload({
               const showProgress = item.status === 'uploading'
               const isSuccess = item.status === 'success'
               const isError = item.status === 'error'
+              const storedSize = item.storedSize ?? file.size
+              const isOptimized = isSuccess && storedSize < file.size
 
               return (
                 <div
@@ -300,7 +302,11 @@ export function SolutionFileUpload({
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between">
                       <p className="text-sm font-medium truncate">{file.name}</p>
-                      <span className="text-xs text-gray-500">{formatFileSize(file.size)}</span>
+                      <span className="text-xs text-gray-500">
+                        {isOptimized
+                          ? `${formatFileSize(file.size)} → ${formatFileSize(storedSize)} · optimized`
+                          : formatFileSize(storedSize)}
+                      </span>
                     </div>
                     {showProgress && (
                       <p className="text-xs text-gray-500 mt-1">Uploading...</p>
