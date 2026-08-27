@@ -35,6 +35,37 @@ describe('uploadAttachmentBatch', () => {
     assert.equal(result.attachmentIds.length, 2)
   })
 
+  it('keeps the server-reported stored size on successful items', async () => {
+    const result = await uploadAttachmentBatch(
+      [item('image', 'photo.pdf')],
+      async () => ({
+        success: true,
+        attachmentId: '11111111-1111-1111-1111-111111111111',
+        storedSize: 327600,
+      }),
+    )
+    assert.equal(result.items[0].storedSize, 327600)
+  })
+
+  it('preserves a prior successful stored size when retrying other items', async () => {
+    const prior = {
+      ...item('prior', 'prior.pdf'),
+      status: 'success' as const,
+      attachmentId: '11111111-1111-1111-1111-111111111111',
+      storedSize: 100,
+    }
+    const result = await uploadAttachmentBatch(
+      [prior, { ...item('retry', 'retry.pdf'), status: 'error' }],
+      async () => ({
+        success: true,
+        attachmentId: '22222222-2222-2222-2222-222222222222',
+        storedSize: 200,
+      }),
+    )
+    assert.equal(result.items[0].storedSize, 100)
+    assert.equal(result.items[1].storedSize, 200)
+  })
+
   it('rejects unsupported metadata without invoking the uploader', async () => {
     const calls: string[] = []
     const snapshots: { id: string; status: string }[] = []
@@ -250,6 +281,10 @@ describe('useSolutionAttachments hook contract', () => {
     assert.match(hookSource, /formData\.append\('file'/)
     assert.match(hookSource, /formData\.append\('requestId'/)
     assert.match(hookSource, /uploadSolutionDraftAttachmentAction/)
+  })
+
+  it('propagates the stored size from the successful draft action', () => {
+    assert.match(hookSource, /storedSize:\s*actionResult\.fileAttachment\.fileSize/)
   })
 
   it('removeItem cleans server-side before removing and never swallows failures', () => {

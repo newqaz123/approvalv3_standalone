@@ -5,11 +5,12 @@ export interface AttachmentUploadItem {
   file: File
   status: 'pending' | 'uploading' | 'success' | 'error'
   attachmentId?: string
+  storedSize?: number
   error?: string
 }
 
 export type UploadOneAttachment = (item: AttachmentUploadItem) => Promise<
-  | { success: true; attachmentId: string }
+  | { success: true; attachmentId: string; storedSize?: number }
   | { success: false; error: string }
 >
 
@@ -86,7 +87,12 @@ export async function uploadAttachmentBatch(
       continue
     }
     items[index] = result.success
-      ? { ...uploading, status: 'success', attachmentId: result.attachmentId }
+      ? {
+          ...uploading,
+          status: 'success',
+          attachmentId: result.attachmentId,
+          storedSize: result.storedSize,
+        }
       : { ...uploading, status: 'error', error: result.error }
     onItemChange?.(items[index])
   }

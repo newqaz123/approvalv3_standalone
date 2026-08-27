@@ -161,7 +161,11 @@ export function useSolutionAttachments({
       formData.append('requestId', requestId)
       const actionResult = await uploadSolutionDraftAttachmentAction(null, formData)
       return actionResult.success
-        ? { success: true, attachmentId: actionResult.attachmentId }
+        ? {
+            success: true,
+            attachmentId: actionResult.attachmentId,
+            storedSize: actionResult.fileAttachment.fileSize,
+          }
         : { success: false, error: actionResult.error }
     }
     // `onItemChange` mirrors each transition into React state for live progress;
