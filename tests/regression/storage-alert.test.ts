@@ -248,7 +248,7 @@ describe('storage alert wiring', () => {
     assert.match(scheduler, /runStorageAlertCheck/)
 
     const nextConfig = readFileSync('next.config.mjs', 'utf8')
-    assert.match(nextConfig, /serverExternalPackages:\s*\[['"]nodemailer['"]\]/)
+    assert.match(nextConfig, /serverExternalPackages:\s*\[['"]nodemailer['"],\s*['"]sharp['"]\]/)
 
     const instrumentation = readFileSync('src/instrumentation.ts', 'utf8')
     assert.match(instrumentation, /NEXT_RUNTIME/)
