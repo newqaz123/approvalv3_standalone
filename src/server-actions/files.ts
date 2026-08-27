@@ -10,6 +10,10 @@ import {
   writeAttachmentFile,
   deleteAttachmentFile,
 } from '@/lib/attachments/storage'
+import {
+  optimizeImageAttachment,
+  type ImageOptimizationResult,
+} from '@/lib/attachments/image-optimization'
 import { revalidateRequestViews } from './request-view-invalidation'
 
 /**
@@ -171,12 +175,24 @@ export async function uploadFileAction(
     return { success: false, error: 'Not authorized to upload to this request' }
   }
 
+  const bytes = Buffer.from(await file.arrayBuffer())
+  let prepared: ImageOptimizationResult
+  try {
+    prepared = await optimizeImageAttachment({
+      bytes,
+      fileName: file.name,
+      mimeType: file.type,
+    })
+  } catch (error) {
+    console.warn('[uploadFileAction] Failed to optimize image attachment', error)
+    return { success: false, error: 'Unable to process image' }
+  }
+
   // Persist the attachment through the private storage layer. The stored path
   // is derived from the requestId + a sanitized filename so it is stable across
   // the write, the DB record, and any later compensation delete.
   const storedPath = createStoredAttachmentPath(requestId, file.name)
-  const bytes = await file.arrayBuffer()
-  await writeAttachmentFile(storedPath, Buffer.from(bytes))
+  await writeAttachmentFile(storedPath, prepared.bytes)
 
   // Create database record. If this fails, remove the file we just wrote so it
   // is not orphaned outside the request lifecycle (best-effort compensation).
@@ -190,7 +206,7 @@ export async function uploadFileAction(
         requestId,
         fileName,
         fileType: file.type,
-        fileSize: file.size,
+        fileSize: prepared.storedSize,
         filePath: storedPath,
         description: description || null,
         uploadedById: userId,
@@ -341,10 +357,22 @@ export async function uploadSolutionDraftAttachmentAction(
     return { success: false, error: 'Request is not available for solution draft upload' }
   }
 
+  const bytes = Buffer.from(await file.arrayBuffer())
+  let prepared: ImageOptimizationResult
+  try {
+    prepared = await optimizeImageAttachment({
+      bytes,
+      fileName: file.name,
+      mimeType: file.type,
+    })
+  } catch (error) {
+    console.warn('[uploadSolutionDraftAttachmentAction] Failed to optimize image attachment', error)
+    return { success: false, error: 'Unable to process image' }
+  }
+
   // Persist through the private storage layer, keyed by the target request.
   const storedPath = createStoredAttachmentPath(requestId, file.name)
-  const bytes = await file.arrayBuffer()
-  await writeAttachmentFile(storedPath, Buffer.from(bytes))
+  await writeAttachmentFile(storedPath, prepared.bytes)
 
   // Create the draft record: requestId = target, solutionId = null, uploader =
   // current user. If the insert fails, remove the file we just wrote so it is
@@ -360,7 +388,7 @@ export async function uploadSolutionDraftAttachmentAction(
         solutionId: null,
         fileName,
         fileType: file.type,
-        fileSize: file.size,
+        fileSize: prepared.storedSize,
         filePath: storedPath,
         description: description || null,
         uploadedById: userId,
