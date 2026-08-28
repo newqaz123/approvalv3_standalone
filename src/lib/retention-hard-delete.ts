@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { revalidateRequestViews } from '@/server-actions/request-view-invalidation'
 import {
   cleanupUnreferencedInlineImages,
+  INLINE_IMAGE_EXPIRY_MS,
   type InlineImageCleanupResult,
 } from '@/lib/inline-images/lifecycle'
 
@@ -104,11 +105,13 @@ export async function hardDeleteArchivedRequests(
   })
 
   // The deletion above has committed, so assets whose request/solution
-  // references cascaded away are now unreferenced; a now cutoff picks them up.
-  // Assets still referenced by other owners stay out of the candidate set.
+  // references cascaded away are now unreferenced. A 24h createdAt cutoff still
+  // selects committed orphans (they keep their original createdAt) while
+  // excluding live and recently abandoned drafts. Shared referenced assets stay
+  // out of the candidate set.
   try {
     const cleanup = await deps.cleanupUnreferencedInlineImages({
-      olderThan: new Date(),
+      olderThan: new Date(Date.now() - INLINE_IMAGE_EXPIRY_MS),
       limit: INLINE_IMAGE_CLEANUP_LIMIT,
     })
     fileWarnings.push(...cleanup.warnings)

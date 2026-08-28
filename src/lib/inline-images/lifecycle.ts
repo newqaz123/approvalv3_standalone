@@ -18,7 +18,7 @@ import {
 } from '@/lib/inline-images/storage'
 import { canUserViewRequest } from '@/lib/request-access'
 
-const DAY_MS = 24 * 60 * 60 * 1000
+export const INLINE_IMAGE_EXPIRY_MS = 24 * 60 * 60 * 1000
 const DEFAULT_CLEANUP_LIMIT = 100
 const UPLOAD_CLEANUP_LIMIT = 5
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -392,7 +392,7 @@ export async function createInlineImageDraft(
     // Expiry cleanup is opportunistic. A transient cleanup error must not make
     // a new valid upload fail before it has written any bytes.
     await deps.cleanupExpired({
-      olderThan: new Date(Date.now() - DAY_MS),
+      olderThan: new Date(Date.now() - INLINE_IMAGE_EXPIRY_MS),
       limit: UPLOAD_CLEANUP_LIMIT,
     })
   } catch (error) {

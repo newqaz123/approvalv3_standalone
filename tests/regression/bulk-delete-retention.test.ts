@@ -32,7 +32,11 @@ it('hard delete triggers inline image cleanup only after the deletion transactio
   const hardDelete = readFileSync('src/lib/retention-hard-delete.ts', 'utf8')
 
   assert.match(hardDelete, /cleanupUnreferencedInlineImages/)
-  assert.match(hardDelete, /olderThan: new Date\(\)/)
+  // The 24h expiry cutoff (not a now cutoff) keeps other users' live
+  // in-session drafts out of the sweep; committed assets orphaned by this
+  // delete keep their original createdAt and still qualify.
+  assert.doesNotMatch(hardDelete, /olderThan: new Date\(\)/)
+  assert.match(hardDelete, /INLINE_IMAGE_EXPIRY_MS/)
   assert.match(hardDelete, /INLINE_IMAGE_CLEANUP_LIMIT = 100/)
   assert.match(hardDelete, /isArchived: true/)
 

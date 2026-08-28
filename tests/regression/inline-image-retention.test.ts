@@ -15,6 +15,10 @@ function archivedRow(id: string): HardDeleteArchivedRow {
   }
 }
 
+/** Design contract: unreferenced assets stay readable for 24 hours before cleanup. */
+const EXPIRY_MS = 24 * 60 * 60 * 1000
+const CUTOFF_SLOP_MS = 60_000
+
 type RecordedCall = { step: string }
 
 function recordingDeps(
@@ -35,8 +39,8 @@ function recordingDeps(
     cleanupUnreferencedInlineImages: async (input) => {
       events.push(`inline-cleanup:${input.limit}`)
       assert.ok(
-        input.olderThan.getTime() <= Date.now(),
-        'cleanup cutoff must be now so newly unreferenced committed assets qualify'
+        input.olderThan.getTime() <= Date.now() - EXPIRY_MS + CUTOFF_SLOP_MS,
+        'cleanup cutoff must be the 24h expiry cutoff so live in-session drafts are not candidates'
       )
       return { deleted: [], warnings: [] }
     },
@@ -63,7 +67,7 @@ describe('hardDeleteArchivedRequests inline image cleanup', () => {
     ])
   })
 
-  it('passes a now cutoff and the retention limit to the cleanup helper', async () => {
+  it('passes the 24-hour expiry cutoff and the retention limit to the cleanup helper', async () => {
     const seen: Array<RecordedCall & { olderThan: Date; limit: number }> = []
     const result = await hardDeleteArchivedRequests(
       ['request-1'],
@@ -78,9 +82,12 @@ describe('hardDeleteArchivedRequests inline image cleanup', () => {
     assert.equal(result.success, true)
     assert.equal(seen.length, 1)
     assert.equal(seen[0].limit, 100)
+    // Live drafts are unreferenced by definition, so a now cutoff would sweep
+    // every user's in-session uploads. Only assets older than the 24h expiry
+    // may be reclaimed (design AC4).
     assert.ok(
-      Math.abs(seen[0].olderThan.getTime() - Date.now()) < 60_000,
-      'cleanup cutoff must be the current time'
+      Math.abs(seen[0].olderThan.getTime() - (Date.now() - EXPIRY_MS)) < CUTOFF_SLOP_MS,
+      'cleanup cutoff must be 24 hours in the past, not the current time'
     )
   })
 
@@ -199,7 +206,14 @@ describe('hard delete cleanup safety', () => {
   it('keeps the upload route sweep independent from hard-delete cleanup', () => {
     const route = readFileSync('src/app/api/inline-images/route.ts', 'utf8')
     assert.doesNotMatch(route, /hardDeleteArchivedRequests/)
+
+    // Hard delete must share the lifecycle expiry window instead of a now
+    // cutoff, which would select other users' live in-session drafts.
     const hardDelete = readFileSync('src/lib/retention-hard-delete.ts', 'utf8')
-    assert.doesNotMatch(hardDelete, /DAY_MS|Date\.now\(\) - 24/)
+    assert.match(hardDelete, /INLINE_IMAGE_EXPIRY_MS/)
+    assert.doesNotMatch(hardDelete, /olderThan:\s*new Date\(\)/)
+
+    const lifecycle = readFileSync('src/lib/inline-images/lifecycle.ts', 'utf8')
+    assert.match(lifecycle, /export const INLINE_IMAGE_EXPIRY_MS/)
   })
 })
