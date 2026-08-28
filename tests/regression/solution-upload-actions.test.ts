@@ -105,7 +105,19 @@ describe('submitSolutionSchema validates attachment IDs (Task 3 brief)', () => {
     requestId: randomUUID(),
     title: 'Solution title',
     description: 'Solution description',
+    inlineImageSessionId: randomUUID(),
   }
+
+  it('requires a UUID inline image upload session', () => {
+    assert.throws(() => submitSolutionSchema.parse({
+      ...validInput,
+      inlineImageSessionId: undefined,
+    }))
+    assert.throws(() => submitSolutionSchema.parse({
+      ...validInput,
+      inlineImageSessionId: 'not-a-uuid',
+    }))
+  })
 
   it('rejects a non-UUID attachment id', () => {
     assert.throws(() =>
@@ -172,11 +184,23 @@ describe('resubmitSolutionSchema validates resubmission attachment IDs (Task 4 b
     requestId: randomUUID(),
     title: 'Updated solution title',
     description: 'Updated solution description',
+    inlineImageSessionId: randomUUID(),
     cost: 1500,
     currency: 'THB' as const,
     timeline: '3 weeks',
     useCustomHierarchy: false,
   }
+
+  it('requires a UUID inline image upload session', () => {
+    assert.throws(() => resubmitSolutionSchema.parse({
+      ...validInput,
+      inlineImageSessionId: undefined,
+    }))
+    assert.throws(() => resubmitSolutionSchema.parse({
+      ...validInput,
+      inlineImageSessionId: 'not-a-uuid',
+    }))
+  })
 
   it('rejects a non-UUID newFileId', () => {
     assert.throws(() =>
@@ -260,7 +284,7 @@ describe('resubmitSolution transfers staged IDs and deletes files after commit (
 
   it('no longer accepts raw File[] inputs or does disk writes / arrayBuffer reads', () => {
     // The signature must carry inferred staged-id input, never File[].
-    assert.match(resubmitBody, /resubmitSolution\(input: ResubmitSolutionInput\)/)
+    assert.match(resubmitBody, /resubmitSolution\(input: ResubmitSolutionActionInput\)/)
     assert.doesNotMatch(resubmitBody, /files:\s*File\[\]/)
     assert.doesNotMatch(resubmitBody, /\.arrayBuffer\(\)/)
     assert.doesNotMatch(resubmitBody, /writeAttachmentFile/)

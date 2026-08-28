@@ -10,6 +10,10 @@ import { requireAdmin } from '@/lib/auth'
 import { getCurrentUser, getUserById } from '@/lib/cache/user-cache'
 import { deleteAttachmentFile } from '@/lib/attachments/storage'
 import { descriptionSchema } from '@/lib/schemas/solution-schemas'
+import {
+  prepareInlineDescription,
+  reconcileInlineDescriptionImages,
+} from '@/lib/inline-images/references'
 import { cancellationReasonSchema } from '@/lib/schemas/cancellation-schemas'
 import { buildRequestExportRows } from '@/lib/request-export'
 import {
@@ -28,11 +32,15 @@ import * as XLSX from 'xlsx'
 const createRequestSchema = z.object({
   title: z.string().min(1, 'Title is required').max(200, 'Title too long'),
   description: descriptionSchema,
+  inlineImageSessionId: z.string().uuid(),
 })
 
 export interface CreateRequestInput {
   title: string
   description: string
+  // Callers add this during the editor-coordinator rollout; validation still
+  // requires it before any description save can claim image drafts.
+  inlineImageSessionId?: string
 }
 
 /**
@@ -58,16 +66,27 @@ export async function createRequest(input: CreateRequestInput) {
     }
   }
 
+  const prepared = await prepareInlineDescription({
+    description: validatedFields.data.description,
+    userId: user.id,
+    uploadSessionId: validatedFields.data.inlineImageSessionId,
+  })
+
   // Create request in a transaction with activity log
   const request = await prisma.$transaction(async (tx) => {
     const newRequest = await tx.requests.create({
       data: {
         title: validatedFields.data.title,
-        description: validatedFields.data.description,
+        description: prepared.html,
         requesterId: user.id,
         departmentId: user.departmentId!, // Non-null assertion since we checked above
         status: 'ImprovementRequest',
       },
+    })
+
+    await reconcileInlineDescriptionImages(tx, {
+      owner: { kind: 'request', id: newRequest.id },
+      imageIds: prepared.imageIds,
     })
 
     // Log creation in audit trail
@@ -2108,6 +2127,7 @@ export async function resubmitRequest(input: {
   requestId: string
   title?: string
   description?: string
+  inlineImageSessionId?: string
 }) {
   const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
 
@@ -2164,11 +2184,25 @@ export async function resubmitRequest(input: {
     }
   }
 
+  let prepared: { html: string; imageIds: string[] } | undefined
   if (input.description !== undefined) {
     const descValidation = descriptionSchema.safeParse(input.description)
     if (!descValidation.success) {
       throw new Error(descValidation.error.issues[0].message)
     }
+
+    const sessionValidation = z.string().uuid().safeParse(input.inlineImageSessionId)
+    if (!sessionValidation.success) {
+      throw new Error('A valid inline image session id is required when updating the description')
+    }
+
+    prepared = await prepareInlineDescription({
+      description: input.description,
+      userId,
+      uploadSessionId: sessionValidation.data,
+    })
+  } else if (input.inlineImageSessionId !== undefined) {
+    throw new Error('An inline image session id is only allowed when updating the description')
   }
 
   // Perform resubmit in transaction
@@ -2183,8 +2217,7 @@ export async function resubmitRequest(input: {
       updatedAt: new Date(Math.max(Date.now(), request.updatedAt.getTime() + 1)),
     }
     if (input.title !== undefined) updateData.title = input.title
-    if (input.description !== undefined)
-      updateData.description = input.description
+    if (prepared) updateData.description = prepared.html
 
     await updateRequestStatusExpecting(tx, {
       requestId: input.requestId,
@@ -2193,6 +2226,13 @@ export async function resubmitRequest(input: {
       data: updateData,
       actionLabel: 'resubmit request',
     })
+
+    if (prepared) {
+      await reconcileInlineDescriptionImages(tx, {
+        owner: { kind: 'request', id: input.requestId },
+        imageIds: prepared.imageIds,
+      })
+    }
 
     // Delete all existing approvals
     await tx.request_approvals.deleteMany({

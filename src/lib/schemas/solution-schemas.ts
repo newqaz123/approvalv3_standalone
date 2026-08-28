@@ -34,6 +34,7 @@ export const submitSolutionSchema = z.object({
   requestId: z.string().uuid(),
   title: z.string().min(1, 'Title is required').max(200, 'Title must be less than 200 characters'),
   description: descriptionSchema,
+  inlineImageSessionId: z.string().uuid(),
   costEstimate: z
     .number({ message: 'Cost must be a number' })
     .positive('Cost must be greater than 0')
@@ -69,6 +70,7 @@ export const resubmitSolutionSchema = z.object({
   requestId: z.string().uuid(),
   title: z.string().min(1, 'Title is required').max(200, 'Title must be less than 200 characters'),
   description: descriptionSchema,
+  inlineImageSessionId: z.string().uuid(),
   cost: z.number({ message: 'Cost must be a number' }).positive('Cost must be greater than 0'),
   currency: z.enum(['THB', 'USD', 'EUR']),
   timeline: z.string().min(1, 'Timeline is required').max(500, 'Timeline must be less than 500 characters'),

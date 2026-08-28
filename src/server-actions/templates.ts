@@ -5,11 +5,16 @@ import { requireAdmin } from '@/lib/auth'
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { descriptionSchema } from '@/lib/schemas/solution-schemas'
+import {
+  prepareInlineDescription,
+  reconcileInlineDescriptionImages,
+} from '@/lib/inline-images/references'
 
 export interface CreateTemplateInput {
   name: string
   title: string
   description: string
+  inlineImageSessionId?: string
   isDefault?: boolean
 }
 
@@ -18,6 +23,7 @@ export interface UpdateTemplateInput {
   name: string
   title: string
   description: string
+  inlineImageSessionId?: string
   isActive?: boolean
 }
 
@@ -30,6 +36,7 @@ const createTemplateSchema = z.object({
   name: z.string().min(1, 'Template name is required'),
   title: z.string().min(1, 'Template title is required'),
   description: descriptionSchema,
+  inlineImageSessionId: z.string().uuid(),
   isDefault: z.boolean().optional(),
 })
 
@@ -38,6 +45,7 @@ const updateTemplateSchema = z.object({
   name: z.string().min(1, 'Template name is required'),
   title: z.string().min(1, 'Template title is required'),
   description: descriptionSchema,
+  inlineImageSessionId: z.string().uuid(),
   isActive: z.boolean().optional(),
 })
 
@@ -140,7 +148,10 @@ export async function getDefaultTemplate() {
  * If isDefault is true, will set all other templates' isDefault to false
  */
 export async function createTemplate(input: CreateTemplateInput) {
-  await requireAdmin()
+  const userId = await requireAdmin()
+  if (!userId) {
+    throw new Error('Unauthorized')
+  }
 
   // Validate input
   const validatedFields = createTemplateSchema.safeParse(input)
@@ -151,10 +162,16 @@ export async function createTemplate(input: CreateTemplateInput) {
     throw new Error(errorMessages)
   }
 
+  const prepared = await prepareInlineDescription({
+    description: validatedFields.data.description,
+    userId,
+    uploadSessionId: validatedFields.data.inlineImageSessionId,
+  })
+
   // Use transaction to ensure only one default template
   await prisma.$transaction(async (tx) => {
     // If setting as default, unset all other defaults
-    if (input.isDefault) {
+    if (validatedFields.data.isDefault) {
       await tx.templates.updateMany({
         where: { isDefault: true },
         data: { isDefault: false },
@@ -162,14 +179,19 @@ export async function createTemplate(input: CreateTemplateInput) {
     }
 
     // Create new template
-    await tx.templates.create({
+    const template = await tx.templates.create({
       data: {
-        name: input.name,
-        title: input.title,
-        description: input.description,
-        isDefault: input.isDefault || false,
+        name: validatedFields.data.name,
+        title: validatedFields.data.title,
+        description: prepared.html,
+        isDefault: validatedFields.data.isDefault || false,
         isActive: true,
       },
+    })
+
+    await reconcileInlineDescriptionImages(tx, {
+      owner: { kind: 'template', id: template.id },
+      imageIds: prepared.imageIds,
     })
   })
 
@@ -181,7 +203,10 @@ export async function createTemplate(input: CreateTemplateInput) {
  * Does not change default status - use setTemplateDefault for that
  */
 export async function updateTemplate(input: UpdateTemplateInput) {
-  await requireAdmin()
+  const userId = await requireAdmin()
+  if (!userId) {
+    throw new Error('Unauthorized')
+  }
 
   // Validate input
   const validatedFields = updateTemplateSchema.safeParse(input)
@@ -192,14 +217,29 @@ export async function updateTemplate(input: UpdateTemplateInput) {
     throw new Error(errorMessages)
   }
 
-  const template = await prisma.templates.update({
-    where: { id: input.id },
-    data: {
-      name: input.name,
-      title: input.title,
-      description: input.description,
-      isActive: input.isActive,
-    },
+  const prepared = await prepareInlineDescription({
+    description: validatedFields.data.description,
+    userId,
+    uploadSessionId: validatedFields.data.inlineImageSessionId,
+  })
+
+  const template = await prisma.$transaction(async (tx) => {
+    const updatedTemplate = await tx.templates.update({
+      where: { id: validatedFields.data.id },
+      data: {
+        name: validatedFields.data.name,
+        title: validatedFields.data.title,
+        description: prepared.html,
+        isActive: validatedFields.data.isActive,
+      },
+    })
+
+    await reconcileInlineDescriptionImages(tx, {
+      owner: { kind: 'template', id: updatedTemplate.id },
+      imageIds: prepared.imageIds,
+    })
+
+    return updatedTemplate
   })
 
   revalidatePath('/admin/templates')

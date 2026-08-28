@@ -12,12 +12,24 @@ import prisma from '@/lib/prisma'
 import { RequestStatus, UserRole, type Prisma } from '@prisma/client'
 import { submitSolutionSchema, SubmitSolutionInput, resubmitSolutionSchema, ResubmitSolutionInput } from '@/lib/schemas/solution-schemas'
 import { deleteAttachmentFile } from '@/lib/attachments/storage'
+import {
+  prepareInlineDescription,
+  reconcileInlineDescriptionImages,
+} from '@/lib/inline-images/references'
 import { revalidateRequestViews } from './request-view-invalidation'
 import { updateRequestStatusExpecting } from '@/lib/request-status-transition'
 import {
   runTransactionWithPostCommitNotifications,
   type PostCommitNotificationCollector,
 } from '@/lib/post-commit-notifications'
+
+type SubmitSolutionActionInput = Omit<SubmitSolutionInput, 'inlineImageSessionId'> & {
+  inlineImageSessionId?: string
+}
+
+type ResubmitSolutionActionInput = Omit<ResubmitSolutionInput, 'inlineImageSessionId'> & {
+  inlineImageSessionId?: string
+}
 
 async function getMaxValidLevelInDepartment(
   tx: { user: { findFirst: Function } },
@@ -101,7 +113,7 @@ async function runSolutionTransactionWithNotifications<T>(
  * Submit an engineering solution for a request
  * Creates the solution record and approval chain in a transaction
  */
-export async function submitSolution(input: SubmitSolutionInput) {
+export async function submitSolution(input: SubmitSolutionActionInput) {
   const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
   if (!userId) {
     throw new Error('Unauthorized')
@@ -158,6 +170,12 @@ export async function submitSolution(input: SubmitSolutionInput) {
     throw new Error('Engineering department not found')
   }
 
+  const prepared = await prepareInlineDescription({
+    description: validated.description,
+    userId: user.id,
+    uploadSessionId: validated.inlineImageSessionId,
+  })
+
   const pendingNotifications: Array<{
     userId: string
     type: 'approval_needed' | 'solution_ready'
@@ -190,13 +208,18 @@ export async function submitSolution(input: SubmitSolutionInput) {
       data: {
         requestId: validated.requestId,
         title: validated.title,
-        description: validated.description,
+        description: prepared.html,
         costEstimate: validated.costEstimate ?? 0,
         currency: validated.currency,
         timeline: validated.timeline,
         conceptDesign: validated.conceptDesign,
         submittedById: user.id,
       },
+    })
+
+    await reconcileInlineDescriptionImages(tx, {
+      owner: { kind: 'solution', id: solution.id },
+      imageIds: prepared.imageIds,
     })
 
     // Link only attachments the current user owns and staged on this request,
@@ -1906,7 +1929,7 @@ export async function rejectFinalApproval(requestId: string, comments: string, e
  * for removed attachments runs ONLY after the DB transaction commits, so a
  * cleanup failure can never roll back a successful resubmission.
  */
-export async function resubmitSolution(input: ResubmitSolutionInput) {
+export async function resubmitSolution(input: ResubmitSolutionActionInput) {
   const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
   if (!userId) {
     throw new Error('Unauthorized')
@@ -1976,6 +1999,12 @@ export async function resubmitSolution(input: ResubmitSolutionInput) {
     throw new Error('Can only resubmit rejected solutions')
   }
 
+  const prepared = await prepareInlineDescription({
+    description: validated.description,
+    userId: user.id,
+    uploadSessionId: validated.inlineImageSessionId,
+  })
+
   // Single transaction: update solution, validate + link staged attachments,
   // delete selected attachments, reset the approval chain, and transition
   // status. Physical file cleanup and queued notification delivery run only
@@ -1986,12 +2015,17 @@ export async function resubmitSolution(input: ResubmitSolutionInput) {
       where: { id: solution.id },
       data: {
         title: validated.title,
-        description: validated.description,
+        description: prepared.html,
         costEstimate: validated.cost,
         currency: validated.currency,
         timeline: validated.timeline,
         updatedAt: new Date(),
       },
+    })
+
+    await reconcileInlineDescriptionImages(tx, {
+      owner: { kind: 'solution', id: updatedSolution.id },
+      imageIds: prepared.imageIds,
     })
 
     // Reject overlap between new and deleted id sets: a single id cannot be
