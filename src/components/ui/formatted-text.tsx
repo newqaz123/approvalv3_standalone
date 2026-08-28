@@ -6,6 +6,7 @@ import {
   sanitizeRichText,
 } from '@/lib/rich-text-sanitizer'
 import { tokenizeFormattedText, truncateFormattedText } from '@/lib/formatted-text'
+import { inlineImageAltPlaceholder } from '@/lib/inline-images/policy'
 import { cn } from '@/lib/utils'
 
 export type FormattedTextProps = {
@@ -28,9 +29,10 @@ export function FormattedText({
       return <span className={cn(className, 'rich-text')} dangerouslySetInnerHTML={html} />
     }
     // Truncated contexts (tables, previews) show plain text so slicing can't
-    // break tags mid-stream. truncateFormattedText returns tokens directly.
+    // break tags mid-stream. Approved images become alt placeholders before
+    // text extraction so previews never emit private image URLs.
     const tokens = truncateFormattedText(
-      richTextToPlainText(text),
+      richTextToPlainText(inlineImageAltPlaceholder(sanitizeRichText(text))),
       maxVisibleCharacters,
     )
     return <LegacyNodes tokens={tokens} className={className} />

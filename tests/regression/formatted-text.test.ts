@@ -185,6 +185,22 @@ describe("FormattedText rich output styling", () => {
 		assert.match(source, /cn\(className,\s*["']rich-text["']\)/);
 	});
 
+	it("renders responsive aligned images through the shared rich-text CSS", () => {
+		const css = read("src/app/globals.css");
+		assert.match(css, /\.rich-text img \{/, "img rule missing");
+		assert.match(css, /\.rich-text img \{[^}]*max-width:\s*100%/);
+		assert.match(css, /\.rich-text img \{[^}]*height:\s*auto/);
+		assert.match(css, /\.rich-text img\[data-align='left'\]/);
+		assert.match(css, /\.rich-text img\[data-align='center'\]/);
+		assert.match(css, /\.rich-text img\[data-align='right'\]/);
+	});
+
+	it("keeps the sanitized dangerouslySetInnerHTML boundary for untruncated HTML", () => {
+		const source = read("src/components/ui/formatted-text.tsx");
+		assert.match(source, /dangerouslySetInnerHTML/);
+		assert.match(source, /sanitizeRichText\(text\)/);
+	});
+
 	it("defines rich-text typography styles in globals.css", () => {
 		const css = read("src/app/globals.css");
 		assert.match(css, /\.rich-text h2 \{/, "h2 rule missing");

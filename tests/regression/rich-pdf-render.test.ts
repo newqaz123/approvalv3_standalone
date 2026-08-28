@@ -35,11 +35,13 @@ describe('renderDescriptionHtml', () => {
   })
 })
 
-describe('PDF and email render wiring', () => {
-  it('PDF routes descriptions through the shared helper and prints link URLs', () => {
+describe("PDF and email render wiring", () => {
+  it('PDF resolves descriptions through the owner-scoped inline image resolver', () => {
     const pdf = read('src/lib/pdf.ts')
-    assert.match(pdf, /renderDescriptionHtml\(/)
-    assert.doesNotMatch(pdf, /renderFormattedTextHtml\(data\.(solution\.)?description\)/)
+    assert.match(pdf, /await resolveInlineImagesForPdf\(/)
+    assert.match(pdf, /owner: \{ kind: ["']request["'], id: data\.id \}/)
+    assert.match(pdf, /owner: \{ kind: ["']solution["'], id: data\.solution\.id \}/)
+    assert.doesNotMatch(pdf, /escapeHtml\(data\.(solution\.)?description\)/)
     assert.match(pdf, /\.description a::after/)
     assert.match(pdf, /attr\(href\)/)
   })
@@ -48,5 +50,27 @@ describe('PDF and email render wiring', () => {
     const mail = read('src/server-actions/notifications.ts')
     assert.match(mail, /renderDescriptionHtml\(/)
     assert.match(mail, /renderDescriptionPlainText\(/)
+  })
+})
+
+describe('renderDescriptionHtml email placeholders', () => {
+  const IMG = '123e4567-e89b-42d3-a456-426614174000'
+
+  it('replaces approved images with escaped alt placeholders inside kept formatting', () => {
+    const out = renderDescriptionHtml(
+      `<p><strong>b</strong> <img src="/api/inline-images/${IMG}" alt="floor plan" data-align="left"> tail</p>`,
+      280,
+    )
+    assert.ok(out.includes('<strong>b</strong>'), 'formatting preserved')
+    assert.ok(out.includes('[Image: floor plan]'), 'placeholder present')
+    assert.ok(!/<img\b/i.test(out), 'email HTML must not contain img tags')
+    assert.ok(!out.includes('/api/inline-images'), 'no private image URL in email')
+  })
+
+  it('uses [Image] for empty alt text and keeps plain-text output aligned', () => {
+    const source = `<p><img src="/api/inline-images/${IMG}" alt="" data-align="center"></p>`
+    assert.ok(renderDescriptionHtml(source, 280).includes('[Image]'))
+    assert.ok(renderDescriptionPlainText(source).includes('[Image]'))
+    assert.ok(!renderDescriptionPlainText(source).includes('/api/inline-images'))
   })
 })

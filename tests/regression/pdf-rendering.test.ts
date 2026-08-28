@@ -17,6 +17,7 @@ const sampleData: RequestPDFData = {
   createdAt: new Date('2026-05-01T08:00:00Z'),
   completedAt: new Date('2026-05-10T08:00:00Z'),
   solution: {
+    id: 'SOL-1',
     title: 'Motor replacement',
     description: 'Use approved spare motor and test vibration.',
     costEstimate: 185000,
@@ -74,8 +75,8 @@ const sampleData: RequestPDFData = {
 }
 
 describe('compact approval evidence HTML', () => {
-  it('renders compact packet sections and escapes unsafe content', () => {
-    const html = renderRequestEvidenceHTML({
+  it('renders compact packet sections and escapes unsafe content', async () => {
+    const html = await renderRequestEvidenceHTML({
       ...sampleData,
       description: 'Safe <script>alert("x")</script>',
     })
@@ -96,5 +97,11 @@ describe('compact approval evidence HTML', () => {
     assert.match(html, /Approved &lt;script&gt;alert/)
     assert.doesNotMatch(html, /<script>alert/)
     assert.match(html, /&lt;script&gt;alert/)
+  })
+
+  it('requires owner ids so descriptions can resolve owner-scoped images', async () => {
+    const html = await renderRequestEvidenceHTML(sampleData)
+    assert.ok(html.length > 0)
+    assert.match(html, /Approval Evidence Packet/)
   })
 })

@@ -291,6 +291,7 @@ async function buildRequestPDFData(
   const solution = request.solutions[0]
   if (solution) {
     pdfData.solution = {
+      id: solution.id,
       title: solution.title,
       description: solution.description,
       costEstimate: solution.costEstimate ? Number(solution.costEstimate) : 0,

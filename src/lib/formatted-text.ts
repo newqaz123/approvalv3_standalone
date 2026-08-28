@@ -3,6 +3,7 @@ import {
 	richTextToPlainText,
 	sanitizeRichText,
 } from "@/lib/rich-text-sanitizer";
+import { inlineImageAltPlaceholder } from "@/lib/inline-images/policy";
 
 export type FormattedTextToken =
 	| { type: "text" | "bold"; value: string }
@@ -318,17 +319,21 @@ export function renderFormattedTextPlainText(
  * One description renderer for email + PDF: sanitized HTML for rich rows,
  * legacy markup otherwise. Truncation happens on visible text only — never
  * on tags.
+ *
+ * Email output never carries private image URLs or image bytes: approved
+ * images become escaped alt placeholders before any text extraction or
+ * truncation, while the surrounding safe formatting is preserved.
  */
 export function renderDescriptionHtml(
 	source: string,
 	maxVisibleCharacters?: number,
 ): string {
 	if (containsRichTextHtml(source)) {
-		const sanitized = sanitizeRichText(source);
+		const sanitized = inlineImageAltPlaceholder(sanitizeRichText(source));
 		if (maxVisibleCharacters === undefined) {
 			return sanitized;
 		}
-		const plain = richTextToPlainText(source);
+		const plain = richTextToPlainText(sanitized);
 		if (plain.length <= maxVisibleCharacters) {
 			// Fits the budget: keep the formatting (email short descriptions).
 			return sanitized;
@@ -346,7 +351,9 @@ export function renderDescriptionPlainText(
 	maxVisibleCharacters?: number,
 ): string {
 	if (containsRichTextHtml(source)) {
-		const plain = richTextToPlainText(source);
+		const plain = richTextToPlainText(
+			inlineImageAltPlaceholder(sanitizeRichText(source)),
+		);
 		return maxVisibleCharacters === undefined
 			? plain
 			: plain.slice(0, maxVisibleCharacters);

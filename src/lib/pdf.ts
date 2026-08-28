@@ -6,10 +6,10 @@
  */
 
 import puppeteer from "puppeteer";
-import { renderDescriptionHtml } from "@/lib/formatted-text";
+import { resolveInlineImagesForPdf } from "@/lib/inline-images/pdf";
 
 export interface RequestPDFData {
-	id?: string;
+	id: string;
 	referenceId?: string;
 	title: string;
 	description: string;
@@ -23,6 +23,7 @@ export interface RequestPDFData {
 	createdAt: Date;
 	completedAt?: Date;
 	solution?: {
+		id: string;
 		title: string;
 		description: string;
 		costEstimate: number;
@@ -103,7 +104,7 @@ export async function generatePdfFromHTML(html: string): Promise<Buffer> {
 export async function generateRequestPDF(
 	data: RequestPDFData,
 ): Promise<Buffer> {
-	return generatePdfFromHTML(renderRequestEvidenceHTML(data));
+	return generatePdfFromHTML(await renderRequestEvidenceHTML(data));
 }
 
 function formatDate(date: Date | string): string {
@@ -158,7 +159,21 @@ function statusClass(
 	return "pending";
 }
 
-export function renderRequestEvidenceHTML(data: RequestPDFData): string {
+export async function renderRequestEvidenceHTML(
+	data: RequestPDFData,
+): Promise<string> {
+	// Descriptions are resolved against their owner before interpolation so
+	// only request/solution-referenced image bytes enter the trusted PDF HTML.
+	const requestDescriptionHtml = await resolveInlineImagesForPdf({
+		html: data.description,
+		owner: { kind: "request", id: data.id },
+	});
+	const solutionDescriptionHtml = data.solution
+		? await resolveInlineImagesForPdf({
+				html: data.solution.description,
+				owner: { kind: "solution", id: data.solution.id },
+			})
+		: "";
 	const generatedAt = formatDate(new Date());
 	const createdLabel = formatDateShort(data.createdAt);
 	const completedLabel = data.completedAt
@@ -314,6 +329,9 @@ export function renderRequestEvidenceHTML(data: RequestPDFData): string {
     .description li { margin: 2px 0; }
     .description a { color: #1d4ed8; text-decoration: underline; }
     .description a::after { content: " (" attr(href) ")"; font-size: 9px; color: #64748b; }
+    .description img { display: block; max-width: 100%; height: auto; margin: 8px auto; break-inside: avoid; page-break-inside: avoid; }
+    .description img[data-align='left'] { margin-left: 0; margin-right: auto; }
+    .description img[data-align='right'] { margin-left: auto; margin-right: 0; }
     table {
       width: 100%;
       border-collapse: collapse;
@@ -376,7 +394,7 @@ export function renderRequestEvidenceHTML(data: RequestPDFData): string {
     <div class="solution-grid">
       <div>
         <strong>${escapeHtml(data.solution.title)}</strong>
-        <div class="description">${renderDescriptionHtml(data.solution.description)}</div>
+        <div class="description">${solutionDescriptionHtml}</div>
       </div>
       <div class="solution-meta">
         <p><strong>Approved Cost</strong><br>${escapeHtml(formatCurrency(data.solution.costEstimate, data.solution.currency))}</p>
@@ -392,7 +410,7 @@ export function renderRequestEvidenceHTML(data: RequestPDFData): string {
 
   <div class="section">
     <h2>Original Request</h2>
-    <div class="description">${renderDescriptionHtml(data.description)}</div>
+    <div class="description">${requestDescriptionHtml}</div>
   </div>
 
   <div class="section">

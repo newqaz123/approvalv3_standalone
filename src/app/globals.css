@@ -43,6 +43,10 @@
   color: #2563eb;
   text-decoration: underline;
 }
+.rich-text img { display: block; max-width: 100%; height: auto; margin-block: .75rem; }
+.rich-text img[data-align='left'] { margin-right: auto; }
+.rich-text img[data-align='center'] { margin-inline: auto; }
+.rich-text img[data-align='right'] { margin-left: auto; }
 
 
 

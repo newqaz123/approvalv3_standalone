@@ -187,6 +187,9 @@ function buildDetailRow(label: string, value: string) {
 }
 
 function buildFormattedDescriptionRow(safeHtml: string) {
+	// safeHtml comes from renderDescriptionHtml: approved inline images are
+	// already replaced by escaped alt placeholders, so notification email never
+	// carries private /api/inline-images URLs or image bytes.
 	return `
     <tr>
       <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; color: #6b7280; font-size: 13px; width: 38%;">${escapeHtml("Description")}</td>
