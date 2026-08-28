@@ -1,8 +1,13 @@
 import sanitizeHtml from 'sanitize-html'
 import { decodeHTML } from 'entities'
+import {
+  MAX_INLINE_ALT_LENGTH,
+  canonicalInlineImageSrc,
+  parseInlineImageSrc,
+} from '@/lib/inline-images/policy'
 
 export const RICH_TEXT_ALLOWED_TAGS = [
-  'p', 'br', 'strong', 'em', 'u', 's', 'ul', 'ol', 'li', 'h2', 'h3', 'a',
+  'p', 'br', 'strong', 'em', 'u', 's', 'ul', 'ol', 'li', 'h2', 'h3', 'a', 'img',
 ] as const
 
 /** Exact allowed link schemes. Scheme-less/relative hrefs are stripped (text kept). */
@@ -17,7 +22,10 @@ export function sanitizeRichText(html: string): string {
   try {
     return sanitizeHtml(html, {
       allowedTags: [...RICH_TEXT_ALLOWED_TAGS],
-      allowedAttributes: { a: ['href', 'target', 'rel'] },
+      allowedAttributes: {
+        a: ['href', 'target', 'rel'],
+        img: ['src', 'alt', 'data-align'],
+      },
       allowedSchemes: ['http', 'https', 'mailto'],
       allowProtocolRelative: false,
       transformTags: {
@@ -27,6 +35,23 @@ export function sanitizeRichText(html: string): string {
             next.href = attribs.href
           }
           return { tagName, attribs: next }
+        },
+        img: (_tagName, attribs) => {
+          const id = parseInlineImageSrc(attribs.src ?? '')
+          if (!id) return { tagName: 'span', attribs: {} as Record<string, string> }
+
+          const align = ['left', 'center', 'right'].includes(attribs['data-align'])
+            ? attribs['data-align']
+            : 'center'
+
+          return {
+            tagName: 'img',
+            attribs: {
+              src: canonicalInlineImageSrc(id),
+              alt: (attribs.alt ?? '').slice(0, MAX_INLINE_ALT_LENGTH),
+              'data-align': align,
+            },
+          }
         },
       },
       disallowedTagsMode: 'discard',

@@ -13,6 +13,11 @@ describe('descriptionSchema', () => {
     assert.throws(() => descriptionSchema.parse('<p>   </p>'))
   })
 
+  it('treats a valid inline image as content and invalid image-only HTML as empty', () => {
+    assert.doesNotThrow(() => descriptionSchema.parse('<img src="/api/inline-images/123e4567-e89b-42d3-a456-426614174000" alt="Plan" data-align="center">'))
+    assert.throws(() => descriptionSchema.parse('<img src="data:image/png,x">'))
+  })
+
   it('still rejects plain empties and over-length', () => {
     assert.throws(() => descriptionSchema.parse(''))
     assert.throws(() => descriptionSchema.parse('x'.repeat(20001)))

@@ -1,20 +1,25 @@
 import { z } from 'zod'
 import { MAX_ATTACHMENTS_PER_FORM } from '@/lib/attachments/policy'
+import { extractInlineImageIds } from '@/lib/inline-images/policy'
 import {
   containsRichTextHtml,
   richTextToPlainText,
+  sanitizeRichText,
 } from '@/lib/rich-text-sanitizer'
 
 /**
  * Shared description validator: rich HTML may span up to 20000 stored
  * characters (markup envelope overhead), while the non-empty check runs
- * against visible text only — so `<p><br></p>` is rejected like whitespace.
+ * against sanitized visible text plus approved inline images — so
+ * `<p><br></p>` is still rejected like whitespace.
  */
 const visibleNonEmpty = (value: string) => {
-  const visible = containsRichTextHtml(value)
-    ? richTextToPlainText(value)
-    : value
-  return visible.trim().length > 0
+  if (!containsRichTextHtml(value)) {
+    return value.trim().length > 0
+  }
+
+  const sanitized = sanitizeRichText(value)
+  return richTextToPlainText(sanitized).trim().length > 0 || extractInlineImageIds(sanitized).length > 0
 }
 
 export const descriptionSchema = z

@@ -62,6 +62,38 @@ describe('sanitizeRichText', () => {
     assert.ok(out.includes('keep'))
   })
 
+  it('preserves canonical inline images and strips unapproved attributes', () => {
+    const out = sanitizeRichText('<p><img src="/api/inline-images/123e4567-e89b-42d3-a456-426614174000" alt="Plan" data-align="center" onerror="alert(1)" style="width:10px" class="x" id="img" srcset="/x 2x"></p>')
+    assert.ok(out.includes('<img'))
+    assert.ok(out.includes('src="/api/inline-images/123e4567-e89b-42d3-a456-426614174000"'))
+    assert.ok(out.includes('alt="Plan"'))
+    assert.ok(out.includes('data-align="center"'))
+    for (const disallowed of ['onerror=', 'style=', 'class=', 'id=', 'srcset=']) {
+      assert.ok(!out.includes(disallowed), `unexpected ${disallowed}`)
+    }
+  })
+
+  it('removes inline images with invalid sources', () => {
+    for (const src of [
+      'https://example.com/image.png',
+      'data:image/png,x',
+      'blob:x',
+      '/api/inline-images/123e4567-e89b-42d3-a456-426614174000.svg',
+    ]) {
+      const out = sanitizeRichText(`<p><img src="${src}" alt="Plan" data-align="left"></p>`)
+      assert.ok(!out.includes('<img'), `image should be removed: ${src}`)
+    }
+  })
+
+  it('canonicalizes inline image src, truncates alt, and defaults invalid alignment', () => {
+    const alt = 'x'.repeat(301)
+    const out = sanitizeRichText(`<img src="/api/inline-images/123E4567-E89B-42D3-A456-426614174000" alt="${alt}" data-align="top">`)
+    assert.ok(out.includes('src="/api/inline-images/123e4567-e89b-42d3-a456-426614174000"'))
+    assert.ok(out.includes(`alt="${'x'.repeat(300)}"`))
+    assert.ok(!out.includes(`alt="${alt}"`))
+    assert.ok(out.includes('data-align="center"'))
+  })
+
   it('never throws on garbage input', () => {
     assert.doesNotThrow(() => sanitizeRichText('<<<>>><p'))
     assert.doesNotThrow(() => sanitizeRichText(''))
