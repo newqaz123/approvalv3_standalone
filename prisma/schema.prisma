@@ -56,6 +56,49 @@ model file_attachments {
   @@index([uploadedById])
 }
 
+model inline_description_images {
+  id                String                               @id @default(uuid())
+  uploadedById      String
+  uploadSessionId   String
+  fileName          String
+  fileType          String
+  originalSize      Int
+  fileSize          Int
+  filePath          String
+  width             Int
+  height            Int
+  deletionPendingAt DateTime?
+  createdAt         DateTime                             @default(now())
+  uploadedBy        User                                 @relation(fields: [uploadedById], references: [id])
+  references        inline_description_image_references[]
+
+  @@index([uploadedById])
+  @@index([uploadSessionId])
+  @@index([createdAt])
+  @@index([deletionPendingAt])
+}
+
+model inline_description_image_references {
+  id         String                    @id @default(uuid())
+  imageId    String
+  requestId  String?
+  solutionId String?
+  templateId String?
+  createdAt  DateTime                  @default(now())
+  image      inline_description_images @relation(fields: [imageId], references: [id], onDelete: Cascade)
+  request    requests?                 @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  solution   solutions?                @relation(fields: [solutionId], references: [id], onDelete: Cascade)
+  template   templates?                @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([imageId, requestId])
+  @@unique([imageId, solutionId])
+  @@unique([imageId, templateId])
+  @@index([imageId])
+  @@index([requestId])
+  @@index([solutionId])
+  @@index([templateId])
+}
+
 model hierarchy_change_logs {
   id                                              String      @id @default(uuid())
   departmentId                                    String
@@ -251,6 +294,7 @@ model requests {
   workRequisitionReceivedAt         DateTime?
   workRequisitionReceivedById       String?
   fileAttachments                   file_attachments[]
+  inlineDescriptionImageReferences  inline_description_image_references[]
   notifications                     notifications[]
   activities                        request_activities[]
   approvals                         request_approvals[]
@@ -309,8 +353,9 @@ model solutions {
   submittedAt        DateTime             @default(now())
   createdAt          DateTime             @default(now())
   updatedAt          DateTime             @updatedAt
-  fileAttachments    file_attachments[]
-  approvals          solution_approvals[]
+  fileAttachments                 file_attachments[]
+  inlineDescriptionImageReferences inline_description_image_references[]
+  approvals                       solution_approvals[]
   request            requests             @relation(fields: [requestId], references: [id], onDelete: Cascade)
   submittedBy        User                @relation(fields: [submittedById], references: [id])
 
@@ -326,8 +371,9 @@ model templates {
   description String
   isDefault   Boolean  @default(false)
   isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt                       DateTime                             @default(now())
+  updatedAt                       DateTime                             @updatedAt
+  inlineDescriptionImageReferences inline_description_image_references[]
 
   @@index([isActive])
   @@index([isDefault])
@@ -388,6 +434,7 @@ model User {
   updatedAt                                                       DateTime                       @updatedAt
   departmentApproverRoles                                        department_approvers[]
   fileAttachments                                                file_attachments[]
+  inlineDescriptionImages                                        inline_description_images[]
   adminHierarchyChanges                                          hierarchy_change_logs[]        @relation("hierarchy_change_logs_adminUserIdTousers")
   targetHierarchyChanges                                         hierarchy_change_logs[]        @relation("hierarchy_change_logs_targetUserIdTousers")
   notifications                                                   notifications[]
