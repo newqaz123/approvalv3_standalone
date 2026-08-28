@@ -4,6 +4,7 @@ import { useEditor, EditorContent, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import Link from "@tiptap/extension-link";
+import FileHandler from "@tiptap/extension-file-handler";
 import {
 	Bold,
 	Italic,
@@ -14,11 +15,16 @@ import {
 	Heading2,
 	Heading3,
 	Link as LinkIcon,
+	Image as ImageIcon,
 	Undo2,
 	Redo2,
 } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
+import { InlineImageExtension } from "@/components/rich-text/inline-image-extension";
+import type { InlineImageCoordinator } from "@/hooks/use-inline-description-images";
+import { INLINE_IMAGE_MIMES, MAX_INLINE_ALT_LENGTH } from "@/lib/inline-images/policy";
 import { sanitizeRichText } from "@/lib/rich-text-sanitizer";
+import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 
 export interface RichTextEditorProps {
 	value: string;
@@ -26,6 +32,7 @@ export interface RichTextEditorProps {
 	disabled?: boolean;
 	id?: string;
 	minHeight?: number;
+	inlineImages?: InlineImageCoordinator;
 }
 
 const TOOLBAR_BUTTON =
@@ -33,6 +40,21 @@ const TOOLBAR_BUTTON =
 
 /** Only these link schemes may be applied client-side; the sanitizer stays the authoritative gate. */
 const ALLOWED_URL_RE = /^(?:https?|mailto):/i;
+
+/** Produces the initial accessible alt text without retaining a filename path or extension. */
+export function filenameAlt(name: string): string {
+	const basename = name.split(/[\\/]/).pop() ?? name;
+	return basename
+		.replace(/\.[^.]+$/, "")
+		.replace(/[\u0000-\u001f\u007f]+/g, " ")
+		.replace(/\s+/g, " ")
+		.trim()
+		.slice(0, MAX_INLINE_ALT_LENGTH);
+}
+
+function uploadError(error: unknown): string {
+	return error instanceof Error && error.message ? error.message : "Image upload failed";
+}
 
 function ToolbarButton({
 	editor,
@@ -73,11 +95,117 @@ export default function RichTextEditor({
 	disabled = false,
 	id,
 	minHeight = 160,
+	inlineImages,
 }: RichTextEditorProps) {
 	const lastEmitted = useRef<string | null>(null);
+	const editorRef = useRef<Editor | null>(null);
+	const fileByUploadId = useRef<Map<string, File>>(new Map());
+	const insertionPositionByUploadId = useRef<Map<string, number>>(new Map());
+	const localUploadIds = useRef<Set<string>>(new Set());
+	const inlineImagesRef = useRef<InlineImageCoordinator | undefined>(inlineImages);
+	const disabledRef = useRef(disabled);
+	const imageInputRef = useRef<HTMLInputElement | null>(null);
+
+	inlineImagesRef.current = inlineImages;
+	disabledRef.current = disabled;
+
+	function updateUploadNode(uploadId: string, attrs: Record<string, unknown>) {
+		const currentEditor = editorRef.current;
+		if (!currentEditor) return;
+
+		let target: { pos: number; node: ProseMirrorNode } | null = null;
+		currentEditor.state.doc.descendants((candidate, pos) => {
+			if (candidate.type.name === "inlineImage" && candidate.attrs.uploadId === uploadId) {
+				target = { pos, node: candidate };
+				return false;
+			}
+			return true;
+		});
+
+		if (target === null) return;
+		const resolvedTarget = target as { pos: number; node: ProseMirrorNode };
+		currentEditor.view.dispatch(
+			currentEditor.state.tr.setNodeMarkup(resolvedTarget.pos, resolvedTarget.node.type, {
+				...resolvedTarget.node.attrs,
+				...attrs,
+			}),
+		);
+	}
+
+	function runUpload(uploadId: string, file: File) {
+		const coordinator = inlineImagesRef.current;
+		if (!coordinator) return;
+
+		void coordinator
+			.upload(uploadId, file, (progress) => {
+				updateUploadNode(uploadId, { status: "uploading", progress });
+			})
+			.then((upload) => {
+				updateUploadNode(uploadId, {
+					src: upload.src,
+					alt: upload.alt || filenameAlt(file.name),
+					align: "center",
+					uploadId,
+					status: "success",
+					progress: 100,
+					error: null,
+				});
+			})
+			.catch((error: unknown) => {
+				updateUploadNode(uploadId, {
+					status: "error",
+					progress: 0,
+					error: uploadError(error),
+				});
+			});
+	}
+
+	/** Shared insertion path for the toolbar picker, paste, and drop handlers. */
+	function insertFiles(files: File[], position?: number) {
+		const currentEditor = editorRef.current;
+		const coordinator = inlineImagesRef.current;
+		if (!currentEditor || !coordinator || disabledRef.current) return;
+
+		for (const file of files.filter((item) => INLINE_IMAGE_MIMES.has(item.type))) {
+			const uploadId = crypto.randomUUID();
+			const insertionPosition = position ?? currentEditor.state.selection.from;
+			fileByUploadId.current.set(uploadId, file);
+			insertionPositionByUploadId.current.set(uploadId, insertionPosition);
+			localUploadIds.current.add(uploadId);
+			const inserted = currentEditor
+				.chain()
+				.focus()
+				.insertContentAt(position ?? currentEditor.state.selection.from, {
+					type: "inlineImage",
+					attrs: {
+						uploadId,
+						status: "uploading",
+						progress: 0,
+						alt: filenameAlt(file.name),
+						align: "center",
+					},
+				})
+				.run();
+			if (!inserted) {
+				fileByUploadId.current.delete(uploadId);
+				insertionPositionByUploadId.current.delete(uploadId);
+				localUploadIds.current.delete(uploadId);
+				continue;
+			}
+			void runUpload(uploadId, file);
+		}
+	}
 
 	const editor = useEditor({
+		// TipTap must not construct a browser editor during Next's server render.
+		immediatelyRender: false,
 		extensions: [
+			InlineImageExtension.configure({
+				inlineImages,
+				fileByUploadId: fileByUploadId.current,
+				insertionPositionByUploadId: insertionPositionByUploadId.current,
+				localUploadIds: localUploadIds.current,
+			}),
 			StarterKit.configure({
 				heading: { levels: [2, 3] },
 				// StarterKit v3 bundles link/underline; explicit extensions below
@@ -96,6 +224,12 @@ export default function RichTextEditor({
 			}),
 			Underline,
 			Link.configure({ autolink: true, openOnClick: false }),
+			FileHandler.configure({
+				allowedMimeTypes: Array.from(INLINE_IMAGE_MIMES),
+				consumePasteEvent: true,
+				onPaste: (_editor, files) => insertFiles(files),
+				onDrop: (_editor, files, position) => insertFiles(files, position),
+			}),
 		],
 		content: value || "",
 		editable: !disabled,
@@ -109,6 +243,12 @@ export default function RichTextEditor({
 				style: `--rich-min-h: ${minHeight}px`,
 			},
 		},
+		onCreate: ({ editor: current }) => {
+			editorRef.current = current;
+		},
+		onDestroy: () => {
+			editorRef.current = null;
+		},
 		onUpdate: ({ editor: current }) => {
 			const next = sanitizeRichText(current.getHTML());
 			if (next !== lastEmitted.current) {
@@ -118,13 +258,16 @@ export default function RichTextEditor({
 		},
 	});
 
+	// The hook returns the editor after its first render; keep the insertion
+	// pipeline able to run before the first effect (for example on a paste).
+	editorRef.current = editor;
+
 	// External value changes (e.g. modal reset) sync into the editor once.
 	useEffect(() => {
 		if (!editor) return;
 		if (value === lastEmitted.current) return;
 		// Loop guard: record the incoming value BEFORE setContent so the onUpdate
-		// it triggers compares equal against lastEmitted.current and skips
-		// re-emitting the same value back to the parent (no onChange feedback loop).
+		// it triggers compares equal against lastEmitted.current and skips onChange.
 		lastEmitted.current = value;
 		editor.commands.setContent(value || "");
 	}, [value, editor]);
@@ -134,6 +277,8 @@ export default function RichTextEditor({
 	}, [disabled, editor]);
 
 	if (!editor) return null;
+
+	const canInsertImages = Boolean(inlineImages) && !disabled;
 
 	return (
 		<div className="space-y-2">
@@ -270,6 +415,28 @@ export default function RichTextEditor({
 				>
 					<LinkIcon className="h-4 w-4" />
 				</ToolbarButton>
+				<button
+					type="button"
+					aria-label="Image"
+					disabled={!canInsertImages || !editor}
+					onClick={() => imageInputRef.current?.click()}
+					className={TOOLBAR_BUTTON}
+				>
+					<ImageIcon className="h-4 w-4" />
+				</button>
+				<input
+					ref={imageInputRef}
+					type="file"
+					accept="image/jpeg,image/png,image/webp,image/gif"
+					multiple
+					aria-label="Choose images"
+					disabled={!canInsertImages}
+					className="sr-only"
+					onChange={(event) => {
+						insertFiles(Array.from(event.currentTarget.files ?? []));
+						event.currentTarget.value = "";
+					}}
+				/>
 				<ToolbarButton
 					editor={editor}
 					label="Undo"
