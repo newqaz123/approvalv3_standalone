@@ -32,6 +32,7 @@ import { Progress } from '@/components/ui/progress'
 import { createRequest } from '@/server-actions/requests'
 import { uploadFileAction } from '@/server-actions/files'
 import { MobileFileUpload, type MobileFile } from '@/components/mobile/mobile-file-upload'
+import { useInlineDescriptionImages } from '@/hooks/use-inline-description-images'
 
 const requestFormSchema = z.object({
   title: z.string().min(1, 'Title is required').max(200, 'Title must be less than 200 characters'),
@@ -71,6 +72,9 @@ export function RequestForm({ templates = [], defaultTemplateId, onSuccess }: Re
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selectedFiles, setSelectedFiles] = useState<SelectedFile[]>([])
+  // One inline image coordinator per mounted form; the editor uploads through
+  // it and the save/cancel lifecycle below claims or cleans its draft session.
+  const inlineImages = useInlineDescriptionImages()
 
   // Find default template
   const defaultTemplate = templates.find(t => t.id === defaultTemplateId)
@@ -215,7 +219,10 @@ export function RequestForm({ templates = [], defaultTemplateId, onSuccess }: Re
 
     try {
       // Step 1: Create request
-      const result = await createRequest(data)
+      const result = await createRequest({
+        ...data,
+        inlineImageSessionId: inlineImages.uploadSessionId,
+      })
 
       if (!result.success) {
         if (result.errors) {
@@ -233,6 +240,10 @@ export function RequestForm({ templates = [], defaultTemplateId, onSuccess }: Re
       }
 
       const requestId = result.requestId!
+
+      // The description images are committed request assets now; drop the
+      // local draft session without deleting anything.
+      inlineImages.clear()
 
       // Step 2: Upload all selected files
       if (selectedFiles.length > 0) {
@@ -252,6 +263,18 @@ export function RequestForm({ templates = [], defaultTemplateId, onSuccess }: Re
     } finally {
       setIsSubmitting(false)
     }
+  }
+
+  const handleCancel = async () => {
+    // Await draft cleanup before navigating away. A cleanup failure keeps the
+    // form mounted with a visible error so the user can retry or remove.
+    try {
+      await inlineImages.reset()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to clean up draft images')
+      return
+    }
+    router.back()
   }
 
   const formatFileSize = (bytes: number) => {
@@ -336,6 +359,7 @@ export function RequestForm({ templates = [], defaultTemplateId, onSuccess }: Re
                   value={field.value ?? ''}
                   onChange={field.onChange}
                   minHeight={192}
+                  inlineImages={inlineImages}
                 />
               </FormControl>
               <FormDescription className="text-base md:text-sm">
@@ -464,16 +488,21 @@ export function RequestForm({ templates = [], defaultTemplateId, onSuccess }: Re
         </Card>
 
         <div className="flex flex-col-reverse md:flex-row justify-end gap-2 md:gap-3">
+          {inlineImages.hasBlockingUploads && (
+            <p className="w-full md:w-auto min-h-11 flex items-center text-sm text-amber-700">
+              Wait for image uploads, or retry/remove failed images.
+            </p>
+          )}
           <Button
             type="button"
             variant="outline"
-            onClick={() => router.back()}
+            onClick={handleCancel}
             disabled={isSubmitting}
             className="w-full md:w-auto min-h-11"
           >
             Cancel
           </Button>
-          <Button type="submit" disabled={isSubmitting} className="w-full md:w-auto min-h-11">
+          <Button type="submit" disabled={isSubmitting || inlineImages.hasBlockingUploads} className="w-full md:w-auto min-h-11">
             {isSubmitting
               ? selectedFiles.length > 0
                 ? 'Creating & Uploading...'

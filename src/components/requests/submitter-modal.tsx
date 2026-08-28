@@ -54,6 +54,7 @@ import {
 	validateAttachmentMetadata,
 } from "@/lib/attachments/policy";
 import { useSolutionAttachments } from "@/hooks/use-solution-attachments";
+import { useInlineDescriptionImages } from "@/hooks/use-inline-description-images";
 import { ApproverSearchField } from "@/components/approvals/approver-search-field";
 import { filterApproversByQuery } from "@/lib/approver-search";
 
@@ -104,7 +105,8 @@ interface SubmitterModalProps {
 		description: string;
 		templateId?: string;
 		files: File[];
-	}) => void;
+		inlineImageSessionId: string;
+	}) => Promise<{ success: boolean; error?: string }>;
 	onSubmitSolution?: (data: {
 		title: string;
 		description: string;
@@ -114,6 +116,7 @@ interface SubmitterModalProps {
 		fileIds: string[];
 		useCustomHierarchy: boolean;
 		customApprovers: string[];
+		inlineImageSessionId: string;
 	}) => Promise<{ success: boolean; error?: string }>;
 	onResubmit?: (data: {
 		title?: string;
@@ -125,6 +128,7 @@ interface SubmitterModalProps {
 		deletedFileIds: string[];
 		useCustomHierarchy: boolean;
 		customApprovers: string[];
+		inlineImageSessionId: string;
 	}) => Promise<{ success: boolean; error?: string }>;
 }
 
@@ -450,6 +454,9 @@ export function SubmitterModal({
 		reset,
 		clear,
 	} = useSolutionAttachments({ requestId });
+	// One inline image coordinator for both description editors (request and
+	// solution/resubmit modes); every save path claims or cleans its session.
+	const inlineImages = useInlineDescriptionImages();
 	const [isBusy, setIsBusy] = useState(false);
 	const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -565,13 +572,32 @@ export function SubmitterModal({
 		setSubmitError(null);
 
 		if (mode === "request" && onSubmitRequest) {
-			onSubmitRequest({
-				title,
-				description,
-				templateId: selectedTemplate || undefined,
-				files,
-			});
-			onOpenChange(false);
+			setIsBusy(true);
+			try {
+				// Await the caller's server action; only a confirmed success may
+				// clear the draft session and close the modal.
+				const result = await onSubmitRequest({
+					title,
+					description,
+					templateId: selectedTemplate || undefined,
+					files,
+					inlineImageSessionId: inlineImages.uploadSessionId,
+				});
+				if (!result.success) {
+					setSubmitError(result.error || "Failed to submit");
+					return;
+				}
+				inlineImages.clear();
+				onOpenChange(false);
+			} catch (error) {
+				setSubmitError(
+					error instanceof Error
+						? error.message
+						: "An error occurred",
+				);
+			} finally {
+				setIsBusy(false);
+			}
 			return;
 		}
 
@@ -596,9 +622,11 @@ export function SubmitterModal({
 						fileIds: result.attachmentIds,
 						useCustomHierarchy,
 						customApprovers,
+						inlineImageSessionId: inlineImages.uploadSessionId,
 					});
 					if (res.success) {
 						// Drafts are now linked — clear without invoking cleanup.
+						inlineImages.clear();
 						clear();
 						onOpenChange(false);
 					} else {
@@ -615,8 +643,10 @@ export function SubmitterModal({
 						deletedFileIds,
 						useCustomHierarchy,
 						customApprovers,
+						inlineImageSessionId: inlineImages.uploadSessionId,
 					});
 					if (res.success) {
+						inlineImages.clear();
 						clear();
 						onOpenChange(false);
 					} else {
@@ -633,15 +663,11 @@ export function SubmitterModal({
 		}
 	};
 
-	// On close/cancel for solution/resubmit modes, await cleanupDrafts (via
-	// reset, which cleans unlinked drafts then clears local state) before
-	// clearing/closing. Cleanup errors are surfaced and the modal stays open.
+	// On close/cancel in any mode, await draft cleanup (solution attachments
+	// via reset, plus the inline image coordinator) before closing. Cleanup
+	// errors are surfaced and the modal stays open.
 	const requestClose = () => {
-		if (isSolutionMode) {
-			void handleCloseWithCleanup();
-		} else {
-			onOpenChange(false);
-		}
+		void handleCloseWithCleanup();
 	};
 
 	const handleCloseWithCleanup = async () => {
@@ -649,6 +675,7 @@ export function SubmitterModal({
 		setSubmitError(null);
 		try {
 			await reset();
+			await inlineImages.reset();
 			onOpenChange(false);
 		} catch (error) {
 			setSubmitError(
@@ -662,6 +689,9 @@ export function SubmitterModal({
 	};
 
 	const isSubmitDisabled = () => {
+		if (inlineImages.hasBlockingUploads) {
+			return true;
+		}
 		if (mode === "request") {
 			return !title.trim() || !description.trim();
 		}
@@ -803,6 +833,7 @@ export function SubmitterModal({
 									value={description}
 									onChange={setDescription}
 									minHeight={140}
+									inlineImages={inlineImages}
 								/>
 							</div>
 						</div>
@@ -856,6 +887,7 @@ export function SubmitterModal({
 									value={solutionDescription}
 									onChange={setSolutionDescription}
 									minHeight={140}
+									inlineImages={inlineImages}
 								/>
 							</div>
 
@@ -1121,8 +1153,14 @@ export function SubmitterModal({
 				</div>
 				{/* Footer Actions */}
 				<div className="px-6 py-4 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0">
-					{submitError && (
-						<p className="text-sm text-red-600 flex-1 pr-4">{submitError}</p>
+					{inlineImages.hasBlockingUploads ? (
+						<p className="text-sm text-amber-700 flex-1 pr-4">
+							Wait for image uploads, or retry/remove failed images.
+						</p>
+					) : (
+						submitError && (
+							<p className="text-sm text-red-600 flex-1 pr-4">{submitError}</p>
+						)
 					)}
 					<Button
 						variant="outline"

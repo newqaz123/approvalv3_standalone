@@ -604,8 +604,9 @@ function RequestModalRouterContent({
 	const handleResubmitRequest = async (data: {
 		title: string;
 		description: string;
-	}) => {
-		if (isSubmitting) return;
+		inlineImageSessionId: string;
+	}): Promise<{ success: boolean; error?: string }> => {
+		if (isSubmitting) return { success: false, error: "Submission in progress" };
 		setIsSubmitting(true);
 
 		try {
@@ -613,18 +614,27 @@ function RequestModalRouterContent({
 				requestId,
 				title: data.title,
 				description: data.description,
+				inlineImageSessionId: data.inlineImageSessionId,
 			});
 
 			if (result.success) {
 				toast.success("Request resubmitted successfully");
 				handleClose();
 				router.refresh();
-			} else {
-				toast.error("Failed to resubmit request");
+				return { success: true };
 			}
+			toast.error("Failed to resubmit request");
+			return { success: false, error: "Failed to resubmit request" };
 		} catch (error) {
 			console.error("Resubmit request error:", error);
 			toast.error("An error occurred while resubmitting request");
+			return {
+				success: false,
+				error:
+					error instanceof Error
+						? error.message
+						: "Failed to resubmit request",
+			};
 		} finally {
 			setIsSubmitting(false);
 		}
@@ -800,6 +810,7 @@ function RequestModalRouterContent({
 								requestId: requestData.id,
 								title: data.title || modalData.solution?.title || "",
 								description: data.description,
+								inlineImageSessionId: data.inlineImageSessionId,
 								cost: data.cost,
 								currency: (data.currency as "THB" | "USD" | "EUR") || "THB",
 								timeline: data.timeline,
@@ -1021,6 +1032,7 @@ function RequestModalRouterContent({
 							requestId: requestData.id,
 							title: data.title,
 							description: data.description,
+							inlineImageSessionId: data.inlineImageSessionId,
 							costEstimate: data.cost,
 							currency: data.currency as "THB" | "USD" | "EUR",
 							timeline: data.timeline,
@@ -1076,6 +1088,7 @@ function RequestModalRouterContent({
 								requestId: requestData.id,
 								title: data.title || modalData.solution?.title || "",
 								description: data.description,
+								inlineImageSessionId: data.inlineImageSessionId,
 								cost: data.cost,
 								currency: (data.currency as "THB" | "USD" | "EUR") || "THB",
 								timeline: data.timeline,

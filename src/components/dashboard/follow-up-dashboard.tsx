@@ -58,11 +58,13 @@ export function FollowUpDashboard({ data }: { data: FollowUpDashboardData }) {
 		description: string;
 		templateId?: string;
 		files: File[];
-	}) => {
+		inlineImageSessionId: string;
+	}): Promise<{ success: boolean; error?: string }> => {
 		try {
 			const result = await createRequest({
 				title: form.title,
 				description: form.description,
+				inlineImageSessionId: form.inlineImageSessionId,
 			});
 
 			if (result.success && result.requestId) {
@@ -82,12 +84,21 @@ export function FollowUpDashboard({ data }: { data: FollowUpDashboardData }) {
 				toast.success("Request created successfully");
 				setShowNewRequestModal(false);
 				router.refresh();
+				return { success: true };
 			} else {
 				toast.error(result.error || "Failed to create request");
+				return {
+					success: false,
+					error: result.error || "Failed to create request",
+				};
 			}
 		} catch (error) {
 			console.error("Failed to create request:", error);
 			toast.error("An error occurred while creating the request");
+			return {
+				success: false,
+				error: "An error occurred while creating the request",
+			};
 		}
 	};
 

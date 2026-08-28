@@ -29,6 +29,7 @@ import {
 import { resubmitRequest } from '@/server-actions/requests'
 import { deleteFileAttachment } from '@/server-actions/files'
 import { FileUploadZone } from '@/components/requests/file-upload-zone'
+import { useInlineDescriptionImages } from '@/hooks/use-inline-description-images'
 import { useRouter } from 'next/navigation'
 
 const resubmitSchema = z.object({
@@ -62,6 +63,9 @@ export function ResubmitRequestDialog({
   const [error, setError] = useState<string | null>(null)
   const [files, setFiles] = useState(existingFiles)
   const [isRemoving, setIsRemoving] = useState<string | null>(null)
+  // One inline image coordinator per mounted dialog; the editor uploads
+  // through it and the save/cancel lifecycle below claims or cleans it.
+  const inlineImages = useInlineDescriptionImages()
 
   const form = useForm<ResubmitFormValues>({
     resolver: zodResolver(resubmitSchema),
@@ -110,13 +114,19 @@ export function ResubmitRequestDialog({
         requestId,
         title: data.title,
         description: data.description,
+        inlineImageSessionId: inlineImages.uploadSessionId,
       })
 
       if (result.success) {
+        // The description images are committed request assets now; drop the
+        // local draft session without deleting anything.
+        inlineImages.clear()
         setOpen(false)
         form.reset()
         router.refresh()
         onResubmitted?.()
+      } else {
+        setError('Failed to resubmit request')
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to resubmit request')
@@ -125,8 +135,29 @@ export function ResubmitRequestDialog({
     }
   }
 
+  // Every close path routes through one awaited cleanup so uncommitted inline
+  // image drafts are deleted before the dialog closes. A cleanup failure keeps
+  // the dialog open with a visible error for retry.
+  const handleDialogClose = async () => {
+    try {
+      await inlineImages.reset()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to clean up draft images')
+      return
+    }
+    setOpen(false)
+  }
+
+  const handleDialogOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) {
+      void handleDialogClose()
+      return
+    }
+    setOpen(true)
+  }
+
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleDialogOpenChange}>
       <DialogTrigger asChild>
         <Button variant="default" size="sm">
           <Edit className="h-4 w-4 mr-1" />
@@ -172,6 +203,7 @@ export function ResubmitRequestDialog({
                       value={field.value ?? ""}
                       onChange={field.onChange}
                       minHeight={160}
+                      inlineImages={inlineImages}
                     />
                   </FormControl>
                   <FormMessage />
@@ -222,15 +254,20 @@ export function ResubmitRequestDialog({
             {error && <p className="text-sm text-red-500">{error}</p>}
 
             <DialogFooter>
+              {inlineImages.hasBlockingUploads && (
+                <p className="mr-auto text-sm text-amber-700">
+                  Wait for image uploads, or retry/remove failed images.
+                </p>
+              )}
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setOpen(false)}
+                onClick={handleDialogClose}
                 disabled={isSubmitting}
               >
                 Cancel
               </Button>
-              <Button type="submit" disabled={isSubmitting}>
+              <Button type="submit" disabled={isSubmitting || inlineImages.hasBlockingUploads}>
                 {isSubmitting ? 'Resubmitting...' : 'Resubmit Request'}
               </Button>
             </DialogFooter>

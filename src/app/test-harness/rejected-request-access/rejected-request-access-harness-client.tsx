@@ -40,7 +40,10 @@ export function RejectedRequestAccessHarnessClient() {
 		view === "requester"
 			? {
 					...commonProps,
-					onResubmit: () => setResubmitCalls((count) => count + 1),
+					onResubmit: async () => {
+						setResubmitCalls((count) => count + 1);
+						return { success: true };
+					},
 				}
 			: commonProps;
 

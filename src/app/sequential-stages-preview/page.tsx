@@ -668,7 +668,10 @@ export default function SequentialStagesPreview() {
         open={activeModal === 'request-submit'}
         onOpenChange={() => setActiveModal(null)}
         availableUsers={sampleAvailableUsers}
-        onSubmitRequest={(data) => alert(`Request submitted: ${data.title}`)}
+        onSubmitRequest={async (data) => {
+          alert(`Request submitted: ${data.title}`)
+          return { success: true }
+        }}
       />
 
       {/* 1.2 Review Request */}
@@ -693,7 +696,10 @@ export default function SequentialStagesPreview() {
         open={activeModal === 'request-resubmit'}
         onOpenChange={() => setActiveModal(null)}
         initialData={requestResubmitData}
-        onResubmit={(data) => alert(`Resubmitted: ${data.title}`)}
+        onResubmit={async (data) => {
+          alert(`Resubmitted: ${data.title}`)
+          return { success: true }
+        }}
       />
 
       {/* 1.3 Completed Request */}

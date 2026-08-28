@@ -33,6 +33,7 @@ import { SolutionFileUpload } from './solution-file-upload'
 import { SolutionPreview } from './solution-preview'
 import { submitSolution } from '@/server-actions/solutions'
 import { useSolutionAttachments } from '@/hooks/use-solution-attachments'
+import { useInlineDescriptionImages } from '@/hooks/use-inline-description-images'
 
 const solutionFormSchema = z.object({
   title: z.string().min(1, 'Title is required').max(200),
@@ -76,6 +77,9 @@ export function SolutionForm({
   const router = useRouter()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [showPreview, setShowPreview] = useState(false)
+  // One coordinator for the whole form lifetime, shared by the editor and the
+  // final confirm so preview/edit transitions keep the same upload session.
+  const inlineImages = useInlineDescriptionImages()
   const { items, addFiles, removeItem, ensureUploaded, clear, reset } = useSolutionAttachments({
     requestId,
   })
@@ -132,12 +136,14 @@ export function SolutionForm({
   }
 
   const handleCancel = async () => {
-    // Await hook reset() (cleanup unlinked drafts + clear local state) before
-    // navigating away. Surface cleanup failure and do NOT navigate on error —
-    // the user can retry. After reset succeeds the unmount safety net sees an
-    // empty ref, so there is no double-cleanup.
+    // Await hook reset() (cleanup unlinked drafts + clear local state) and the
+    // inline image coordinator reset before navigating away. Surface cleanup
+    // failure and do NOT navigate on error — the user can retry. After reset
+    // succeeds the unmount safety net sees an empty ref, so there is no
+    // double-cleanup.
     try {
       await reset()
+      await inlineImages.reset()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to clean up draft files')
       return
@@ -173,6 +179,7 @@ export function SolutionForm({
         requestId,
         title: values.title,
         description: values.description,
+        inlineImageSessionId: inlineImages.uploadSessionId,
         costEstimate: values.costEstimate,
         currency: values.currency,
         timeline: values.timeline || undefined,
@@ -192,9 +199,12 @@ export function SolutionForm({
 
       toast.success('Solution submitted successfully')
 
-      // The drafts are now linked to the committed solution. Clear local
-      // references WITHOUT invoking cleanup (reset/cleanupDrafts would fail on
-      // the now solutionId-scoped rows).
+      // The description images are committed solution assets now, so clear the
+      // inline draft session without deleting anything. The drafts are now
+      // linked to the committed solution. Clear local references WITHOUT
+      // invoking cleanup (reset/cleanupDrafts would fail on the now
+      // solutionId-scoped rows).
+      inlineImages.clear()
       clear()
 
       // Redirect to engineering dashboard
@@ -212,6 +222,12 @@ export function SolutionForm({
   }
 
   const handleConfirmSubmit = async () => {
+    // Defense in depth: the Confirm button is disabled while uploads are
+    // blocking, but never submit a description whose images are not stable.
+    if (inlineImages.hasBlockingUploads) {
+      toast.error('Wait for image uploads, or retry/remove failed images.')
+      return
+    }
     const values = form.getValues()
     await handleSubmit(values, true)
   }
@@ -244,13 +260,20 @@ export function SolutionForm({
 
   if (showPreview) {
     return (
-      <SolutionPreview
-        data={previewData}
-        requestTitle={requestTitle}
-        onEdit={handleBackToEdit}
-        onConfirm={handleConfirmSubmit}
-        isSubmitting={isSubmitting}
-      />
+      <div className="space-y-6">
+        {inlineImages.hasBlockingUploads && (
+          <p className="text-sm text-amber-700">
+            Wait for image uploads, or retry/remove failed images.
+          </p>
+        )}
+        <SolutionPreview
+          data={previewData}
+          requestTitle={requestTitle}
+          onEdit={handleBackToEdit}
+          onConfirm={handleConfirmSubmit}
+          isSubmitting={isSubmitting || inlineImages.hasBlockingUploads}
+        />
+      </div>
     )
   }
 
@@ -314,6 +337,7 @@ export function SolutionForm({
                     value={field.value ?? ""}
                     onChange={field.onChange}
                     minHeight={160}
+                    inlineImages={inlineImages}
                   />
                 </FormControl>
                 <FormDescription>
@@ -474,18 +498,25 @@ export function SolutionForm({
           )}
 
           {/* Submit Button */}
-          <div className="flex justify-end gap-3">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={handleCancel}
-              disabled={isSubmitting}
-            >
-              Cancel
-            </Button>
-            <Button type="submit" disabled={isSubmitting}>
-              Review & Submit
-            </Button>
+          <div className="flex flex-col items-end gap-2">
+            {inlineImages.hasBlockingUploads && (
+              <p className="text-sm text-amber-700 self-start md:self-auto">
+                Wait for image uploads, or retry/remove failed images.
+              </p>
+            )}
+            <div className="flex justify-end gap-3">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleCancel}
+                disabled={isSubmitting}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={isSubmitting || inlineImages.hasBlockingUploads}>
+                Review &amp; Submit
+              </Button>
+            </div>
           </div>
         </form>
       </Form>

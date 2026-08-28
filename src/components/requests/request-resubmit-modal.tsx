@@ -26,6 +26,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { RichTextEditor } from "@/components/rich-text/rich-text-editor-lazy";
+import { useInlineDescriptionImages } from "@/hooks/use-inline-description-images";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
@@ -59,7 +60,8 @@ interface RequestResubmitModalProps {
 		description: string;
 		files: File[];
 		deletedFileIds?: string[];
-	}) => void | Promise<void>;
+		inlineImageSessionId: string;
+	}) => Promise<{ success: boolean; error?: string }>;
 	showCancel?: boolean;
 	requestId?: string;
 	requestTitle?: string;
@@ -93,6 +95,9 @@ export function RequestResubmitModal({
 	onCancelled,
 }: RequestResubmitModalProps) {
 	const canResubmit = Boolean(onResubmit);
+	// One inline image coordinator per mounted modal; the editor uploads
+	// through it and the submit/close lifecycle below claims or cleans it.
+	const inlineImages = useInlineDescriptionImages();
 	const [title, setTitle] = useState(initialData.title);
 	const [description, setDescription] = useState(initialData.description);
 	const [existingFiles, setExistingFiles] = useState<FileAttachment[]>(
@@ -129,19 +134,69 @@ export function RequestResubmitModal({
 		}));
 	};
 
-	const handleSubmit = () => {
+	const [submitError, setSubmitError] = useState<string | null>(null);
+	const [isBusy, setIsBusy] = useState(false);
+
+	const handleSubmit = async () => {
 		if (!onResubmit) return;
-		onResubmit({
-			title,
-			description,
-			files: newFiles,
-			deletedFileIds,
-		});
-		onOpenChange(false);
+		setIsBusy(true);
+		setSubmitError(null);
+		try {
+			// Await the caller's server action; only a confirmed success may
+			// clear the draft session and close the modal.
+			const result = await onResubmit({
+				title,
+				description,
+				files: newFiles,
+				deletedFileIds,
+				inlineImageSessionId: inlineImages.uploadSessionId,
+			});
+			if (!result.success) {
+				setSubmitError(result.error || "Failed to resubmit request");
+				return;
+			}
+			inlineImages.clear();
+			onOpenChange(false);
+		} catch (error) {
+			setSubmitError(
+				error instanceof Error ? error.message : "An error occurred",
+			);
+		} finally {
+			setIsBusy(false);
+		}
+	};
+
+	// Every close path routes through one awaited cleanup so uncommitted
+	// inline image drafts are deleted before the modal closes. A cleanup
+	// failure keeps the modal open with a visible error for retry.
+	const requestClose = () => {
+		void handleCloseWithCleanup();
+	};
+
+	const handleCloseWithCleanup = async () => {
+		setIsBusy(true);
+		setSubmitError(null);
+		try {
+			await inlineImages.reset();
+			onOpenChange(false);
+		} catch (error) {
+			setSubmitError(
+				error instanceof Error
+					? error.message
+					: "Failed to clean up draft images",
+			);
+		} finally {
+			setIsBusy(false);
+		}
 	};
 
 	return (
-		<Dialog open={open} onOpenChange={onOpenChange}>
+		<Dialog
+			open={open}
+			onOpenChange={(nextOpen) => {
+				if (!nextOpen) requestClose();
+			}}
+		>
 			<DialogContent className="max-w-5xl w-full max-h-[90vh] p-0 gap-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl rounded-xl overflow-hidden">
 				{/* Header */}
 				<DialogHeader className="flex-shrink-0 px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 sticky top-0 z-20">
@@ -153,7 +208,7 @@ export function RequestResubmitModal({
 							</DialogTitle>
 						</div>
 						<button
-							onClick={() => onOpenChange(false)}
+							onClick={requestClose}
 							className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors text-slate-400 hover:text-slate-600"
 						>
 							<X className="w-5 h-5" />
@@ -211,6 +266,7 @@ export function RequestResubmitModal({
 								onChange={setDescription}
 								disabled={!canResubmit}
 								minHeight={140}
+								inlineImages={inlineImages}
 							/>
 						</div>
 					</div>
@@ -331,7 +387,11 @@ export function RequestResubmitModal({
 				{/* Footer Actions */}
 				<div className="px-6 py-4 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0">
 					<div className="flex items-center gap-2">
-						<Button variant="outline" onClick={() => onOpenChange(false)}>
+						<Button
+							variant="outline"
+							onClick={requestClose}
+							disabled={isBusy}
+						>
 							{canResubmit ? "Cancel" : "Close"}
 						</Button>
 						{canResubmit && showCancel && requestId && requestTitle ? (
@@ -343,15 +403,30 @@ export function RequestResubmitModal({
 						) : null}
 					</div>
 					{canResubmit ? (
-						<Button
-							onClick={handleSubmit}
-							disabled={!title.trim() || !description.trim()}
-							className="bg-amber-600 hover:bg-amber-700 text-white"
-						>
-							<RotateCcw className="w-4 h-4 mr-1.5" />
-							Resubmit Request
-						</Button>
+						<div className="flex items-center gap-3">
+							{inlineImages.hasBlockingUploads && (
+								<p className="text-sm text-amber-700">
+									Wait for image uploads, or retry/remove failed images.
+								</p>
+							)}
+							<Button
+								onClick={() => void handleSubmit()}
+								disabled={
+									!title.trim() ||
+									!description.trim() ||
+									isBusy ||
+									inlineImages.hasBlockingUploads
+								}
+								className="bg-amber-600 hover:bg-amber-700 text-white"
+							>
+								<RotateCcw className="w-4 h-4 mr-1.5" />
+								Resubmit Request
+							</Button>
+						</div>
 					) : null}
+					{submitError && (
+						<p className="text-sm text-red-600 flex-1 pr-4">{submitError}</p>
+					)}
 				</div>
 			</DialogContent>
 		</Dialog>

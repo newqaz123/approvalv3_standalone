@@ -44,4 +44,23 @@ describe('formatted description editors', () => {
     assert.doesNotMatch(read('src/components/solutions/solution-form.tsx'), /max\(5000/)
     assert.doesNotMatch(read('src/components/requests/resubmit-request-dialog.tsx'), /max\(5000/)
   })
+
+  it('passes one inline image coordinator into every authoring editor surface', () => {
+    for (const path of [
+      'src/components/requests/request-form.tsx',
+      'src/components/solutions/solution-form.tsx',
+      'src/components/admin/template-form.tsx',
+      'src/components/requests/resubmit-request-dialog.tsx',
+      'src/components/requests/request-resubmit-modal.tsx',
+    ]) {
+      const source = read(path)
+      assert.match(source, /useInlineDescriptionImages\(\)/, `${path} must create a coordinator`)
+      assert.match(source, /inlineImages=\{inlineImages\}/, `${path} must pass the coordinator to its editor`)
+    }
+
+    // Both description modes in the submitter modal share one coordinator.
+    const modal = read('src/components/requests/submitter-modal.tsx')
+    assert.match(modal, /useInlineDescriptionImages\(\)/)
+    assert.equal((modal.match(/inlineImages=\{inlineImages\}/g) ?? []).length, 2)
+  })
 })

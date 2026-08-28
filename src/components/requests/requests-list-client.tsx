@@ -37,11 +37,13 @@ export function RequestsListClient({
     description: string
     templateId?: string
     files: File[]
-  }) => {
+    inlineImageSessionId: string
+  }): Promise<{ success: boolean; error?: string }> => {
     try {
       const result = await createRequest({
         title: data.title,
         description: data.description,
+        inlineImageSessionId: data.inlineImageSessionId,
       })
 
       if (result.success && result.requestId) {
@@ -63,12 +65,15 @@ export function RequestsListClient({
         setShowNewRequestModal(false)
         setRequestListRefreshSignal((signal) => signal + 1)
         router.refresh()
+        return { success: true }
       } else {
         toast.error(result.error || 'Failed to create request')
+        return { success: false, error: result.error || 'Failed to create request' }
       }
     } catch (error) {
       console.error('Failed to create request:', error)
       toast.error('An error occurred while creating the request')
+      return { success: false, error: 'An error occurred while creating the request' }
     }
   }
 

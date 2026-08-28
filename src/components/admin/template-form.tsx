@@ -18,6 +18,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
 import { RichTextEditor } from '@/components/rich-text/rich-text-editor-lazy'
 import { createTemplate, updateTemplate, type CreateTemplateInput, type UpdateTemplateInput } from '@/server-actions/templates'
+import { useInlineDescriptionImages } from '@/hooks/use-inline-description-images'
 
 const templateFormSchema = z.object({
   name: z.string().min(1, 'Internal name is required'),
@@ -37,6 +38,9 @@ interface TemplateFormProps {
 export function TemplateForm({ initialData, onSuccess, onCancel }: TemplateFormProps) {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // One inline image coordinator per mounted form; the editor uploads through
+  // it and the save/cancel lifecycle below claims or cleans its draft session.
+  const inlineImages = useInlineDescriptionImages()
 
   const form = useForm<TemplateFormValues>({
     resolver: zodResolver(templateFormSchema),
@@ -57,6 +61,7 @@ export function TemplateForm({ initialData, onSuccess, onCancel }: TemplateFormP
         name: data.name,
         title: data.title,
         description: data.description,
+        inlineImageSessionId: inlineImages.uploadSessionId,
         ...(initialData?.id && { id: initialData.id }),
       }
 
@@ -66,12 +71,28 @@ export function TemplateForm({ initialData, onSuccess, onCancel }: TemplateFormP
         await createTemplate(submitData as CreateTemplateInput)
       }
 
+      // The description images are committed template assets now; drop the
+      // local draft session without deleting anything.
+      inlineImages.clear()
+
       onSuccess?.()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save template')
     } finally {
       setIsSubmitting(false)
     }
+  }
+
+  const handleCancel = async () => {
+    // Await draft cleanup before leaving. A cleanup failure keeps the form
+    // mounted with a visible error so the user can retry or remove.
+    try {
+      await inlineImages.reset()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to clean up draft images')
+      return
+    }
+    onCancel?.()
   }
 
   return (
@@ -128,6 +149,7 @@ export function TemplateForm({ initialData, onSuccess, onCancel }: TemplateFormP
                   value={field.value ?? ''}
                   onChange={field.onChange}
                   minHeight={180}
+                  inlineImages={inlineImages}
                 />
               </FormControl>
               <p className="text-xs text-muted-foreground">
@@ -161,15 +183,22 @@ export function TemplateForm({ initialData, onSuccess, onCancel }: TemplateFormP
           />
         )}
 
-        <div className="flex justify-end gap-2">
-          {onCancel && (
-            <Button type="button" variant="outline" onClick={onCancel}>
-              Cancel
-            </Button>
+        <div className="flex flex-col items-end gap-2">
+          {inlineImages.hasBlockingUploads && (
+            <p className="text-sm text-amber-700 self-start">
+              Wait for image uploads, or retry/remove failed images.
+            </p>
           )}
-          <Button type="submit" disabled={isSubmitting}>
-            {isSubmitting ? 'Saving...' : initialData?.id ? 'Update Template' : 'Create Template'}
-          </Button>
+          <div className="flex justify-end gap-2">
+            {onCancel && (
+              <Button type="button" variant="outline" onClick={handleCancel} disabled={isSubmitting}>
+                Cancel
+              </Button>
+            )}
+            <Button type="submit" disabled={isSubmitting || inlineImages.hasBlockingUploads}>
+              {isSubmitting ? 'Saving...' : initialData?.id ? 'Update Template' : 'Create Template'}
+            </Button>
+          </div>
         </div>
       </form>
     </Form>
