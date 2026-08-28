@@ -4,6 +4,7 @@ import {
 	sanitizeRichText,
 } from "@/lib/rich-text-sanitizer";
 import { inlineImageAltPlaceholder } from "@/lib/inline-images/policy";
+import { materializeRichTextForEmail } from "@/lib/rich-text-presentation";
 
 export type FormattedTextToken =
 	| { type: "text" | "bold"; value: string }
@@ -316,32 +317,17 @@ export function renderFormattedTextPlainText(
 }
 
 /**
- * One description renderer for email + PDF: sanitized HTML for rich rows,
- * legacy markup otherwise. Truncation happens on visible text only — never
- * on tags.
- *
- * Email output never carries private image URLs or image bytes: approved
- * images become escaped alt placeholders before any text extraction or
- * truncation, while the surrounding safe formatting is preserved.
+ * Notification-email description renderer: trusted HTML presentation for rich
+ * rows and escaped legacy markup otherwise. Rich truncation is parser-balanced.
+ * Approved images become escaped alt placeholders before truncation, so email
+ * output never carries private image URLs or image bytes.
  */
 export function renderDescriptionHtml(
 	source: string,
 	maxVisibleCharacters?: number,
 ): string {
 	if (containsRichTextHtml(source)) {
-		const sanitized = inlineImageAltPlaceholder(sanitizeRichText(source));
-		if (maxVisibleCharacters === undefined) {
-			return sanitized;
-		}
-		const plain = richTextToPlainText(sanitized);
-		if (plain.length <= maxVisibleCharacters) {
-			// Fits the budget: keep the formatting (email short descriptions).
-			return sanitized;
-		}
-		// Over budget: truncate the visible text only — never slice tags.
-		return escapeFormattedTextHtml(
-			plain.slice(0, maxVisibleCharacters),
-		);
+		return materializeRichTextForEmail(source, maxVisibleCharacters);
 	}
 	return renderFormattedTextHtml(source, maxVisibleCharacters);
 }

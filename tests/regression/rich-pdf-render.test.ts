@@ -27,11 +27,12 @@ describe('renderDescriptionHtml', () => {
     assert.ok(out.includes('<p>'), 'block markup should survive')
   })
 
-  it('falls back to escaped plain truncation when rich text exceeds the budget', () => {
-    const long = '<p>' + 'word '.repeat(100) + '</p>'
+  it('preserves balanced trusted markup when rich text exceeds the budget', () => {
+    const long = '<p><span data-text-color="blue">' + 'word '.repeat(100) + '</span></p>'
     const out = renderDescriptionHtml(long, 40)
-    assert.ok(!/<(p|strong|em|ul|ol|li|h2|h3|a)\b/.test(out), 'no tags in the truncated fallback')
-    assert.ok(out.length > 0 && out.length <= 60, 'truncated to roughly the budget')
+    assert.match(out, /^<p><span style="color:#1D4ED8">/)
+    assert.match(out, /<\/span><\/p>$/)
+    assert.equal(out.replace(/<[^>]+>/g, '').length, 40)
   })
 })
 

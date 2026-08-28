@@ -1,7 +1,12 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { renderFormattedTextHtml, renderFormattedTextPlainText } from '@/lib/formatted-text'
+import {
+  renderDescriptionHtml,
+  renderDescriptionPlainText,
+  renderFormattedTextHtml,
+  renderFormattedTextPlainText,
+} from '@/lib/formatted-text'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
@@ -32,5 +37,15 @@ describe('formatted description output contexts', () => {
     // Escaped text may still contain the substring "onerror="; assert no raw tag opens.
     assert.doesNotMatch(html, /<img\b/i)
     assert.doesNotMatch(html, /<(?!strong\b|\/strong\b|br\b)[^>]*>/i)
+  })
+
+  it('preserves approved palette presentation in HTML email and strips it from plain text', () => {
+    const source = '<p><span data-text-color="red">Keep <mark data-highlight="gray">these words</mark></span></p>'
+
+    assert.equal(
+      renderDescriptionHtml(source),
+      '<p><span style="color:#B91C1C">Keep <mark style="background-color:#E2E8F0">these words</mark></span></p>',
+    )
+    assert.equal(renderDescriptionPlainText(source), 'Keep these words')
   })
 })

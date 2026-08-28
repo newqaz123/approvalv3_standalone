@@ -1,6 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { FormattedText } from "@/components/ui/formatted-text";
 import {
 	renderFormattedTextHtml,
 	renderFormattedTextPlainText,
@@ -8,8 +10,6 @@ import {
 	truncateFormattedText,
 	visibleFormattedText,
 } from "@/lib/formatted-text";
-
-const read = (path: string) => readFileSync(path, "utf8");
 
 describe("formatted description tokenizer", () => {
 	it("keeps plain text unchanged", () => {
@@ -154,64 +154,59 @@ describe("formatted description tokenizer", () => {
 });
 
 describe("FormattedText dual-format rendering", () => {
-	it("renders sanitized HTML when the source starts with whitelisted markup", () => {
-		const source = read("src/components/ui/formatted-text.tsx");
-		assert.match(
-			source,
-			/import \{[^}]*containsRichTextHtml[^}]*\} from ['"]@\/lib\/rich-text-sanitizer['"]/,
-		);
-		assert.match(source, /dangerouslySetInnerHTML/);
-		assert.match(source, /sanitizeRichText\(/);
-		// The HTML branch must run BEFORE tokenizer truncation is applied.
-		assert.ok(
-			source.indexOf("containsRichTextHtml") < source.indexOf("truncateFormattedText"),
-		);
+	it("renders trusted palette output for rich HTML", () => {
+		const html = renderToStaticMarkup(createElement(FormattedText, {
+			source: '<p><span data-text-color="blue" style="position:fixed">Safe</span></p>',
+		}));
+
+		assert.equal(html, '<span class="rich-text"><p><span style="color:#1D4ED8">Safe</span></p></span>');
+		assert.doesNotMatch(html, /position|fixed/);
 	});
 
-	it("truncates rich sources to plain text when maxVisibleCharacters is set", () => {
-		const source = read("src/components/ui/formatted-text.tsx");
-		assert.match(source, /richTextToPlainText\(/);
+	it("keeps balanced palette marks and URL-free image placeholders in truncated rich previews", () => {
+		const html = renderToStaticMarkup(createElement(FormattedText, {
+			source: '<p><span data-text-color="blue">Hi<img src="/api/inline-images/123e4567-e89b-42d3-a456-426614174000" alt="chart"><mark data-highlight="yellow">there</mark></span></p>',
+			maxVisibleCharacters: 4,
+		}));
+
+		assert.match(html, /<span style="color:#1D4ED8">Hi\[Image: chart\]<mark style="background-color:#FEF3C7">th<\/mark><\/span>/);
+		assert.doesNotMatch(html, /\/api\/inline-images|<img/i);
 	});
 
-	it("keeps the legacy tokenizer path for non-HTML sources", () => {
-		const source = read("src/components/ui/formatted-text.tsx");
-		assert.match(source, /tokenizeFormattedText\(/);
+	it("keeps the legacy tokenizer behavior for non-HTML sources", () => {
+		assert.equal(
+			renderToStaticMarkup(createElement(FormattedText, { source: 'A **bold** line' })),
+			'A <strong>bold</strong> line',
+		);
 	});
 });
 
 describe("FormattedText rich output styling", () => {
-	it("applies the rich-text class on the sanitized HTML span", () => {
-		const source = read("src/components/ui/formatted-text.tsx");
-		assert.match(source, /cn\(className,\s*["']rich-text["']\)/);
+	it("applies the rich-text class alongside a caller class", () => {
+		assert.equal(
+			renderToStaticMarkup(createElement(FormattedText, {
+				source: '<p>Safe</p>',
+				className: 'description',
+			})),
+			'<span class="description rich-text"><p>Safe</p></span>',
+		);
 	});
 
-	it("renders responsive aligned images through the shared rich-text CSS", () => {
-		const css = read("src/app/globals.css");
-		assert.match(css, /\.rich-text img \{/, "img rule missing");
-		assert.match(css, /\.rich-text img \{[^}]*max-width:\s*100%/);
-		assert.match(css, /\.rich-text img \{[^}]*height:\s*auto/);
-		assert.match(css, /\.rich-text img\[data-align='left'\]/);
-		assert.match(css, /\.rich-text img\[data-align='center'\]/);
-		assert.match(css, /\.rich-text img\[data-align='right'\]/);
+	it("retains sanitized image alignment for uncropped application images", () => {
+		const html = renderToStaticMarkup(createElement(FormattedText, {
+			source: '<img src="/api/inline-images/123e4567-e89b-42d3-a456-426614174000" alt="chart" data-align="left">',
+		}));
+
+		assert.match(html, /<img [^>]*data-align="left"/);
+		assert.doesNotMatch(html, /rich-text__image-frame/);
 	});
 
-	it("keeps the sanitized dangerouslySetInnerHTML boundary for untruncated HTML", () => {
-		const source = read("src/components/ui/formatted-text.tsx");
-		assert.match(source, /dangerouslySetInnerHTML/);
-		assert.match(source, /sanitizeRichText\(text\)/);
-	});
+	it("does not expose hostile authored attributes through the HTML boundary", () => {
+		const html = renderToStaticMarkup(createElement(FormattedText, {
+			source: '<p onclick="alert(1)"><a href="javascript:alert(1)">Safe</a></p>',
+		}));
 
-	it("defines rich-text typography styles in globals.css", () => {
-		const css = read("src/app/globals.css");
-		assert.match(css, /\.rich-text h2 \{/, "h2 rule missing");
-		assert.match(css, /\.rich-text h3 \{/, "h3 rule missing");
-		assert.match(css, /\.rich-text ul \{[^}]*list-style:\s*disc/, "ul disc missing");
-		assert.match(css, /\.rich-text ol \{[^}]*list-style:\s*decimal/, "ol decimal missing");
-		assert.match(css, /\.rich-text a \{/, "anchor rule missing");
-	});
-
-	it("reuses rich-text styling inside the editor body", () => {
-		const source = read("src/components/rich-text/rich-text-editor.tsx");
-		assert.match(source, /rich-text prose-rich-text/);
+		assert.match(html, />Safe<\/a>/);
+		assert.doesNotMatch(html, /onclick|javascript|alert/);
 	});
 });

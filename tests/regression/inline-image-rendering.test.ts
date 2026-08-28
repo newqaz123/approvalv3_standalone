@@ -1,6 +1,9 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { FormattedText } from '@/components/ui/formatted-text'
 import {
   renderDescriptionHtml,
   renderDescriptionPlainText,
@@ -100,15 +103,16 @@ describe('application inline image rendering', () => {
   })
 
   it('converts truncated app previews to alt placeholders instead of dropping images', () => {
-    const source = read('src/components/ui/formatted-text.tsx')
-    // Placeholder conversion must wrap the sanitized source before plain-text
-    // extraction feeds the truncation tokenizer.
-    assert.match(
-      source,
-      /richTextToPlainText\(inlineImageAltPlaceholder\(sanitizeRichText\(text\)\)\)/,
+    const html = renderToStaticMarkup(createElement(FormattedText, {
+      source: `<p>before <img src="${src(IMG_REQUEST)}" alt="floor plan"> after</p>`,
+      maxVisibleCharacters: 8,
+    }))
+
+    assert.equal(
+      html,
+      '<span class="rich-text"><p>before [Image: floor plan] </p></span>',
     )
-    // The untruncated sanitized boundary still renders real <img> elements.
-    assert.match(source, /sanitizeRichText\(text\)/)
+    assert.doesNotMatch(html, /<img|\/api\/inline-images/i)
   })
 })
 
@@ -148,11 +152,13 @@ describe('notification email alt placeholders', () => {
     assert.ok(!html.includes('data:'), 'no bytes in email HTML')
   })
 
-  it('over-budget HTML email falls back to escaped truncated text including placeholders', () => {
-    const long = `<p>${'word '.repeat(100)}<img src="${src(IMG_REQUEST)}" alt="floor plan"></p>`
+  it('over-budget HTML email keeps balanced formatting without private images', () => {
+    const long = `<p><strong>${'word '.repeat(100)}</strong><img src="${src(IMG_REQUEST)}" alt="floor plan"></p>`
     const html = renderDescriptionHtml(long, 40)
-    assert.ok(!/<(p|strong|img)\b/.test(html), 'no tags in truncated fallback')
-    assert.ok(!html.includes('/api/inline-images'))
+    assert.match(html, /^<p><strong>/)
+    assert.match(html, /<\/strong><\/p>$/)
+    assert.equal(html.replace(/<[^>]+>/g, '').length, 40)
+    assert.doesNotMatch(html, /<img|\/api\/inline-images|data:/i)
   })
 
   it('legacy descriptions keep their existing rendering without placeholders', () => {

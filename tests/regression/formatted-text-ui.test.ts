@@ -1,6 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { FormattedText } from "@/components/ui/formatted-text";
 import { wrapSelectionWithBold } from "@/components/ui/formatted-textarea";
 
 const read = (path: string) => readFileSync(path, "utf8");
@@ -47,23 +50,16 @@ describe("formatted text UI contracts", () => {
 		});
 	});
 
-	it("renders only safe React elements", () => {
-		const source = read("src/components/ui/formatted-text.tsx");
-		assert.match(source, /tokenizeFormattedText/);
-		assert.match(source, /truncateFormattedText/);
-		assert.match(source, /maxVisibleCharacters/);
-		assert.match(source, /<strong/);
-		assert.match(source, /<br/);
-		// Rich-HTML sources render through dangerouslySetInnerHTML, but ONLY
-		// after whitelist sanitization — the sanitizer call must wrap the value.
-		assert.match(
-			source,
-			/__html:\s*sanitizeRichText\(text\)/,
+	it("renders only trusted application HTML", () => {
+		const html = renderToStaticMarkup(createElement(FormattedText, {
+			source: '<p onclick="alert(1)"><span data-text-color="teal" style="position:fixed">Safe</span><script>bad()</script></p>',
+		}));
+
+		assert.equal(
+			html,
+			'<span class="rich-text"><p><span style="color:#0F766E">Safe</span></p></span>',
 		);
-		assert.doesNotMatch(
-			source,
-			/__html:\s*(?!sanitizeRichText\()[\s\S]{0,80}dangerouslySetInnerHTML/,
-		);
+		assert.doesNotMatch(html, /onclick|position|fixed|<script/);
 	});
 
 	it("exposes an accessible Bold control", () => {

@@ -47,6 +47,29 @@
 .rich-text img[data-align='left'] { margin-right: auto; }
 .rich-text img[data-align='center'] { margin-inline: auto; }
 .rich-text img[data-align='right'] { margin-left: auto; }
+.rich-text__image-frame {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  max-width: 100%;
+  margin-block: .75rem;
+}
+.rich-text__image-frame[data-align='left'] { margin-right: auto; }
+.rich-text__image-frame[data-align='center'] { margin-inline: auto; }
+.rich-text__image-frame[data-align='right'] { margin-left: auto; }
+.rich-text__image-frame > img {
+  position: absolute;
+  display: block;
+  max-width: none;
+  margin: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .rich-text__image-frame,
+  .rich-text__image-frame > img {
+    animation: none !important;
+    transition: none !important;
+  }
+}
 
 
 
