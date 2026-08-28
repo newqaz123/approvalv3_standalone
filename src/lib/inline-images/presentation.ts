@@ -167,20 +167,13 @@ function normalizedEdgesToCrop(input: {
   top: number
   right: number
   bottom: number
-}): NormalizedInlineImageCrop {
-  let left = Math.round(input.left)
-  let top = Math.round(input.top)
-  let right = Math.round(input.right)
-  let bottom = Math.round(input.bottom)
+}): NormalizedInlineImageCrop | null {
+  const left = Math.round(input.left)
+  const top = Math.round(input.top)
+  const right = Math.round(input.right)
+  const bottom = Math.round(input.bottom)
 
-  if (right <= left) {
-    if (right >= INLINE_IMAGE_CROP_SCALE) left = INLINE_IMAGE_CROP_SCALE - 1
-    right = left + 1
-  }
-  if (bottom <= top) {
-    if (bottom >= INLINE_IMAGE_CROP_SCALE) top = INLINE_IMAGE_CROP_SCALE - 1
-    bottom = top + 1
-  }
+  if (right <= left || bottom <= top) return null
 
   return {
     x: left,
@@ -217,7 +210,7 @@ export function pixelRectToNormalizedInlineImageCrop(input: {
     right: right / input.naturalWidth * INLINE_IMAGE_CROP_SCALE,
     bottom: bottom / input.naturalHeight * INLINE_IMAGE_CROP_SCALE,
   })
-  return isValidCrop(crop) ? crop : null
+  return crop !== null && isValidCrop(crop) ? crop : null
 }
 
 export function computeInlineImageFrameGeometry(input: {

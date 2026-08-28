@@ -200,14 +200,14 @@ describe('inline image pure geometry', () => {
       naturalHeight: 3,
     }), { x: 3333, y: 3333, width: 3334, height: 3334 })
 
-    assert.deepEqual(pixelRectToNormalizedInlineImageCrop({
+    assert.equal(pixelRectToNormalizedInlineImageCrop({
       x: 9999.6,
       y: 9999.6,
       width: 0.4,
       height: 0.4,
       naturalWidth: 10000,
       naturalHeight: 10000,
-    }), { x: 9999, y: 9999, width: 1, height: 1 })
+    }), null)
   })
 
   it('returns null for invalid or empty pixel rectangles', () => {
