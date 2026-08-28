@@ -1,4 +1,5 @@
 import sanitizeHtml from 'sanitize-html'
+import { decodeHTML, escapeText } from 'entities'
 import {
   computeInlineImageFrameGeometry,
   parseInlineImagePresentation,
@@ -12,6 +13,9 @@ import {
 
 const SANITIZED_IMAGE_RE = /<img\b[^>]*>/gi
 const SANITIZED_ATTRIBUTE_RE = /(?:^|\s)([a-z][a-z0-9-]*)="([^"]*)"/gi
+const PRIVATE_INLINE_IMAGE_URL_RE = /\/api\/inline-images\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/gi
+const IMAGE_DATA_URI_RE = /data:image\/[^\s<\]]+/gi
+const EMAIL_IMAGE_REFERENCE_REPLACEMENT = '[redacted]'
 
 function sanitizedImageAttributes(imageHtml: string): Record<string, string> {
   const attributes: Record<string, string> = {}
@@ -84,17 +88,34 @@ export function truncateSanitizedRichTextHtml(
   return sanitizeHtml(sanitized, {
     allowedTags: [...RICH_TEXT_ALLOWED_TAGS],
     allowedAttributes: false,
+    transformTags: {
+      '*': (tagName, attribs) => remaining <= 0
+        ? { tagName: '', attribs: {} }
+        : { tagName, attribs },
+    },
     textFilter: (text) => {
       if (remaining <= 0) return ''
-      const codePoints = Array.from(text)
+      const codePoints = Array.from(decodeHTML(text))
       if (codePoints.length <= remaining) {
         remaining -= codePoints.length
-        return text
+        return escapeText(codePoints.join(''))
       }
       const retained = codePoints.slice(0, remaining).join('')
       remaining = 0
-      return retained
+      return escapeText(retained)
     },
+  })
+}
+
+function redactEmailVisibleImageReferences(source: string): string {
+  return sanitizeHtml(source, {
+    allowedTags: [...RICH_TEXT_ALLOWED_TAGS],
+    allowedAttributes: false,
+    textFilter: (text) => escapeText(
+      decodeHTML(text)
+        .replace(PRIVATE_INLINE_IMAGE_URL_RE, EMAIL_IMAGE_REFERENCE_REPLACEMENT)
+        .replace(IMAGE_DATA_URI_RE, EMAIL_IMAGE_REFERENCE_REPLACEMENT),
+    ),
   })
 }
 
@@ -105,8 +126,9 @@ export function materializeRichTextForEmail(
 ): string {
   const sanitized = sanitizeRichText(source)
   const withoutImages = inlineImageAltPlaceholder(sanitized)
+  const redacted = redactEmailVisibleImageReferences(withoutImages)
   const truncated = maxVisibleCharacters === undefined
-    ? withoutImages
-    : truncateSanitizedRichTextHtml(withoutImages, maxVisibleCharacters)
+    ? redacted
+    : truncateSanitizedRichTextHtml(redacted, maxVisibleCharacters)
   return materializeRichTextPalette(truncated, 'email')
 }

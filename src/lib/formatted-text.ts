@@ -329,7 +329,9 @@ export function renderDescriptionHtml(
 	if (containsRichTextHtml(source)) {
 		return materializeRichTextForEmail(source, maxVisibleCharacters);
 	}
-	return renderFormattedTextHtml(source, maxVisibleCharacters);
+	return materializeRichTextForEmail(
+		renderFormattedTextHtml(source, maxVisibleCharacters),
+	);
 }
 
 export function renderDescriptionPlainText(

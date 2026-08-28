@@ -48,4 +48,19 @@ describe('formatted description output contexts', () => {
     )
     assert.equal(renderDescriptionPlainText(source), 'Keep these words')
   })
+
+  it('fix 3: removes private image references from ordinary HTML-email text only', () => {
+    const source = '<p><strong>Before /api/inline-images/123e4567-e89b-42d3-a456-426614174000 middle data:image/png;base64,AAAA after</strong></p>'
+    const html = renderDescriptionHtml(source)
+
+    assert.match(html, /^<p><strong>Before .* middle .* after<\/strong><\/p>$/)
+    assert.doesNotMatch(html, /\/api\/inline-images\/[0-9a-f-]{36}|data:image\//i)
+    assert.match(renderDescriptionPlainText(source), /\/api\/inline-images|data:image\//)
+
+    const legacyHtml = renderDescriptionHtml(
+      'Before **/api/inline-images/123e4567-e89b-42d3-a456-426614174000** and data:image/webp;base64,BBBB after',
+    )
+    assert.match(legacyHtml, /^Before <strong>.*<\/strong> and .* after$/)
+    assert.doesNotMatch(legacyHtml, /\/api\/inline-images\/[0-9a-f-]{36}|data:image\//i)
+  })
 })

@@ -70,6 +70,33 @@ describe('trusted rich text presentation', () => {
     )
   })
 
+  it('fix 1: truncates decoded entity text at visible Unicode boundaries', () => {
+    assert.equal(
+      truncateSanitizedRichTextHtml('<p>A&amp;B</p>', 2),
+      '<p>A&amp;</p>',
+    )
+    assert.equal(
+      truncateSanitizedRichTextHtml('<p>A&lt;B</p>', 2),
+      '<p>A&lt;</p>',
+    )
+    assert.equal(
+      materializeRichTextForEmail(
+        `<p>${image().replace('alt="Diagram"', 'alt="A &amp; B"')}</p>`,
+        11,
+      ),
+      '<p>[Image: A &amp;</p>',
+    )
+  })
+
+  it('fix 2: suppresses elements first encountered after truncation is exhausted', () => {
+    const html = truncateSanitizedRichTextHtml(
+      `<p>Keep${image()}<strong>later <em>nested</em></strong></p>`,
+      4,
+    )
+
+    assert.equal(html, '<p>Keep</p>')
+  })
+
   it('replaces email images before truncation, preserves palette styling, and emits no image source', () => {
     const html = materializeRichTextForEmail(
       `<p><span data-text-color="teal">Before ${image().replace('alt="Diagram"', 'alt="Receipt &lt;final&gt;"')} after</span></p>`,
@@ -95,5 +122,15 @@ describe('trusted rich text presentation', () => {
       html,
       '<p><span style="color:#1D4ED8">Hello <mark style="background-color:#FEF3C7">wo</mark></span></p>',
     )
+  })
+
+  it('fix 3: redacts private image references from all email-visible text', () => {
+    const html = materializeRichTextForEmail(
+      `<p><span data-text-color="blue">Before ${IMAGE_SRC} and data:image/png;base64,AAAA after</span>${image().replace('alt="Diagram"', `alt="receipt ${IMAGE_SRC} data:image/webp;base64,BBBB"`)}</p>`,
+    )
+
+    assert.match(html, /<span style="color:#1D4ED8">Before .* and .* after<\/span>/)
+    assert.match(html, /\[Image: receipt .* .*\]/)
+    assert.doesNotMatch(html, /\/api\/inline-images\/[0-9a-f-]{36}|data:image\//i)
   })
 })

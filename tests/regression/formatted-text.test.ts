@@ -173,6 +173,18 @@ describe("FormattedText dual-format rendering", () => {
 		assert.doesNotMatch(html, /\/api\/inline-images|<img/i);
 	});
 
+	it("fix 2: omits image placeholders and nested sibling marks after the cutoff", () => {
+		const html = renderToStaticMarkup(createElement(FormattedText, {
+			source: '<p><span data-text-color="blue">Keep</span><img src="/api/inline-images/123e4567-e89b-42d3-a456-426614174000" alt="secret"><strong>later <em>nested</em></strong></p>',
+			maxVisibleCharacters: 4,
+		}));
+
+		assert.equal(
+			html,
+			'<span class="rich-text"><p><span style="color:#1D4ED8">Keep</span></p></span>',
+		);
+	});
+
 	it("keeps the legacy tokenizer behavior for non-HTML sources", () => {
 		assert.equal(
 			renderToStaticMarkup(createElement(FormattedText, { source: 'A **bold** line' })),

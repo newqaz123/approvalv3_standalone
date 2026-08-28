@@ -47,4 +47,13 @@ describe('notification SMTP transport', () => {
     )
     assert.doesNotMatch(html, /\/api\/inline-images|data:|<img/i)
   })
+
+  it('fix 3: redacts private image references embedded in notification image alt text', () => {
+    const html = renderDescriptionHtml(
+      '<p><mark data-highlight="pink"><img src="/api/inline-images/123e4567-e89b-42d3-a456-426614174000" alt="receipt /api/inline-images/123e4567-e89b-42d3-a456-426614174001 data:image/png;base64,AAAA"></mark></p>',
+    )
+
+    assert.match(html, /\[Image: receipt .* .*\]/)
+    assert.doesNotMatch(html, /\/api\/inline-images\/[0-9a-f-]{36}|data:image\//i)
+  })
 })
