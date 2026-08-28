@@ -191,6 +191,44 @@ describe('inline image upload coordinator', () => {
     assert.deepEqual(coordinator.getState(), [])
   })
 
+  it('fences reset against in-flight uploads and deletes drafts that finish after reset begins', async () => {
+    const uploadB = deferred<InlineImageUpload>()
+    const deleteA = deferred<void>()
+    const deleteCalls: string[] = []
+    const coordinator = makeCoordinator(
+      async (candidate) => {
+        if (candidate.name === 'a.png') return upload(IMAGE_A)
+        if (candidate.name === 'b.png') return uploadB.promise
+        throw new Error('unexpected upload')
+      },
+      async (imageId) => {
+        deleteCalls.push(imageId)
+        if (imageId === IMAGE_A) await deleteA.promise
+      },
+    )
+    await coordinator.upload('upload-a', file('a.png'), () => undefined)
+    const uploadBPromise = coordinator.upload('upload-b', file('b.png'), () => undefined)
+
+    const resetPromise = coordinator.reset()
+    await tick()
+    assert.equal(deleteCalls.length, 0)
+    assert.deepEqual(coordinator.getState().map((entry) => entry.status), ['success', 'uploading'])
+    await assert.rejects(
+      coordinator.upload('upload-c', file('c.png'), () => undefined),
+      /resetting/,
+    )
+
+    uploadB.resolve(upload(IMAGE_B))
+    await uploadBPromise
+    await tick()
+    assert.deepEqual(coordinator.getState().map((entry) => entry.status), ['success', 'success'])
+
+    deleteA.resolve()
+    await resetPromise
+    assert.deepEqual(deleteCalls.sort(), [IMAGE_A, IMAGE_B].sort())
+    assert.deepEqual(coordinator.getState(), [])
+  })
+
   it('waits for every staged draft deletion during reset and retains state when one deletion fails', async () => {
     const deleteCalls: string[] = []
     const pending = new Map<string, Deferred<void>>()

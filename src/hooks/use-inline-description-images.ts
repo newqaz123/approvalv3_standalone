@@ -146,9 +146,19 @@ type UploadAttempt = {
   sessionId: string
   callbacks: Array<(percent: number) => void>
   deferred: DeferredUpload
+  completion: Promise<void>
+  resolveCompletion: () => void
   settled: boolean
   cancelled: boolean
   cleanupOnCompletion: boolean
+}
+
+function createAttemptCompletion(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void
+  const promise = new Promise<void>((resolvePromise) => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
 }
 
 function createDeferredUpload(): DeferredUpload {
@@ -190,6 +200,7 @@ export function createInlineImageCoordinator(
   let pendingUploadIds: string[] = []
   let activeUploads = 0
   let disposed = false
+  let resetting = false
   let resetPromise: Promise<void> | null = null
   const attempts = new Map<string, UploadAttempt>()
 
@@ -217,7 +228,7 @@ export function createInlineImageCoordinator(
   }
 
   const pump = () => {
-    while (!disposed && activeUploads < MAX_CONCURRENT_INLINE_UPLOADS && pendingUploadIds.length > 0) {
+    while (!disposed && !resetting && activeUploads < MAX_CONCURRENT_INLINE_UPLOADS && pendingUploadIds.length > 0) {
       const uploadId = pendingUploadIds.shift()!
       const attempt = attempts.get(uploadId)
       const record = getRecord(uploadId)
@@ -226,6 +237,7 @@ export function createInlineImageCoordinator(
       activeUploads += 1
       void runAttempt(uploadId, attempt).finally(() => {
         activeUploads -= 1
+        attempt.resolveCompletion()
         pump()
       })
     }
@@ -277,7 +289,10 @@ export function createInlineImageCoordinator(
     if (pendingIndex !== -1) pendingUploadIds.splice(pendingIndex, 1)
     if (!attempt) return
     attempt.cancelled = true
-    if (!attempt.settled) settleAttempt(uploadId, attempt, { error: new Error('Image upload was removed') })
+    if (!attempt.settled) {
+      settleAttempt(uploadId, attempt, { error: new Error('Image upload was removed') })
+      attempt.resolveCompletion()
+    }
   }
 
   const deleteStaged = async (imageIds: string[], sessionForDeletes: string): Promise<void> => {
@@ -318,6 +333,7 @@ export function createInlineImageCoordinator(
 
     upload(uploadId, file, onProgress) {
       if (disposed) return Promise.reject(new Error('Inline image coordinator is disposed'))
+      if (resetting) return Promise.reject(new Error('Inline image coordinator is resetting'))
 
       const current = getRecord(uploadId)
       if (current?.status === 'success' && current.upload) {
@@ -331,11 +347,14 @@ export function createInlineImageCoordinator(
       }
 
       const deferred = createDeferredUpload()
+      const completion = createAttemptCompletion()
       const attempt: UploadAttempt = {
         file,
         sessionId,
         callbacks: [onProgress],
         deferred,
+        completion: completion.promise,
+        resolveCompletion: completion.resolve,
         settled: false,
         cancelled: false,
         cleanupOnCompletion: false,
@@ -370,12 +389,25 @@ export function createInlineImageCoordinator(
       if (disposed) return
       if (resetPromise) return resetPromise
 
+      resetting = true
       const sessionForDeletes = sessionId
-      const stagedIds = records
-        .filter((record) => record.status === 'success' && record.imageId)
-        .map((record) => record.imageId as string)
+      const attemptsAtReset = [...attempts.entries()]
+      const activeAttemptCompletions: Promise<void>[] = []
+      for (const [uploadId, attempt] of attemptsAtReset) {
+        if (pendingUploadIds.includes(uploadId)) {
+          cancelPendingAttempt(uploadId, attempt)
+        } else if (!attempt.settled) {
+          // Let an in-flight request finish before taking the success snapshot.
+          // This fences late drafts into the same reset cleanup pass.
+          activeAttemptCompletions.push(attempt.completion)
+        }
+      }
 
       resetPromise = (async () => {
+        await Promise.all(activeAttemptCompletions)
+        const stagedIds = records
+          .filter((record) => record.status === 'success' && record.imageId)
+          .map((record) => record.imageId as string)
         await deleteStaged(stagedIds, sessionForDeletes)
         // A successful deletion must finish before local state is discarded.
         // clearState also rotates the session for the next form instance.
@@ -385,11 +417,12 @@ export function createInlineImageCoordinator(
         await resetPromise
       } finally {
         resetPromise = null
+        resetting = false
       }
     },
 
     clear() {
-      if (disposed) return
+      if (disposed || resetting) return
       clearState()
     },
 
