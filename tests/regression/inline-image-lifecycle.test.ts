@@ -123,12 +123,11 @@ describe('createInlineImageDraft', () => {
         calls.push(`cleanup:${limit}`)
         return { deleted: [], warnings: [] }
       },
-      findLiveDraftUsage: async () => ({ count: 0, originalSize: 0 }),
       prepareImage: async (input) => prepareInlineImage(input),
       generateId: () => IMAGE,
       createStoredPath: (userId, fileName, id) => createStoredInlineImagePath(userId, fileName, id),
       writeFile: async () => { calls.push('write') },
-      createRow: async () => {
+      createRowUnderSessionQuotaLock: async () => {
         calls.push('row')
         throw new Error('database unavailable')
       },
@@ -148,16 +147,18 @@ describe('createInlineImageDraft', () => {
 
   it('returns public metadata only after creating an owner/session-scoped draft', async () => {
     const bytes = await createImage('jpeg', 100, 80)
-    let row: Parameters<CreateInlineImageDeps['createRow']>[0] | undefined
+    let row: Parameters<CreateInlineImageDeps['createRowUnderSessionQuotaLock']>[0] | undefined
     const deps: CreateInlineImageDeps = {
       findActiveUser: async () => true,
       cleanupExpired: async () => ({ deleted: [], warnings: [] }),
-      findLiveDraftUsage: async () => ({ count: 0, originalSize: 0 }),
       prepareImage: async (input) => prepareInlineImage(input),
       generateId: () => IMAGE,
       createStoredPath: (userId, fileName, id) => createStoredInlineImagePath(userId, fileName, id),
       writeFile: async () => undefined,
-      createRow: async (input) => { row = input },
+      createRowUnderSessionQuotaLock: async (input) => {
+        row = input
+        return { created: true }
+      },
       deleteFile: async () => undefined,
     }
 
@@ -175,6 +176,62 @@ describe('createInlineImageDraft', () => {
     assert.equal(row?.uploadedById, USER)
     assert.equal(row?.uploadSessionId, SESSION)
     assert.equal(row?.filePath.includes('inline-images/'), true)
+  })
+
+  it('allows only one concurrent upload to claim the final draft slot', async () => {
+    const bytes = await createImage('png', 100, 80)
+    const ids = [IMAGE, '123e4567-e89b-42d3-a456-426614174005']
+    const written = new Set<string>()
+    const compensated = new Set<string>()
+    let draftCount = 9
+    let sessionLock = Promise.resolve()
+    const deps: CreateInlineImageDeps = {
+      findActiveUser: async () => true,
+      cleanupExpired: async () => ({ deleted: [], warnings: [] }),
+      prepareImage: async (input) => ({
+        bytes: input.bytes,
+        originalSize: input.bytes.length,
+        storedSize: input.bytes.length,
+        fileType: input.mimeType,
+        width: 100,
+        height: 80,
+      }),
+      generateId: () => ids.shift()!,
+      createStoredPath: (_userId, _fileName, id) => `inline-images/${id}.png`,
+      writeFile: async (filePath) => { written.add(filePath) },
+      createRowUnderSessionQuotaLock: async () => {
+        const previousLock = sessionLock
+        let releaseCurrentLock: () => void = () => {}
+        sessionLock = new Promise<void>((resolve) => { releaseCurrentLock = resolve })
+        await previousLock
+        try {
+          if (draftCount >= 10) return { created: false, reason: 'image-count' as const }
+          draftCount += 1
+          return { created: true }
+        } finally {
+          releaseCurrentLock()
+        }
+      },
+      deleteFile: async (filePath) => { compensated.add(filePath) },
+    }
+
+    const results = await Promise.allSettled([
+      createInlineImageDraft({
+        userId: USER,
+        uploadSessionId: SESSION,
+        file: fileFrom(bytes, 'first.png', 'image/png'),
+      }, deps),
+      createInlineImageDraft({
+        userId: USER,
+        uploadSessionId: SESSION,
+        file: fileFrom(bytes, 'second.png', 'image/png'),
+      }, deps),
+    ])
+
+    assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1)
+    assert.equal(draftCount, 10)
+    assert.equal(written.size, 2)
+    assert.equal(compensated.size, 1)
   })
 })
 

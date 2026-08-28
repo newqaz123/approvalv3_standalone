@@ -59,19 +59,20 @@ export type InlineImageCleanupResult = {
   warnings: string[]
 }
 
+export type CreateInlineImageQuotaResult =
+  | { created: true }
+  | { created: false; reason: 'image-count' | 'original-bytes' }
+
 /** Narrow database/storage adapter for draft creation tests and production. */
 export type CreateInlineImageDeps = {
   findActiveUser(userId: string): Promise<boolean>
   cleanupExpired(input: { olderThan: Date; limit: number }): Promise<InlineImageCleanupResult>
-  findLiveDraftUsage(input: { userId: string; uploadSessionId: string }): Promise<{
-    count: number
-    originalSize: number
-  }>
   prepareImage(input: { bytes: Buffer; fileName: string; mimeType: string }): Promise<PreparedInlineImage>
   generateId(): string
   createStoredPath(userId: string, fileName: string, id: string): string
   writeFile(filePath: string, bytes: Buffer): Promise<void>
-  createRow(input: CreateInlineImageRowInput): Promise<void>
+  /** Rechecks quota and creates the row while holding the uploader/session lock. */
+  createRowUnderSessionQuotaLock(input: CreateInlineImageRowInput): Promise<CreateInlineImageQuotaResult>
   deleteFile(filePath: string): Promise<void>
 }
 
@@ -248,6 +249,41 @@ async function markExpiredInlineImageDeletion(imageId: string): Promise<{ filePa
   })
 }
 
+async function createInlineImageRowUnderSessionQuotaLock(
+  input: CreateInlineImageRowInput,
+): Promise<CreateInlineImageQuotaResult> {
+  return prisma.$transaction(async (tx) => {
+    // A two-part transaction advisory lock consistently serializes every
+    // creation for this uploader/session, including when no draft row exists.
+    await tx.$executeRaw`
+      SELECT pg_advisory_xact_lock(
+        hashtext(${input.uploadedById}),
+        hashtext(${input.uploadSessionId})
+      )
+    `
+
+    const where = {
+      uploadedById: input.uploadedById,
+      uploadSessionId: input.uploadSessionId,
+      deletionPendingAt: null,
+      references: { none: {} },
+    }
+    const [count, sizes] = await Promise.all([
+      tx.inline_description_images.count({ where }),
+      tx.inline_description_images.aggregate({ where, _sum: { originalSize: true } }),
+    ])
+    if (count >= MAX_INLINE_IMAGES) {
+      return { created: false, reason: 'image-count' }
+    }
+    if ((sizes._sum.originalSize ?? 0) + input.originalSize > MAX_INLINE_DESCRIPTION_BYTES) {
+      return { created: false, reason: 'original-bytes' }
+    }
+
+    await tx.inline_description_images.create({ data: input })
+    return { created: true }
+  })
+}
+
 const productionCreateInlineImageDeps: CreateInlineImageDeps = {
   findActiveUser: async (userId) => {
     const user = await prisma.user.findUnique({
@@ -257,26 +293,11 @@ const productionCreateInlineImageDeps: CreateInlineImageDeps = {
     return Boolean(user?.isActive)
   },
   cleanupExpired: async (input) => cleanupUnreferencedInlineImages(input),
-  findLiveDraftUsage: async ({ userId, uploadSessionId }) => {
-    const where = {
-      uploadedById: userId,
-      uploadSessionId,
-      deletionPendingAt: null,
-      references: { none: {} },
-    }
-    const [count, sizes] = await Promise.all([
-      prisma.inline_description_images.count({ where }),
-      prisma.inline_description_images.aggregate({ where, _sum: { originalSize: true } }),
-    ])
-    return { count, originalSize: sizes._sum.originalSize ?? 0 }
-  },
   prepareImage: prepareInlineImage,
   generateId: randomUUID,
   createStoredPath: createStoredInlineImagePath,
   writeFile: writeInlineImageFile,
-  createRow: async (input) => {
-    await prisma.inline_description_images.create({ data: input })
-  },
+  createRowUnderSessionQuotaLock: createInlineImageRowUnderSessionQuotaLock,
   deleteFile: deleteInlineImageFile,
 }
 
@@ -362,17 +383,6 @@ export async function createInlineImageDraft(
     console.warn('[createInlineImageDraft] Failed to clean expired inline images', error)
   }
 
-  const usage = await deps.findLiveDraftUsage({
-    userId: input.userId,
-    uploadSessionId: input.uploadSessionId,
-  })
-  if (usage.count >= MAX_INLINE_IMAGES) {
-    throw new InlineImageValidationError(`An upload session can contain at most ${MAX_INLINE_IMAGES} images`)
-  }
-  if (usage.originalSize + bytes.length > MAX_INLINE_DESCRIPTION_BYTES) {
-    throw new InlineImagePayloadTooLargeError('Upload session image bytes exceed the 100 MB limit')
-  }
-
   let prepared: PreparedInlineImage
   try {
     prepared = await deps.prepareImage({ bytes, fileName, mimeType })
@@ -385,7 +395,7 @@ export async function createInlineImageDraft(
   await deps.writeFile(filePath, prepared.bytes)
 
   try {
-    await deps.createRow({
+    const result = await deps.createRowUnderSessionQuotaLock({
       id,
       uploadedById: input.userId,
       uploadSessionId: input.uploadSessionId,
@@ -397,6 +407,12 @@ export async function createInlineImageDraft(
       width: prepared.width,
       height: prepared.height,
     })
+    if (!result.created) {
+      if (result.reason === 'image-count') {
+        throw new InlineImageValidationError(`An upload session can contain at most ${MAX_INLINE_IMAGES} images`)
+      }
+      throw new InlineImagePayloadTooLargeError('Upload session image bytes exceed the 100 MB limit')
+    }
   } catch (error) {
     try {
       await deps.deleteFile(filePath)
