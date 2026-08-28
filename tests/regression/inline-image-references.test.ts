@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Prisma } from '@prisma/client'
+import { markInlineImageDeletionPending } from '@/lib/inline-images/lifecycle'
 import {
   MAX_INLINE_DESCRIPTION_BYTES,
   MAX_INLINE_IMAGES,
@@ -184,6 +185,11 @@ class FakeReferenceTransaction {
 
   asTransaction(): Prisma.TransactionClient {
     return {
+      $queryRaw: async (query: TemplateStringsArray) => {
+        assert.match(query.join('?'), /FROM "inline_description_images"[\s\S]*FOR UPDATE/)
+        this.writes.push('lock-images')
+        return [...this.availableImageIds].map((id) => ({ id }))
+      },
       inline_description_images: {
         findMany: async ({ where }: { where: { id: { in: string[] }; deletionPendingAt: null } }) => {
           assert.equal(where.deletionPendingAt, null)
@@ -264,7 +270,7 @@ describe('reconcileInlineDescriptionImages', () => {
       tx.references.some((reference) => reference.imageId === add && reference.templateId === 'template-other'),
       true,
     )
-    assert.deepEqual(tx.writes, ['read-images', 'delete-references', 'create-references'])
+    assert.deepEqual(tx.writes, ['lock-images', 'delete-references', 'create-references'])
   })
 
   it('fails before reference writes when the transactional re-read misses a deletion-pending asset', async () => {
@@ -280,7 +286,77 @@ describe('reconcileInlineDescriptionImages', () => {
       /not available/i,
     )
 
-    assert.deepEqual(tx.writes, ['read-images'])
+    assert.deepEqual(tx.writes, ['lock-images'])
     assert.deepEqual(tx.references, [])
+  })
+
+  it('serializes cleanup marking behind a description claim and rechecks references after locking', async () => {
+    const claimed = imageId(72)
+    const references = new Set<string>()
+    let releaseOwnerLock: () => void = () => {}
+    const ownerLockReleased = new Promise<void>((resolve) => { releaseOwnerLock = resolve })
+    let releaseOwnerLockAcquired: () => void = () => {}
+    const ownerLockAcquired = new Promise<void>((resolve) => { releaseOwnerLockAcquired = resolve })
+
+    const ownerTx = {
+      $queryRaw: async (query: TemplateStringsArray) => {
+        assert.match(query.join('?'), /FROM "inline_description_images"[\s\S]*FOR UPDATE/)
+        releaseOwnerLockAcquired()
+        return [{ id: claimed }]
+      },
+      inline_description_images: {},
+      inline_description_image_references: {
+        deleteMany: async () => ({ count: 0 }),
+        createMany: async () => {
+          references.add(claimed)
+          return { count: 1 }
+        },
+      },
+    } as unknown as Prisma.TransactionClient
+
+    const cleanupWrites: string[] = []
+    const cleanupTx = {
+      $queryRaw: async (query: TemplateStringsArray) => {
+        assert.match(query.join('?'), /FROM "inline_description_images"[\s\S]*FOR UPDATE/)
+        await ownerLockReleased
+        cleanupWrites.push('lock')
+        return [{ filePath: 'inline-images/claimed.png' }]
+      },
+      inline_description_images: {
+        update: async () => {
+          cleanupWrites.push('mark')
+          return {}
+        },
+      },
+      inline_description_image_references: {
+        findFirst: async () => {
+          cleanupWrites.push('recheck')
+          return references.size > 0 ? { id: 'existing-reference' } : null
+        },
+      },
+    } as unknown as Prisma.TransactionClient
+
+    const reconciliation = reconcileInlineDescriptionImages(ownerTx, {
+      owner: { kind: 'request', id: 'request-current' },
+      imageIds: [claimed],
+    })
+    await ownerLockAcquired
+
+    let cleanupFinished = false
+    const cleanup = markInlineImageDeletionPending(cleanupTx, {
+      kind: 'expired',
+      imageId: claimed,
+    }).then((result) => {
+      cleanupFinished = true
+      return result
+    })
+    await Promise.resolve()
+    assert.equal(cleanupFinished, false)
+
+    await reconciliation
+    releaseOwnerLock()
+
+    assert.equal(await cleanup, null)
+    assert.deepEqual(cleanupWrites, ['lock', 'recheck'])
   })
 })

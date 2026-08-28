@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import type { Prisma } from '@prisma/client'
 import prisma from '@/lib/prisma'
 import { MAX_ATTACHMENT_BYTES, sanitizeAttachmentFileName, validateAttachmentMetadata } from '@/lib/attachments/policy'
 import {
@@ -192,61 +193,76 @@ async function deleteMarkedInlineImage(
   if (!deleted) throw new Error('Inline image row was no longer deletable')
 }
 
-async function markOwnedInlineImageDeletion(input: {
-  imageId: string
-  userId: string
-  uploadSessionId: string
-}): Promise<{ filePath: string } | null> {
-  return prisma.$transaction(async (tx) => {
-    // Locking the asset row before setting the marker prevents a reference
-    // claim from racing a physical delete. Reference creation rejects pending
-    // assets, while deleteRow rechecks both pending state and zero references.
-    const rows = await tx.$queryRaw<Array<{ filePath: string }>>`
+export type InlineImageDeletionClaim =
+  | {
+    kind: 'owned-draft'
+    imageId: string
+    userId: string
+    uploadSessionId: string
+  }
+  | {
+    kind: 'expired'
+    imageId: string
+  }
+
+/**
+ * Claims an unreferenced image for deletion within an open transaction.
+ * Reconciliation locks these same asset rows before it creates references.
+ */
+export async function markInlineImageDeletionPending(
+  tx: Prisma.TransactionClient,
+  input: InlineImageDeletionClaim,
+): Promise<{ filePath: string } | null> {
+  const rows = input.kind === 'owned-draft'
+    ? await tx.$queryRaw<Array<{ filePath: string }>>`
       SELECT "filePath"
       FROM "inline_description_images"
       WHERE "id" = ${input.imageId}
         AND "uploadedById" = ${input.userId}
         AND "uploadSessionId" = ${input.uploadSessionId}
-        AND NOT EXISTS (
-          SELECT 1
-          FROM "inline_description_image_references"
-          WHERE "imageId" = "inline_description_images"."id"
-        )
       FOR UPDATE
     `
-    const row = rows[0]
-    if (!row) return null
+    : await tx.$queryRaw<Array<{ filePath: string }>>`
+      SELECT "filePath"
+      FROM "inline_description_images"
+      WHERE "id" = ${input.imageId}
+      FOR UPDATE
+    `
+  const row = rows[0]
+  if (!row) return null
 
-    await tx.inline_description_images.update({
-      where: { id: input.imageId },
-      data: { deletionPendingAt: new Date() },
-    })
-    return row
+  // Use a fresh statement after acquiring the asset lock. A competing
+  // reconciliation has either committed its reference or still holds the
+  // lock, so cleanup cannot mark a now-claimed image for physical deletion.
+  const reference = await tx.inline_description_image_references.findFirst({
+    where: { imageId: input.imageId },
+    select: { id: true },
   })
+  if (reference) return null
+
+  await tx.inline_description_images.update({
+    where: { id: input.imageId },
+    data: { deletionPendingAt: new Date() },
+  })
+  return row
+}
+
+async function markOwnedInlineImageDeletion(input: {
+  imageId: string
+  userId: string
+  uploadSessionId: string
+}): Promise<{ filePath: string } | null> {
+  return prisma.$transaction((tx) => markInlineImageDeletionPending(tx, {
+    kind: 'owned-draft',
+    ...input,
+  }))
 }
 
 async function markExpiredInlineImageDeletion(imageId: string): Promise<{ filePath: string } | null> {
-  return prisma.$transaction(async (tx) => {
-    const rows = await tx.$queryRaw<Array<{ filePath: string }>>`
-      SELECT "filePath"
-      FROM "inline_description_images"
-      WHERE "id" = ${imageId}
-        AND NOT EXISTS (
-          SELECT 1
-          FROM "inline_description_image_references"
-          WHERE "imageId" = "inline_description_images"."id"
-        )
-      FOR UPDATE
-    `
-    const row = rows[0]
-    if (!row) return null
-
-    await tx.inline_description_images.update({
-      where: { id: imageId },
-      data: { deletionPendingAt: new Date() },
-    })
-    return row
-  })
+  return prisma.$transaction((tx) => markInlineImageDeletionPending(tx, {
+    kind: 'expired',
+    imageId,
+  }))
 }
 
 async function createInlineImageRowUnderSessionQuotaLock(

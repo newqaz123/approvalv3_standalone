@@ -1,4 +1,4 @@
-import type { Prisma } from '@prisma/client'
+import { Prisma } from '@prisma/client'
 import prisma from '@/lib/prisma'
 import { canReadInlineImage } from '@/lib/inline-images/lifecycle'
 import {
@@ -109,13 +109,16 @@ export async function reconcileInlineDescriptionImages(
   input: { owner: InlineImageOwner; imageIds: string[] },
 ): Promise<void> {
   if (input.imageIds.length > 0) {
-    const currentImages = await tx.inline_description_images.findMany({
-      where: {
-        id: { in: input.imageIds },
-        deletionPendingAt: null,
-      },
-      select: { id: true },
-    })
+    // Cleanup claims the same asset rows before it marks them pending. Holding
+    // these locks through reference creation makes either claim win atomically.
+    const currentImages = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT "id"
+      FROM "inline_description_images"
+      WHERE "id" IN (${Prisma.join(input.imageIds)})
+        AND "deletionPendingAt" IS NULL
+      ORDER BY "id"
+      FOR UPDATE
+    `
     if (currentImages.length !== input.imageIds.length) {
       throw unavailableInlineImageError()
     }
