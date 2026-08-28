@@ -27,3 +27,36 @@ it('bulk delete by date archives rows instead of soft-deleting them', () => {
   assert.doesNotMatch(dialog, /Soft delete/i)
   assert.match(dialog, /Archive/i)
 })
+
+it('hard delete triggers inline image cleanup only after the deletion transaction commits', () => {
+  const hardDelete = readFileSync('src/lib/retention-hard-delete.ts', 'utf8')
+
+  assert.match(hardDelete, /cleanupUnreferencedInlineImages/)
+  assert.match(hardDelete, /olderThan: new Date\(\)/)
+  assert.match(hardDelete, /INLINE_IMAGE_CLEANUP_LIMIT = 100/)
+  assert.match(hardDelete, /isArchived: true/)
+
+  // The request deletion transaction is database-only: reference cascades
+  // commit there, and cleanup/file I/O must never run inside it.
+  const txStart = hardDelete.indexOf('$transaction')
+  const txEnd = hardDelete.indexOf('})', hardDelete.indexOf('deleteMany', txStart))
+  assert.notEqual(txEnd, -1, 'deletion transaction should contain deleteMany')
+  const transactionBlock = hardDelete.slice(txStart, txEnd)
+  assert.match(transactionBlock, /deleteMany/)
+  assert.doesNotMatch(transactionBlock, /cleanupUnreferencedInlineImages/)
+  assert.doesNotMatch(transactionBlock, /deleteAttachmentFile/)
+  assert.doesNotMatch(transactionBlock, /deleteInlineImageFile/)
+
+  // Cleanup runs after the committed deletion in the flow order.
+  const flow = hardDelete.slice(hardDelete.indexOf('export async function hardDeleteArchivedRequests'))
+  const deletionCall = flow.indexOf('deleteArchivedRequests(')
+  const cleanupCall = flow.indexOf('cleanupUnreferencedInlineImages(')
+  assert.notEqual(deletionCall, -1, 'flow should call the deletion dependency')
+  assert.ok(deletionCall < cleanupCall, 'cleanup must be invoked after the deletion call')
+})
+
+it('keeps archive-only hard delete semantics while appending cleanup warnings', () => {
+  const hardDelete = readFileSync('src/lib/retention-hard-delete.ts', 'utf8')
+  assert.match(hardDelete, /fileWarnings\.push\(\.\.\.cleanup\.warnings\)/)
+  assert.doesNotMatch(hardDelete, /isDeleted: true/)
+})

@@ -7,7 +7,8 @@ import { readFileSync, existsSync } from 'node:fs'
 import {
   formatStorageBytes,
   classifyAttachmentOwner,
-  aggregateAttachmentStorage,
+  aggregateStorageRows,
+  toStorageRows,
   diskUsedPercent,
   buildStorageTrendChart,
   resolveVolumeStripShares,
@@ -16,6 +17,7 @@ import {
   isMissingStoragePlanTable,
   estimateBytesAtMonth,
   type AttachmentStorageRow,
+  type InlineImageStorageRow,
 } from '../../src/lib/storage-dashboard'
 import { measureUploadVolume } from '../../src/lib/storage-volume'
 
@@ -28,6 +30,17 @@ function row(
     createdAt: overrides.createdAt ?? new Date('2026-03-01T00:00:00.000Z'),
     requestId: overrides.requestId ?? null,
     solutionId: overrides.solutionId ?? null,
+    ...overrides,
+  }
+}
+
+function inlineRow(
+  overrides: Partial<InlineImageStorageRow> & Pick<InlineImageStorageRow, 'id' | 'fileSize'>
+): InlineImageStorageRow {
+  return {
+    fileName: overrides.fileName ?? `${overrides.id}.png`,
+    fileType: overrides.fileType ?? 'image/png',
+    createdAt: overrides.createdAt ?? new Date('2026-03-01T00:00:00.000Z'),
     ...overrides,
   }
 }
@@ -60,29 +73,93 @@ describe('classifyAttachmentOwner', () => {
   })
 })
 
-describe('aggregateAttachmentStorage', () => {
+describe('aggregateStorageRows', () => {
   it('sums bytes and counts by owner and keeps the largest files', () => {
-    const totals = aggregateAttachmentStorage(
-      [
-        row({ id: 'a', fileSize: 100, requestId: 'r1', fileName: 'small.pdf' }),
-        row({ id: 'b', fileSize: 400, requestId: 'r1', fileName: 'big.pdf' }),
-        row({ id: 'c', fileSize: 250, solutionId: 's1', fileName: 'mid.xlsx' }),
-        row({ id: 'd', fileSize: 50, fileName: 'orphan.bin' }),
-      ],
+    const totals = aggregateStorageRows(
+      toStorageRows(
+        [
+          row({ id: 'a', fileSize: 100, requestId: 'r1', fileName: 'small.pdf' }),
+          row({ id: 'b', fileSize: 400, requestId: 'r1', fileName: 'big.pdf' }),
+          row({ id: 'c', fileSize: 250, solutionId: 's1', fileName: 'mid.xlsx' }),
+          row({ id: 'd', fileSize: 50, fileName: 'orphan.bin' }),
+        ],
+        []
+      ),
       2
     )
 
-    assert.equal(totals.recordedAttachmentBytes, 800)
+    assert.equal(totals.recordedStorageBytes, 800)
     assert.equal(totals.attachmentCount, 4)
     assert.equal(totals.requestAttachmentBytes, 500)
     assert.equal(totals.requestAttachmentCount, 2)
     assert.equal(totals.solutionAttachmentBytes, 250)
     assert.equal(totals.solutionAttachmentCount, 1)
+    assert.equal(totals.inlineImageBytes, 0)
+    assert.equal(totals.inlineImageCount, 0)
     assert.deepEqual(
       totals.largestFiles.map((file) => ({ id: file.id, owner: file.owner })),
       [
         { id: 'b', owner: 'request' },
         { id: 'c', owner: 'solution' },
+      ]
+    )
+  })
+
+  it('aggregates mixed attachment and inline assets while keeping attachment metrics separate', () => {
+    const totals = aggregateStorageRows(
+      toStorageRows(
+        [
+          row({ id: 'att-request', fileSize: 100, requestId: 'r1' }),
+          row({ id: 'att-solution', fileSize: 250, solutionId: 's1' }),
+        ],
+        [
+          inlineRow({ id: 'img-1', fileSize: 400, fileName: 'plan.webp' }),
+          inlineRow({ id: 'img-2', fileSize: 50, fileName: 'detail.png' }),
+        ]
+      ),
+      3
+    )
+
+    // Recorded storage covers attachments plus inline images exactly once.
+    assert.equal(totals.recordedStorageBytes, 800)
+    // Existing attachment metrics stay attachment-only.
+    assert.equal(totals.attachmentCount, 2)
+    assert.equal(totals.requestAttachmentBytes, 100)
+    assert.equal(totals.requestAttachmentCount, 1)
+    assert.equal(totals.solutionAttachmentBytes, 250)
+    assert.equal(totals.solutionAttachmentCount, 1)
+    // Dedicated inline metrics use each asset's stored size.
+    assert.equal(totals.inlineImageBytes, 450)
+    assert.equal(totals.inlineImageCount, 2)
+    assert.deepEqual(
+      totals.largestFiles.map((file) => ({ id: file.id, owner: file.owner })),
+      [
+        { id: 'img-1', owner: 'inline' },
+        { id: 'att-solution', owner: 'solution' },
+        { id: 'att-request', owner: 'request' },
+      ]
+    )
+  })
+
+  it('counts an inline asset once even when its references are shared', () => {
+    // 'shared-photo' is referenced by both a request description and a
+    // solution description. Asset rows load once per asset, never once per
+    // reference, so shared storage must never double count.
+    const totals = aggregateStorageRows(
+      toStorageRows(
+        [row({ id: 'att-request', fileSize: 100, requestId: 'r1' })],
+        [inlineRow({ id: 'shared-photo', fileSize: 400 })]
+      )
+    )
+
+    assert.equal(totals.inlineImageBytes, 400)
+    assert.equal(totals.inlineImageCount, 1)
+    assert.equal(totals.recordedStorageBytes, 500)
+    assert.deepEqual(
+      totals.largestFiles.map((file) => ({ id: file.id, owner: file.owner })),
+      [
+        { id: 'shared-photo', owner: 'inline' },
+        { id: 'att-request', owner: 'request' },
       ]
     )
   })
@@ -321,8 +398,29 @@ describe('buildStorageTrendChart', () => {
     assert.equal(utcMonthKey(new Date('2026-04-30T00:00:00.000Z')), '2026-04')
   })
 
+  it('feeds combined attachment and inline rows into the cumulative trend', () => {
+    const chart = buildStorageTrendChart(
+      toStorageRows(
+        [row({ id: 'att', fileSize: 100, createdAt: new Date('2026-01-10T00:00:00.000Z') })],
+        [inlineRow({ id: 'img', fileSize: 50, createdAt: new Date('2026-03-02T00:00:00.000Z') })]
+      ),
+      now,
+      { monthsAhead: 1 }
+    )
+
+    const actuals = chart.filter((point) => point.actualBytes != null)
+    assert.deepEqual(
+      actuals.map((point) => ({ month: point.month, actualBytes: point.actualBytes })),
+      [
+        { month: '2026-01', actualBytes: 100 },
+        { month: '2026-02', actualBytes: 100 },
+        { month: '2026-03', actualBytes: 150 },
+      ]
+    )
+  })
+
   it('returns no points when there are no attachments', () => {
-    assert.deepEqual(buildStorageTrendChart([], now), [])
+    assert.deepEqual(buildStorageTrendChart(toStorageRows([], []), now), [])
   })
 })
 
@@ -361,8 +459,40 @@ describe('admin storage dashboard wiring', () => {
     assert.match(page, /StorageDashboard/)
     assert.match(action, /requireAdmin/)
     assert.match(action, /measureUploadVolume/)
-    assert.match(action, /aggregateAttachmentStorage/)
+    assert.match(action, /aggregateStorageRows/)
+    assert.match(action, /toStorageRows/)
     assert.match(action, /pg_database_size/)
+  })
+
+  it('loads inline image assets once and records them alongside attachments', () => {
+    const action = readFileSync('src/server-actions/storage-dashboard.ts', 'utf8')
+    assert.match(action, /inline_description_images\.findMany/)
+
+    // The inline query selects asset columns only: expanding references would
+    // duplicate a shared asset once per reference and double count its bytes.
+    const inlineQuery = action.slice(
+      action.indexOf('inline_description_images.findMany'),
+      action.indexOf('})', action.indexOf('inline_description_images.findMany'))
+    )
+    assert.doesNotMatch(inlineQuery, /references/)
+
+    // Combined rows feed totals and the trend series together.
+    const combined = action.slice(action.indexOf('const storageRows = toStorageRows'))
+    assert.match(combined, /aggregateStorageRows\(storageRows\)/)
+    assert.match(combined, /buildStorageTrendChart\(storageRows/)
+  })
+
+  it('adds an inline image metric and owner label without changing attachment labels', () => {
+    const dashboard = readFileSync('src/components/admin/storage-dashboard.tsx', 'utf8')
+    assert.match(dashboard, /inline: 'Inline image'/)
+    assert.match(dashboard, /Inline images/)
+    assert.match(dashboard, /inlineImageBytes/)
+    assert.match(dashboard, /inlineImageCount/)
+    // Existing attachment labels and volume-strip math remain unchanged.
+    assert.match(dashboard, /request: 'Request'/)
+    assert.match(dashboard, /solution: 'Solution'/)
+    assert.match(dashboard, /other: 'Other'/)
+    assert.match(dashboard, /resolveVolumeStripShares/)
   })
 
   it('links the admin hub to storage and retention management', () => {

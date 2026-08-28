@@ -1,4 +1,4 @@
-export type AttachmentOwner = 'request' | 'solution' | 'other'
+export type StorageOwner = 'request' | 'solution' | 'other' | 'inline'
 
 export type AttachmentStorageRow = {
   id: string
@@ -10,22 +10,42 @@ export type AttachmentStorageRow = {
   solutionId: string | null
 }
 
+export type InlineImageStorageRow = {
+  id: string
+  fileName: string
+  fileSize: number
+  fileType: string
+  createdAt: Date
+}
+
+export type StorageRow = {
+  id: string
+  fileName: string
+  fileSize: number
+  fileType: string
+  createdAt: Date
+  owner: StorageOwner
+}
+
 export type LargestStoredFile = {
   id: string
   fileName: string
   fileSize: number
   fileType: string
   createdAt: Date
-  owner: AttachmentOwner
+  owner: StorageOwner
 }
 
-export type AttachmentStorageTotals = {
-  recordedAttachmentBytes: number
+export type StorageUsageTotals = {
+  /** Attachment bytes plus inline image bytes, each asset counted once */
+  recordedStorageBytes: number
   attachmentCount: number
   requestAttachmentBytes: number
   requestAttachmentCount: number
   solutionAttachmentBytes: number
   solutionAttachmentCount: number
+  inlineImageBytes: number
+  inlineImageCount: number
   largestFiles: LargestStoredFile[]
 }
 
@@ -60,33 +80,71 @@ export function formatStorageBytes(bytes: number): string {
 export function classifyAttachmentOwner(attachment: {
   requestId: string | null
   solutionId: string | null
-}): AttachmentOwner {
+}): Exclude<StorageOwner, 'inline'> {
   if (attachment.requestId) return 'request'
   if (attachment.solutionId) return 'solution'
   return 'other'
 }
 
-export function aggregateAttachmentStorage(
-  rows: AttachmentStorageRow[],
+/**
+ * Converts attachments and inline image assets into one storage-row union.
+ * Inline assets contribute one row per asset regardless of how many request,
+ * solution, or template references point at them, so shared storage is never
+ * double counted.
+ */
+export function toStorageRows(
+  attachments: AttachmentStorageRow[],
+  inlineImages: InlineImageStorageRow[],
+): StorageRow[] {
+  return [
+    ...attachments.map((attachment) => ({
+      id: attachment.id,
+      fileName: attachment.fileName,
+      fileSize: attachment.fileSize,
+      fileType: attachment.fileType,
+      createdAt: attachment.createdAt,
+      owner: classifyAttachmentOwner(attachment),
+    })),
+    ...inlineImages.map((image) => ({
+      id: image.id,
+      fileName: image.fileName,
+      fileSize: image.fileSize,
+      fileType: image.fileType,
+      createdAt: image.createdAt,
+      owner: 'inline' as const,
+    })),
+  ]
+}
+
+export function aggregateStorageRows(
+  rows: StorageRow[],
   largestLimit = 10
-): AttachmentStorageTotals {
-  const totals: AttachmentStorageTotals = {
-    recordedAttachmentBytes: 0,
-    attachmentCount: rows.length,
+): StorageUsageTotals {
+  const totals: StorageUsageTotals = {
+    recordedStorageBytes: 0,
+    attachmentCount: 0,
     requestAttachmentBytes: 0,
     requestAttachmentCount: 0,
     solutionAttachmentBytes: 0,
     solutionAttachmentCount: 0,
+    inlineImageBytes: 0,
+    inlineImageCount: 0,
     largestFiles: [],
   }
 
   for (const file of rows) {
-    const owner = classifyAttachmentOwner(file)
-    totals.recordedAttachmentBytes += file.fileSize
-    if (owner === 'request') {
+    totals.recordedStorageBytes += file.fileSize
+    if (file.owner === 'inline') {
+      totals.inlineImageBytes += file.fileSize
+      totals.inlineImageCount += 1
+      continue
+    }
+
+    totals.attachmentCount += 1
+    if (file.owner === 'request') {
       totals.requestAttachmentBytes += file.fileSize
       totals.requestAttachmentCount += 1
-    } else if (owner === 'solution') {
+    } else if (file.owner === 'solution') {
       totals.solutionAttachmentBytes += file.fileSize
       totals.solutionAttachmentCount += 1
     }
@@ -101,7 +159,7 @@ export function aggregateAttachmentStorage(
       fileSize: file.fileSize,
       fileType: file.fileType,
       createdAt: file.createdAt,
-      owner: classifyAttachmentOwner(file),
+      owner: file.owner,
     }))
 
   return totals

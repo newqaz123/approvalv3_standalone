@@ -5,12 +5,13 @@ import { requireAdmin } from '@/lib/auth'
 import prisma from '@/lib/prisma'
 import { getUploadRoot } from '@/lib/attachments/storage'
 import {
-  aggregateAttachmentStorage,
+  aggregateStorageRows,
   buildStorageTrendChart,
   isMissingStoragePlanTable,
+  toStorageRows,
   toStoragePlanEventView,
   utcMonthKey,
-  type AttachmentStorageTotals,
+  type StorageUsageTotals,
   type StoragePlanEventView,
   type StorageTrendPoint,
   type UploadVolumeUsage,
@@ -19,7 +20,7 @@ import { measureUploadVolume } from '@/lib/storage-volume'
 import { parseStorageAlertThreshold } from '@/lib/storage-alert'
 import { RETENTION_DEFAULTS } from '@/lib/retention-policy'
 
-export type StorageDashboardData = AttachmentStorageTotals &
+export type StorageDashboardData = StorageUsageTotals &
   UploadVolumeUsage & {
     databaseBytes: number | null
     alertThresholdPct: number
@@ -101,7 +102,7 @@ export async function getStorageDashboardData(): Promise<StorageDashboardData> {
     throw new Error('Unauthorized')
   }
 
-  const [attachments, volume, databaseBytes, planRows, alert] = await Promise.all([
+  const [attachments, inlineImages, volume, databaseBytes, planRows, alert] = await Promise.all([
     prisma.file_attachments.findMany({
       select: {
         id: true,
@@ -111,6 +112,17 @@ export async function getStorageDashboardData(): Promise<StorageDashboardData> {
         createdAt: true,
         requestId: true,
         solutionId: true,
+      },
+    }),
+    // One row per inline image asset: loading through references would
+    // duplicate shared assets once per reference and double count their bytes.
+    prisma.inline_description_images.findMany({
+      select: {
+        id: true,
+        fileName: true,
+        fileSize: true,
+        fileType: true,
+        createdAt: true,
       },
     }),
     measureUploadVolume(getUploadRoot()),
@@ -126,13 +138,17 @@ export async function getStorageDashboardData(): Promise<StorageDashboardData> {
   )
   const monthsAhead = Math.max(DEFAULT_MONTHS_AHEAD, ...farthestPlanMonths, 0)
 
+  // Attachment and inline image rows aggregate once into shared totals and
+  // the same combined rows feed the trend series.
+  const storageRows = toStorageRows(attachments, inlineImages)
+
   return {
-    ...aggregateAttachmentStorage(attachments),
+    ...aggregateStorageRows(storageRows),
     ...volume,
     databaseBytes,
     alertThresholdPct: alert.thresholdPct,
     lastStorageAlertOn: alert.lastAlertOn,
-    trend: buildStorageTrendChart(attachments, now, { monthsAhead }),
+    trend: buildStorageTrendChart(storageRows, now, { monthsAhead }),
     planEvents: planRows.map(toStoragePlanEventView),
   }
 }

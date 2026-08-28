@@ -3,6 +3,7 @@ import Link from 'next/link'
 import {
   Database,
   FileStack,
+  FileImage,
   Files,
   HardDrive,
   HardDriveDownload,
@@ -20,17 +21,18 @@ import {
   diskUsedPercent,
   formatStorageBytes,
   resolveVolumeStripShares,
-  type AttachmentOwner,
+  type StorageOwner,
 } from '@/lib/storage-dashboard'
 import type { StorageDashboardData } from '@/server-actions/storage-dashboard'
 import { StorageTrendChart } from '@/components/admin/storage-trend-chart'
 import { StorageAlertCard } from '@/components/admin/storage-alert-card'
 import { cn } from '@/lib/utils'
 
-const OWNER_LABEL: Record<AttachmentOwner, string> = {
+const OWNER_LABEL: Record<StorageOwner, string> = {
   request: 'Request',
   solution: 'Solution',
   other: 'Other',
+  inline: 'Inline image',
 }
 
 function MetricCard({
@@ -60,7 +62,7 @@ function MetricCard({
 
 function VolumeStrip({ data }: { data: StorageDashboardData }) {
   const usedBytes = data.uploadDirBytes
-  const recorded = data.recordedAttachmentBytes
+  const recorded = data.recordedStorageBytes
   const otherOnDisk =
     usedBytes == null ? 0 : Math.max(0, usedBytes - recorded)
   const capacity = data.diskTotalBytes
@@ -153,7 +155,7 @@ function ShareBar({
   bytes: number
   count: number
   totalBytes: number
-  tone: 'slate' | 'amber'
+  tone: 'slate' | 'amber' | 'emerald'
 }) {
   const percent = totalBytes > 0 ? Math.round((bytes / totalBytes) * 100) : 0
 
@@ -167,7 +169,14 @@ function ShareBar({
       </div>
       <div className="h-2 overflow-hidden rounded-sm bg-stone-100">
         <div
-          className={cn('h-full', tone === 'slate' ? 'bg-slate-800' : 'bg-amber-500')}
+          className={cn(
+            'h-full',
+            tone === 'slate'
+              ? 'bg-slate-800'
+              : tone === 'amber'
+                ? 'bg-amber-500'
+                : 'bg-emerald-600'
+          )}
           style={{ width: `${percent}%` }}
         />
       </div>
@@ -176,7 +185,8 @@ function ShareBar({
 }
 
 export function StorageDashboard({ data }: { data: StorageDashboardData }) {
-  const splitTotal = data.requestAttachmentBytes + data.solutionAttachmentBytes
+  const splitTotal =
+    data.requestAttachmentBytes + data.solutionAttachmentBytes + data.inlineImageBytes
 
   return (
     <div className="space-y-6">
@@ -204,8 +214,8 @@ export function StorageDashboard({ data }: { data: StorageDashboardData }) {
         />
         <MetricCard
           label="Recorded files"
-          value={formatStorageBytes(data.recordedAttachmentBytes)}
-          hint="Sum of attachment sizes in the database"
+          value={formatStorageBytes(data.recordedStorageBytes)}
+          hint="Sum of attachment and inline image sizes in the database"
           icon={HardDriveDownload}
         />
         <MetricCard
@@ -219,6 +229,12 @@ export function StorageDashboard({ data }: { data: StorageDashboardData }) {
           value={String(data.attachmentCount)}
           hint="Request and solution files combined"
           icon={Files}
+        />
+        <MetricCard
+          label="Inline images"
+          value={formatStorageBytes(data.inlineImageBytes)}
+          hint={`${data.inlineImageCount} description image${data.inlineImageCount === 1 ? '' : 's'} · counted once when shared`}
+          icon={FileImage}
         />
       </div>
 
@@ -243,6 +259,13 @@ export function StorageDashboard({ data }: { data: StorageDashboardData }) {
               totalBytes={splitTotal}
               tone="amber"
             />
+            <ShareBar
+              label="Inline images"
+              bytes={data.inlineImageBytes}
+              count={data.inlineImageCount}
+              totalBytes={splitTotal}
+              tone="emerald"
+            />
           </div>
         </section>
 
@@ -252,7 +275,7 @@ export function StorageDashboard({ data }: { data: StorageDashboardData }) {
             Top 10 by recorded size. Nothing here can be deleted.
           </p>
           {data.largestFiles.length === 0 ? (
-            <p className="mt-6 text-sm text-muted-foreground">No attachments stored yet.</p>
+            <p className="mt-6 text-sm text-muted-foreground">No files stored yet.</p>
           ) : (
             <div className="mt-4">
               <Table>
