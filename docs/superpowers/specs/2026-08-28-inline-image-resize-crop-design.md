@@ -1,4 +1,4 @@
-# Inline Image Resize and Non-Destructive Crop Design
+# Inline Image Resize, Non-Destructive Crop, and Curated Color Design
 
 **Date:** 2026-08-28
 **Status:** Approved for planning
@@ -6,9 +6,9 @@
 
 ## 1. Purpose
 
-Replace the current full-width selected-image action row with a compact contextual editing experience and add direct image resizing plus non-destructive cropping to every rich-text description editor.
+Replace the current full-width selected-image action row with a compact contextual editing experience, add direct image resizing plus non-destructive cropping, and add controlled text-color and highlight formatting to every rich-text description editor.
 
-The feature must work in request, solution, resubmission, and template editors. Size and crop state must survive save/reopen, template copying, application rendering, and PDF export without modifying or duplicating the original private image bytes.
+The feature must work in request, solution, resubmission, and template editors. Image size/crop state and curated color formatting must survive save/reopen, template copying, application rendering, HTML email, and PDF export without modifying or duplicating original private image bytes or permitting arbitrary styles.
 
 ## 2. Goals
 
@@ -18,9 +18,11 @@ The feature must work in request, solution, resubmission, and template editors. 
 4. Keep cropping non-destructive and placement-specific.
 5. Persist only canonical private image URLs and strictly bounded numeric presentation metadata.
 6. Render the same size/crop in the editor, application views, and PDFs.
-7. Preserve email behavior as escaped image-alt placeholders.
-8. Keep existing image upload, retry, cleanup, reference sharing, authorization, and attachment behavior unchanged.
-9. Provide keyboard, pointer, touch, focus, and reduced-motion-safe interactions.
+7. Add curated text-color and highlight controls without permitting arbitrary CSS.
+8. Preserve approved text/highlight colors in application views, PDFs, and HTML email; plain text keeps words only.
+9. Preserve image email behavior as escaped image-alt placeholders.
+10. Keep existing image upload, retry, cleanup, reference sharing, authorization, and attachment behavior unchanged.
+11. Provide keyboard, pointer, touch, focus, and reduced-motion-safe interactions.
 
 ## 3. Non-Goals
 
@@ -28,7 +30,8 @@ The feature must work in request, solution, resubmission, and template editors. 
 - Creating a new cropped image asset or database placement model.
 - Applying crop edits from a template retroactively to requests that already copied it.
 - Adding filters, rotation, annotation, focal-point AI, or image compositing.
-- Allowing arbitrary inline CSS, external image URLs, blobs, or data URIs in stored descriptions.
+- Allowing arbitrary inline CSS, arbitrary hex/RGB/HSL colors, external image URLs, blobs, or data URIs in stored descriptions.
+- Preserving pasted colors that do not map exactly to the curated palette.
 - Changing inline-image ownership, reference, quota, retention, or access-control schema.
 
 ## 4. Selected UX Direction
@@ -259,26 +262,106 @@ Email and plain-text paths continue replacing approved images with `[Image: alt]
 - The floating toolbar flips below the image when insufficient space exists above it.
 - Images and crop frames always use `max-width: 100%` and cannot overflow the modal/editor.
 
-## 10. Component and Interface Changes
+## 10. Curated Text Color and Highlight
+
+### 10.1 Toolbar behavior
+
+Desktop editors show two compact controls in the main toolbar:
+
+- Text color;
+- Highlight color.
+
+On narrow request dialogs, both controls move into the existing More overflow so the toolbar does not wrap into a dense multi-row control surface.
+
+Each control opens a palette popover with:
+
+- labeled swatches;
+- a visible selected state;
+- a color-independent text name/tooltip;
+- Default text or No highlight reset action;
+- keyboard arrow navigation and Escape-to-close behavior.
+
+The selected visual direction is the Calm Document palette.
+
+Text tokens:
+
+| Token | Color |
+|---|---|
+| `ink` | `#1E293B` |
+| `slate` | `#475569` |
+| `blue` | `#1D4ED8` |
+| `teal` | `#0F766E` |
+| `green` | `#15803D` |
+| `amber` | `#B45309` |
+| `red` | `#B91C1C` |
+
+Highlight tokens:
+
+| Token | Color |
+|---|---|
+| `yellow` | `#FEF3C7` |
+| `blue` | `#DBEAFE` |
+| `green` | `#D1FAE5` |
+| `pink` | `#FCE7F3` |
+| `violet` | `#EDE9FE` |
+| `red` | `#FEE2E2` |
+| `gray` | `#E2E8F0` |
+
+### 10.2 Stored markup
+
+Color formatting is persisted as semantic allowlisted marks, not arbitrary styles:
+
+```html
+<span data-text-color="blue">Cooling-water line</span>
+<mark data-highlight="yellow">Confirm before Friday</mark>
+```
+
+Text color and highlight marks may nest with each other and combine with bold, italic, underline, strike, links, headings, and list content. Removing a color mark preserves every other mark and all text.
+
+The editor uses custom restricted TipTap marks. Minimal Tiptap's palette interaction may inform the presentation, but its generic style-emitting Color extension is not adopted as the storage contract.
+
+### 10.3 Sanitization
+
+- `data-text-color` accepts only the seven text token names above.
+- `data-highlight` accepts only the seven highlight token names above.
+- Invalid tokens, style-based pasted colors, CSS variables, hex/RGB/HSL strings, and unsupported span/mark attributes are removed while preserving child text and other valid formatting.
+- Pasted palette colors are preserved only when they normalize to one of the exact approved token values; otherwise they become default text/no highlight.
+- No arbitrary `style` or `class` is stored.
+
+### 10.4 Output rendering
+
+Application views, PDF output, and HTML email materialize approved tokens through a single palette map. The trusted renderer emits only hard-coded color values associated with validated tokens.
+
+- Application rendering may use generated classes or numeric-free trusted styles after sanitization.
+- PDF uses the same palette constants.
+- HTML email emits hard-coded inline `color` / `background-color` because email clients cannot rely on application classes.
+- Plain-text output strips the marks and keeps their text.
+- Image placeholders inside email remain unchanged and never expose private URLs or bytes.
+
+If materialization fails, text falls back to default color with no highlight. Color is presentation only and never affects validation of visible content.
+
+## 11. Component and Interface Changes
 
 Expected boundaries:
 
 - `src/lib/inline-images/presentation.ts` — shared metadata and geometry contract.
 - `src/components/rich-text/inline-image-extension.ts` — stable width/natural/crop attrs and TipTap parsing/rendering.
 - `src/components/rich-text/inline-image-node-view.tsx` — floating toolbar, handles, crop mode, focus/error behavior.
-- `src/components/rich-text/rich-text-editor.tsx` — image-edit blocking integration.
+- `src/components/rich-text/rich-text-editor.tsx` — image-edit blocking integration plus responsive text/highlight palette controls.
+- New restricted TipTap text-color and highlight marks — semantic token parsing, commands, and serialization without stored style attributes.
 - `src/hooks/use-inline-description-images.ts` — active-edit tokens and combined blocking state.
 - Form components wired in the original inline-image work — use `hasBlockingOperations` and crop-specific blocking copy.
-- `src/lib/rich-text-sanitizer.ts` and inline-image policy — strict metadata validation.
-- `src/components/ui/formatted-text.tsx` plus a trusted presentation helper/component — application crop rendering.
-- `src/lib/inline-images/pdf.ts` and `src/lib/pdf.ts` — owner-scoped cropped PDF rendering.
-- `src/app/globals.css` — selection/frame/toolbar/application rules that do not rely on stored arbitrary styles.
+- `src/lib/rich-text-sanitizer.ts`, inline-image policy, and a shared rich-text palette module — strict image metadata and exact color-token validation.
+- `src/components/ui/formatted-text.tsx` plus a trusted presentation helper/component — application crop and approved color rendering.
+- `src/lib/formatted-text.ts` and notification output — trusted approved-color materialization for HTML email while plain text remains mark-free.
+- `src/lib/inline-images/pdf.ts` and `src/lib/pdf.ts` — owner-scoped cropped PDF rendering plus the shared approved palette.
+- `src/app/globals.css` — selection/frame/toolbar/application rules and fixed palette variables/classes that do not rely on stored arbitrary styles.
 
 The exact file decomposition may be refined in the implementation plan, but geometry/validation must remain independent from React interaction code.
 
-## 11. Testing Strategy
+## 12. Testing Strategy
 
-### 11.1 TDD unit and regression tests
+### 12.1 TDD unit and regression tests
 
 Add failing tests before implementation for:
 
@@ -287,17 +370,21 @@ Add failing tests before implementation for:
 - resize clamping;
 - normalized crop conversion and aspect math;
 - sanitizer retention/removal behavior;
+- exact text/highlight token allowlists and stripping of arbitrary pasted colors/styles;
+- text color and highlight composition with bold/italic/underline/strike/link/list/heading marks;
 - TipTap parse/render round trips with no transient attrs/styles;
 - existing image compatibility;
 - template HTML copy preserving independent metadata;
 - application materialization producing only generated safe styles;
 - PDF owner authorization remaining required while crop is applied;
-- email placeholders ignoring crop metadata;
+- one shared Calm Document palette across application, PDF, and HTML email;
+- HTML email preserves approved colors but never arbitrary styles; plain text keeps words only;
+- email image placeholders ignore crop metadata and remain private-URL-free;
 - combined upload/crop blocking state;
 - Apply/Cancel/Reset/undo transaction behavior;
 - keyboard resize/crop commands.
 
-### 11.2 Browser acceptance
+### 12.2 Browser acceptance
 
 Extend the opt-in browser gate and manually test the live request dialog to prove:
 
@@ -310,11 +397,14 @@ Extend the opt-in browser gate and manually test the live request dialog to prov
 7. Request copied from a cropped template initially matches, then edits independently.
 8. Application detail view and PDF match the applied crop.
 9. Keyboard controls and narrow viewport remain usable.
-10. Stored HTML contains canonical URL plus bounded data metadata and no style/blob/data URL.
+10. Desktop exposes text/highlight palette controls while narrow layouts place them in More.
+11. Every curated text and highlight token persists after save/reopen and renders consistently in application, PDF, and HTML email.
+12. Reset color/highlight preserves text and unrelated formatting; unsupported pasted colors are stripped.
+13. Stored HTML contains canonical image URLs, bounded image data metadata, and semantic color tokens with no style/blob/data URL.
 
 The current disposable worktree database may be used for manual UI testing. The existing full release gate remains opt-in and requires its declared disposable credentials/records.
 
-### 11.3 Verification
+### 12.3 Verification
 
 - Focused geometry/sanitizer/editor/rendering tests.
 - `npm run check` through Portly.
@@ -322,7 +412,7 @@ The current disposable worktree database may be used for manual UI testing. The 
 - Agent-browser manual request-dialog verification at desktop and mobile viewport.
 - `graphify update .`.
 
-## 12. Acceptance Criteria
+## 13. Acceptance Criteria
 
 1. The current full-width image action row no longer appears.
 2. Selecting an image shows a floating toolbar and four resize handles without moving surrounding content.
@@ -333,8 +423,12 @@ The current disposable worktree database may be used for manual UI testing. The 
 7. Stored HTML contains only canonical image URLs and validated data metadata; no arbitrary style or transient edit state.
 8. Invalid metadata degrades to a safe uncropped image.
 9. Editor, application, and owner-authorized PDF rendering agree on crop and size.
-10. Email/plain text remains alt-placeholder-only.
-11. Active crop sessions block save with specific guidance; upload blocking behavior remains intact.
-12. Existing images, attachments, authorization, cleanup, reference reconciliation, quotas, and retention continue passing regression tests.
-13. Pointer, touch, and keyboard operation are usable in the request dialog and narrow viewports.
-14. No database migration, destructive crop asset, or duplicate image bytes are introduced.
+10. The Calm Document palette provides seven text colors and seven highlights plus reset actions.
+11. Stored color markup uses only approved semantic tokens; arbitrary CSS and unsupported pasted colors are stripped while preserving text.
+12. Approved colors render consistently in application views, PDFs, and HTML email; plain text ignores color, and image email output remains alt-placeholder-only.
+13. Color/highlight marks combine with existing formatting and can be removed independently.
+14. Desktop shows compact color controls; narrow layouts move them into More without toolbar overflow.
+15. Active crop sessions block save with specific guidance; upload blocking behavior remains intact.
+16. Existing images, attachments, authorization, cleanup, reference reconciliation, quotas, retention, and legacy descriptions continue passing regression tests.
+17. Pointer, touch, and keyboard operation are usable in the request dialog and narrow viewports.
+18. No database migration, destructive crop asset, or duplicate image bytes are introduced.
