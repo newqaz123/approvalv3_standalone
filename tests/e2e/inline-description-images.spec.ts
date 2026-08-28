@@ -377,10 +377,7 @@ test.describe('Inline description images (release gate)', () => {
     // their sanitized default alt text rather than DOM order.
     await pasteImageFile(editor, pngPath('inline-pasted.png'))
     await expect(stableImages(dialog)).toHaveCount(2, { timeout: 20_000 })
-    const pastedImg = stableImages(dialog).filter({
-      has: dialog.locator('img[alt="inline-pasted"]'),
-    })
-    await expect(pastedImg).toHaveCount(1)
+    await expect(dialog.locator('img[alt="inline-pasted"]')).toHaveCount(1)
     await canonicalSrc(dialog.locator('img[alt="inline-pasted"]'))
 
     await dropImageFile(page, editor, pngPath('inline-dropped.png'))
@@ -409,7 +406,9 @@ test.describe('Inline description images (release gate)', () => {
     await imagePickerInput(dialog).setInputFiles(pngPath('inline-failing.png'))
     const failedNode = inlineImageNodes(dialog).filter({ hasText: UPLOAD_FAILED_TEXT })
     await expect(failedNode).toHaveCount(1)
-    await expect(failedNode.getByRole('alert')).toHaveText(UPLOAD_FAILED_TEXT)
+    // The alert wrapper also renders the Retry/Remove buttons, so assert the
+    // error text as a substring instead of an exact match.
+    await expect(failedNode.getByRole('alert')).toContainText(UPLOAD_FAILED_TEXT)
     await expect(blockingNotice).toBeVisible()
     await expect(submitButton).toBeDisabled()
     expect(routes.uploads.filter((upload) => upload.kind === 'abort')).toHaveLength(1)
