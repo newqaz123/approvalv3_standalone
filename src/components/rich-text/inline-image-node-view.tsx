@@ -1,12 +1,13 @@
 'use client'
 
-import type { ChangeEvent } from 'react'
+import { useState, type ChangeEvent } from 'react'
 import { NodeViewWrapper, type NodeViewProps } from '@tiptap/react'
 import {
   INLINE_IMAGE_ALIGNMENTS,
   type InlineImageAlignment,
   type InlineImageExtensionOptions,
 } from './inline-image-extension'
+import type { InlineImageCoordinator } from '@/hooks/use-inline-description-images'
 import { MAX_INLINE_ALT_LENGTH, parseInlineImageSrc } from '@/lib/inline-images/policy'
 
 function extensionOptions(extension: NodeViewProps['extension']): InlineImageExtensionOptions {
@@ -27,6 +28,34 @@ const INLINE_IMAGE_ALIGNMENT_LABELS: Record<InlineImageAlignment, string> = {
   right: 'Right',
 }
 
+export type RemoveInlineImageNodeInput = {
+  uploadId: string
+  imageId?: string
+  isLocalUpload: boolean
+  coordinator?: InlineImageCoordinator
+  fileByUploadId?: Map<string, File>
+  insertionPositionByUploadId?: Map<string, number>
+  localUploadIds?: Set<string>
+  removedUploadIds?: Set<string>
+  deleteNode: () => void
+}
+
+/** Deletes coordinator state before removing a local draft from the document. */
+export async function removeInlineImageNode(input: RemoveInlineImageNodeInput): Promise<void> {
+  if (!input.isLocalUpload) {
+    input.deleteNode()
+    return
+  }
+  if (!input.coordinator) throw new Error('Image cleanup is unavailable')
+
+  await input.coordinator.remove(input.uploadId, input.imageId)
+  input.removedUploadIds?.add(input.uploadId)
+  input.localUploadIds?.delete(input.uploadId)
+  input.fileByUploadId?.delete(input.uploadId)
+  input.insertionPositionByUploadId?.delete(input.uploadId)
+  input.deleteNode()
+}
+
 /** Interactive view for one local upload or committed private image. */
 export function InlineImageNodeView({
   node,
@@ -44,8 +73,13 @@ export function InlineImageNodeView({
   const align = isAlignment(node.attrs.align) ? node.attrs.align : 'center'
   const imageId = src ? parseInlineImageSrc(src) : null
   const isStable = imageId !== null && status !== 'error'
+  const transactionRemovalError = status === 'removal-error' && typeof node.attrs.error === 'string'
+    ? node.attrs.error
+    : null
   const isLocalUpload = uploadId.length > 0 && options.localUploadIds?.has(uploadId) === true
   const coordinator = options.inlineImages
+  const [removePending, setRemovePending] = useState(false)
+  const [removeError, setRemoveError] = useState<string | null>(null)
 
   const retry = () => {
     if (!uploadId || !coordinator || !options.fileByUploadId) return
@@ -73,14 +107,27 @@ export function InlineImageNodeView({
       })
   }
 
-  const remove = () => {
-    if (isLocalUpload && coordinator) {
-      options.localUploadIds?.delete(uploadId)
-      options.fileByUploadId?.delete(uploadId)
-      options.insertionPositionByUploadId?.delete(uploadId)
-      void coordinator.remove(uploadId, imageId ?? undefined).catch(() => undefined)
+  const remove = async () => {
+    if (removePending) return
+    setRemoveError(null)
+
+    setRemovePending(true)
+    try {
+      await removeInlineImageNode({
+        uploadId,
+        imageId: imageId ?? undefined,
+        isLocalUpload,
+        coordinator,
+        fileByUploadId: options.fileByUploadId,
+        insertionPositionByUploadId: options.insertionPositionByUploadId,
+        localUploadIds: options.localUploadIds,
+        removedUploadIds: options.removedUploadIds,
+        deleteNode,
+      })
+    } catch (error: unknown) {
+      setRemoveError(`Unable to remove image: ${uploadError(error)}`)
+      setRemovePending(false)
     }
-    deleteNode()
   }
 
   const onAltChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -95,13 +142,20 @@ export function InlineImageNodeView({
       className="inline-block max-w-full align-middle"
     >
       {isStable ? (
-        <img
-          src={src}
-          alt={alt}
-          data-align={align}
-          draggable={false}
-          className="block h-auto max-w-full"
-        />
+        <>
+          <img
+            src={src}
+            alt={alt}
+            data-align={align}
+            draggable={false}
+            className="block h-auto max-w-full"
+          />
+          {transactionRemovalError && (
+            <span role="alert" className="mt-1 block text-sm text-red-700">
+              {transactionRemovalError}
+            </span>
+          )}
+        </>
       ) : (
         <span
           role={status === 'error' ? 'alert' : 'status'}
@@ -121,13 +175,14 @@ export function InlineImageNodeView({
               />
             </>
           )}
+          {removeError && <span role="alert">{removeError}</span>}
           {status === 'error' && (
             <span className="flex gap-2" contentEditable={false}>
               <button
                 type="button"
                 onMouseDown={(event) => event.stopPropagation()}
                 onClick={retry}
-                disabled={!editor.isEditable}
+                disabled={!editor.isEditable || removePending}
                 className="rounded border border-slate-300 px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50"
               >
                 Retry
@@ -136,10 +191,10 @@ export function InlineImageNodeView({
                 type="button"
                 onMouseDown={(event) => event.stopPropagation()}
                 onClick={remove}
-                disabled={!editor.isEditable}
+                disabled={!editor.isEditable || removePending}
                 className="rounded border border-slate-300 px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50"
               >
-                Remove
+                {removePending ? 'Removing…' : 'Remove'}
               </button>
             </span>
           )}
@@ -181,14 +236,15 @@ export function InlineImageNodeView({
               </button>
             ))}
           </span>
+          {removeError && <span className="basis-full" role="alert">{removeError}</span>}
           <button
             type="button"
             onMouseDown={(event) => event.stopPropagation()}
             onClick={remove}
-            disabled={!editor.isEditable}
+            disabled={!editor.isEditable || removePending}
             className="rounded border border-slate-300 px-2 py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50"
           >
-            Remove
+            {removePending ? 'Removing…' : 'Remove'}
           </button>
         </span>
       )}

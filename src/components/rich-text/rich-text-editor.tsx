@@ -20,7 +20,11 @@ import {
 	Redo2,
 } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
-import { InlineImageExtension } from "@/components/rich-text/inline-image-extension";
+import {
+	createInlineImageMimeFilter,
+	createInlineImageTransactionCleanupController,
+	InlineImageExtension,
+} from "@/components/rich-text/inline-image-extension";
 import type { InlineImageCoordinator } from "@/hooks/use-inline-description-images";
 import { INLINE_IMAGE_MIMES, MAX_INLINE_ALT_LENGTH } from "@/lib/inline-images/policy";
 import { sanitizeRichText } from "@/lib/rich-text-sanitizer";
@@ -54,6 +58,19 @@ export function filenameAlt(name: string): string {
 
 function uploadError(error: unknown): string {
 	return error instanceof Error && error.message ? error.message : "Image upload failed";
+}
+
+/** Emits only the sanitizer's canonical HTML and suppresses duplicate updates. */
+export function emitSanitizedRichTextChange(
+	html: string,
+	lastEmitted: { current: string | null },
+	onChange: (next: string) => void,
+): void {
+	const next = sanitizeRichText(html);
+	if (next !== lastEmitted.current) {
+		lastEmitted.current = next;
+		onChange(next);
+	}
 }
 
 function ToolbarButton({
@@ -102,12 +119,27 @@ export default function RichTextEditor({
 	const fileByUploadId = useRef<Map<string, File>>(new Map());
 	const insertionPositionByUploadId = useRef<Map<string, number>>(new Map());
 	const localUploadIds = useRef<Set<string>>(new Set());
+	const removedUploadIds = useRef<Set<string>>(new Set());
 	const inlineImagesRef = useRef<InlineImageCoordinator | undefined>(inlineImages);
 	const disabledRef = useRef(disabled);
+	const canInsertImagesRef = useRef(Boolean(inlineImages) && !disabled);
 	const imageInputRef = useRef<HTMLInputElement | null>(null);
+	const transactionCleanup = useRef<ReturnType<
+		typeof createInlineImageTransactionCleanupController
+	> | null>(null);
 
 	inlineImagesRef.current = inlineImages;
 	disabledRef.current = disabled;
+	canInsertImagesRef.current = Boolean(inlineImages) && !disabled;
+	if (!transactionCleanup.current) {
+		transactionCleanup.current = createInlineImageTransactionCleanupController({
+			getCoordinator: () => inlineImagesRef.current,
+			fileByUploadId: fileByUploadId.current,
+			insertionPositionByUploadId: insertionPositionByUploadId.current,
+			localUploadIds: localUploadIds.current,
+			removedUploadIds: removedUploadIds.current,
+		});
+	}
 
 	function updateUploadNode(uploadId: string, attrs: Record<string, unknown>) {
 		const currentEditor = editorRef.current;
@@ -175,7 +207,7 @@ export default function RichTextEditor({
 			const inserted = currentEditor
 				.chain()
 				.focus()
-				.insertContentAt(position ?? currentEditor.state.selection.from, {
+				.insertContentAt(insertionPosition, {
 					type: "inlineImage",
 					attrs: {
 						uploadId,
@@ -205,6 +237,7 @@ export default function RichTextEditor({
 				fileByUploadId: fileByUploadId.current,
 				insertionPositionByUploadId: insertionPositionByUploadId.current,
 				localUploadIds: localUploadIds.current,
+				removedUploadIds: removedUploadIds.current,
 			}),
 			StarterKit.configure({
 				heading: { levels: [2, 3] },
@@ -225,7 +258,7 @@ export default function RichTextEditor({
 			Underline,
 			Link.configure({ autolink: true, openOnClick: false }),
 			FileHandler.configure({
-				allowedMimeTypes: Array.from(INLINE_IMAGE_MIMES),
+				allowedMimeTypes: createInlineImageMimeFilter(() => canInsertImagesRef.current),
 				consumePasteEvent: true,
 				onPaste: (_editor, files) => insertFiles(files),
 				onDrop: (_editor, files, position) => insertFiles(files, position),
@@ -245,16 +278,18 @@ export default function RichTextEditor({
 		},
 		onCreate: ({ editor: current }) => {
 			editorRef.current = current;
+			transactionCleanup.current?.attach(current);
 		},
 		onDestroy: () => {
+			const current = editorRef.current;
+			if (current) transactionCleanup.current?.detach(current);
 			editorRef.current = null;
 		},
+		onTransaction: ({ editor: current }) => {
+			transactionCleanup.current?.handleTransaction(current);
+		},
 		onUpdate: ({ editor: current }) => {
-			const next = sanitizeRichText(current.getHTML());
-			if (next !== lastEmitted.current) {
-				lastEmitted.current = next;
-				onChange(next);
-			}
+			emitSanitizedRichTextChange(current.getHTML(), lastEmitted, onChange);
 		},
 	});
 
