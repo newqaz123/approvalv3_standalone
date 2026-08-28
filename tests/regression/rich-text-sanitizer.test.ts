@@ -62,14 +62,68 @@ describe('sanitizeRichText', () => {
     assert.ok(out.includes('keep'))
   })
 
-  it('preserves canonical inline images and strips unapproved attributes', () => {
-    const out = sanitizeRichText('<p><img src="/api/inline-images/123e4567-e89b-42d3-a456-426614174000" alt="Plan" data-align="center" onerror="alert(1)" style="width:10px" class="x" id="img" srcset="/x 2x"></p>')
+  it('preserves canonical inline images and bounded presentation metadata', () => {
+    const out = sanitizeRichText('<p><img src="/api/inline-images/123e4567-e89b-42d3-a456-426614174000" alt="Plan" data-align="center" data-width="480" data-natural-width="1600" data-natural-height="900" data-crop-x="1000" data-crop-y="2000" data-crop-width="5000" data-crop-height="4000" onerror="alert(1)" style="width:10px" class="x" id="img" srcset="/x 2x" width="999" height="999"></p>')
     assert.ok(out.includes('<img'))
     assert.ok(out.includes('src="/api/inline-images/123e4567-e89b-42d3-a456-426614174000"'))
     assert.ok(out.includes('alt="Plan"'))
     assert.ok(out.includes('data-align="center"'))
-    for (const disallowed of ['onerror=', 'style=', 'class=', 'id=', 'srcset=']) {
+    for (const attribute of [
+      'data-width="480"',
+      'data-natural-width="1600"',
+      'data-natural-height="900"',
+      'data-crop-x="1000"',
+      'data-crop-y="2000"',
+      'data-crop-width="5000"',
+      'data-crop-height="4000"',
+    ]) {
+      assert.ok(out.includes(attribute), `missing ${attribute}`)
+    }
+    for (const disallowed of ['onerror=', 'style=', 'class=', 'id=', 'srcset=', 'width="999"', 'height="999"']) {
       assert.ok(!out.includes(disallowed), `unexpected ${disallowed}`)
+    }
+  })
+
+  it('removes malicious display width syntax independently', () => {
+    for (const width of [
+      '480px', '+480', '4e2', '480.5', '-480', '0480', '2049',
+      '9007199254740992', '999999999999999999999999999999999999',
+    ]) {
+      const out = sanitizeRichText(`<img src="/api/inline-images/123e4567-e89b-42d3-a456-426614174000" data-width="${width}" data-natural-width="1600" data-natural-height="900">`)
+      assert.ok(!out.includes('data-width='), `width should be removed: ${width}`)
+      assert.ok(out.includes('data-natural-width="1600"'), `safe natural dimensions should survive: ${width}`)
+      assert.ok(out.includes('data-natural-height="900"'), `safe natural dimensions should survive: ${width}`)
+    }
+  })
+
+  it('removes invalid natural pairs and their dependent crop metadata', () => {
+    for (const dimensions of [
+      'data-natural-width="1600"',
+      'data-natural-height="900"',
+      'data-natural-width="0" data-natural-height="900"',
+      'data-natural-width="65536" data-natural-height="900"',
+      'data-natural-width="1600.5" data-natural-height="900"',
+    ]) {
+      const out = sanitizeRichText(`<img src="/api/inline-images/123e4567-e89b-42d3-a456-426614174000" data-width="480" ${dimensions} data-crop-x="0" data-crop-y="0" data-crop-width="10000" data-crop-height="10000">`)
+      assert.ok(out.includes('data-width="480"'))
+      assert.ok(!out.includes('data-natural-'), dimensions)
+      assert.ok(!out.includes('data-crop-'), dimensions)
+    }
+  })
+
+  it('removes incomplete, malformed, and uncontained crop groups as a unit', () => {
+    for (const crop of [
+      'data-crop-x="0" data-crop-y="0" data-crop-width="10000"',
+      'data-crop-x="4000" data-crop-y="0" data-crop-width="7000" data-crop-height="10000"',
+      'data-crop-x="0" data-crop-y="-1" data-crop-width="10000" data-crop-height="10000"',
+      'data-crop-x="0" data-crop-y="0" data-crop-width="4e2" data-crop-height="10000"',
+      'data-crop-x="0" data-crop-y="0" data-crop-width="10000.0" data-crop-height="10000"',
+    ]) {
+      const out = sanitizeRichText(`<img src="/api/inline-images/123e4567-e89b-42d3-a456-426614174000" data-width="480" data-natural-width="1600" data-natural-height="900" ${crop}>`)
+      assert.ok(out.includes('data-width="480"'))
+      assert.ok(out.includes('data-natural-width="1600"'))
+      assert.ok(out.includes('data-natural-height="900"'))
+      assert.ok(!out.includes('data-crop-'), crop)
     }
   })
 

@@ -3,8 +3,10 @@ import { decodeHTML } from 'entities'
 import {
   MAX_INLINE_ALT_LENGTH,
   canonicalInlineImageSrc,
+  normalizeInlineImageAlignment,
   parseInlineImageSrc,
 } from '@/lib/inline-images/policy'
+import { sanitizeInlineImagePresentationAttributes } from '@/lib/inline-images/presentation'
 
 export const RICH_TEXT_ALLOWED_TAGS = [
   'p', 'br', 'strong', 'em', 'u', 's', 'ul', 'ol', 'li', 'h2', 'h3', 'a', 'img',
@@ -24,7 +26,18 @@ export function sanitizeRichText(html: string): string {
       allowedTags: [...RICH_TEXT_ALLOWED_TAGS],
       allowedAttributes: {
         a: ['href', 'target', 'rel'],
-        img: ['src', 'alt', 'data-align'],
+        img: [
+          'src',
+          'alt',
+          'data-align',
+          'data-width',
+          'data-natural-width',
+          'data-natural-height',
+          'data-crop-x',
+          'data-crop-y',
+          'data-crop-width',
+          'data-crop-height',
+        ],
       },
       allowedSchemes: ['http', 'https', 'mailto'],
       allowProtocolRelative: false,
@@ -40,9 +53,8 @@ export function sanitizeRichText(html: string): string {
           const id = parseInlineImageSrc(attribs.src ?? '')
           if (!id) return { tagName: 'span', attribs: {} as Record<string, string> }
 
-          const align = ['left', 'center', 'right'].includes(attribs['data-align'])
-            ? attribs['data-align']
-            : 'center'
+          const align = normalizeInlineImageAlignment(attribs['data-align'])
+          const presentation = sanitizeInlineImagePresentationAttributes(attribs)
 
           return {
             tagName: 'img',
@@ -50,6 +62,7 @@ export function sanitizeRichText(html: string): string {
               src: canonicalInlineImageSrc(id),
               alt: (attribs.alt ?? '').slice(0, MAX_INLINE_ALT_LENGTH),
               'data-align': align,
+              ...presentation,
             },
           }
         },

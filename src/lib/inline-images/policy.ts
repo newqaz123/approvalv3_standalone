@@ -5,6 +5,15 @@ export const MAX_INLINE_DESCRIPTION_BYTES = 100 * 1024 * 1024
 export const MAX_INLINE_ALT_LENGTH = 300
 export const MAX_CONCURRENT_INLINE_UPLOADS = 3
 export const INLINE_IMAGE_MIMES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif'])
+export const INLINE_IMAGE_ALIGNMENTS = ['left', 'center', 'right'] as const
+
+export type InlineImageAlignment = typeof INLINE_IMAGE_ALIGNMENTS[number]
+
+export function normalizeInlineImageAlignment(alignment: string | undefined): InlineImageAlignment {
+  return INLINE_IMAGE_ALIGNMENTS.includes(alignment as InlineImageAlignment)
+    ? alignment as InlineImageAlignment
+    : 'center'
+}
 
 export type InlineImageUpload = {
   id: string

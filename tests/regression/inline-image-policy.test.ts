@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   canonicalInlineImageSrc,
   extractInlineImageIds,
+  normalizeInlineImageAlignment,
   parseInlineImageSrc,
 } from '@/lib/inline-images/policy'
 
@@ -20,5 +21,14 @@ describe('inline image canonical URLs', () => {
   it('extracts unique IDs in document order', () => {
     const html = `<p><img src="/api/inline-images/${ID}"><img src="/api/inline-images/${ID}"></p>`
     assert.deepEqual(extractInlineImageIds(html), [ID])
+  })
+
+  it('normalizes alignment to the exact supported values', () => {
+    for (const alignment of ['left', 'center', 'right'] as const) {
+      assert.equal(normalizeInlineImageAlignment(alignment), alignment)
+    }
+    for (const alignment of ['top', 'LEFT', '', undefined]) {
+      assert.equal(normalizeInlineImageAlignment(alignment), 'center')
+    }
   })
 })
