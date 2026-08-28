@@ -10,6 +10,10 @@ import {
   createInlineImageTransactionCleanupController,
 } from '../../src/components/rich-text/inline-image-extension'
 import { removeInlineImageNode } from '../../src/components/rich-text/inline-image-node-view'
+import {
+  HighlightColorTokenMark,
+  TextColorTokenMark,
+} from '../../src/components/rich-text/rich-text-color-extensions'
 import { sanitizeRichText } from '../../src/lib/rich-text-sanitizer'
 import { emitSanitizedRichTextChange } from '../../src/components/rich-text/rich-text-editor'
 import { createInlineImageCoordinator } from '../../src/hooks/use-inline-description-images'
@@ -38,6 +42,8 @@ function createEditor(content: JSONContent = {
         horizontalRule: false,
       }),
       InlineImageExtension.configure({}),
+      TextColorTokenMark,
+      HighlightColorTokenMark,
     ],
     content,
   })
@@ -491,6 +497,17 @@ describe('inline image editor contract', () => {
 
     assert.deepEqual(changes, [`<p>Diagram</p><img src="${IMAGE_SRC}" alt="diagram" data-align="right" />`])
     assert.equal(lastEmitted.current, changes[0])
+  })
+
+  it('preserves semantic palette marks without weakening canonical image sanitization', () => {
+    const lastEmitted = { current: null as string | null }
+    const changes: string[] = []
+    const html = `<p><span data-text-color="blue" style="color:#ff00ff">Diagram</span><mark data-highlight="yellow">Check</mark><img src="${IMAGE_SRC.toUpperCase()}" alt="diagram" data-align="right" data-width="480" data-natural-width="1600" data-natural-height="900" style="width:999px" onerror="alert(1)"></p>`
+
+    emitSanitizedRichTextChange(html, lastEmitted, (next) => changes.push(next))
+
+    assert.deepEqual(changes, [`<p><span data-text-color="blue">Diagram</span><mark data-highlight="yellow">Check</mark><img src="${IMAGE_SRC}" alt="diagram" data-align="right" data-width="480" data-natural-width="1600" data-natural-height="900" /></p>`])
+    assert.doesNotMatch(changes[0], /style=|onerror=/)
   })
 
   it('keeps a live transient node out of the sanitized onChange emission', () => {

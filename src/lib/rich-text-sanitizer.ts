@@ -7,9 +7,14 @@ import {
   parseInlineImageSrc,
 } from '@/lib/inline-images/policy'
 import { sanitizeInlineImagePresentationAttributes } from '@/lib/inline-images/presentation'
+import {
+  isHighlightColorToken,
+  isTextColorToken,
+} from '@/lib/rich-text-palette'
 
 export const RICH_TEXT_ALLOWED_TAGS = [
   'p', 'br', 'strong', 'em', 'u', 's', 'ul', 'ol', 'li', 'h2', 'h3', 'a', 'img',
+  'span', 'mark',
 ] as const
 
 /** Exact allowed link schemes. Scheme-less/relative hrefs are stripped (text kept). */
@@ -26,6 +31,8 @@ export function sanitizeRichText(html: string): string {
       allowedTags: [...RICH_TEXT_ALLOWED_TAGS],
       allowedAttributes: {
         a: ['href', 'target', 'rel'],
+        span: ['data-text-color'],
+        mark: ['data-highlight'],
         img: [
           'src',
           'alt',
@@ -48,6 +55,24 @@ export function sanitizeRichText(html: string): string {
             next.href = attribs.href
           }
           return { tagName, attribs: next }
+        },
+        span: (tagName, attribs) => {
+          if (attribs['data-inline-upload-placeholder'] === 'true') {
+            return { tagName: 'inline-upload-placeholder', attribs: {} as Record<string, string> }
+          }
+
+          const token = attribs['data-text-color']
+          const next: Record<string, string> = isTextColorToken(token)
+            ? { 'data-text-color': token }
+            : {}
+          return { tagName, attribs: next }
+        },
+        mark: (tagName, attribs) => {
+          const token = attribs['data-highlight']
+          const next: Record<string, string> = isHighlightColorToken(token)
+            ? { 'data-highlight': token }
+            : {}
+          return { tagName: isHighlightColorToken(token) ? tagName : 'span', attribs: next }
         },
         img: (_tagName, attribs) => {
           const id = parseInlineImageSrc(attribs.src ?? '')

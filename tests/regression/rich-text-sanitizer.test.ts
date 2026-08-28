@@ -62,6 +62,31 @@ describe('sanitizeRichText', () => {
     assert.ok(out.includes('keep'))
   })
 
+  it('keeps exact semantic tokens and strips arbitrary pasted color styles', () => {
+    assert.equal(
+      sanitizeRichText('<span data-text-color="blue" style="font-size:99px">A</span><span style="color:#ff00ff">B</span><mark data-highlight="yellow" class="x">C</mark>'),
+      '<span data-text-color="blue">A</span><span>B</span><mark data-highlight="yellow">C</mark>',
+    )
+  })
+
+  it('rejects invalid or case-mismatched tokens while preserving child text and formatting', () => {
+    assert.equal(
+      sanitizeRichText('<span data-text-color="Blue"><strong>A</strong></span><mark data-highlight="orange"><a href="https://example.com">B</a></mark>'),
+      '<span><strong>A</strong></span><span><a target="_blank" rel="noopener noreferrer" href="https://example.com">B</a></span>',
+    )
+  })
+
+  it('preserves child line breaks in neutral palette spans', () => {
+    assert.equal(sanitizeRichText('<span data-text-color="invalid"><br></span>'), '<span><br /></span>')
+  })
+
+  it('keeps independently nested semantic marks with all existing rich text formatting', () => {
+    assert.equal(
+      sanitizeRichText('<p><span data-text-color="teal"><mark data-highlight="pink"><strong><em><u><s><a href="mailto:user@example.com">Nested</a></s></u></em></strong></mark></span></p>'),
+      '<p><span data-text-color="teal"><mark data-highlight="pink"><strong><em><u><s><a target="_blank" rel="noopener noreferrer" href="mailto:user@example.com">Nested</a></s></u></em></strong></mark></span></p>',
+    )
+  })
+
   it('preserves canonical inline images and bounded presentation metadata', () => {
     const out = sanitizeRichText('<p><img src="/api/inline-images/123e4567-e89b-42d3-a456-426614174000" alt="Plan" data-align="center" data-width="480" data-natural-width="1600" data-natural-height="900" data-crop-x="1000" data-crop-y="2000" data-crop-width="5000" data-crop-height="4000" onerror="alert(1)" style="width:10px" class="x" id="img" srcset="/x 2x" width="999" height="999"></p>')
     assert.ok(out.includes('<img'))
