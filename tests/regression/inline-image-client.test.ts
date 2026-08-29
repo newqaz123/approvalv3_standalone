@@ -155,6 +155,27 @@ describe('inline image coordinator blocking operations', () => {
     assert.equal(disposedCoordinator.hasBlockingOperations, false)
   })
 
+  it('keeps active edits blocking until reset cleanup finishes', async () => {
+    const deleteDeferred = deferred<void>()
+    const coordinator = makeCoordinator(
+      async () => upload(IMAGE_A),
+      async () => deleteDeferred.promise,
+    )
+    await coordinator.upload('upload-a', file('a.png'), () => undefined)
+    coordinator.beginImageEdit('crop-reset')
+
+    const resetPromise = coordinator.reset()
+    await tick()
+    assert.equal(coordinator.hasActiveImageEdits, true)
+    assert.equal(coordinator.hasBlockingOperations, true)
+    assert.equal(coordinator.blockingReason, 'image-edit')
+
+    deleteDeferred.resolve()
+    await resetPromise
+    assert.equal(coordinator.hasActiveImageEdits, false)
+    assert.equal(coordinator.hasBlockingOperations, false)
+  })
+
   it('returns exact guidance for each blocking reason', () => {
     assert.equal(
       inlineImageBlockingMessage('upload'),

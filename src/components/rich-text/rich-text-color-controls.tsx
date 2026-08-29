@@ -466,7 +466,7 @@ function CompactColorMenu({
 								aria-haspopup="dialog"
 								aria-expanded={open}
 								disabled={disabled}
-								onPointerDown={captureTriggerSelection}
+								onPointerDown={preserveTriggerSelection}
 								onMouseDown={preserveTriggerSelection}
 								onClick={captureTriggerSelection}
 								className={CONTROL_BUTTON_CLASS}

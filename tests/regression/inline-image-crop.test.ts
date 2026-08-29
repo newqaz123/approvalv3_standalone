@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { Editor, type JSONContent } from '@tiptap/core'
@@ -67,6 +68,20 @@ function croppedDraft() {
     crop: { x: 1000, y: 1000, width: 5000, height: 5000 },
   }))
 }
+
+describe('inline image handle touch targets', () => {
+  it('expands resize and crop handles to 44px on coarse pointers while centering their grips', () => {
+    const css = readFileSync('src/app/globals.css', 'utf8')
+    const coarseStart = css.indexOf('@media (pointer: coarse)')
+    assert.notEqual(coarseStart, -1)
+    const coarseRules = css.slice(coarseStart)
+
+    assert.match(coarseRules, /\.inline-image-resize-handle\s*\{[\s\S]*?width:\s*44px;[\s\S]*?height:\s*44px;/)
+    assert.match(coarseRules, /\.inline-image-resize-handle::after\s*\{[\s\S]*?inset:\s*18px;/)
+    assert.match(coarseRules, /\.inline-image-crop-handle\s*\{[\s\S]*?width:\s*44px;[\s\S]*?height:\s*44px;/)
+    assert.match(coarseRules, /\.inline-image-crop-handle::after\s*\{[\s\S]*?inset:\s*17px;/)
+  })
+})
 
 describe('inline image crop draft model', () => {
   it('seeds a full-image draft from a presentation without crop', () => {

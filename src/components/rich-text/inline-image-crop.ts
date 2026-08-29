@@ -106,7 +106,8 @@ export function createInlineImageCropDraft(
 /**
  * Applies one preset. `original` selects the full source; aspect presets pick
  * the largest physically-correct rectangle that fits the source, centered on
- * the current crop center. Invalid natural dimensions keep the geometry.
+ * the current crop center. Invalid natural dimensions fall back to the full
+ * original geometry.
  */
 export function applyInlineImageCropPreset(
   draft: InlineImageCropDraft,

@@ -434,7 +434,6 @@ export function createInlineImageCoordinator(
       if (disposed) return
       if (resetPromise) return resetPromise
 
-      clearActiveImageEdits()
       resetting = true
       const sessionForDeletes = sessionId
       const attemptsAtReset = [...attempts.entries()]
@@ -458,6 +457,7 @@ export function createInlineImageCoordinator(
         // A successful deletion must finish before local state is discarded.
         // clearState also rotates the session for the next form instance.
         clearState()
+        clearActiveImageEdits()
       })()
       try {
         await resetPromise

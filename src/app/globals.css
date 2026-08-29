@@ -297,6 +297,36 @@
   outline-offset: 2px;
 }
 
+@media (pointer: coarse) {
+  .inline-image-resize-handle {
+    width: 44px;
+    height: 44px;
+  }
+  .inline-image-resize-handle::after {
+    inset: 18px;
+  }
+  .inline-image-resize-handle--top-left { top: -22px; left: -22px; }
+  .inline-image-resize-handle--top-right { top: -22px; right: -22px; }
+  .inline-image-resize-handle--bottom-left { bottom: -22px; left: -22px; }
+  .inline-image-resize-handle--bottom-right { bottom: -22px; right: -22px; }
+
+  .inline-image-crop-handle {
+    width: 44px;
+    height: 44px;
+  }
+  .inline-image-crop-handle::after {
+    inset: 17px;
+  }
+  .inline-image-crop-handle--top { top: -22px; }
+  .inline-image-crop-handle--bottom { bottom: -22px; }
+  .inline-image-crop-handle--left { left: -22px; }
+  .inline-image-crop-handle--right { right: -22px; }
+  .inline-image-crop-handle--top-left { top: -22px; left: -22px; }
+  .inline-image-crop-handle--top-right { top: -22px; right: -22px; }
+  .inline-image-crop-handle--bottom-left { bottom: -22px; left: -22px; }
+  .inline-image-crop-handle--bottom-right { bottom: -22px; right: -22px; }
+}
+
 /*
  * Curated color controls. The toolbar owns the inline-size container so the
  * controls change layout with the editor surface rather than the viewport.
