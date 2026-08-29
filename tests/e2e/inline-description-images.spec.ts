@@ -358,7 +358,7 @@ async function applyColorToken(
   const paletteLabel = `${label} palette`
   const trigger = controls.getByRole('button', { name: label })
   await trigger.click()
-  const palette = page.locator(`[aria-label="${paletteLabel}"]`)
+  const palette = page.locator(`[aria-label="${paletteLabel}"]`).first()
   await expect(palette).toBeVisible()
   const swatch = palette.locator(`[data-color-kind="${kind}"][data-color-token="${token}"]`)
   await expect(swatch).toHaveAttribute('data-color-value', kind === 'text'
@@ -679,10 +679,12 @@ test.describe('Inline description images (release gate)', () => {
     const removedImg = dialog.locator('img[alt="inline-delayed"]')
     const removedSrc = await canonicalSrc(removedImg)
     await removedImg.click()
-    const removeControls = dialog.getByRole('group', { name: 'Image controls' })
-    await expect(removeControls).toBeVisible()
+    const removeControl = dialog
+      .getByRole('toolbar', { name: 'Image actions' })
+      .getByRole('button', { name: 'Remove image' })
+    await expect(removeControl).toBeVisible()
     const deletesBeforeRemove = routes.deletes.length
-    await removeControls.getByRole('button', { name: 'Remove' }).click()
+    await removeControl.click()
     await expect(dialog.locator(`img[src="${removedSrc}"]`)).toHaveCount(0)
     await expect(stableImages(dialog)).toHaveCount(stableCountBeforeRemove - 1)
     await expect
@@ -845,9 +847,9 @@ test.describe('Inline description images (release gate)', () => {
     await expect(detailImg).toBeVisible({ timeout: 20_000 })
     await expect(detailImg).toHaveAttribute('src', savedPresentation.src)
     await expect(detailImg).toHaveAttribute('alt', 'E2E committed inline image')
-    await expect(detailImg).toHaveAttribute('data-align', 'right')
     await expectLoadedImage(detailImg)
     const savedFrame = detailImg.locator('xpath=..')
+    await expect(savedFrame).toHaveAttribute('data-align', 'right')
     await expect(savedFrame).toHaveClass(/rich-text__image-frame/)
     expect(normalizedInlineStyle(await savedFrame.getAttribute('style'))).toBe(
       normalizedInlineStyle(editorFrameStyle),
