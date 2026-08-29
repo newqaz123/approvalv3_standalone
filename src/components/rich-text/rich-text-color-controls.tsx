@@ -16,11 +16,6 @@ import {
 	type ReactNode,
 } from "react";
 import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
 	Popover,
 	PopoverContent,
 	PopoverTrigger,
@@ -46,13 +41,13 @@ export type RichTextColorControlsProps = {
 	compact: boolean;
 };
 
-type ColorKind = "text" | "highlight";
-type ColorToken = TextColorToken | HighlightColorToken;
+export type ColorKind = "text" | "highlight";
+export type ColorToken = TextColorToken | HighlightColorToken;
 type ColorEntry<Token extends ColorToken = ColorToken> = readonly [Token, string];
 
 type ColorSelection = { from: number; to: number };
 
-type ColorPaletteProps<Token extends ColorToken> = {
+export type ColorPaletteProps<Token extends ColorToken> = {
 	editor: Editor;
 	disabled: boolean;
 	kind: ColorKind;
@@ -75,6 +70,44 @@ const textColorEntries = Object.entries(TEXT_COLOR_VALUES) as Array<
 const highlightColorEntries = Object.entries(HIGHLIGHT_COLOR_VALUES) as Array<
 	ColorEntry<HighlightColorToken>
 >;
+
+export function getColorPaletteEntries(kind: ColorKind): readonly ColorEntry[] {
+	return kind === "text" ? textColorEntries : highlightColorEntries;
+}
+
+export type ColorPaletteKeyAction = {
+	focusIndex: number | null;
+	close: boolean;
+};
+
+export function getColorPaletteKeyAction(
+	index: number,
+	key: string,
+	entryCount: number,
+): ColorPaletteKeyAction {
+	if (key === "Escape") return { focusIndex: null, close: true };
+	if (entryCount <= 0) return { focusIndex: null, close: false };
+
+	let focusIndex: number | null = null;
+	switch (key) {
+		case "ArrowRight":
+		case "ArrowDown":
+			focusIndex = (index + 1) % entryCount;
+			break;
+		case "ArrowLeft":
+		case "ArrowUp":
+			focusIndex = (index - 1 + entryCount) % entryCount;
+			break;
+		case "Home":
+			focusIndex = 0;
+			break;
+		case "End":
+			focusIndex = entryCount - 1;
+			break;
+	}
+
+	return { focusIndex, close: false };
+}
 
 function tokenLabel(token: ColorToken): string {
 	return token.charAt(0).toUpperCase() + token.slice(1);
@@ -137,28 +170,28 @@ function colorValueForToken(
 	return entry?.[1] ?? null;
 }
 
-function applyColorToken(
+export function applyRichTextColorToken(
 	editor: Editor,
 	kind: ColorKind,
 	token: ColorToken,
 ): boolean {
 	if (kind === "text" && isTextColorToken(token)) {
-		return editor.chain().focus().setTextColorToken(token).run();
+		return editor.chain().setTextColorToken(token).run();
 	}
 	if (kind === "highlight" && isHighlightColorToken(token)) {
-		return editor.chain().focus().setHighlightColorToken(token).run();
+		return editor.chain().setHighlightColorToken(token).run();
 	}
 	return false;
 }
 
-function unsetColorToken(editor: Editor, kind: ColorKind): boolean {
+export function resetRichTextColorToken(editor: Editor, kind: ColorKind): boolean {
 	if (kind === "text") {
-		return editor.chain().focus().unsetTextColorToken().run();
+		return editor.chain().unsetTextColorToken().run();
 	}
-	return editor.chain().focus().unsetHighlightColorToken().run();
+	return editor.chain().unsetHighlightColorToken().run();
 }
 
-function PaletteSwatches<Token extends ColorToken>({
+export function PaletteSwatches<Token extends ColorToken>({
 	editor,
 	disabled,
 	kind,
@@ -176,35 +209,18 @@ function PaletteSwatches<Token extends ColorToken>({
 	const firstTabIndex = selectedIndex >= 0 ? selectedIndex : 0;
 
 	function moveFocus(event: KeyboardEvent<HTMLButtonElement>, index: number) {
-		let nextIndex: number | null = null;
-		switch (event.key) {
-			case "ArrowRight":
-			case "ArrowDown":
-				nextIndex = (index + 1) % entries.length;
-				break;
-			case "ArrowLeft":
-			case "ArrowUp":
-				nextIndex = (index - 1 + entries.length) % entries.length;
-				break;
-			case "Home":
-				nextIndex = 0;
-				break;
-			case "End":
-				nextIndex = entries.length - 1;
-				break;
-			default:
-				return;
-		}
+		const action = getColorPaletteKeyAction(index, event.key, entries.length);
+		if (action.close || action.focusIndex === null) return;
 
 		event.preventDefault();
 		event.stopPropagation();
-		swatchRefs.current[nextIndex]?.focus();
+		swatchRefs.current[action.focusIndex]?.focus();
 	}
 
 	function choose(token: Token) {
 		if (disabled) return;
 		restoreSelection?.();
-		if (applyColorToken(editor, kind, token)) {
+		if (applyRichTextColorToken(editor, kind, token)) {
 			restoreEditorFocus(editor);
 			onComplete?.();
 		}
@@ -213,7 +229,7 @@ function PaletteSwatches<Token extends ColorToken>({
 	function reset() {
 		if (disabled) return;
 		restoreSelection?.();
-		unsetColorToken(editor, kind);
+		resetRichTextColorToken(editor, kind);
 		restoreEditorFocus(editor);
 		onComplete?.();
 	}
@@ -439,15 +455,15 @@ function CompactColorMenu({
 	};
 
 	return (
-		<DropdownMenu open={open} onOpenChange={setOpen}>
+		<Popover open={open} onOpenChange={setOpen}>
 			<Tooltip>
 				<TooltipTrigger asChild>
 					<span className="inline-flex">
-						<DropdownMenuTrigger asChild>
+						<PopoverTrigger asChild>
 							<button
 								type="button"
 								aria-label="More formatting"
-								aria-haspopup="menu"
+								aria-haspopup="dialog"
 								aria-expanded={open}
 								disabled={disabled}
 								onPointerDown={captureTriggerSelection}
@@ -458,14 +474,16 @@ function CompactColorMenu({
 								<MoreHorizontal className="h-4 w-4" aria-hidden="true" />
 								<span className="sr-only">More formatting</span>
 							</button>
-						</DropdownMenuTrigger>
+						</PopoverTrigger>
 					</span>
 				</TooltipTrigger>
 				<TooltipContent>More formatting</TooltipContent>
 			</Tooltip>
-			<DropdownMenuContent
+			<PopoverContent
 				align="end"
 				className="rich-text-color-overflow-menu"
+				aria-label="More formatting"
+				onEscapeKeyDown={() => setOpen(false)}
 				onCloseAutoFocus={(event) => {
 					if (returnFocusToEditor.current) {
 						event.preventDefault();
@@ -497,8 +515,8 @@ function CompactColorMenu({
 					onComplete={complete}
 					restoreSelection={restoreTriggerSelection}
 				/>
-			</DropdownMenuContent>
-		</DropdownMenu>
+			</PopoverContent>
+		</Popover>
 	);
 }
 

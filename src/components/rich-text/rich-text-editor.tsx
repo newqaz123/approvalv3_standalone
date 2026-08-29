@@ -53,6 +53,12 @@ const TOOLBAR_BUTTON =
 /** Only these link schemes may be applied client-side; the sanitizer stays the authoritative gate. */
 const ALLOWED_URL_RE = /^(?:https?|mailto):/i;
 
+/** The semantic color marks used by every RichTextEditor instance. */
+export const RICH_TEXT_COLOR_EXTENSIONS = [
+	TextColorTokenMark,
+	HighlightColorTokenMark,
+] as const;
+
 /** Produces the initial accessible alt text without retaining a filename path or extension. */
 export function filenameAlt(name: string): string {
 	const basename = name.split(/[\\/]/).pop() ?? name;
@@ -285,8 +291,7 @@ export default function RichTextEditor({
 				horizontalRule: false,
 			}),
 			Underline,
-			TextColorTokenMark,
-			HighlightColorTokenMark,
+			...RICH_TEXT_COLOR_EXTENSIONS,
 			Link.configure({ autolink: true, openOnClick: false }),
 			FileHandler.configure({
 				allowedMimeTypes: createInlineImageMimeFilter(() => canInsertImagesRef.current),

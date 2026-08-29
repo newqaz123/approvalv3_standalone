@@ -4,10 +4,9 @@ import { readFileSync } from 'node:fs'
 import { Editor } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import {
-  HighlightColorTokenMark,
-  TextColorTokenMark,
-} from '../../src/components/rich-text/rich-text-color-extensions'
-import { bindInlineImageCropCommands } from '../../src/components/rich-text/rich-text-editor'
+  bindInlineImageCropCommands,
+  RICH_TEXT_COLOR_EXTENSIONS,
+} from '../../src/components/rich-text/rich-text-editor'
 import { createInlineImageCropCommandsController } from '../../src/components/rich-text/inline-image-extension'
 
 const read = (path: string) => readFileSync(path, 'utf8')
@@ -95,7 +94,7 @@ describe('RichTextEditor palette schema integration', () => {
   it('supports semantic color commands alongside the editor formatting schema', () => {
     const editor = new Editor({
       element: null,
-      extensions: [StarterKit, TextColorTokenMark, HighlightColorTokenMark],
+      extensions: [StarterKit, ...RICH_TEXT_COLOR_EXTENSIONS],
       content: {
         type: 'doc',
         content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Palette' }] }],
