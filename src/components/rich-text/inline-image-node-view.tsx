@@ -22,6 +22,7 @@ import {
 import { InlineImageToolbar } from './inline-image-toolbar'
 import {
   InlineImageCropEditor,
+  captureInlineImageCropLayoutWidth,
   endInlineImageCropSession,
   focusInlineImageCropButton,
   startInlineImageCropSession,
@@ -613,12 +614,20 @@ export function InlineImageNodeView({
       && imageRef.current.naturalHeight > 0
       ? { width: imageRef.current.naturalWidth, height: imageRef.current.naturalHeight }
       : null
+    const cropFrame = frameRef.current?.querySelector('.inline-image-crop-frame')
+    const measuredElement = imageRef.current
+      ?? (cropFrame instanceof HTMLElement ? cropFrame : null)
+    const measuredWidth = measuredElement?.getBoundingClientRect().width ?? 0
     const started = startInlineImageCropSession({
       src,
       presentation: inlineImageNodePresentation(node.attrs),
       decodedDimensions: decoded,
       coordinator,
       cropCommands: options.cropCommands,
+      layoutWidth: captureInlineImageCropLayoutWidth({
+        measuredWidth,
+        fallbackWidth: currentWidth(),
+      }),
     })
     if (!started.ok) {
       setCropGuidance(started.guidance)

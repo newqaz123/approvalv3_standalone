@@ -29,6 +29,7 @@ import {
 import {
   INLINE_IMAGE_CROP_UNAVAILABLE_GUIDANCE,
   InlineImageCropEditor,
+  captureInlineImageCropLayoutWidth,
   rebaseInlineImageCropSurfaceDrag,
   endInlineImageCropSession,
   focusInlineImageCropButton,
@@ -745,8 +746,105 @@ function cropSession(overrides: Partial<InlineImagePresentation> = {}): InlineIm
     naturalWidth: NATURAL_WIDTH,
     naturalHeight: NATURAL_HEIGHT,
     ended: false,
+    layoutWidth: 0,
   }
 }
+
+function cropSurfaceAttrs(markup: string): string {
+  const match = markup.match(/class="inline-image-crop-surface"([^>]*)>/)
+  assert.ok(match, 'crop surface markup must be present')
+  return match[1] ?? ''
+}
+
+describe('inline image crop layout width', () => {
+  it('keeps crop markup at an explicit resized width without writing it as new stored metadata', () => {
+    const started = startInlineImageCropSession({
+      src: IMAGE_SRC,
+      presentation: presentation({ displayWidth: 320 }),
+      decodedDimensions: null,
+      layoutWidth: 320,
+    })
+    assert.equal(started.ok, true)
+    if (!started.ok) return
+    assert.equal(started.session.layoutWidth, 320)
+    assert.equal(started.session.snapshot.displayWidth, 320)
+
+    const markup = renderCropEditor(started.session)
+    const surface = cropSurfaceAttrs(markup)
+    assert.match(surface, /style="[^"]*width:\s*320px/)
+    assert.match(surface, /max-width:\s*100%/)
+    assert.doesNotMatch(markup, /data-width="320"/)
+
+    const attrs = inlineImageCropApplyAttributes({
+      draft: createInlineImageCropDraft(started.session.snapshot),
+      displayWidth: started.session.snapshot.displayWidth,
+      naturalWidth: started.session.naturalWidth,
+      naturalHeight: started.session.naturalHeight,
+    })
+    assert.equal(attrs.displayWidth, 320)
+    endInlineImageCropSession({ session: started.session })
+  })
+
+  it('keeps crop markup at a captured actual width when stored displayWidth is null', () => {
+    const started = startInlineImageCropSession({
+      src: IMAGE_SRC,
+      presentation: presentation({ displayWidth: null }),
+      decodedDimensions: null,
+      layoutWidth: 247,
+    })
+    assert.equal(started.ok, true)
+    if (!started.ok) return
+    assert.equal(started.session.layoutWidth, 247)
+    assert.equal(started.session.snapshot.displayWidth, null)
+
+    const markup = renderCropEditor(started.session)
+    const surface = cropSurfaceAttrs(markup)
+    assert.match(surface, /style="[^"]*width:\s*247px/)
+    assert.match(surface, /max-width:\s*100%/)
+    assert.doesNotMatch(markup, /data-width="247"/)
+
+    const attrs = inlineImageCropApplyAttributes({
+      draft: createInlineImageCropDraft(started.session.snapshot),
+      displayWidth: started.session.snapshot.displayWidth,
+      naturalWidth: started.session.naturalWidth,
+      naturalHeight: started.session.naturalHeight,
+    })
+    assert.equal(attrs.displayWidth, null)
+    endInlineImageCropSession({ session: started.session })
+  })
+
+  it('prefers a finite positive bounding-box width over the currentWidth fallback', () => {
+    assert.equal(captureInlineImageCropLayoutWidth({
+      measuredWidth: 247,
+      fallbackWidth: 1600,
+    }), 247)
+    assert.equal(captureInlineImageCropLayoutWidth({
+      measuredWidth: 320.4,
+      fallbackWidth: 400,
+    }), 320.4)
+    const image = { getBoundingClientRect: () => ({ width: 247 }) }
+    assert.equal(captureInlineImageCropLayoutWidth({
+      measuredWidth: image.getBoundingClientRect().width,
+      fallbackWidth: 1600,
+    }), 247)
+    assert.equal(captureInlineImageCropLayoutWidth({
+      measuredWidth: 0,
+      fallbackWidth: 400,
+    }), 400)
+    assert.equal(captureInlineImageCropLayoutWidth({
+      measuredWidth: Number.NaN,
+      fallbackWidth: 400,
+    }), 400)
+    assert.equal(captureInlineImageCropLayoutWidth({
+      measuredWidth: Number.POSITIVE_INFINITY,
+      fallbackWidth: 400,
+    }), 400)
+    assert.equal(captureInlineImageCropLayoutWidth({
+      measuredWidth: -12,
+      fallbackWidth: 400,
+    }), 400)
+  })
+})
 
 describe('inline image crop chrome', () => {
   const frameProps = () => ({

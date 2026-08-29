@@ -249,9 +249,19 @@ async function enterCrop(scope: LocatorScope, image: Locator): Promise<Locator> 
   await image.click()
   const toolbar = scope.locator('[role="toolbar"][aria-label="Image actions"]')
   await expect(toolbar).toBeVisible()
+  const beforeBox = await image.boundingBox()
+  if (!beforeBox) throw new Error('Image has no bounding box before crop')
   await toolbar.getByRole('button', { name: 'Crop image' }).click()
   const crop = scope.locator('[data-inline-image-crop="true"]')
   await expect(crop).toBeVisible()
+  const surface = crop.locator('.inline-image-crop-surface')
+  await expect(surface).toBeVisible()
+  const afterBox = await surface.boundingBox()
+  if (!afterBox) throw new Error('Crop surface has no bounding box')
+  expect(
+    Math.abs(afterBox.width - beforeBox.width),
+    `crop surface width ${afterBox.width} must match inline image width ${beforeBox.width} within 1 CSS pixel`,
+  ).toBeLessThanOrEqual(1)
   return crop
 }
 

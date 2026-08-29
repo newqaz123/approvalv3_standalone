@@ -65,6 +65,25 @@ export type InlineImageCropNodeSession = {
   naturalHeight: number
   /** Guard flag so teardown/cancel/apply can never end the token twice. */
   ended: boolean
+  /**
+   * Transient pre-switch rendered width for the crop surface only.
+   * Never serialized as displayWidth or other stored metadata.
+   */
+  layoutWidth: number
+}
+
+/**
+ * Captures the crop surface width from the live box. A finite positive
+ * measurement wins; otherwise the existing currentWidth fallback is used.
+ */
+export function captureInlineImageCropLayoutWidth(input: {
+  measuredWidth: number
+  fallbackWidth: number
+}): number {
+  if (Number.isFinite(input.measuredWidth) && input.measuredWidth > 0) {
+    return input.measuredWidth
+  }
+  return input.fallbackWidth
 }
 
 export type InlineImageCropSessionStart =
@@ -92,6 +111,8 @@ export function startInlineImageCropSession(input: {
   decodedDimensions: { width: number; height: number } | null
   coordinator?: Pick<InlineImageCoordinator, 'beginImageEdit'>
   cropCommands?: InlineImageCropCommandsController
+  /** Transient rendered width captured before switching into crop UI. */
+  layoutWidth?: number
 }): InlineImageCropSessionStart {
   const snapshot = parseInlineImagePresentation(
     serializeInlineImagePresentation(input.presentation),
@@ -108,6 +129,10 @@ export function startInlineImageCropSession(input: {
     naturalWidth,
     naturalHeight,
     ended: false,
+    layoutWidth: captureInlineImageCropLayoutWidth({
+      measuredWidth: input.layoutWidth ?? 0,
+      fallbackWidth: 0,
+    }),
   }
   input.coordinator?.beginImageEdit(session.editId)
   input.cropCommands?.begin()
@@ -507,7 +532,14 @@ export function InlineImageCropEditor({
           Apply
         </button>
       </span>
-      <span className="inline-image-crop-surface" ref={surfaceRef}>
+      <span
+        className="inline-image-crop-surface"
+        ref={surfaceRef}
+        style={session.layoutWidth > 0 ? {
+          width: `${session.layoutWidth}px`,
+          maxWidth: '100%',
+        } : undefined}
+      >
         <img src={src} alt={alt} draggable={false} className="inline-image-crop-source" />
         <span
           ref={regionRef}
