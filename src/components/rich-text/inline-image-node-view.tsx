@@ -167,6 +167,21 @@ export function applyInlineImageAttributes(
   editor.view.dispatch(transaction)
 }
 
+/** Resolves the visible frame width a new image-resize session should use. */
+export function inlineImageResizeStartWidth(input: {
+  renderedWidth: number | null
+  cropGeometry: InlineImageFrameGeometry | null
+  naturalWidth: number | null
+  measuredImageWidth: number
+}): number {
+  if (input.cropGeometry) return input.cropGeometry.frameWidth
+  if (input.renderedWidth !== null) return input.renderedWidth
+  if (input.naturalWidth !== null) return input.naturalWidth
+  return input.measuredImageWidth > 0
+    ? input.measuredImageWidth
+    : INLINE_IMAGE_MIN_DISPLAY_WIDTH
+}
+
 /** Interactive view for one local upload or committed private image. */
 export type InlineImageNodeFrameProps = {
   frameRef: Ref<HTMLSpanElement>
@@ -436,12 +451,12 @@ export function InlineImageNodeView({
   }
 
   /** The width a fresh resize session starts from. */
-  const currentWidth = () => {
-    if (renderedWidth !== null) return renderedWidth
-    if (typeof node.attrs.naturalWidth === 'number') return node.attrs.naturalWidth
-    const measured = imageRef.current?.getBoundingClientRect().width ?? 0
-    return measured > 0 ? measured : INLINE_IMAGE_MIN_DISPLAY_WIDTH
-  }
+  const currentWidth = () => inlineImageResizeStartWidth({
+    renderedWidth,
+    cropGeometry,
+    naturalWidth: typeof node.attrs.naturalWidth === 'number' ? node.attrs.naturalWidth : null,
+    measuredImageWidth: imageRef.current?.getBoundingClientRect().width ?? 0,
+  })
 
   const startResizeSession = (edge: InlineImageResizeEdge, startPointerX: number) => (
     createInlineImageResizeSession({

@@ -1,6 +1,8 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { bindInlineImageCropCommands } from '../../src/components/rich-text/rich-text-editor'
+import { createInlineImageCropCommandsController } from '../../src/components/rich-text/inline-image-extension'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
@@ -34,9 +36,33 @@ describe('RichTextEditor implementation', () => {
     assert.match(source, /ALLOWED_URL_RE\.test\(/)
   })
 
-  it('gates toolbar commands on the component disabled flag', () => {
-    assert.match(source, /const commandsDisabled = disabled \|\| cropCommandsDisabled/)
-    assert.match(source, /disabled\s*=\{commandsDisabled\}/)
+  it('wires crop activity to editor editability and toolbar command state', () => {
+    const controller = createInlineImageCropCommandsController()
+    const editableCalls: boolean[] = []
+    const commandDisabledCalls: boolean[] = []
+    const editor = {
+      setEditable: (editable: boolean) => editableCalls.push(editable),
+    }
+    const unsubscribe = bindInlineImageCropCommands({
+      controller,
+      getEditor: () => editor,
+      isDisabled: () => false,
+      setCommandsDisabled: (disabled: boolean) => commandDisabledCalls.push(disabled),
+    })
+
+    controller.begin()
+    assert.deepEqual(commandDisabledCalls, [true])
+    assert.deepEqual(editableCalls, [false])
+
+    controller.end()
+    assert.deepEqual(commandDisabledCalls, [true, false])
+    assert.deepEqual(editableCalls, [false, true])
+
+    unsubscribe()
+    controller.begin()
+    assert.deepEqual(commandDisabledCalls, [true, false])
+    assert.deepEqual(editableCalls, [false, true])
+    controller.end()
   })
 
   it('guards the external setContent sync against re-emission loops', () => {

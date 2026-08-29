@@ -26,6 +26,7 @@ import {
 	createInlineImageTransactionCleanupController,
 	InlineImageExtension,
 	inlineImageUploadSuccessAttributes,
+	type InlineImageCropCommandsController,
 } from "@/components/rich-text/inline-image-extension";
 import type { InlineImageCoordinator } from "@/hooks/use-inline-description-images";
 import { INLINE_IMAGE_MIMES, MAX_INLINE_ALT_LENGTH } from "@/lib/inline-images/policy";
@@ -106,6 +107,20 @@ function ToolbarButton({
 			{children}
 		</button>
 	);
+}
+
+/** Binds crop activity to the live editor and the toolbar command state. */
+export function bindInlineImageCropCommands(input: {
+	controller: InlineImageCropCommandsController;
+	getEditor: () => Pick<Editor, "setEditable"> | null;
+	isDisabled: () => boolean;
+	setCommandsDisabled: (disabled: boolean) => void;
+}): () => void {
+	return input.controller.subscribe(() => {
+		const activeCrop = input.controller.hasActiveCrop();
+		input.setCommandsDisabled(activeCrop);
+		input.getEditor()?.setEditable(!input.isDisabled() && !activeCrop);
+	});
 }
 
 export default function RichTextEditor({
@@ -324,15 +339,11 @@ export default function RichTextEditor({
 	useEffect(() => {
 		const controller = cropCommands.current;
 		if (!controller) return undefined;
-		return controller.subscribe(() => {
-			const activeCrop = controller.hasActiveCrop();
-			setCropCommandsDisabled(activeCrop);
-			// Applied synchronously so the NodeView chrome that re-renders with the
-		// crop exit already observes the restored editable state.
-			const current = editorRef.current;
-			if (current) {
-				current.setEditable(!disabledRef.current && !activeCrop);
-			}
+		return bindInlineImageCropCommands({
+			controller,
+			getEditor: () => editorRef.current,
+			isDisabled: () => disabledRef.current,
+			setCommandsDisabled: setCropCommandsDisabled,
 		});
 	}, []);
 

@@ -28,6 +28,7 @@ import {
 import {
   INLINE_IMAGE_CROP_UNAVAILABLE_GUIDANCE,
   InlineImageCropEditor,
+  rebaseInlineImageCropSurfaceDrag,
   endInlineImageCropSession,
   focusInlineImageCropButton,
   startInlineImageCropSession,
@@ -298,6 +299,38 @@ describe('inline image crop draft model', () => {
     assert.equal(normalizeInlineImageCropPinchZoom(3.9, 1.5), 4)
     assert.equal(normalizeInlineImageCropPinchZoom(2, 0.5), 1)
     assert.equal(normalizeInlineImageCropPinchZoom(1, 0.5), 1)
+  })
+
+  it('rebases one-finger pan from the post-pinch draft after the other pointer lifts', () => {
+    const beforePinch = createInlineImageCropDraft(presentation({
+      crop: { x: 1000, y: 1000, width: 8000, height: 8000 },
+    }))
+    const postPinch = zoomInlineImageCrop(
+      beforePinch,
+      normalizeInlineImageCropPinchZoom(beforePinch.zoom, 2),
+    )
+    const rebased = rebaseInlineImageCropSurfaceDrag({
+      drag: {
+        kind: 'surface',
+        originDraft: beforePinch,
+        originX: 100,
+        originY: 100,
+        pointerIds: [1, 2],
+        pinch: { distance: 120, draft: beforePinch },
+      },
+      draft: postPinch,
+      remainingPointer: { pointerId: 2, x: 180, y: 160 },
+    })
+
+    assert.equal(rebased.pinch, null)
+    assert.deepEqual(rebased.originDraft, postPinch)
+    assert.deepEqual(rebased.pointerIds, [2])
+    assert.equal(rebased.originX, 180)
+    assert.equal(rebased.originY, 160)
+
+    const afterPan = panInlineImageCrop(rebased.originDraft, 500, -250)
+    assert.deepEqual(afterPan.crop, { x: 2500, y: 3250, width: 4000, height: 4000 })
+    assert.notDeepEqual(afterPan.crop, panInlineImageCrop(beforePinch, 500, -250).crop)
   })
 
   it('converts display pixel deltas through the shared pixel-to-normalized converter', () => {

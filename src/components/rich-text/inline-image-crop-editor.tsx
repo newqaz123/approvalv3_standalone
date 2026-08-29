@@ -165,6 +165,28 @@ type SurfaceDrag = {
   pinch: { distance: number; draft: InlineImageCropDraft } | null
 }
 
+export type InlineImageCropSurfacePointer = {
+  pointerId: number
+  x: number
+  y: number
+}
+
+/** Rebases a remaining one-finger pan on the draft produced by a pinch. */
+export function rebaseInlineImageCropSurfaceDrag(input: {
+  drag: SurfaceDrag
+  draft: InlineImageCropDraft
+  remainingPointer: InlineImageCropSurfacePointer
+}): SurfaceDrag {
+  return {
+    ...input.drag,
+    originDraft: input.draft,
+    originX: input.remainingPointer.x,
+    originY: input.remainingPointer.y,
+    pointerIds: [input.remainingPointer.pointerId],
+    pinch: null,
+  }
+}
+
 /** In-editor crop UI: dimmed regions, eight handles, pan surface, zoom, presets. */
 export function InlineImageCropEditor({
   src,
@@ -177,6 +199,13 @@ export function InlineImageCropEditor({
   const [status, setStatus] = useState<string>('Crop editor open')
   const draftRef = useRef(draft)
   draftRef.current = draft
+
+  const updateDraft = (next: InlineImageCropDraft) => {
+    // Pointer events can deliver pointer-up before React has rendered the
+    // preceding pinch update; keep the imperative gesture snapshot current too.
+    draftRef.current = next
+    setDraft(next)
+  }
 
   const surfaceRef = useRef<HTMLSpanElement | null>(null)
   const regionRef = useRef<HTMLSpanElement | null>(null)
@@ -204,7 +233,8 @@ export function InlineImageCropEditor({
     if (!surface) return undefined
     const onWheel = (event: WheelEvent) => {
       event.preventDefault()
-      setDraft((current) => zoomInlineImageCrop(
+      const current = draftRef.current
+      updateDraft(zoomInlineImageCrop(
         current,
         normalizeInlineImageCropWheelZoom(current.zoom, event.deltaY),
       ))
@@ -259,7 +289,7 @@ export function InlineImageCropEditor({
     event.preventDefault()
     event.stopPropagation()
     const delta = totalDelta(drag.originX, drag.originY, event.clientX, event.clientY)
-    setDraft(resizeInlineImageCropEdge(drag.originDraft, drag.edge, delta.dx, delta.dy))
+    updateDraft(resizeInlineImageCropEdge(drag.originDraft, drag.edge, delta.dx, delta.dy))
   }
 
   const endHandleDrag = (
@@ -271,7 +301,7 @@ export function InlineImageCropEditor({
     handleDragRef.current = null
     releasePointerCaptureSafe(event.currentTarget, event.pointerId)
     if (restore) {
-      setDraft(drag.originDraft)
+      updateDraft(drag.originDraft)
       return
     }
     setStatus(describeCrop(draftRef.current))
@@ -289,8 +319,9 @@ export function InlineImageCropEditor({
     if (!isArrowKey(event.key)) return
     event.preventDefault()
     event.stopPropagation()
-    setDraft(stepInlineImageCropEdge(draftRef.current, edge, event.key, event.shiftKey))
-    setStatus(describeCrop(stepInlineImageCropEdge(draftRef.current, edge, event.key, event.shiftKey)))
+    const next = stepInlineImageCropEdge(draftRef.current, edge, event.key, event.shiftKey)
+    updateDraft(next)
+    setStatus(describeCrop(next))
   }
 
   const onRegionPointerDown = (event: ReactPointerEvent<HTMLSpanElement>) => {
@@ -338,7 +369,7 @@ export function InlineImageCropEditor({
     if (drag.pinch && pointersRef.current.size >= 2) {
       const [first, second] = [...pointersRef.current.values()]
       const scale = Math.hypot(first.x - second.x, first.y - second.y) / drag.pinch.distance
-      setDraft(zoomInlineImageCrop(
+      updateDraft(zoomInlineImageCrop(
         drag.pinch.draft,
         normalizeInlineImageCropPinchZoom(drag.pinch.draft.zoom, scale),
       ))
@@ -346,7 +377,7 @@ export function InlineImageCropEditor({
     }
 
     const delta = totalDelta(drag.originX, drag.originY, event.clientX, event.clientY)
-    setDraft(panInlineImageCrop(drag.originDraft, delta.dx, delta.dy))
+    updateDraft(panInlineImageCrop(drag.originDraft, delta.dx, delta.dy))
   }
 
   const endRegionDrag = (
@@ -356,13 +387,27 @@ export function InlineImageCropEditor({
     const drag = surfaceDragRef.current
     pointersRef.current.delete(event.pointerId)
     if (!drag || !drag.pointerIds.includes(event.pointerId)) return
-    if (pointersRef.current.size === 0) surfaceDragRef.current = null
+    const remaining = [...pointersRef.current.entries()]
+    if (remaining.length === 0) {
+      surfaceDragRef.current = null
+    } else if (remaining.length === 1) {
+      const [[pointerId, pointer]] = remaining
+      const nextDraft = restore
+        ? (drag.pinch ? drag.pinch.draft : drag.originDraft)
+        : draftRef.current
+      surfaceDragRef.current = rebaseInlineImageCropSurfaceDrag({
+        drag,
+        draft: nextDraft,
+        remainingPointer: { pointerId, x: pointer.x, y: pointer.y },
+      })
+      if (restore) updateDraft(nextDraft)
+    }
     releasePointerCaptureSafe(event.currentTarget, event.pointerId)
     if (restore) {
-      setDraft(drag.pinch ? drag.pinch.draft : drag.originDraft)
+      if (remaining.length !== 1) updateDraft(drag.pinch ? drag.pinch.draft : drag.originDraft)
       return
     }
-    if (pointersRef.current.size === 0) setStatus(describeCrop(draftRef.current))
+    if (remaining.length === 0) setStatus(describeCrop(draftRef.current))
   }
 
   const onRegionKeyDown = (event: ReactKeyboardEvent<HTMLSpanElement>) => {
@@ -375,7 +420,7 @@ export function InlineImageCropEditor({
     event.preventDefault()
     event.stopPropagation()
     const next = stepInlineImageCropRegion(draftRef.current, event.key, event.shiftKey)
-    setDraft(next)
+    updateDraft(next)
     setStatus(describeCrop(next))
   }
 
@@ -386,12 +431,12 @@ export function InlineImageCropEditor({
       session.naturalWidth,
       session.naturalHeight,
     )
-    setDraft(next)
+    updateDraft(next)
     setStatus(preset === 'original' ? 'Crop reset to the full original image' : describeCrop(next))
   }
 
   const onZoomChange = (zoom: number) => {
-    setDraft(zoomInlineImageCrop(draftRef.current, zoom))
+    updateDraft(zoomInlineImageCrop(draftRef.current, zoom))
   }
 
   const onApplyCrop = () => {
