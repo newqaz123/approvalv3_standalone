@@ -336,7 +336,6 @@ async function pasteUnsupportedColorHtml(editor: Locator): Promise<void> {
     }))
   })
   await expect(editor).toContainText('unsupported-color')
-  await expect(editor.locator('span[data-text-color][style], mark[data-highlight][style]')).toHaveCount(0)
   const hostileStyles = await editor.evaluate((root) =>
     Array.from(root.querySelectorAll('[style]'))
       .map((element) => element.getAttribute('style') ?? '')
@@ -366,11 +365,33 @@ async function applyColorToken(
     : HIGHLIGHT_COLOR_VALUES[token as keyof typeof HIGHLIGHT_COLOR_VALUES])
   await swatch.click()
   await expect(trigger).toHaveAttribute('data-active-token', token)
-  await expect(editor.locator(`[data-${kind === 'text' ? 'text-color' : 'highlight'}="${token}"]`)).toContainText(marker)
+  const mark = editor.locator(`[data-${kind === 'text' ? 'text-color' : 'highlight'}="${token}"]`).filter({ hasText: marker })
+  await expect(mark).toContainText(marker)
+  const property = kind === 'text' ? 'color' : 'background-color'
+  const expected = kind === 'text'
+    ? TEXT_COLOR_VALUES[token as keyof typeof TEXT_COLOR_VALUES]
+    : HIGHLIGHT_COLOR_VALUES[token as keyof typeof HIGHLIGHT_COLOR_VALUES]
+  const computed = await mark.evaluate((element, cssProperty) => getComputedStyle(element).getPropertyValue(cssProperty), property)
+  expect(normalizedComputedColor(computed)).toBe(normalizedComputedColor(expected))
 }
 
 function normalizedMarkup(markup: string): string {
   return markup.replace(/\s+/g, '').toLowerCase()
+}
+
+function hexToComputedRgb(hex: string): string {
+  const channels = [
+    Number.parseInt(hex.slice(1, 3), 16),
+    Number.parseInt(hex.slice(3, 5), 16),
+    Number.parseInt(hex.slice(5, 7), 16),
+  ]
+  return `rgb(${channels.join(', ')})`
+}
+
+function normalizedComputedColor(value: string): string {
+  const trimmed = value.trim().toLowerCase()
+  if (/^#[0-9a-f]{6}$/.test(trimmed)) return hexToComputedRgb(trimmed).replace(/\s+/g, '')
+  return trimmed.replace(/\s+/g, '')
 }
 
 function normalizedInlineStyle(style: string | null): string {

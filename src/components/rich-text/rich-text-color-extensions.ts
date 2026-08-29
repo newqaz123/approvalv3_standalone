@@ -85,9 +85,11 @@ export const TextColorTokenMark = Mark.create({
   },
 
   renderHTML({ mark }) {
-    return isTextColorToken(mark.attrs.token)
-      ? ['span', { 'data-text-color': mark.attrs.token }, 0]
-      : ['span', {}, 0]
+    if (!isTextColorToken(mark.attrs.token)) return ['span', {}, 0]
+    return ['span', {
+      'data-text-color': mark.attrs.token,
+      style: `color:${TEXT_COLOR_VALUES[mark.attrs.token]}`,
+    }, 0]
   },
 
   addCommands() {
@@ -127,9 +129,11 @@ export const HighlightColorTokenMark = Mark.create({
   },
 
   renderHTML({ mark }) {
-    return isHighlightColorToken(mark.attrs.token)
-      ? ['mark', { 'data-highlight': mark.attrs.token }, 0]
-      : ['span', {}, 0]
+    if (!isHighlightColorToken(mark.attrs.token)) return ['span', {}, 0]
+    return ['mark', {
+      'data-highlight': mark.attrs.token,
+      style: `background-color:${HIGHLIGHT_COLOR_VALUES[mark.attrs.token]}`,
+    }, 0]
   },
 
   addCommands() {

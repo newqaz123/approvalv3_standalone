@@ -9,6 +9,7 @@ import {
   isTextColorToken,
   materializeRichTextPalette,
 } from '../../src/lib/rich-text-palette'
+import { sanitizeRichText } from '../../src/lib/rich-text-sanitizer'
 import {
   HighlightColorTokenMark,
   TextColorTokenMark,
@@ -42,6 +43,14 @@ function createPaletteEditor(content: JSONContent = nestedContent) {
 function markNames(editor: Editor): string[] {
   const text = editor.getJSON().content?.[0]?.content?.[0]
   return (text?.marks ?? []).map((mark) => mark.type).sort()
+}
+
+function htmlFromMarkSpec(spec: unknown, inner: string): string {
+  const [tag, attrs] = spec as [string, Record<string, string>, number]
+  const attributes = Object.entries(attrs)
+    .map(([name, value]) => `${name}="${value}"`)
+    .join(' ')
+  return attributes ? `<${tag} ${attributes}>${inner}</${tag}>` : `<${tag}>${inner}</${tag}>`
 }
 
 describe('rich text palette contract', () => {
@@ -118,12 +127,60 @@ describe('restricted TipTap palette marks', () => {
 
       const textMark = second.schema.marks.textColorToken.create({ token: 'blue' })
       const highlightMark = second.schema.marks.highlightColorToken.create({ token: 'yellow' })
-      assert.deepEqual(second.schema.marks.textColorToken.spec.toDOM!(textMark, true), ['span', { 'data-text-color': 'blue' }, 0])
-      assert.deepEqual(second.schema.marks.highlightColorToken.spec.toDOM!(highlightMark, true), ['mark', { 'data-highlight': 'yellow' }, 0])
+      assert.deepEqual(second.schema.marks.textColorToken.spec.toDOM!(textMark, true), ['span', {
+        'data-text-color': 'blue',
+        style: `color:${TEXT_COLOR_VALUES.blue}`,
+      }, 0])
+      assert.deepEqual(second.schema.marks.highlightColorToken.spec.toDOM!(highlightMark, true), ['mark', {
+        'data-highlight': 'yellow',
+        style: `background-color:${HIGHLIGHT_COLOR_VALUES.yellow}`,
+      }, 0])
       assert.doesNotMatch(JSON.stringify(second.getJSON()), /style/)
     } finally {
       first.destroy()
       second.destroy()
+    }
+  })
+
+  it('serializes trusted palette presentation in editor HTML and strips it on sanitize', () => {
+    const editor = createPaletteEditor({
+      type: 'doc',
+      content: [{
+        type: 'paragraph',
+        content: [{
+          type: 'text',
+          text: 'Visible',
+          marks: [
+            { type: 'textColorToken', attrs: { token: 'blue' } },
+            { type: 'highlightColorToken', attrs: { token: 'green' } },
+          ],
+        }],
+      }],
+    })
+    try {
+      const textMark = editor.schema.marks.textColorToken.create({ token: 'blue' })
+      const highlightMark = editor.schema.marks.highlightColorToken.create({ token: 'green' })
+      const html = htmlFromMarkSpec(
+        editor.schema.marks.textColorToken.spec.toDOM!(textMark, true),
+        htmlFromMarkSpec(
+          editor.schema.marks.highlightColorToken.spec.toDOM!(highlightMark, true),
+          'Visible',
+        ),
+      )
+      assert.match(html, /data-text-color="blue"/)
+      assert.match(html, /data-highlight="green"/)
+      assert.match(html, new RegExp(`color:${TEXT_COLOR_VALUES.blue}`))
+      assert.match(html, new RegExp(`background-color:${HIGHLIGHT_COLOR_VALUES.green}`))
+      assert.equal(html.includes('#ff00ff') || html.includes('var('), false)
+
+      const sanitized = sanitizeRichText(html)
+      assert.match(sanitized, /data-text-color="blue"/)
+      assert.match(sanitized, /data-highlight="green"/)
+      assert.doesNotMatch(sanitized, /style/)
+      assert.doesNotMatch(sanitized, new RegExp(`${TEXT_COLOR_VALUES.blue}|${HIGHLIGHT_COLOR_VALUES.green}`, 'i'))
+      assert.doesNotMatch(JSON.stringify(editor.getJSON()), /style/)
+    } finally {
+      editor.destroy()
     }
   })
 
