@@ -297,6 +297,95 @@
   outline-offset: 2px;
 }
 
+/*
+ * Curated color controls. The toolbar owns the inline-size container so the
+ * controls change layout with the editor surface rather than the viewport.
+ * The compact prop is an explicit narrow-layout hint; a false hint still
+ * follows the container breakpoint for responsive editor surfaces.
+ */
+.rich-text-toolbar-wrapper {
+  container: rich-text-toolbar / inline-size;
+}
+.rich-text-color-controls-wide,
+.rich-text-color-controls-compact {
+  align-items: center;
+  gap: 0.25rem;
+}
+.rich-text-color-controls-wide {
+  display: inline-flex;
+}
+.rich-text-color-controls-compact {
+  display: none;
+}
+.rich-text-color-controls[data-compact='true'] .rich-text-color-controls-wide {
+  display: none;
+}
+.rich-text-color-controls[data-compact='true'] .rich-text-color-controls-compact {
+  display: inline-flex;
+}
+.rich-text-color-popover {
+  width: min(18rem, calc(100vw - 1rem));
+  padding: 0.625rem;
+}
+.rich-text-color-popover[data-state='closed'],
+.rich-text-color-overflow-menu[data-state='closed'] {
+  display: none;
+}
+.rich-text-color-palette-title {
+  margin: 0 0 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1rem;
+  color: hsl(var(--foreground));
+}
+.rich-text-color-swatch-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.25rem;
+}
+.rich-text-color-swatch[data-selected='true'] {
+  border-color: hsl(var(--ring));
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+}
+.rich-text-color-swatch-chip {
+  display: block;
+}
+.rich-text-color-reset[aria-pressed='true'] {
+  border-color: hsl(var(--ring));
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+}
+.rich-text-color-overflow-menu {
+  width: min(22rem, calc(100vw - 1rem));
+  max-height: min(32rem, calc(100svh - 2rem));
+  overflow-y: auto;
+}
+.rich-text-color-compact-section + .rich-text-color-overflow-divider {
+  margin-block: 0.625rem;
+}
+.rich-text-color-overflow-divider {
+  height: 1px;
+  background: hsl(var(--border));
+}
+@container rich-text-toolbar (max-width: 40rem) {
+  .rich-text-color-controls[data-compact='false'] .rich-text-color-controls-wide {
+    display: none;
+  }
+  .rich-text-color-controls[data-compact='false'] .rich-text-color-controls-compact {
+    display: inline-flex;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rich-text-color-popover[data-state],
+  .rich-text-color-overflow-menu[data-state],
+  .rich-text-color-swatch,
+  .rich-text-color-reset {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
 
 
 @layer base {

@@ -1,6 +1,12 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { Editor } from '@tiptap/core'
+import StarterKit from '@tiptap/starter-kit'
+import {
+  HighlightColorTokenMark,
+  TextColorTokenMark,
+} from '../../src/components/rich-text/rich-text-color-extensions'
 import { bindInlineImageCropCommands } from '../../src/components/rich-text/rich-text-editor'
 import { createInlineImageCropCommandsController } from '../../src/components/rich-text/inline-image-extension'
 
@@ -82,6 +88,32 @@ describe('RichTextEditor implementation', () => {
     assert.match(source, /aria-label=/)
     assert.match(source, /aria-pressed=/)
     assert.match(source, /focus-visible/)
+  })
+})
+
+describe('RichTextEditor palette schema integration', () => {
+  it('supports semantic color commands alongside the editor formatting schema', () => {
+    const editor = new Editor({
+      element: null,
+      extensions: [StarterKit, TextColorTokenMark, HighlightColorTokenMark],
+      content: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Palette' }] }],
+      },
+    })
+    try {
+      editor.commands.setTextSelection({ from: 1, to: 8 })
+      assert.equal(editor.commands.setTextColorToken('teal'), true)
+      assert.equal(editor.commands.setHighlightColorToken('pink'), true)
+      assert.equal(editor.commands.toggleBold(), true)
+      assert.deepEqual(
+        editor.getJSON().content?.[0]?.content?.[0]?.marks?.map((mark) => mark.type).sort(),
+        ['bold', 'highlightColorToken', 'textColorToken'],
+      )
+      assert.doesNotMatch(JSON.stringify(editor.getJSON()), /style/)
+    } finally {
+      editor.destroy()
+    }
   })
 })
 

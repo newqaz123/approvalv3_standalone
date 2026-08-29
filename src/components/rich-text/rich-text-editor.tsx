@@ -29,6 +29,11 @@ import {
 	type InlineImageCropCommandsController,
 } from "@/components/rich-text/inline-image-extension";
 import type { InlineImageCoordinator } from "@/hooks/use-inline-description-images";
+import { RichTextColorControls } from "@/components/rich-text/rich-text-color-controls";
+import {
+	HighlightColorTokenMark,
+	TextColorTokenMark,
+} from "@/components/rich-text/rich-text-color-extensions";
 import { INLINE_IMAGE_MIMES, MAX_INLINE_ALT_LENGTH } from "@/lib/inline-images/policy";
 import { sanitizeRichText } from "@/lib/rich-text-sanitizer";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
@@ -280,6 +285,8 @@ export default function RichTextEditor({
 				horizontalRule: false,
 			}),
 			Underline,
+			TextColorTokenMark,
+			HighlightColorTokenMark,
 			Link.configure({ autolink: true, openOnClick: false }),
 			FileHandler.configure({
 				allowedMimeTypes: createInlineImageMimeFilter(() => canInsertImagesRef.current),
@@ -358,7 +365,7 @@ export default function RichTextEditor({
 	return (
 		<div className="space-y-2">
 			<div
-				className="flex flex-wrap items-center gap-1"
+				className="rich-text-toolbar-wrapper flex flex-wrap items-center gap-1"
 				role="toolbar"
 				aria-label="Formatting"
 			>
@@ -511,6 +518,11 @@ export default function RichTextEditor({
 						insertFiles(Array.from(event.currentTarget.files ?? []));
 						event.currentTarget.value = "";
 					}}
+				/>
+				<RichTextColorControls
+					editor={editor}
+					disabled={commandsDisabled}
+					compact={false}
 				/>
 				<ToolbarButton
 					editor={editor}

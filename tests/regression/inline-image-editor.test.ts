@@ -618,6 +618,30 @@ describe('inline image editor contract', () => {
     assert.doesNotMatch(changes[0], /style=|onerror=/)
   })
 
+  it('combines palette marks with image nodes without adding presentation styles', () => {
+    const editor = createEditor({
+      type: 'doc',
+      content: [{
+        type: 'paragraph',
+        content: [
+          { type: 'text', text: 'Diagram' },
+          { type: 'inlineImage', attrs: { src: IMAGE_SRC, alt: 'diagram', align: 'center' } },
+        ],
+      }],
+    })
+    try {
+      editor.commands.setTextSelection({ from: 1, to: 8 })
+      assert.equal(editor.commands.setTextColorToken('blue'), true)
+      assert.equal(editor.commands.setHighlightColorToken('yellow'), true)
+      const text = editor.getJSON().content?.[0]?.content?.[0]
+      assert.deepEqual(text?.marks?.map((mark) => mark.type).sort(), ['highlightColorToken', 'textColorToken'])
+      assert.deepEqual(editor.getJSON().content?.[0]?.content?.[1]?.type, 'inlineImage')
+      assert.doesNotMatch(JSON.stringify(editor.getJSON()), /style/)
+    } finally {
+      editor.destroy()
+    }
+  })
+
   it('keeps a live transient node out of the sanitized onChange emission', () => {
     const editor = createEditor()
     try {
