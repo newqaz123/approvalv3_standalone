@@ -29,7 +29,10 @@ import {
 import { resubmitRequest } from '@/server-actions/requests'
 import { deleteFileAttachment } from '@/server-actions/files'
 import { FileUploadZone } from '@/components/requests/file-upload-zone'
-import { useInlineDescriptionImages } from '@/hooks/use-inline-description-images'
+import {
+  inlineImageBlockingMessage,
+  useInlineDescriptionImages,
+} from '@/hooks/use-inline-description-images'
 import { useRouter } from 'next/navigation'
 
 const resubmitSchema = z.object({
@@ -66,6 +69,7 @@ export function ResubmitRequestDialog({
   // One inline image coordinator per mounted dialog; the editor uploads
   // through it and the save/cancel lifecycle below claims or cleans it.
   const inlineImages = useInlineDescriptionImages()
+  const inlineImageBlockingGuidance = inlineImageBlockingMessage(inlineImages.blockingReason)
 
   const form = useForm<ResubmitFormValues>({
     resolver: zodResolver(resubmitSchema),
@@ -106,6 +110,10 @@ export function ResubmitRequestDialog({
   }
 
   async function onSubmit(data: ResubmitFormValues) {
+    if (inlineImages.hasBlockingOperations) {
+      setError(inlineImageBlockingMessage(inlineImages.blockingReason))
+      return
+    }
     setIsSubmitting(true)
     setError(null)
 
@@ -254,9 +262,9 @@ export function ResubmitRequestDialog({
             {error && <p className="text-sm text-red-500">{error}</p>}
 
             <DialogFooter>
-              {inlineImages.hasBlockingUploads && (
+              {inlineImageBlockingGuidance && (
                 <p className="mr-auto text-sm text-amber-700">
-                  Wait for image uploads, or retry/remove failed images.
+                  {inlineImageBlockingGuidance}
                 </p>
               )}
               <Button
@@ -267,7 +275,7 @@ export function ResubmitRequestDialog({
               >
                 Cancel
               </Button>
-              <Button type="submit" disabled={isSubmitting || inlineImages.hasBlockingUploads}>
+              <Button type="submit" disabled={isSubmitting || inlineImages.hasBlockingOperations}>
                 {isSubmitting ? 'Resubmitting...' : 'Resubmit Request'}
               </Button>
             </DialogFooter>

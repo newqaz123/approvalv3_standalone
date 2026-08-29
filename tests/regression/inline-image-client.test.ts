@@ -2,6 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   createInlineImageCoordinator,
+  inlineImageBlockingMessage,
   inlineImageReducer,
   type InlineImageRecord,
   type InlineImageUploadTransport,
@@ -80,6 +81,90 @@ describe('inline image reducer', () => {
       upload: upload(IMAGE_A),
     })
     assert.deepEqual(inlineImageReducer(succeeded, { type: 'removed', uploadId: 'upload-a' }), [])
+  })
+})
+
+describe('inline image coordinator blocking operations', () => {
+  it('blocks save until every active image edit token ends and only notifies for membership changes', () => {
+    let notifications = 0
+    const coordinator = createInlineImageCoordinator({
+      uploadSessionId: SESSION,
+      upload: async () => upload(IMAGE_A),
+      onStateChange: () => { notifications += 1 },
+    })
+
+    assert.equal(coordinator.hasActiveImageEdits, false)
+    assert.equal(coordinator.hasBlockingOperations, false)
+    assert.equal(coordinator.blockingReason, null)
+
+    coordinator.beginImageEdit('crop-a')
+    coordinator.beginImageEdit('crop-a')
+    coordinator.beginImageEdit('crop-b')
+    assert.equal(notifications, 2)
+    assert.equal(coordinator.hasActiveImageEdits, true)
+    assert.equal(coordinator.hasBlockingOperations, true)
+    assert.equal(coordinator.blockingReason, 'image-edit')
+
+    coordinator.endImageEdit('missing')
+    coordinator.endImageEdit('crop-a')
+    assert.equal(notifications, 3)
+    assert.equal(coordinator.hasBlockingOperations, true)
+    assert.equal(coordinator.blockingReason, 'image-edit')
+
+    coordinator.endImageEdit('crop-b')
+    coordinator.endImageEdit('crop-b')
+    assert.equal(notifications, 4)
+    assert.equal(coordinator.hasActiveImageEdits, false)
+    assert.equal(coordinator.hasBlockingOperations, false)
+    assert.equal(coordinator.blockingReason, null)
+  })
+
+  it('gives uploads precedence over active image edits', async () => {
+    const pendingUpload = deferred<InlineImageUpload>()
+    const coordinator = makeCoordinator(async () => pendingUpload.promise)
+
+    coordinator.beginImageEdit('crop-a')
+    const uploadPromise = coordinator.upload('upload-a', file('a.png'), () => undefined)
+    assert.equal(coordinator.blockingReason, 'upload')
+
+    pendingUpload.resolve(upload(IMAGE_A))
+    await uploadPromise
+    assert.equal(coordinator.blockingReason, 'image-edit')
+
+    coordinator.endImageEdit('crop-a')
+    assert.equal(coordinator.blockingReason, null)
+  })
+
+  it('clears active edit tokens during reset, clear, and dispose cleanup', async () => {
+    const resetCoordinator = makeCoordinator(async () => upload(IMAGE_A))
+    resetCoordinator.beginImageEdit('crop-reset')
+    await resetCoordinator.reset()
+    assert.equal(resetCoordinator.hasActiveImageEdits, false)
+    assert.equal(resetCoordinator.hasBlockingOperations, false)
+
+    const clearCoordinator = makeCoordinator(async () => upload(IMAGE_A))
+    clearCoordinator.beginImageEdit('crop-clear')
+    clearCoordinator.clear()
+    assert.equal(clearCoordinator.hasActiveImageEdits, false)
+    assert.equal(clearCoordinator.hasBlockingOperations, false)
+
+    const disposedCoordinator = makeCoordinator(async () => upload(IMAGE_A))
+    disposedCoordinator.beginImageEdit('crop-dispose')
+    disposedCoordinator.dispose()
+    assert.equal(disposedCoordinator.hasActiveImageEdits, false)
+    assert.equal(disposedCoordinator.hasBlockingOperations, false)
+  })
+
+  it('returns exact guidance for each blocking reason', () => {
+    assert.equal(
+      inlineImageBlockingMessage('upload'),
+      'Wait for image uploads, or retry/remove failed images.',
+    )
+    assert.equal(
+      inlineImageBlockingMessage('image-edit'),
+      'Apply or cancel the image edit before saving.',
+    )
+    assert.equal(inlineImageBlockingMessage(null), null)
   })
 })
 

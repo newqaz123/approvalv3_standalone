@@ -4,7 +4,13 @@ import { readFileSync } from 'node:fs'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
-const BLOCKING_MESSAGE = 'Wait for image uploads, or retry/remove failed images.'
+function assertCombinedBlockingWiring(source: string) {
+  assert.match(source, /inlineImageBlockingMessage\(\s*inlineImages\.blockingReason,?\s*\)/)
+  assert.ok(
+    (source.match(/inlineImages\.hasBlockingOperations/g) ?? []).length >= 2,
+    'expected both submit-handler and disabled-button blocking guards',
+  )
+}
 
 describe('inline image form wiring', () => {
   describe('request form', () => {
@@ -19,9 +25,9 @@ describe('inline image form wiring', () => {
       assert.match(source, /inlineImageSessionId: inlineImages\.uploadSessionId/)
     })
 
-    it('disables submit while uploads are blocking and explains why', () => {
-      assert.match(source, /disabled=\{isSubmitting \|\| inlineImages\.hasBlockingUploads\}/)
-      assert.match(source, new RegExp(BLOCKING_MESSAGE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+    it('blocks submit during uploads or image edits and shows reason-specific guidance', () => {
+      assertCombinedBlockingWiring(source)
+      assert.match(source, /disabled=\{isSubmitting \|\| inlineImages\.hasBlockingOperations\}/)
     })
 
     it('clears draft state only after the save succeeds', () => {
@@ -57,9 +63,10 @@ describe('inline image form wiring', () => {
       assert.match(source, /inlineImageSessionId: inlineImages\.uploadSessionId/)
     })
 
-    it('disables submission while uploads are blocking and explains why', () => {
-      assert.match(source, /inlineImages\.hasBlockingUploads/)
-      assert.match(source, new RegExp(BLOCKING_MESSAGE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+    it('blocks submission during uploads or image edits and shows reason-specific guidance', () => {
+      assertCombinedBlockingWiring(source)
+      assert.match(source, /isSubmitting=\{isSubmitting \|\| inlineImages\.hasBlockingOperations\}/)
+      assert.match(source, /disabled=\{isSubmitting \|\| inlineImages\.hasBlockingOperations\}/)
     })
 
     it('clears inline drafts only after the solution save succeeds', () => {
@@ -93,9 +100,9 @@ describe('inline image form wiring', () => {
       assert.match(source, /inlineImageSessionId: inlineImages\.uploadSessionId/)
     })
 
-    it('disables submit while uploads are blocking and explains why', () => {
-      assert.match(source, /disabled=\{isSubmitting \|\| inlineImages\.hasBlockingUploads\}/)
-      assert.match(source, new RegExp(BLOCKING_MESSAGE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+    it('blocks submit during uploads or image edits and shows reason-specific guidance', () => {
+      assertCombinedBlockingWiring(source)
+      assert.match(source, /disabled=\{isSubmitting \|\| inlineImages\.hasBlockingOperations\}/)
     })
 
     it('clears inline drafts only after the template save succeeds', () => {
@@ -125,9 +132,9 @@ describe('inline image form wiring', () => {
       assert.match(source, /inlineImageSessionId: inlineImages\.uploadSessionId/)
     })
 
-    it('disables submit while uploads are blocking and explains why', () => {
-      assert.match(source, /disabled=\{isSubmitting \|\| inlineImages\.hasBlockingUploads\}/)
-      assert.match(source, new RegExp(BLOCKING_MESSAGE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+    it('blocks submit during uploads or image edits and shows reason-specific guidance', () => {
+      assertCombinedBlockingWiring(source)
+      assert.match(source, /disabled=\{isSubmitting \|\| inlineImages\.hasBlockingOperations\}/)
     })
 
     it('clears inline drafts only after the resubmit succeeds', () => {
@@ -188,9 +195,9 @@ describe('inline image form wiring', () => {
       assert.match(source, /await inlineImages\.reset\(\)/)
     })
 
-    it('disables submit while uploads are blocking and explains why', () => {
-      assert.match(source, /inlineImages\.hasBlockingUploads/)
-      assert.match(source, new RegExp(BLOCKING_MESSAGE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+    it('blocks submit during uploads or image edits and shows reason-specific guidance', () => {
+      assertCombinedBlockingWiring(source)
+      assert.match(source, /if \(inlineImages\.hasBlockingOperations\)/)
     })
 
     it('still copies template description HTML and forwards templateId through callback data', () => {
@@ -227,9 +234,9 @@ describe('inline image form wiring', () => {
       assert.doesNotMatch(source, /onClick=\{\(\) => onOpenChange\(false\)\}/)
     })
 
-    it('disables resubmit while uploads are blocking and explains why', () => {
-      assert.match(source, /inlineImages\.hasBlockingUploads/)
-      assert.match(source, new RegExp(BLOCKING_MESSAGE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+    it('blocks resubmit during uploads or image edits and shows reason-specific guidance', () => {
+      assertCombinedBlockingWiring(source)
+      assert.match(source, /inlineImages\.hasBlockingOperations/)
     })
   })
 

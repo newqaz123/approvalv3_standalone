@@ -26,7 +26,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { RichTextEditor } from "@/components/rich-text/rich-text-editor-lazy";
-import { useInlineDescriptionImages } from "@/hooks/use-inline-description-images";
+import {
+	inlineImageBlockingMessage,
+	useInlineDescriptionImages,
+} from "@/hooks/use-inline-description-images";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
@@ -98,6 +101,9 @@ export function RequestResubmitModal({
 	// One inline image coordinator per mounted modal; the editor uploads
 	// through it and the submit/close lifecycle below claims or cleans it.
 	const inlineImages = useInlineDescriptionImages();
+	const inlineImageBlockingGuidance = inlineImageBlockingMessage(
+		inlineImages.blockingReason,
+	);
 	const [title, setTitle] = useState(initialData.title);
 	const [description, setDescription] = useState(initialData.description);
 	const [existingFiles, setExistingFiles] = useState<FileAttachment[]>(
@@ -139,6 +145,10 @@ export function RequestResubmitModal({
 
 	const handleSubmit = async () => {
 		if (!onResubmit) return;
+		if (inlineImages.hasBlockingOperations) {
+			setSubmitError(inlineImageBlockingMessage(inlineImages.blockingReason));
+			return;
+		}
 		setIsBusy(true);
 		setSubmitError(null);
 		try {
@@ -404,9 +414,9 @@ export function RequestResubmitModal({
 					</div>
 					{canResubmit ? (
 						<div className="flex items-center gap-3">
-							{inlineImages.hasBlockingUploads && (
+							{inlineImageBlockingGuidance && (
 								<p className="text-sm text-amber-700">
-									Wait for image uploads, or retry/remove failed images.
+									{inlineImageBlockingGuidance}
 								</p>
 							)}
 							<Button
@@ -415,7 +425,7 @@ export function RequestResubmitModal({
 									!title.trim() ||
 									!description.trim() ||
 									isBusy ||
-									inlineImages.hasBlockingUploads
+									inlineImages.hasBlockingOperations
 								}
 								className="bg-amber-600 hover:bg-amber-700 text-white"
 							>

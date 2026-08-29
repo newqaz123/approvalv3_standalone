@@ -15,6 +15,13 @@ import {
 export type { InlineImageDeleteTransport, InlineImageUploadTransport } from '@/lib/inline-images/client'
 
 export type InlineImageUploadStatus = 'queued' | 'uploading' | 'failed' | 'success'
+export type InlineImageBlockingReason = 'upload' | 'image-edit' | null
+
+export function inlineImageBlockingMessage(reason: InlineImageBlockingReason): string | null {
+  if (reason === 'upload') return 'Wait for image uploads, or retry/remove failed images.'
+  if (reason === 'image-edit') return 'Apply or cancel the image edit before saving.'
+  return null
+}
 
 export type InlineImageRecord = {
   uploadId: string
@@ -117,7 +124,12 @@ export type InlineImageCoordinator = {
   uploadSessionId: string
   upload(uploadId: string, file: File, onProgress: (percent: number) => void): Promise<InlineImageUpload>
   remove(uploadId: string, imageId?: string): Promise<void>
+  beginImageEdit(editId: string): void
+  endImageEdit(editId: string): void
   hasBlockingUploads: boolean
+  hasActiveImageEdits: boolean
+  hasBlockingOperations: boolean
+  blockingReason: InlineImageBlockingReason
   reset(): Promise<void>
   clear(): void
 }
@@ -203,6 +215,7 @@ export function createInlineImageCoordinator(
   let resetting = false
   let resetPromise: Promise<void> | null = null
   const attempts = new Map<string, UploadAttempt>()
+  const activeEditIds = new Set<string>()
 
   const snapshot = (): InlineImageRecord[] => records.map((record) => ({ ...record }))
   const notify = () => options.onStateChange?.(snapshot())
@@ -314,7 +327,14 @@ export function createInlineImageCoordinator(
     }
     pendingUploadIds = []
     records = []
+    activeEditIds.clear()
     sessionId = makeSessionId()
+    notify()
+  }
+
+  const clearActiveImageEdits = () => {
+    if (activeEditIds.size === 0) return
+    activeEditIds.clear()
     notify()
   }
 
@@ -329,6 +349,31 @@ export function createInlineImageCoordinator(
 
     get hasBlockingUploads() {
       return hasBlockingInlineImageUploads(records)
+    },
+
+    get hasActiveImageEdits() {
+      return activeEditIds.size > 0
+    },
+
+    get hasBlockingOperations() {
+      return hasBlockingInlineImageUploads(records) || activeEditIds.size > 0
+    },
+
+    get blockingReason(): InlineImageBlockingReason {
+      if (hasBlockingInlineImageUploads(records)) return 'upload'
+      if (activeEditIds.size > 0) return 'image-edit'
+      return null
+    },
+
+    beginImageEdit(editId) {
+      if (disposed || activeEditIds.has(editId)) return
+      activeEditIds.add(editId)
+      notify()
+    },
+
+    endImageEdit(editId) {
+      if (disposed || !activeEditIds.delete(editId)) return
+      notify()
     },
 
     upload(uploadId, file, onProgress) {
@@ -389,6 +434,7 @@ export function createInlineImageCoordinator(
       if (disposed) return
       if (resetPromise) return resetPromise
 
+      clearActiveImageEdits()
       resetting = true
       const sessionForDeletes = sessionId
       const attemptsAtReset = [...attempts.entries()]
@@ -429,6 +475,7 @@ export function createInlineImageCoordinator(
     dispose() {
       if (disposed) return
       disposed = true
+      activeEditIds.clear()
       const sessionForDeletes = sessionId
       const stagedIds = records
         .filter((record) => record.status === 'success' && record.imageId)

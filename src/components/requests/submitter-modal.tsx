@@ -54,7 +54,10 @@ import {
 	validateAttachmentMetadata,
 } from "@/lib/attachments/policy";
 import { useSolutionAttachments } from "@/hooks/use-solution-attachments";
-import { useInlineDescriptionImages } from "@/hooks/use-inline-description-images";
+import {
+	inlineImageBlockingMessage,
+	useInlineDescriptionImages,
+} from "@/hooks/use-inline-description-images";
 import { ApproverSearchField } from "@/components/approvals/approver-search-field";
 import { filterApproversByQuery } from "@/lib/approver-search";
 
@@ -457,6 +460,9 @@ export function SubmitterModal({
 	// One inline image coordinator for both description editors (request and
 	// solution/resubmit modes); every save path claims or cleans its session.
 	const inlineImages = useInlineDescriptionImages();
+	const inlineImageBlockingGuidance = inlineImageBlockingMessage(
+		inlineImages.blockingReason,
+	);
 	const [isBusy, setIsBusy] = useState(false);
 	const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -569,6 +575,10 @@ export function SubmitterModal({
 
 	// Handle submission
 	const handleSubmit = async () => {
+		if (inlineImages.hasBlockingOperations) {
+			setSubmitError(inlineImageBlockingMessage(inlineImages.blockingReason));
+			return;
+		}
 		setSubmitError(null);
 
 		if (mode === "request" && onSubmitRequest) {
@@ -689,7 +699,7 @@ export function SubmitterModal({
 	};
 
 	const isSubmitDisabled = () => {
-		if (inlineImages.hasBlockingUploads) {
+		if (inlineImages.hasBlockingOperations) {
 			return true;
 		}
 		if (mode === "request") {
@@ -1153,9 +1163,9 @@ export function SubmitterModal({
 				</div>
 				{/* Footer Actions */}
 				<div className="px-6 py-4 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0">
-					{inlineImages.hasBlockingUploads ? (
+					{inlineImageBlockingGuidance ? (
 						<p className="text-sm text-amber-700 flex-1 pr-4">
-							Wait for image uploads, or retry/remove failed images.
+							{inlineImageBlockingGuidance}
 						</p>
 					) : (
 						submitError && (

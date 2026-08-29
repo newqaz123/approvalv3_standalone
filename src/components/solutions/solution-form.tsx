@@ -33,7 +33,10 @@ import { SolutionFileUpload } from './solution-file-upload'
 import { SolutionPreview } from './solution-preview'
 import { submitSolution } from '@/server-actions/solutions'
 import { useSolutionAttachments } from '@/hooks/use-solution-attachments'
-import { useInlineDescriptionImages } from '@/hooks/use-inline-description-images'
+import {
+  inlineImageBlockingMessage,
+  useInlineDescriptionImages,
+} from '@/hooks/use-inline-description-images'
 
 const solutionFormSchema = z.object({
   title: z.string().min(1, 'Title is required').max(200),
@@ -80,6 +83,7 @@ export function SolutionForm({
   // One coordinator for the whole form lifetime, shared by the editor and the
   // final confirm so preview/edit transitions keep the same upload session.
   const inlineImages = useInlineDescriptionImages()
+  const inlineImageBlockingGuidance = inlineImageBlockingMessage(inlineImages.blockingReason)
   const { items, addFiles, removeItem, ensureUploaded, clear, reset } = useSolutionAttachments({
     requestId,
   })
@@ -152,6 +156,11 @@ export function SolutionForm({
   }
 
   const handleSubmit = async (values: SolutionFormValues, isConfirmed: boolean = false) => {
+    if (inlineImages.hasBlockingOperations) {
+      toast.error(inlineImageBlockingMessage(inlineImages.blockingReason))
+      return
+    }
+
     // If not yet previewing, show preview
     if (!isConfirmed) {
       setShowPreview(true)
@@ -222,10 +231,10 @@ export function SolutionForm({
   }
 
   const handleConfirmSubmit = async () => {
-    // Defense in depth: the Confirm button is disabled while uploads are
-    // blocking, but never submit a description whose images are not stable.
-    if (inlineImages.hasBlockingUploads) {
-      toast.error('Wait for image uploads, or retry/remove failed images.')
+    // Defense in depth: the Confirm button is disabled while inline image
+    // operations are blocking, but never submit an unstable description.
+    if (inlineImages.hasBlockingOperations) {
+      toast.error(inlineImageBlockingMessage(inlineImages.blockingReason))
       return
     }
     const values = form.getValues()
@@ -261,9 +270,9 @@ export function SolutionForm({
   if (showPreview) {
     return (
       <div className="space-y-6">
-        {inlineImages.hasBlockingUploads && (
+        {inlineImageBlockingGuidance && (
           <p className="text-sm text-amber-700">
-            Wait for image uploads, or retry/remove failed images.
+            {inlineImageBlockingGuidance}
           </p>
         )}
         <SolutionPreview
@@ -271,7 +280,7 @@ export function SolutionForm({
           requestTitle={requestTitle}
           onEdit={handleBackToEdit}
           onConfirm={handleConfirmSubmit}
-          isSubmitting={isSubmitting || inlineImages.hasBlockingUploads}
+          isSubmitting={isSubmitting || inlineImages.hasBlockingOperations}
         />
       </div>
     )
@@ -499,9 +508,9 @@ export function SolutionForm({
 
           {/* Submit Button */}
           <div className="flex flex-col items-end gap-2">
-            {inlineImages.hasBlockingUploads && (
+            {inlineImageBlockingGuidance && (
               <p className="text-sm text-amber-700 self-start md:self-auto">
-                Wait for image uploads, or retry/remove failed images.
+                {inlineImageBlockingGuidance}
               </p>
             )}
             <div className="flex justify-end gap-3">
@@ -513,7 +522,7 @@ export function SolutionForm({
               >
                 Cancel
               </Button>
-              <Button type="submit" disabled={isSubmitting || inlineImages.hasBlockingUploads}>
+              <Button type="submit" disabled={isSubmitting || inlineImages.hasBlockingOperations}>
                 Review &amp; Submit
               </Button>
             </div>

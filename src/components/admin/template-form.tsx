@@ -18,7 +18,10 @@ import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
 import { RichTextEditor } from '@/components/rich-text/rich-text-editor-lazy'
 import { createTemplate, updateTemplate, type CreateTemplateInput, type UpdateTemplateInput } from '@/server-actions/templates'
-import { useInlineDescriptionImages } from '@/hooks/use-inline-description-images'
+import {
+  inlineImageBlockingMessage,
+  useInlineDescriptionImages,
+} from '@/hooks/use-inline-description-images'
 
 const templateFormSchema = z.object({
   name: z.string().min(1, 'Internal name is required'),
@@ -41,6 +44,7 @@ export function TemplateForm({ initialData, onSuccess, onCancel }: TemplateFormP
   // One inline image coordinator per mounted form; the editor uploads through
   // it and the save/cancel lifecycle below claims or cleans its draft session.
   const inlineImages = useInlineDescriptionImages()
+  const inlineImageBlockingGuidance = inlineImageBlockingMessage(inlineImages.blockingReason)
 
   const form = useForm<TemplateFormValues>({
     resolver: zodResolver(templateFormSchema),
@@ -53,6 +57,10 @@ export function TemplateForm({ initialData, onSuccess, onCancel }: TemplateFormP
   })
 
   async function onSubmit(data: TemplateFormValues) {
+    if (inlineImages.hasBlockingOperations) {
+      setError(inlineImageBlockingMessage(inlineImages.blockingReason))
+      return
+    }
     setIsSubmitting(true)
     setError(null)
 
@@ -184,9 +192,9 @@ export function TemplateForm({ initialData, onSuccess, onCancel }: TemplateFormP
         )}
 
         <div className="flex flex-col items-end gap-2">
-          {inlineImages.hasBlockingUploads && (
+          {inlineImageBlockingGuidance && (
             <p className="text-sm text-amber-700 self-start">
-              Wait for image uploads, or retry/remove failed images.
+              {inlineImageBlockingGuidance}
             </p>
           )}
           <div className="flex justify-end gap-2">
@@ -195,7 +203,7 @@ export function TemplateForm({ initialData, onSuccess, onCancel }: TemplateFormP
                 Cancel
               </Button>
             )}
-            <Button type="submit" disabled={isSubmitting || inlineImages.hasBlockingUploads}>
+            <Button type="submit" disabled={isSubmitting || inlineImages.hasBlockingOperations}>
               {isSubmitting ? 'Saving...' : initialData?.id ? 'Update Template' : 'Create Template'}
             </Button>
           </div>
