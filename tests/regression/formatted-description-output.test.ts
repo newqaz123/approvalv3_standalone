@@ -63,4 +63,19 @@ describe('formatted description output contexts', () => {
     assert.match(legacyHtml, /^Before <strong>.*<\/strong> and .* after$/)
     assert.doesNotMatch(legacyHtml, /\/api\/inline-images\/[0-9a-f-]{36}|data:image\//i)
   })
+
+  it('fix round 2: preserves unrelated email formatting around split forbidden references', () => {
+    const html = renderDescriptionHtml(
+      '<p><strong>Safe before </strong>/api/inline-<em>images/123e4567-e89b-42d3-a456-426614174000</em><mark data-highlight="pink"> safe middle </mark>data:<u>image/webp;base64,BBBB</u><strong> safe after</strong></p>',
+    )
+
+    assert.equal(
+      html,
+      '<p><strong>Safe before </strong>[redacted]<mark style="background-color:#FCE7F3"> safe middle </mark>[redacted]<strong> safe after</strong></p>',
+    )
+    assert.doesNotMatch(
+      html.replace(/<[^>]+>/g, ''),
+      /\/api\/inline-images\/[0-9a-f-]{36}|data:image\//i,
+    )
+  })
 })

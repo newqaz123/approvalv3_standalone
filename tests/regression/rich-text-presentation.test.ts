@@ -133,4 +133,19 @@ describe('trusted rich text presentation', () => {
     assert.match(html, /\[Image: receipt .* .*\]/)
     assert.doesNotMatch(html, /\/api\/inline-images\/[0-9a-f-]{36}|data:image\//i)
   })
+
+  it('fix round 2: redacts forbidden references split across nested formatting', () => {
+    const html = materializeRichTextForEmail(
+      `<p>Before /api/inline-<strong>images/${IMAGE_ID}</strong> after <em>safe emphasis</em></p><p><span data-text-color="blue">Before data:<mark data-highlight="yellow">image/png;base64,AAAA</mark> after <u>safe underline</u></span></p>`,
+    )
+
+    assert.equal(
+      html,
+      '<p>Before [redacted] after <em>safe emphasis</em></p><p><span style="color:#1D4ED8">Before [redacted] after <u>safe underline</u></span></p>',
+    )
+    assert.doesNotMatch(
+      html.replace(/<[^>]+>/g, ''),
+      /\/api\/inline-images\/[0-9a-f-]{36}|data:image\//i,
+    )
+  })
 })
