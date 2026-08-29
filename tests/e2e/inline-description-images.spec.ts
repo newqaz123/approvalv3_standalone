@@ -249,18 +249,25 @@ async function enterCrop(scope: LocatorScope, image: Locator): Promise<Locator> 
   await image.click()
   const toolbar = scope.locator('[role="toolbar"][aria-label="Image actions"]')
   await expect(toolbar).toBeVisible()
-  const beforeBox = await image.boundingBox()
-  if (!beforeBox) throw new Error('Image has no bounding box before crop')
+  const beforeWidth = await image.evaluate((element) => {
+    const visible = element.closest('.inline-image-crop-frame') ?? element
+    return visible.getBoundingClientRect().width
+  })
+  if (!Number.isFinite(beforeWidth) || beforeWidth <= 0) {
+    throw new Error('Visible image frame has no bounding box before crop')
+  }
   await toolbar.getByRole('button', { name: 'Crop image' }).click()
   const crop = scope.locator('[data-inline-image-crop="true"]')
   await expect(crop).toBeVisible()
   const surface = crop.locator('.inline-image-crop-surface')
   await expect(surface).toBeVisible()
-  const afterBox = await surface.boundingBox()
-  if (!afterBox) throw new Error('Crop surface has no bounding box')
+  const afterWidth = await surface.evaluate((element) => element.getBoundingClientRect().width)
+  if (!Number.isFinite(afterWidth) || afterWidth <= 0) {
+    throw new Error('Crop surface has no bounding box')
+  }
   expect(
-    Math.abs(afterBox.width - beforeBox.width),
-    `crop surface width ${afterBox.width} must match inline image width ${beforeBox.width} within 1 CSS pixel`,
+    Math.abs(afterWidth - beforeWidth),
+    `crop surface width ${afterWidth} must match inline image width ${beforeWidth} within 1 CSS pixel`,
   ).toBeLessThanOrEqual(1)
   return crop
 }

@@ -30,6 +30,7 @@ import {
   INLINE_IMAGE_CROP_UNAVAILABLE_GUIDANCE,
   InlineImageCropEditor,
   captureInlineImageCropLayoutWidth,
+  inlineImageVisibleCropLayoutElement,
   rebaseInlineImageCropSurfaceDrag,
   endInlineImageCropSession,
   focusInlineImageCropButton,
@@ -843,6 +844,40 @@ describe('inline image crop layout width', () => {
       measuredWidth: -12,
       fallbackWidth: 400,
     }), 400)
+  })
+
+  it('measures the committed crop frame, not the oversized inner source', () => {
+    const frame = {
+      id: 'frame',
+      getBoundingClientRect: () => ({ width: 320 }),
+      closest(selector: string) {
+        return selector === '.inline-image-crop-frame' ? this : null
+      },
+    }
+    const innerSource = {
+      id: 'inner',
+      getBoundingClientRect: () => ({ width: 800 }),
+      closest(selector: string) {
+        return selector === '.inline-image-crop-frame' ? frame : null
+      },
+    }
+    const visible = inlineImageVisibleCropLayoutElement(innerSource)
+    assert.equal(visible, frame)
+    assert.equal(visible.getBoundingClientRect().width, 320)
+    assert.notEqual(innerSource.getBoundingClientRect().width, 320)
+  })
+
+  it('measures the image itself when no crop frame is present', () => {
+    const image = {
+      id: 'image',
+      getBoundingClientRect: () => ({ width: 247 }),
+      closest(_selector: string) {
+        return null
+      },
+    }
+    const visible = inlineImageVisibleCropLayoutElement(image)
+    assert.equal(visible, image)
+    assert.equal(visible.getBoundingClientRect().width, 247)
   })
 })
 

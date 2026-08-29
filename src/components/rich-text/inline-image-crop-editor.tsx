@@ -86,6 +86,16 @@ export function captureInlineImageCropLayoutWidth(input: {
   return input.fallbackWidth
 }
 
+/**
+ * Visible layout box before crop/recrop: the committed crop frame when the
+ * image is the absolutely positioned inner source, otherwise the image itself.
+ */
+export function inlineImageVisibleCropLayoutElement<T extends {
+  closest(selectors: string): T | null
+}>(image: T): T {
+  return image.closest('.inline-image-crop-frame') ?? image
+}
+
 export type InlineImageCropSessionStart =
   | { ok: true; session: InlineImageCropNodeSession }
   | { ok: false; guidance: string }
