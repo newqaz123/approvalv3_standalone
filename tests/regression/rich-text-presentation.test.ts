@@ -15,12 +15,20 @@ function image(attributes = ''): string {
 }
 
 describe('trusted rich text presentation', () => {
-  it('keeps uncropped images as bare sanitized images', () => {
+  it('materializes valid uncropped display widths on bare sanitized images', () => {
     const html = materializeRichTextForApp(image(' data-width="400"'))
 
     assert.match(html, new RegExp(`<img src="${IMAGE_SRC}"`))
+    assert.match(html, /data-width="400" width="400" \/>$/)
     assert.doesNotMatch(html, /rich-text__image-frame/)
     assert.doesNotMatch(html, /style=/)
+  })
+
+  it('keeps invalid uncropped display widths intrinsic', () => {
+    const html = materializeRichTextForApp(image(' data-width="480px"'))
+
+    assert.match(html, /^<img\b/)
+    assert.doesNotMatch(html, /data-width=|\swidth="|rich-text__image-frame|style=/)
   })
 
   it('renders a valid crop as a responsive frame using validated geometry', () => {
@@ -39,6 +47,7 @@ describe('trusted rich text presentation', () => {
     ))
 
     assert.match(html, /^<img\b/)
+    assert.match(html, /\swidth="400" \/>$/)
     assert.doesNotMatch(html, /rich-text__image-frame|style=/)
   })
 

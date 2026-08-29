@@ -249,7 +249,24 @@ describe('resolveInlineImagesForPdf', () => {
     )
 
     assert.match(out, /<img src="data:image\/png;base64,[^"]*" alt="uncropped plan"/)
+    assert.match(out, /\swidth="480" \/>/)
     assert.doesNotMatch(out, /rich-text__image-frame|<img[^>]+style=/)
+  })
+
+  it('keeps invalid uncropped display widths intrinsic after embedding', async () => {
+    const owned = asset(IMG_REQUEST, [{ kind: 'request', id: REQ_ID }])
+    const { deps } = fakeDeps([owned])
+
+    const out = await resolveInlineImagesForPdf(
+      {
+        html: `<p><img src="${src(IMG_REQUEST)}" alt="intrinsic plan" data-width="480px"></p>`,
+        owner: requestOwner,
+      },
+      deps,
+    )
+
+    assert.match(out, /<img src="data:image\/png;base64,[^"]*" alt="intrinsic plan"/)
+    assert.doesNotMatch(out, /data-width=|\swidth="|rich-text__image-frame|<img[^>]+style=/)
   })
 
   it('materializes only the shared Calm Document palette for PDF output', async () => {

@@ -9,6 +9,7 @@ import {
 } from '@/lib/inline-images/policy'
 import {
   computeInlineImageFrameGeometry,
+  materializeInlineImageDisplayWidth,
   parseInlineImagePresentation,
 } from '@/lib/inline-images/presentation'
 import { readInlineImageFile } from '@/lib/inline-images/storage'
@@ -90,9 +91,11 @@ function materializePdfImage(
   const presentation = parseInlineImagePresentation(attributes)
   const imageTag = tag.replace(SRC_ATTRIBUTE_RE, ` src="${dataUri}"`)
 
+  if (presentation.crop === null) {
+    return materializeInlineImageDisplayWidth(imageTag, presentation.displayWidth)
+  }
   if (
-    presentation.crop === null
-    || presentation.naturalWidth === null
+    presentation.naturalWidth === null
     || presentation.naturalHeight === null
   ) {
     return imageTag

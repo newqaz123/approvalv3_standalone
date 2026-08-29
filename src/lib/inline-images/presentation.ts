@@ -213,6 +213,22 @@ export function pixelRectToNormalizedInlineImageCrop(input: {
   return crop !== null && isValidCrop(crop) ? crop : null
 }
 
+/** Materialize a validated resize width without creating a crop frame or storing style. */
+export function materializeInlineImageDisplayWidth(
+  imageHtml: string,
+  displayWidth: number | null,
+): string {
+  if (displayWidth === null || !isBoundedInteger(
+    displayWidth,
+    INLINE_IMAGE_MIN_DISPLAY_WIDTH,
+    INLINE_IMAGE_MAX_DISPLAY_WIDTH,
+  )) {
+    return imageHtml
+  }
+
+  return imageHtml.replace(/(\s*\/?>)$/, (closing) => ` width="${String(displayWidth)}"${closing}`)
+}
+
 export function computeInlineImageFrameGeometry(input: {
   crop: NormalizedInlineImageCrop
   naturalWidth: number

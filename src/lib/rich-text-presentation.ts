@@ -2,6 +2,7 @@ import sanitizeHtml from 'sanitize-html'
 import { decodeHTML, escapeText } from 'entities'
 import {
   computeInlineImageFrameGeometry,
+  materializeInlineImageDisplayWidth,
   parseInlineImagePresentation,
 } from '@/lib/inline-images/presentation'
 import { inlineImageAltPlaceholder } from '@/lib/inline-images/policy'
@@ -44,9 +45,11 @@ function materializeCroppedImages(sanitized: string): string {
   return sanitized.replace(SANITIZED_IMAGE_RE, (imageHtml) => {
     const attributes = sanitizedImageAttributes(imageHtml)
     const presentation = parseInlineImagePresentation(attributes)
+    if (presentation.crop === null) {
+      return materializeInlineImageDisplayWidth(imageHtml, presentation.displayWidth)
+    }
     if (
-      presentation.crop === null
-      || presentation.naturalWidth === null
+      presentation.naturalWidth === null
       || presentation.naturalHeight === null
     ) {
       return imageHtml
