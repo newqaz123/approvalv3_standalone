@@ -3,6 +3,7 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PDFDocument } from 'pdf-lib'
+import sharp from 'sharp'
 
 /**
  * Inline description image browser gate — upload, controls, blocking,
@@ -60,13 +61,46 @@ const CANONICAL_SRC_RE =
 const MISSING_IMAGE_UUID = '00000000-0000-4000-8000-000000000000'
 
 const BLOCKING_UPLOAD_MESSAGE = 'Wait for image uploads, or retry/remove failed images.'
+const EDIT_BLOCKING_MESSAGE = 'Apply or cancel the image edit before saving.'
 const UPLOAD_FAILED_TEXT = 'Image upload failed'
 
+const TEXT_COLOR_VALUES = {
+  ink: '#1E293B',
+  slate: '#475569',
+  blue: '#1D4ED8',
+  teal: '#0F766E',
+  green: '#15803D',
+  amber: '#B45309',
+  red: '#B91C1C',
+} as const
+
+const HIGHLIGHT_COLOR_VALUES = {
+  yellow: '#FEF3C7',
+  blue: '#DBEAFE',
+  green: '#D1FAE5',
+  pink: '#FCE7F3',
+  violet: '#EDE9FE',
+  red: '#FEE2E2',
+  gray: '#E2E8F0',
+} as const
+
+type SerializedImagePresentation = {
+  src: string
+  width: string | null
+  naturalWidth: string | null
+  naturalHeight: string | null
+  cropX: string | null
+  cropY: string | null
+  cropWidth: string | null
+  cropHeight: string | null
+}
+
 /**
- * Real 16x16 PNG (solid color, verified with sharp) so server-side decode and
- * optimization always succeed. Identical bytes are reused under distinct fixed
- * filenames; the sanitized filename (minus extension) becomes each node's
- * default alt text, which is how the spec tells nodes apart.
+ * A real 320x180 PNG (solid color, resized and verified with sharp) so the
+ * server-side decode, optimization, and interactive crop/resize surfaces are
+ * all large enough for real pointer gestures. Identical bytes are reused under
+ * distinct fixed filenames; the sanitized filename (minus extension) becomes
+ * each node's default alt text, which is how the spec tells nodes apart.
  */
 const SAMPLE_PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAGUlEQVR4nGO4FGBDEmIY1RAwGkqXhmvSAACoeF4Qrn9alwAAAABJRU5ErkJggg=='
@@ -111,7 +145,10 @@ test.beforeAll(async () => {
   }
 
   await mkdir(FIXTURE_DIR, { recursive: true })
-  const png = Buffer.from(SAMPLE_PNG_BASE64, 'base64')
+  const png = await sharp(Buffer.from(SAMPLE_PNG_BASE64, 'base64'))
+    .resize(320, 180)
+    .png()
+    .toBuffer()
   for (const name of PNG_FIXTURES) {
     await writeFile(pngPath(name), png)
   }
@@ -162,6 +199,199 @@ function inlineImageNodes(scope: LocatorScope): Locator {
 
 function stableImages(scope: LocatorScope): Locator {
   return scope.locator('[data-inline-image-node] img')
+}
+
+async function serializedPresentation(img: Locator): Promise<SerializedImagePresentation> {
+  return {
+    src: await canonicalSrc(img),
+    width: await img.getAttribute('data-width'),
+    naturalWidth: await img.getAttribute('data-natural-width'),
+    naturalHeight: await img.getAttribute('data-natural-height'),
+    cropX: await img.getAttribute('data-crop-x'),
+    cropY: await img.getAttribute('data-crop-y'),
+    cropWidth: await img.getAttribute('data-crop-width'),
+    cropHeight: await img.getAttribute('data-crop-height'),
+  }
+}
+
+async function dragResizeHandle(
+  page: Page,
+  scope: LocatorScope,
+  image: Locator,
+  delta = 80,
+): Promise<SerializedImagePresentation> {
+  await image.click()
+  // The top-right handle avoids the fixed modal footer when the editor has
+  // scrolled the image's lower edge beneath it.
+  const handle = scope.locator('button[aria-label="Resize image top-right"]')
+  await expect(handle).toBeVisible()
+  const beforeWidth = await image.evaluate((element) => element.getBoundingClientRect().width)
+  const box = await handle.boundingBox()
+  if (!box) throw new Error('Resize handle has no bounding box for a real pointer drag')
+  const startX = box.x + box.width / 2
+  const startY = box.y + box.height / 2
+  await page.mouse.move(startX, startY)
+  await page.mouse.down()
+  await page.mouse.move(startX + delta, startY + delta, { steps: 5 })
+  await page.mouse.up()
+
+  await expect
+    .poll(
+      async () => Number(await image.getAttribute('data-width')),
+      { timeout: 15_000, message: 'real resize drag must commit data-width' },
+    )
+    .toBeGreaterThan(Math.round(beforeWidth))
+  return serializedPresentation(image)
+}
+
+async function enterCrop(scope: LocatorScope, image: Locator): Promise<Locator> {
+  await image.click()
+  const toolbar = scope.locator('[role="toolbar"][aria-label="Image actions"]')
+  await expect(toolbar).toBeVisible()
+  await toolbar.getByRole('button', { name: 'Crop image' }).click()
+  const crop = scope.locator('[data-inline-image-crop="true"]')
+  await expect(crop).toBeVisible()
+  return crop
+}
+
+async function chooseCropPreset(crop: Locator, preset: 'free' | 'original' | '1:1' | '4:3' | '16:9') {
+  const button = crop.getByRole('button', { name: `Crop aspect ${preset}` })
+  await button.click()
+  await expect(button).toHaveAttribute('aria-pressed', 'true')
+}
+
+async function increaseCropZoom(crop: Locator, steps = 8): Promise<string> {
+  const zoom = crop.getByRole('slider', { name: 'Image zoom' })
+  await zoom.focus()
+  for (let index = 0; index < steps; index += 1) await zoom.press('ArrowRight')
+  const value = await zoom.inputValue()
+  expect(Number(value), 'crop zoom must respond to keyboard input').toBeGreaterThan(1)
+  return value
+}
+
+async function panCropSurface(page: Page, crop: Locator): Promise<void> {
+  const region = crop.getByRole('group', { name: 'Crop region' })
+  const beforeStyle = await region.getAttribute('style')
+  const box = await region.boundingBox()
+  if (!box) throw new Error('Crop region has no bounding box for a real pan gesture')
+  const startX = box.x + box.width / 2
+  const startY = box.y + box.height / 2
+  await page.mouse.move(startX, startY)
+  await page.mouse.down()
+  await page.mouse.move(startX + Math.min(24, box.width / 4), startY, { steps: 4 })
+  await page.mouse.up()
+  await expect
+    .poll(
+      () => region.getAttribute('style'),
+      { timeout: 15_000, message: 'real crop pan must change the crop region' },
+    )
+    .not.toBe(beforeStyle)
+}
+
+async function selectTextOccurrence(editor: Locator, text: string, occurrence = 0): Promise<void> {
+  const found = await editor.evaluate(
+    (root, target) => {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+      let seen = 0
+      let current: Node | null = walker.nextNode()
+      while (current) {
+        const value = current.nodeValue ?? ''
+        let offset = value.indexOf(target.text)
+        while (offset !== -1) {
+          if (seen === target.occurrence) {
+            const range = document.createRange()
+            range.setStart(current, offset)
+            range.setEnd(current, offset + target.text.length)
+            const selection = window.getSelection()
+            selection?.removeAllRanges()
+            selection?.addRange(range)
+            return true
+          }
+          seen += 1
+          offset = value.indexOf(target.text, offset + target.text.length)
+        }
+        current = walker.nextNode()
+      }
+      return false
+    },
+    { text, occurrence },
+  )
+  expect(found, `editor text occurrence ${text} must exist`).toBe(true)
+}
+
+async function pasteUnsupportedColorHtml(editor: Locator): Promise<void> {
+  await editor.focus()
+  await editor.press('Control+End')
+  await editor.evaluate((element) => {
+    const transfer = new DataTransfer()
+    transfer.setData(
+      'text/html',
+      '<span style="color:#ff00ff;background-color:#123456">unsupported-color</span>',
+    )
+    transfer.setData('text/plain', 'unsupported-color')
+    element.dispatchEvent(new ClipboardEvent('paste', {
+      clipboardData: transfer,
+      bubbles: true,
+      cancelable: true,
+    }))
+  })
+  await expect(editor).toContainText('unsupported-color')
+  await expect(editor.locator('span[data-text-color][style], mark[data-highlight][style]')).toHaveCount(0)
+  const hostileStyles = await editor.evaluate((root) =>
+    Array.from(root.querySelectorAll('[style]'))
+      .map((element) => element.getAttribute('style') ?? '')
+      .filter((style) => /ff00ff|123456/i.test(style)),
+  )
+  expect(hostileStyles).toEqual([])
+}
+
+async function applyColorToken(
+  page: Page,
+  editor: Locator,
+  controls: Locator,
+  kind: 'text' | 'highlight',
+  token: string,
+  marker: string,
+): Promise<void> {
+  await selectTextOccurrence(editor, marker)
+  const label = kind === 'text' ? 'Text color' : 'Highlight'
+  const paletteLabel = `${label} palette`
+  const trigger = controls.getByRole('button', { name: label })
+  await trigger.click()
+  const palette = page.locator(`[aria-label="${paletteLabel}"]`)
+  await expect(palette).toBeVisible()
+  const swatch = palette.locator(`[data-color-kind="${kind}"][data-color-token="${token}"]`)
+  await expect(swatch).toHaveAttribute('data-color-value', kind === 'text'
+    ? TEXT_COLOR_VALUES[token as keyof typeof TEXT_COLOR_VALUES]
+    : HIGHLIGHT_COLOR_VALUES[token as keyof typeof HIGHLIGHT_COLOR_VALUES])
+  await swatch.click()
+  await expect(trigger).toHaveAttribute('data-active-token', token)
+  await expect(editor.locator(`[data-${kind === 'text' ? 'text-color' : 'highlight'}="${token}"]`)).toContainText(marker)
+}
+
+function normalizedMarkup(markup: string): string {
+  return markup.replace(/\s+/g, '').toLowerCase()
+}
+
+function normalizedInlineStyle(style: string | null): string {
+  return (style ?? '')
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/\/1(?=;|$)/g, '')
+    .split(';')
+    .filter(Boolean)
+    .sort()
+    .join(';')
+}
+
+async function expectMaterializedPalette(scope: LocatorScope): Promise<void> {
+  const markup = normalizedMarkup(await scope.locator('span.rich-text').innerHTML())
+  for (const value of Object.values(TEXT_COLOR_VALUES)) {
+    expect(markup).toContain(`color:${value.toLowerCase()}`)
+  }
+  for (const value of Object.values(HIGHLIGHT_COLOR_VALUES)) {
+    expect(markup).toContain(`background-color:${value.toLowerCase()}`)
+  }
 }
 
 async function canonicalSrc(img: Locator): Promise<string> {
@@ -317,7 +547,8 @@ async function expectMigrationApplied(page: Page): Promise<void> {
 }
 
 test.describe('Inline description images (release gate)', () => {
-  test('toolbar, paste, and drop uploads, image controls, upload blocking, retry, and remove', async ({
+  test.describe.configure({ mode: 'serial' })
+  test('scenarios 1-2 and 4: floating toolbar, real resize, reset, uploads, and cleanup', async ({
     page,
   }) => {
     test.setTimeout(240_000)
@@ -353,10 +584,21 @@ test.describe('Inline description images (release gate)', () => {
     await expect(toolbarImg).toHaveAttribute('data-align', 'center')
     expect(routes.uploads.filter((upload) => upload.kind === 'pass')).toHaveLength(1)
 
-    // ── 3. Alt text and alignment controls update sanitized attributes ──────
+    // ── 1. Selection uses only the floating toolbar, never the old row ──────
     await toolbarImg.click()
-    const controls = dialog.getByRole('group', { name: 'Image controls' })
-    await expect(controls).toBeVisible()
+    const floatingToolbar = dialog.getByRole('toolbar', { name: 'Image actions' })
+    await expect(floatingToolbar).toBeVisible()
+    await expect(dialog.getByRole('group', { name: 'Image controls' })).toHaveCount(0)
+    await expect(dialog.getByRole('button', { name: /^Resize image / })).toHaveCount(4)
+
+    // ── 2. A real pointer drag changes serialized width; Reset removes it ───
+    const resizedPresentation = await dragResizeHandle(page, dialog, toolbarImg)
+    expect(resizedPresentation.width).toBeTruthy()
+    await floatingToolbar.getByRole('button', { name: 'Reset image size' }).click()
+    await expect(toolbarImg).not.toHaveAttribute('data-width', /.+/)
+
+    // ── 3. Alt text and alignment controls update sanitized attributes ──────
+    const controls = dialog.getByRole('toolbar', { name: 'Image actions' })
     await controls.getByLabel('Image alt text').fill('Renamed floor plan')
     await expect(toolbarImg).toHaveAttribute('alt', 'Renamed floor plan')
 
@@ -461,63 +703,167 @@ test.describe('Inline description images (release gate)', () => {
       .toBeGreaterThanOrEqual(deletesBeforeCancel + stableBeforeCancel)
   })
 
-  test('requester saves an inline image with the resubmission and reopens it', async ({ page }) => {
-    test.setTimeout(180_000)
+  test('scenarios 3, 5, 6, 8, and 9: crop lifecycle, persistence, palette round-trip, and responsive controls', async ({ page }) => {
+    test.setTimeout(300_000)
 
     const email = process.env.E2E_REQUESTER_EMAIL as string
     const password = process.env.E2E_REQUESTER_PASSWORD as string
     const requestId = process.env.E2E_INLINE_REQUEST_ID as string
 
     await login(page, email, password)
+    await expectMigrationApplied(page)
 
     const dialog = await openResubmitDialog(page, requestId)
-    await expect(richEditor(dialog)).toBeVisible({ timeout: 20_000 })
+    const editor = richEditor(dialog)
+    await expect(editor).toBeVisible({ timeout: 20_000 })
+    const submitButton = dialog.getByRole('button', { name: 'Resubmit Request', exact: true })
+    const textMarkers = Object.keys(TEXT_COLOR_VALUES).map((token) => `palette-text-${token}`)
+    const highlightMarkers = Object.keys(HIGHLIGHT_COLOR_VALUES).map((token) => `palette-highlight-${token}`)
 
-    // Upload, then persist a non-default alt text and alignment.
+    // Put palette markers into the empty tail before inserting an image. This
+    // avoids replacing a selected image node when the text is typed.
+    await editor.focus()
+    await editor.press('Control+End')
+    await editor.type(` ${[...textMarkers, ...highlightMarkers].join(' ')}`)
+
+    // Upload, resize, and persist a non-default alt text and alignment.
     await imagePickerInput(dialog).setInputFiles(pngPath('inline-toolbar.png'))
     const editorImg = stableImages(dialog).first()
     await expect(editorImg).toBeVisible({ timeout: 20_000 })
-    const savedSrc = await canonicalSrc(editorImg)
+    await expectLoadedImage(editorImg)
+    const resizedPresentation = await dragResizeHandle(page, dialog, editorImg)
+    await expect(editorImg).toHaveAttribute('data-width', resizedPresentation.width as string)
 
-    await editorImg.click()
-    const controls = dialog.getByRole('group', { name: 'Image controls' })
-    await expect(controls).toBeVisible()
-    await controls.getByLabel('Image alt text').fill('E2E committed inline image')
-    await controls.getByRole('button', { name: 'Align right' }).click()
+    const toolbar = dialog.getByRole('toolbar', { name: 'Image actions' })
+    await toolbar.getByLabel('Image alt text').fill('E2E committed inline image')
+    await toolbar.getByRole('button', { name: 'Align right' }).click()
     await expect(editorImg).toHaveAttribute('data-align', 'right')
+    const baselinePresentation = await serializedPresentation(editorImg)
+
+    // ── 5. Exercise every crop preset, pan, zoom, Cancel, Reset, Apply ────
+    let crop = await enterCrop(dialog, editorImg)
+    const cropControls = crop.getByRole('group', { name: 'Crop controls' })
+    await expect(cropControls).toBeVisible()
+    for (const preset of ['free', 'original', '1:1'] as const) {
+      await chooseCropPreset(crop, preset)
+    }
+    await panCropSurface(page, crop)
+    const zoomBeforeCancel = await increaseCropZoom(crop)
+    expect(Number(zoomBeforeCancel)).toBeGreaterThan(1)
+    for (const preset of ['4:3', '16:9'] as const) {
+      await chooseCropPreset(crop, preset)
+    }
+    await crop.getByRole('button', { name: 'Cancel crop' }).click()
+    await expect(crop).toHaveCount(0)
+    expect(await serializedPresentation(editorImg)).toEqual(baselinePresentation)
+
+    // Escape cancels a second draft without dismissing the resubmission dialog.
+    crop = await enterCrop(dialog, editorImg)
+    await chooseCropPreset(crop, '1:1')
+    await increaseCropZoom(crop, 3)
+    await page.keyboard.press('Escape')
+    await expect(crop).toHaveCount(0)
+    await expect(dialog).toBeVisible()
+    expect(await serializedPresentation(editorImg)).toEqual(baselinePresentation)
+
+    // ── 6. While crop is live, saving is disabled with the exact guidance. ─
+    crop = await enterCrop(dialog, editorImg)
+    await chooseCropPreset(crop, '1:1')
+    await expect(submitButton).toBeDisabled()
+    await expect(dialog.getByText(EDIT_BLOCKING_MESSAGE, { exact: true })).toBeVisible()
+
+    // Reset returns to Original/zoom 1, then a non-full crop is applied.
+    await increaseCropZoom(crop, 4)
+    await crop.getByRole('button', { name: 'Reset crop' }).click()
+    await expect(crop.getByRole('button', { name: 'Crop aspect original' })).toHaveAttribute('aria-pressed', 'true')
+    await expect(crop.getByRole('slider', { name: 'Image zoom' })).toHaveValue('1')
+    await chooseCropPreset(crop, '4:3')
+    await increaseCropZoom(crop, 4)
+    await panCropSurface(page, crop)
+    await crop.getByRole('button', { name: 'Apply crop' }).click()
+    await expect(crop).toHaveCount(0)
+    await expect(submitButton).toBeEnabled()
+
+    const savedPresentation = await serializedPresentation(editorImg)
+    expect(savedPresentation.src).toBe(baselinePresentation.src)
+    expect(savedPresentation.width).toBe(baselinePresentation.width)
+    expect(savedPresentation.naturalWidth).toBe('320')
+    expect(savedPresentation.naturalHeight).toBe('180')
+    for (const value of [savedPresentation.cropX, savedPresentation.cropY, savedPresentation.cropWidth, savedPresentation.cropHeight]) {
+      expect(value).toBeTruthy()
+    }
+    const editorCropFrame = editorImg.locator('xpath=..')
+    await expect(editorCropFrame).toHaveClass(/inline-image-crop-frame/)
+    const editorFrameStyle = await editorCropFrame.getAttribute('style')
+    const editorCropImageStyle = await editorImg.getAttribute('style')
+    expect(editorFrameStyle).toContain('aspect-ratio')
+    expect(editorCropImageStyle).toContain('%')
+
+    // ── 8. Every Calm Document token applies to semantic editor marks. ────
+    const colorControls = dialog.locator('[aria-label="Text color and highlight controls"]')
+    await expect(colorControls).toBeVisible()
+    for (const [index, token] of Object.keys(TEXT_COLOR_VALUES).entries()) {
+      await applyColorToken(page, editor, colorControls, 'text', token, textMarkers[index] as string)
+    }
+    for (const [index, token] of Object.keys(HIGHLIGHT_COLOR_VALUES).entries()) {
+      await applyColorToken(page, editor, colorControls, 'highlight', token, highlightMarkers[index] as string)
+    }
+    await pasteUnsupportedColorHtml(editor)
+
+    // ── 9. Narrow toolbar uses More and crop remains usable at 360px. ─────
+    await page.setViewportSize({ width: 360, height: 800 })
+    const wideColors = colorControls.locator('.rich-text-color-controls-wide')
+    const compactColors = colorControls.locator('.rich-text-color-controls-compact')
+    await expect(wideColors).toBeHidden()
+    await expect(compactColors).toBeVisible()
+    const moreFormatting = compactColors.getByRole('button', { name: 'More formatting' })
+    await expect(moreFormatting).toBeVisible()
+    await moreFormatting.click()
+    await expect(page.locator('[aria-label="More formatting"]').last()).toBeVisible()
+    await page.keyboard.press('Escape')
+
+    crop = await enterCrop(dialog, editorImg)
+    await expect(crop.getByRole('button', { name: 'Apply crop' })).toBeVisible()
+    await expect(crop.getByRole('button', { name: 'Cancel crop' })).toBeVisible()
+    await expect(crop.locator('.inline-image-crop-surface')).toBeVisible()
+    await chooseCropPreset(crop, '1:1')
+    await crop.getByRole('button', { name: 'Cancel crop' }).click()
+    await expect(crop).toHaveCount(0)
+    await page.setViewportSize({ width: 1280, height: 900 })
 
     await dialog.getByRole('button', { name: 'Resubmit Request', exact: true }).click()
     await expect(page.getByText('Request resubmitted successfully')).toBeVisible({
       timeout: 30_000,
     })
 
-    // ── 6. Reopen the request detail and verify the private image renders ──
+    // ── 3. Reopen and compare canonical storage plus saved crop rendering. ─
     await page.goto(`/requests/${encodeURIComponent(requestId)}`)
     const descriptionCard = page.locator('div.bg-white').filter({
       has: page.getByRole('heading', { name: 'Description', exact: true }),
     })
     const detailImg = descriptionCard.locator('span.rich-text img').first()
     await expect(detailImg).toBeVisible({ timeout: 20_000 })
-    await expect(detailImg).toHaveAttribute('src', savedSrc)
+    await expect(detailImg).toHaveAttribute('src', savedPresentation.src)
     await expect(detailImg).toHaveAttribute('alt', 'E2E committed inline image')
     await expect(detailImg).toHaveAttribute('data-align', 'right')
-    // Sanitized persistence: exactly the three approved attributes survive.
-    const attributeNames = await detailImg.evaluate((el) =>
-      Array.from(el.attributes)
-        .map((attribute) => attribute.name)
-        .sort(),
-    )
-    expect(attributeNames).toEqual(['alt', 'data-align', 'src'])
     await expectLoadedImage(detailImg)
+    const savedFrame = detailImg.locator('xpath=..')
+    await expect(savedFrame).toHaveClass(/rich-text__image-frame/)
+    expect(normalizedInlineStyle(await savedFrame.getAttribute('style'))).toBe(
+      normalizedInlineStyle(editorFrameStyle),
+    )
+    expect(normalizedInlineStyle(await detailImg.getAttribute('style'))).toBe(
+      normalizedInlineStyle(editorCropImageStyle),
+    )
+    await expectMaterializedPalette(descriptionCard)
 
-    // The authorized requester streams the stored bytes with safe headers.
-    const imageResponse = await page.request.get(savedSrc)
+    const imageResponse = await page.request.get(savedPresentation.src)
     expect(imageResponse.status()).toBe(200)
     expect(imageResponse.headers()['content-type'] ?? '').toMatch(/^image\//)
     expect(imageResponse.headers()['x-content-type-options'] ?? '').toBe('nosniff')
   })
 
-  test('inline image reads enforce 401, 403, and 200 authorization', async ({ page }) => {
+  test('scenario 10: canonical private-image reads enforce 401, 403, and 200 authorization', async ({ page }) => {
     test.setTimeout(120_000)
 
     const email = process.env.E2E_REQUESTER_EMAIL as string
@@ -556,7 +902,7 @@ test.describe('Inline description images (release gate)', () => {
     expect(forbiddenResponse.status()).toBe(403)
   })
 
-  test('template image is committed by the template save and reused by a new request; attachment upload stays independent', async ({
+  test('scenario 7 and 10: cropped template copies diverge independently; attachments stay independent', async ({
     page,
   }) => {
     test.setTimeout(240_000)
@@ -582,6 +928,20 @@ test.describe('Inline description images (release gate)', () => {
     const templateSrc = await canonicalSrc(templateImg)
     await expectLoadedImage(templateImg)
 
+    // Commit a non-default template crop before copying it to a request.
+    let templateCrop = await enterCrop(page, templateImg)
+    await chooseCropPreset(templateCrop, '4:3')
+    await increaseCropZoom(templateCrop, 3)
+    await panCropSurface(page, templateCrop)
+    await templateCrop.getByRole('button', { name: 'Apply crop' }).click()
+    await expect(templateCrop).toHaveCount(0)
+    const templatePresentation = await serializedPresentation(templateImg)
+    expect(templatePresentation.src).toBe(templateSrc)
+    expect(templatePresentation.cropWidth).toBeTruthy()
+    const templateCropFrame = templateImg.locator('xpath=..')
+    const templateFrameStyle = await templateCropFrame.getAttribute('style')
+    const templateCropImageStyle = await templateImg.getAttribute('style')
+
     await page.getByRole('button', { name: 'Update Template' }).click()
     await page.waitForURL(/\/admin\/templates$/, { timeout: 30_000 })
 
@@ -590,8 +950,15 @@ test.describe('Inline description images (release gate)', () => {
     await expect(richEditor(page)).toBeVisible({ timeout: 20_000 })
     const reopenedImg = stableImages(page).first()
     await expect(reopenedImg).toBeVisible({ timeout: 20_000 })
+    expect(await serializedPresentation(reopenedImg)).toEqual(templatePresentation)
     await expect(reopenedImg).toHaveAttribute('src', templateSrc)
     await expectLoadedImage(reopenedImg)
+    expect(normalizedInlineStyle(await reopenedImg.locator('xpath=..').getAttribute('style'))).toBe(
+      normalizedInlineStyle(templateFrameStyle),
+    )
+    expect(normalizedInlineStyle(await reopenedImg.getAttribute('style'))).toBe(
+      normalizedInlineStyle(templateCropImageStyle),
+    )
 
     // ── 8b. Requester copies the template description into a new request ──
     await page.context().clearCookies()
@@ -623,6 +990,29 @@ test.describe('Inline description images (release gate)', () => {
     await expect(formImg).toBeVisible({ timeout: 20_000 })
     await expect(formImg).toHaveAttribute('src', templateSrc)
     await expectLoadedImage(formImg)
+    expect(await serializedPresentation(formImg)).toEqual(templatePresentation)
+
+    // A request crop changes only the copied presentation; the private image
+    // URL remains shared with the template.
+    const requestCrop = await enterCrop(page, formImg)
+    await chooseCropPreset(requestCrop, '1:1')
+    await increaseCropZoom(requestCrop, 2)
+    await requestCrop.getByRole('button', { name: 'Apply crop' }).click()
+    await expect(requestCrop).toHaveCount(0)
+    const requestPresentation = await serializedPresentation(formImg)
+    expect(requestPresentation.src).toBe(templatePresentation.src)
+    expect(requestPresentation).not.toEqual(templatePresentation)
+    expect(
+      [requestPresentation.cropX, requestPresentation.cropY, requestPresentation.cropWidth, requestPresentation.cropHeight],
+    ).not.toEqual([
+      templatePresentation.cropX,
+      templatePresentation.cropY,
+      templatePresentation.cropWidth,
+      templatePresentation.cropHeight,
+    ])
+    const requestCropFrame = formImg.locator('xpath=..')
+    const requestFrameStyle = await requestCropFrame.getAttribute('style')
+    const requestCropImageStyle = await formImg.getAttribute('style')
 
     const uniqueTitle = `E2E inline template image ${Date.now()}`
     await page.getByPlaceholder('Brief summary of your request').fill(uniqueTitle)
@@ -646,7 +1036,26 @@ test.describe('Inline description images (release gate)', () => {
       .getByRole('dialog')
       .filter({ has: page.locator(`img[src="${templateSrc}"]`) })
     await expect(createdDialog).toBeVisible({ timeout: 20_000 })
-    await expect(createdDialog.locator(`img[src="${templateSrc}"]`).first()).toBeVisible()
-    await expectLoadedImage(createdDialog.locator(`img[src="${templateSrc}"]`).first())
+    const createdImg = createdDialog.locator(`img[src="${templateSrc}"]`).first()
+    await expect(createdImg).toBeVisible()
+    await expectLoadedImage(createdImg)
+    const createdFrame = createdImg.locator('xpath=..')
+    await expect(createdFrame).toHaveClass(/rich-text__image-frame/)
+    expect(normalizedInlineStyle(await createdFrame.getAttribute('style'))).toBe(
+      normalizedInlineStyle(requestFrameStyle),
+    )
+    expect(normalizedInlineStyle(await createdImg.getAttribute('style'))).toBe(
+      normalizedInlineStyle(requestCropImageStyle),
+    )
+
+    // Request edits must not mutate the source template's crop metadata.
+    await page.context().clearCookies()
+    await login(page, adminEmail, adminPassword)
+    await page.goto(editUrl)
+    await expect(richEditor(page)).toBeVisible({ timeout: 20_000 })
+    const templateAfterRequest = stableImages(page).first()
+    await expect(templateAfterRequest).toBeVisible({ timeout: 20_000 })
+    expect(await serializedPresentation(templateAfterRequest)).toEqual(templatePresentation)
+    await expect(templateAfterRequest).toHaveAttribute('src', templateSrc)
   })
 })
