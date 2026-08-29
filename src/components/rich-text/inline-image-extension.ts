@@ -26,6 +26,44 @@ export type InlineImageExtensionOptions = ImageOptions & {
   insertionPositionByUploadId?: Map<string, number>
   localUploadIds?: Set<string>
   removedUploadIds?: Set<string>
+  /** Counts live crop sessions so the editor can disable its other commands. */
+  cropCommands?: InlineImageCropCommandsController
+}
+
+export type InlineImageCropCommandsListener = () => void
+
+export type InlineImageCropCommandsController = {
+  subscribe(listener: InlineImageCropCommandsListener): () => void
+  hasActiveCrop(): boolean
+  begin(): void
+  end(): void
+}
+
+/** Publishes crop-session state so editor commands disable while any crop UI is open. */
+export function createInlineImageCropCommandsController(): InlineImageCropCommandsController {
+  let listeners: InlineImageCropCommandsListener[] = []
+  let activeCrops = 0
+  const notify = () => {
+    for (const listener of listeners) listener()
+  }
+  return {
+    subscribe(listener) {
+      listeners.push(listener)
+      return () => {
+        listeners = listeners.filter((candidate) => candidate !== listener)
+      }
+    },
+    hasActiveCrop: () => activeCrops > 0,
+    begin() {
+      activeCrops += 1
+      if (activeCrops === 1) notify()
+    },
+    end() {
+      if (activeCrops === 0) return
+      activeCrops -= 1
+      if (activeCrops === 0) notify()
+    },
+  }
 }
 
 function parseAlignment(value: string | null): InlineImageAlignment {
@@ -377,6 +415,7 @@ export const InlineImageExtension = Image.extend<InlineImageExtensionOptions>({
       insertionPositionByUploadId: undefined,
       localUploadIds: undefined,
       removedUploadIds: undefined,
+      cropCommands: undefined,
     }
   },
 

@@ -35,7 +35,8 @@ describe('RichTextEditor implementation', () => {
   })
 
   it('gates toolbar commands on the component disabled flag', () => {
-    assert.match(source, /disabled\s*=\{disabled\}/)
+    assert.match(source, /const commandsDisabled = disabled \|\| cropCommandsDisabled/)
+    assert.match(source, /disabled\s*=\{commandsDisabled\}/)
   })
 
   it('guards the external setContent sync against re-emission loops', () => {

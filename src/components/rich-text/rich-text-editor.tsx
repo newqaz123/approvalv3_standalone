@@ -19,8 +19,9 @@ import {
 	Undo2,
 	Redo2,
 } from "lucide-react";
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
+	createInlineImageCropCommandsController,
 	createInlineImageMimeFilter,
 	createInlineImageTransactionCleanupController,
 	InlineImageExtension,
@@ -128,6 +129,10 @@ export default function RichTextEditor({
 	const transactionCleanup = useRef<ReturnType<
 		typeof createInlineImageTransactionCleanupController
 	> | null>(null);
+	const cropCommands = useRef<ReturnType<
+		typeof createInlineImageCropCommandsController
+	> | null>(null);
+	const [cropCommandsDisabled, setCropCommandsDisabled] = useState(false);
 
 	inlineImagesRef.current = inlineImages;
 	disabledRef.current = disabled;
@@ -140,6 +145,9 @@ export default function RichTextEditor({
 			localUploadIds: localUploadIds.current,
 			removedUploadIds: removedUploadIds.current,
 		});
+	}
+	if (!cropCommands.current) {
+		cropCommands.current = createInlineImageCropCommandsController();
 	}
 
 	function updateUploadNode(uploadId: string, attrs: Record<string, unknown>) {
@@ -238,6 +246,7 @@ export default function RichTextEditor({
 				insertionPositionByUploadId: insertionPositionByUploadId.current,
 				localUploadIds: localUploadIds.current,
 				removedUploadIds: removedUploadIds.current,
+				cropCommands: cropCommands.current ?? undefined,
 			}),
 			StarterKit.configure({
 				heading: { levels: [2, 3] },
@@ -307,13 +316,33 @@ export default function RichTextEditor({
 		editor.commands.setContent(value || "");
 	}, [value, editor]);
 
+	// Formatting and every other editor command stay disabled while any crop
+	// session is active; the crop controls themselves are never disabled by it.
+	const commandsDisabled = disabled || cropCommandsDisabled;
+	canInsertImagesRef.current = Boolean(inlineImages) && !commandsDisabled;
+
 	useEffect(() => {
-		if (editor) editor.setEditable(!disabled);
-	}, [disabled, editor]);
+		const controller = cropCommands.current;
+		if (!controller) return undefined;
+		return controller.subscribe(() => {
+			const activeCrop = controller.hasActiveCrop();
+			setCropCommandsDisabled(activeCrop);
+			// Applied synchronously so the NodeView chrome that re-renders with the
+		// crop exit already observes the restored editable state.
+			const current = editorRef.current;
+			if (current) {
+				current.setEditable(!disabledRef.current && !activeCrop);
+			}
+		});
+	}, []);
+
+	useEffect(() => {
+		if (editor) editor.setEditable(!disabled && !cropCommandsDisabled);
+	}, [disabled, cropCommandsDisabled, editor]);
 
 	if (!editor) return null;
 
-	const canInsertImages = Boolean(inlineImages) && !disabled;
+	const canInsertImages = Boolean(inlineImages) && !commandsDisabled;
 
 	return (
 		<div className="space-y-2">
@@ -327,7 +356,7 @@ export default function RichTextEditor({
 					label="Bold"
 					active={editor.isActive("bold")}
 					enabled={editor.can().chain().focus().toggleBold().run()}
-					disabled={disabled}
+					disabled={commandsDisabled}
 					onClick={() => editor.chain().focus().toggleBold().run()}
 				>
 					<Bold className="h-4 w-4" />
@@ -337,7 +366,7 @@ export default function RichTextEditor({
 					label="Italic"
 					active={editor.isActive("italic")}
 					enabled={editor.can().chain().focus().toggleItalic().run()}
-					disabled={disabled}
+					disabled={commandsDisabled}
 					onClick={() => editor.chain().focus().toggleItalic().run()}
 				>
 					<Italic className="h-4 w-4" />
@@ -347,7 +376,7 @@ export default function RichTextEditor({
 					label="Underline"
 					active={editor.isActive("underline")}
 					enabled={editor.can().chain().focus().toggleUnderline().run()}
-					disabled={disabled}
+					disabled={commandsDisabled}
 					onClick={() => editor.chain().focus().toggleUnderline().run()}
 				>
 					<UnderlineIcon className="h-4 w-4" />
@@ -357,7 +386,7 @@ export default function RichTextEditor({
 					label="Strikethrough"
 					active={editor.isActive("strike")}
 					enabled={editor.can().chain().focus().toggleStrike().run()}
-					disabled={disabled}
+					disabled={commandsDisabled}
 					onClick={() => editor.chain().focus().toggleStrike().run()}
 				>
 					<Strikethrough className="h-4 w-4" />
@@ -367,7 +396,7 @@ export default function RichTextEditor({
 					label="Bullet list"
 					active={editor.isActive("bulletList")}
 					enabled={editor.can().chain().focus().toggleBulletList().run()}
-					disabled={disabled}
+					disabled={commandsDisabled}
 					onClick={() => editor.chain().focus().toggleBulletList().run()}
 				>
 					<List className="h-4 w-4" />
@@ -377,7 +406,7 @@ export default function RichTextEditor({
 					label="Numbered list"
 					active={editor.isActive("orderedList")}
 					enabled={editor.can().chain().focus().toggleOrderedList().run()}
-					disabled={disabled}
+					disabled={commandsDisabled}
 					onClick={() => editor.chain().focus().toggleOrderedList().run()}
 				>
 					<ListOrdered className="h-4 w-4" />
@@ -392,7 +421,7 @@ export default function RichTextEditor({
 						.focus()
 						.toggleHeading({ level: 2 })
 						.run()}
-					disabled={disabled}
+					disabled={commandsDisabled}
 					onClick={() =>
 						editor.chain().focus().toggleHeading({ level: 2 }).run()
 					}
@@ -409,7 +438,7 @@ export default function RichTextEditor({
 						.focus()
 						.toggleHeading({ level: 3 })
 						.run()}
-					disabled={disabled}
+					disabled={commandsDisabled}
 					onClick={() =>
 						editor.chain().focus().toggleHeading({ level: 3 }).run()
 					}
@@ -426,7 +455,7 @@ export default function RichTextEditor({
 						.focus()
 						.setLink({ href: "https://example.com" })
 						.run()}
-					disabled={disabled}
+					disabled={commandsDisabled}
 					onClick={() => {
 						const previous = editor.getAttributes("link").href as
 							| string
@@ -477,7 +506,7 @@ export default function RichTextEditor({
 					label="Undo"
 					active={false}
 					enabled={editor.can().chain().focus().undo().run()}
-					disabled={disabled}
+					disabled={commandsDisabled}
 					onClick={() => editor.chain().focus().undo().run()}
 				>
 					<Undo2 className="h-4 w-4" />
@@ -487,7 +516,7 @@ export default function RichTextEditor({
 					label="Redo"
 					active={false}
 					enabled={editor.can().chain().focus().redo().run()}
-					disabled={disabled}
+					disabled={commandsDisabled}
 					onClick={() => editor.chain().focus().redo().run()}
 				>
 					<Redo2 className="h-4 w-4" />

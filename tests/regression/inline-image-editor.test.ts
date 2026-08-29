@@ -6,6 +6,7 @@ import { FileHandlePlugin } from '@tiptap/extension-file-handler'
 import {
   InlineImageExtension,
   collectInlineImageUploads,
+  createInlineImageCropCommandsController,
   createInlineImageMimeFilter,
   createInlineImageTransactionCleanupController,
 } from '../../src/components/rich-text/inline-image-extension'
@@ -17,6 +18,11 @@ import {
 import { sanitizeRichText } from '../../src/lib/rich-text-sanitizer'
 import { emitSanitizedRichTextChange } from '../../src/components/rich-text/rich-text-editor'
 import { createInlineImageCoordinator } from '../../src/hooks/use-inline-description-images'
+import {
+  createInlineImageCropDraft,
+  inlineImageCropApplyAttributes,
+  zoomInlineImageCrop,
+} from '../../src/components/rich-text/inline-image-crop'
 import type { InlineImageUpload } from '../../src/lib/inline-images/policy'
 
 const IMAGE_ID = '123e4567-e89b-42d3-a456-426614174001'
@@ -525,6 +531,68 @@ describe('inline image NodeView removal', () => {
   })
 })
 
+
+describe('inline image crop editor contract', () => {
+  it('publishes the crop commands controller through extension options', () => {
+    const controller = createInlineImageCropCommandsController()
+    const configured = InlineImageExtension.configure({ cropCommands: controller })
+    assert.equal(configured.options.cropCommands, controller)
+
+    const plain = InlineImageExtension.configure({})
+    assert.equal(plain.options.cropCommands, undefined)
+  })
+
+  it('commits crop apply attributes through the serialized presentation boundary', () => {
+    const editor = createEditor()
+    try {
+      const draft = zoomInlineImageCrop(
+        createInlineImageCropDraft({
+          displayWidth: 400,
+          naturalWidth: 1600,
+          naturalHeight: 900,
+          crop: null,
+        }),
+        4,
+      )
+      const attrs = inlineImageCropApplyAttributes({
+        draft,
+        displayWidth: 400,
+        naturalWidth: 1600,
+        naturalHeight: 900,
+      })
+      assert.deepEqual(attrs, {
+        displayWidth: 400,
+        naturalWidth: 1600,
+        naturalHeight: 900,
+        cropX: 3750,
+        cropY: 3750,
+        cropWidth: 2500,
+        cropHeight: 2500,
+      })
+
+      const spec = imageRenderSpec(editor, { src: IMAGE_SRC, alt: 'diagram', align: 'center', ...attrs }) as ['img', Record<string, string>]
+      assert.deepEqual(spec, ['img', {
+        src: IMAGE_SRC,
+        alt: 'diagram',
+        'data-align': 'center',
+        'data-width': '400',
+        'data-natural-width': '1600',
+        'data-natural-height': '900',
+        'data-crop-x': '3750',
+        'data-crop-y': '3750',
+        'data-crop-width': '2500',
+        'data-crop-height': '2500',
+      }])
+
+      const parsed = imageParseAttrs(spec[1]) as Record<string, unknown>
+      for (const [key, value] of Object.entries(attrs)) {
+        assert.equal(parsed[key], value, key)
+      }
+    } finally {
+      editor.destroy()
+    }
+  })
+})
 
 describe('inline image editor contract', () => {
   it('emits sanitized canonical HTML through the onChange boundary and suppresses duplicates', () => {

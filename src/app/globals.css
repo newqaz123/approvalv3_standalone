@@ -162,6 +162,141 @@
   outline-offset: 2px;
 }
 
+/*
+ * Inline image crop mode. Controls wrap above the image so narrow request
+ * dialogs keep every action inside the dialog; the surface shows the full
+ * source with the crop rectangle on top and the outside dimmed by its own
+ * oversized box-shadow. No transitions are used so reduced-motion users get
+ * the same static presentation.
+ */
+.inline-image-crop {
+  display: block;
+  max-width: 100%;
+}
+.inline-image-crop-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+  max-width: 100%;
+}
+.inline-image-crop-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 0 0.5rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.25rem;
+  background: #fff;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: #334155;
+}
+.inline-image-crop-button:hover {
+  background: #f1f5f9;
+}
+.inline-image-crop-button[aria-pressed='true'] {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+.inline-image-crop-button--apply {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+.inline-image-crop-zoom {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.75rem;
+  color: #475569;
+  max-width: 100%;
+}
+.inline-image-crop-zoom input {
+  width: 6.5rem;
+  min-width: 0;
+}
+.inline-image-crop-status {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  color: #475569;
+}
+.inline-image-crop-surface {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.inline-image-crop-source {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+/* Clipped frame for a committed crop in the live editor; geometry comes from
+ * the trusted Task 1 module, styles are editor-only and never serialized. */
+.inline-image-crop-frame {
+  position: relative;
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+}
+.inline-image-crop-frame > img,
+.rich-text .inline-image-crop-frame-image {
+  display: block;
+  max-width: none;
+  margin: 0;
+  pointer-events: none;
+}
+.inline-image-crop-rect {
+  position: absolute;
+  cursor: grab;
+  outline: 2px solid #2563eb;
+  outline-offset: -2px;
+  box-shadow: 0 0 0 9999px rgb(15 23 42 / 0.55);
+}
+.inline-image-crop-rect:active {
+  cursor: grabbing;
+}
+.inline-image-crop-handle {
+  position: absolute;
+  display: block;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: inherit;
+}
+.inline-image-crop-handle::after {
+  content: '';
+  position: absolute;
+  inset: 7px;
+  border-radius: 2px;
+  background: #2563eb;
+  border: 2px solid #fff;
+  opacity: 0.9;
+}
+.inline-image-crop-handle--top { top: -12px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }
+.inline-image-crop-handle--bottom { bottom: -12px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }
+.inline-image-crop-handle--left { left: -12px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }
+.inline-image-crop-handle--right { right: -12px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }
+.inline-image-crop-handle--top-left { top: -12px; left: -12px; cursor: nwse-resize; }
+.inline-image-crop-handle--top-right { top: -12px; right: -12px; cursor: nesw-resize; }
+.inline-image-crop-handle--bottom-left { bottom: -12px; left: -12px; cursor: nesw-resize; }
+.inline-image-crop-handle--bottom-right { bottom: -12px; right: -12px; cursor: nwse-resize; }
+.inline-image-crop-rect:focus-visible,
+.inline-image-crop-handle:focus-visible,
+.inline-image-crop-controls :focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
 
 
 @layer base {

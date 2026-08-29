@@ -10,6 +10,7 @@ import {
 } from 'react'
 import { NodeViewWrapper, type NodeViewProps } from '@tiptap/react'
 import type { Editor } from '@tiptap/core'
+import type { Ref } from 'react'
 import { NodeSelection } from '@tiptap/pm/state'
 import {
   attachInlineImageResizeEscapeGuard,
@@ -20,7 +21,16 @@ import {
 } from './inline-image-resize'
 import { InlineImageToolbar } from './inline-image-toolbar'
 import {
+  InlineImageCropEditor,
+  endInlineImageCropSession,
+  focusInlineImageCropButton,
+  startInlineImageCropSession,
+  type InlineImageCropNodeSession,
+} from './inline-image-crop-editor'
+import {
+  inlineImageNodePresentation,
   inlineImageUploadSuccessAttributes,
+  type InlineImageAlignment,
   type InlineImageExtensionOptions,
 } from './inline-image-extension'
 import type { InlineImageCoordinator } from '@/hooks/use-inline-description-images'
@@ -28,6 +38,9 @@ import { MAX_INLINE_ALT_LENGTH, parseInlineImageSrc } from '@/lib/inline-images/
 import {
   INLINE_IMAGE_MAX_DISPLAY_WIDTH,
   INLINE_IMAGE_MIN_DISPLAY_WIDTH,
+  computeInlineImageFrameGeometry,
+  serializeInlineImagePresentation,
+  type InlineImageFrameGeometry,
 } from '@/lib/inline-images/presentation'
 
 function extensionOptions(extension: NodeViewProps['extension']): InlineImageExtensionOptions {
@@ -155,6 +168,147 @@ export function applyInlineImageAttributes(
 }
 
 /** Interactive view for one local upload or committed private image. */
+export type InlineImageNodeFrameProps = {
+  frameRef: Ref<HTMLSpanElement>
+  imageRef: Ref<HTMLImageElement>
+  src: string
+  alt: string
+  align: InlineImageAlignment
+  selected: boolean
+  renderedWidth: number | null
+  editable: boolean
+  removePending: boolean
+  placement: 'above' | 'below'
+  /** Serialized presentation data attributes carried by the live editor img. */
+  presentationAttributes: Record<string, string>
+  /** Trusted Task 1 frame geometry when the node carries a valid crop. */
+  cropGeometry: InlineImageFrameGeometry | null
+  crop: {
+    session: InlineImageCropNodeSession
+    onApply: (attributes: Record<string, unknown>) => void
+    onCancel: () => void
+  } | null
+  cropGuidance: string | null
+  onAltChange: (value: string) => void
+  onAlignChange: (align: InlineImageAlignment) => void
+  onCrop: () => void
+  onResetSize: () => void
+  onRemove: () => void
+  resizeHandlers: InlineImageResizeHandlesProps
+}
+
+/** Frame presenter: crop mode replaces the stable image and its selection chrome. */
+export function InlineImageNodeFrame({
+  frameRef,
+  imageRef,
+  src,
+  alt,
+  align,
+  selected,
+  renderedWidth,
+  editable,
+  removePending,
+  placement,
+  presentationAttributes,
+  cropGeometry,
+  crop,
+  cropGuidance,
+  onAltChange,
+  onAlignChange,
+  onCrop,
+  onResetSize,
+  onRemove,
+  resizeHandlers,
+}: InlineImageNodeFrameProps) {
+  if (crop) {
+    return (
+      <span
+        ref={frameRef}
+        data-align={align}
+        data-crop-active="true"
+        className="inline-image-node-frame"
+      >
+        <InlineImageCropEditor
+          src={src}
+          alt={alt}
+          session={crop.session}
+          onApply={crop.onApply}
+          onCancel={crop.onCancel}
+        />
+      </span>
+    )
+  }
+
+  return (
+    <span
+      ref={frameRef}
+      data-align={align}
+      data-selected={selected ? 'true' : undefined}
+      className="inline-image-node-frame"
+    >
+      {cropGeometry ? (
+        <span
+          className="inline-image-crop-frame"
+          style={{
+            width: `${cropGeometry.frameWidth}px`,
+            aspectRatio: String(cropGeometry.aspectRatio),
+          }}
+        >
+          <img
+            src={src}
+            alt={alt}
+            data-align={align}
+            draggable={false}
+            className="inline-image-crop-frame-image"
+            {...presentationAttributes}
+            style={{
+              position: 'absolute',
+              width: `${cropGeometry.imageWidthPercent}%`,
+              height: `${cropGeometry.imageHeightPercent}%`,
+              left: `${cropGeometry.imageOffsetXPercent}%`,
+              top: `${cropGeometry.imageOffsetYPercent}%`,
+            }}
+          />
+        </span>
+      ) : (
+        <img
+          ref={imageRef}
+          src={src}
+          alt={alt}
+          data-align={align}
+          width={renderedWidth ?? undefined}
+          draggable={false}
+          className="block h-auto max-w-full"
+          {...presentationAttributes}
+          data-width={renderedWidth !== null ? String(renderedWidth) : undefined}
+        />
+      )}
+      {selected && (
+        <>
+          <InlineImageToolbar
+            alt={alt}
+            align={align}
+            editable={editable}
+            removePending={removePending}
+            placement={placement}
+            onAltChange={onAltChange}
+            onAlignChange={onAlignChange}
+            onCrop={onCrop}
+            onResetSize={onResetSize}
+            onRemove={onRemove}
+          />
+          <InlineImageResizeHandles {...resizeHandlers} />
+        </>
+      )}
+      {cropGuidance && (
+        <span role="status" className="mt-1 block max-w-full text-sm text-amber-700">
+          {cropGuidance}
+        </span>
+      )}
+    </span>
+  )
+}
+
 export function InlineImageNodeView({
   node,
   editor,
@@ -188,6 +342,40 @@ export function InlineImageNodeView({
   const [toolbarPlacement, setToolbarPlacement] = useState<'above' | 'below'>('above')
   const [resizeActive, setResizeActive] = useState(false)
   const discardSessionRef = useRef<(session: InlineImageResizeSession | null) => void>(() => undefined)
+
+  const [cropSession, setCropSessionState] = useState<InlineImageCropNodeSession | null>(null)
+  const [cropGuidance, setCropGuidance] = useState<string | null>(null)
+  const cropSessionRef = useRef<InlineImageCropNodeSession | null>(null)
+  const focusCropAfterExitRef = useRef(false)
+
+  const setCropSession = (session: InlineImageCropNodeSession | null) => {
+    cropSessionRef.current = session
+    setCropSessionState(session)
+  }
+
+  /** Focus returns to the Crop button; the flag is consumed after the toolbar
+   * has re-rendered, so the button exists regardless of React flush timing. */
+  const focusCropButton = () => {
+    focusCropAfterExitRef.current = true
+  }
+
+  useEffect(() => {
+    if (cropSession || !focusCropAfterExitRef.current) return
+    focusCropAfterExitRef.current = false
+    const frame = frameRef.current
+    if (frame) focusInlineImageCropButton(frame)
+  }, [cropSession])
+
+  // NodeView teardown ends any still-active crop token (spec 8 lifecycle).
+  useEffect(() => (
+    () => {
+      endInlineImageCropSession({
+        session: cropSessionRef.current,
+        coordinator,
+        cropCommands: options.cropCommands,
+      })
+    }
+  ), [])
 
   // The floating toolbar must stay inside its clipping scroll container; when
   // the frame starts too close to the scrollport top it flips below the frame.
@@ -223,6 +411,22 @@ export function InlineImageNodeView({
 
   const displayWidth = typeof node.attrs.displayWidth === 'number' ? node.attrs.displayWidth : null
   const renderedWidth = previewWidth ?? displayWidth
+
+  // The live editor img carries the serialized presentation data attributes and,
+  // when a validated crop exists, renders the same trusted clipped frame the
+  // application and PDF paths use (spec 7.2) — never its own crop math.
+  const nodePresentation = inlineImageNodePresentation(node.attrs)
+  const presentationAttributes = serializeInlineImagePresentation(nodePresentation)
+  const cropGeometry = nodePresentation.crop
+    && nodePresentation.naturalWidth !== null
+    && nodePresentation.naturalHeight !== null
+    ? computeInlineImageFrameGeometry({
+      crop: nodePresentation.crop,
+      naturalWidth: nodePresentation.naturalWidth,
+      naturalHeight: nodePresentation.naturalHeight,
+      displayWidth: renderedWidth,
+    })
+    : null
 
   const measuredEditorWidth = () => {
     const domWidth = (editor.view.dom as HTMLElement).clientWidth
@@ -386,6 +590,46 @@ export function InlineImageNodeView({
     applyInlineImageAttributes(editor, position, attributes)
   }
 
+  /** Enters crop mode: snapshot the node, resolve dims, begin one edit token. */
+  const enterCrop = () => {
+    if (!editor.isEditable || cropSessionRef.current) return
+    const decoded = imageRef.current
+      && imageRef.current.naturalWidth > 0
+      && imageRef.current.naturalHeight > 0
+      ? { width: imageRef.current.naturalWidth, height: imageRef.current.naturalHeight }
+      : null
+    const started = startInlineImageCropSession({
+      src,
+      presentation: inlineImageNodePresentation(node.attrs),
+      decodedDimensions: decoded,
+      coordinator,
+      cropCommands: options.cropCommands,
+    })
+    if (!started.ok) {
+      setCropGuidance(started.guidance)
+      return
+    }
+    setCropGuidance(null)
+    setCropSession(started.session)
+  }
+
+  const exitCropSession = () => {
+    const session = cropSessionRef.current
+    setCropSession(null)
+    endInlineImageCropSession({
+      session,
+      coordinator,
+      cropCommands: options.cropCommands,
+      focusCropButton: focusCropButton,
+    })
+  }
+
+  /** Apply: one selection-preserving transaction with the serialized attrs. */
+  const applyCropAttributes = (attributes: Record<string, unknown>) => {
+    exitCropSession()
+    updateSelectedAttributes(attributes)
+  }
+
   return (
     <NodeViewWrapper
       as="span"
@@ -394,48 +638,40 @@ export function InlineImageNodeView({
       className="inline-block max-w-full align-middle"
     >
       {isStable ? (
-        <span
-          ref={frameRef}
-          data-align={align}
-          data-selected={selected ? 'true' : undefined}
-          className="inline-image-node-frame"
-        >
-          <img
-            ref={imageRef}
-            src={src}
-            alt={alt}
-            data-align={align}
-            data-width={renderedWidth !== null ? String(renderedWidth) : undefined}
-            width={renderedWidth ?? undefined}
-            draggable={false}
-            className="block h-auto max-w-full"
-          />
-          {selected && (
-            <>
-              <InlineImageToolbar
-                alt={alt}
-                align={align}
-                editable={editor.isEditable}
-                removePending={removePending}
-                placement={toolbarPlacement}
-                onAltChange={(value) => updateSelectedAttributes({ alt: value.slice(0, MAX_INLINE_ALT_LENGTH) })}
-                onAlignChange={(nextAlign) => updateSelectedAttributes({ align: nextAlign })}
-                onCrop={() => undefined}
-                onResetSize={() => updateSelectedAttributes({ displayWidth: null })}
-                onRemove={remove}
-              />
-              <InlineImageResizeHandles
-                disabled={!editor.isEditable}
-                onPointerDown={onHandlePointerDown}
-                onPointerMove={onHandlePointerMove}
-                onPointerUp={onHandlePointerUp}
-                onPointerCancel={onHandlePointerCancel}
-                onKeyDown={onHandleKeyDown}
-                onDoubleClick={onHandleDoubleClick}
-              />
-            </>
-          )}
-        </span>
+        <InlineImageNodeFrame
+          frameRef={frameRef}
+          imageRef={imageRef}
+          src={src}
+          alt={alt}
+          align={align}
+          selected={selected}
+          renderedWidth={renderedWidth}
+          editable={editor.isEditable}
+          removePending={removePending}
+          placement={toolbarPlacement}
+          presentationAttributes={presentationAttributes}
+          cropGeometry={cropGeometry}
+          crop={cropSession ? {
+            session: cropSession,
+            onApply: applyCropAttributes,
+            onCancel: exitCropSession,
+          } : null}
+          cropGuidance={cropGuidance}
+          onAltChange={(value) => updateSelectedAttributes({ alt: value.slice(0, MAX_INLINE_ALT_LENGTH) })}
+          onAlignChange={(nextAlign) => updateSelectedAttributes({ align: nextAlign })}
+          onCrop={enterCrop}
+          onResetSize={() => updateSelectedAttributes({ displayWidth: null })}
+          onRemove={remove}
+          resizeHandlers={{
+            disabled: !editor.isEditable,
+            onPointerDown: onHandlePointerDown,
+            onPointerMove: onHandlePointerMove,
+            onPointerUp: onHandlePointerUp,
+            onPointerCancel: onHandlePointerCancel,
+            onKeyDown: onHandleKeyDown,
+            onDoubleClick: onHandleDoubleClick,
+          }}
+        />
       ) : (
         <span
           role={status === 'error' ? 'alert' : 'status'}
