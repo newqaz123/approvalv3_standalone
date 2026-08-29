@@ -127,6 +127,41 @@ describe('inline image TipTap behavior', () => {
     }
   })
 
+  it('emits only Task 1 serialized presentation data attributes for stable nodes', () => {
+    const editor = createEditor()
+    try {
+      assert.deepEqual(imageRenderSpec(editor, {
+        src: IMAGE_SRC,
+        alt: 'diagram',
+        align: 'right',
+        uploadId: UPLOAD_ID,
+        status: 'success',
+        progress: 100,
+        error: null,
+        displayWidth: 480,
+        naturalWidth: 1600,
+        naturalHeight: 900,
+        cropX: 1000,
+        cropY: 2000,
+        cropWidth: 5000,
+        cropHeight: 4000,
+      }), ['img', {
+        src: IMAGE_SRC,
+        alt: 'diagram',
+        'data-align': 'right',
+        'data-width': '480',
+        'data-natural-width': '1600',
+        'data-natural-height': '900',
+        'data-crop-x': '1000',
+        'data-crop-y': '2000',
+        'data-crop-width': '5000',
+        'data-crop-height': '4000',
+      }])
+    } finally {
+      editor.destroy()
+    }
+  })
+
   it('renders stable and transient nodes through the real TipTap schema and sanitizer boundary', () => {
     const editor = createEditor()
     try {

@@ -24,6 +24,7 @@ import {
 	createInlineImageMimeFilter,
 	createInlineImageTransactionCleanupController,
 	InlineImageExtension,
+	inlineImageUploadSuccessAttributes,
 } from "@/components/rich-text/inline-image-extension";
 import type { InlineImageCoordinator } from "@/hooks/use-inline-description-images";
 import { INLINE_IMAGE_MIMES, MAX_INLINE_ALT_LENGTH } from "@/lib/inline-images/policy";
@@ -174,13 +175,12 @@ export default function RichTextEditor({
 			})
 			.then((upload) => {
 				updateUploadNode(uploadId, {
-					src: upload.src,
-					alt: upload.alt || filenameAlt(file.name),
-					align: "center",
 					uploadId,
-					status: "success",
-					progress: 100,
-					error: null,
+					...inlineImageUploadSuccessAttributes(
+						upload,
+						upload.alt || filenameAlt(file.name),
+						"center",
+					),
 				});
 			})
 			.catch((error: unknown) => {

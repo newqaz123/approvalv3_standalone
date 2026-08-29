@@ -1,14 +1,32 @@
 'use client'
 
-import { useState, type ChangeEvent } from 'react'
-import { NodeViewWrapper, type NodeViewProps } from '@tiptap/react'
+import * as React from 'react'
 import {
-  INLINE_IMAGE_ALIGNMENTS,
-  type InlineImageAlignment,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react'
+import { NodeViewWrapper, type NodeViewProps } from '@tiptap/react'
+import type { Editor } from '@tiptap/core'
+import { NodeSelection } from '@tiptap/pm/state'
+import {
+  createInlineImageResizeSession,
+  type InlineImageResizeEdge,
+  type InlineImageResizeSession,
+} from './inline-image-resize'
+import { InlineImageToolbar } from './inline-image-toolbar'
+import {
+  inlineImageUploadSuccessAttributes,
   type InlineImageExtensionOptions,
 } from './inline-image-extension'
 import type { InlineImageCoordinator } from '@/hooks/use-inline-description-images'
 import { MAX_INLINE_ALT_LENGTH, parseInlineImageSrc } from '@/lib/inline-images/policy'
+import {
+  INLINE_IMAGE_MAX_DISPLAY_WIDTH,
+  INLINE_IMAGE_MIN_DISPLAY_WIDTH,
+} from '@/lib/inline-images/presentation'
 
 function extensionOptions(extension: NodeViewProps['extension']): InlineImageExtensionOptions {
   return extension.options as unknown as InlineImageExtensionOptions
@@ -18,14 +36,56 @@ function uploadError(error: unknown): string {
   return error instanceof Error && error.message ? error.message : 'Image upload failed'
 }
 
-function isAlignment(value: unknown): value is InlineImageAlignment {
-  return INLINE_IMAGE_ALIGNMENTS.includes(value as InlineImageAlignment)
+/** Corner handle -> drag edge mapping; vertical position only changes the cursor. */
+export const INLINE_IMAGE_RESIZE_CORNERS: ReadonlyArray<{
+  corner: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+  edge: InlineImageResizeEdge
+}> = [
+  { corner: 'top-left', edge: 'left' },
+  { corner: 'top-right', edge: 'right' },
+  { corner: 'bottom-left', edge: 'left' },
+  { corner: 'bottom-right', edge: 'right' },
+]
+
+export type InlineImageResizeHandlesProps = {
+  disabled: boolean
+  onPointerDown: (edge: InlineImageResizeEdge, event: ReactPointerEvent<HTMLButtonElement>) => void
+  onPointerMove: (event: ReactPointerEvent<HTMLButtonElement>) => void
+  onPointerUp: (event: ReactPointerEvent<HTMLButtonElement>) => void
+  onPointerCancel: (event: ReactPointerEvent<HTMLButtonElement>) => void
+  onKeyDown: (event: ReactKeyboardEvent<HTMLButtonElement>) => void
+  onDoubleClick: () => void
 }
 
-const INLINE_IMAGE_ALIGNMENT_LABELS: Record<InlineImageAlignment, string> = {
-  left: 'Left',
-  center: 'Center',
-  right: 'Right',
+/** Four focusable 24px corner handles for pointer and keyboard resizing. */
+export function InlineImageResizeHandles({
+  disabled,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
+  onPointerCancel,
+  onKeyDown,
+  onDoubleClick,
+}: InlineImageResizeHandlesProps) {
+  return (
+    <span contentEditable={false} className="inline-image-resize-handles">
+      {INLINE_IMAGE_RESIZE_CORNERS.map(({ corner, edge }) => (
+        <button
+          key={corner}
+          type="button"
+          aria-label={`Resize image ${corner}`}
+          disabled={disabled}
+          className={`inline-image-resize-handle inline-image-resize-handle--${corner}`}
+          onPointerDown={(event) => onPointerDown(edge, event)}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerCancel}
+          onKeyDown={onKeyDown}
+          onDoubleClick={onDoubleClick}
+        />
+      ))}
+    </span>
+  )
 }
 
 export type RemoveInlineImageNodeInput = {
@@ -56,12 +116,49 @@ export async function removeInlineImageNode(input: RemoveInlineImageNodeInput): 
   input.deleteNode()
 }
 
+/** Height of the floating toolbar plus its gap, used for the below-flip. */
+const INLINE_IMAGE_TOOLBAR_CLEARANCE = 44
+
+/** The nearest ancestor whose overflow actually clips the frame. */
+function inlineImageClipContainer(element: HTMLElement): HTMLElement | null {
+  let ancestor: HTMLElement | null = element.parentElement
+  while (ancestor instanceof HTMLElement) {
+    const overflow = getComputedStyle(ancestor).overflowY
+    if (overflow === 'hidden' || overflow === 'auto' || overflow === 'scroll') return ancestor
+    ancestor = ancestor.parentElement
+  }
+  return null
+}
+
+/**
+ * Applies attrs to one inline image in a single transaction and keeps the
+ * node selected. TipTap's updateAttributes alone maps a NodeSelection to a
+ * collapsed cursor, which would hide the toolbar and handles after every
+ * resize or toolbar action.
+ */
+export function applyInlineImageAttributes(
+  editor: Editor,
+  position: number,
+  attributes: Record<string, unknown>,
+): void {
+  const node = editor.state.doc.nodeAt(position)
+  if (!node || node.type.name !== 'inlineImage') return
+
+  const transaction = editor.state.tr.setNodeMarkup(position, undefined, {
+    ...node.attrs,
+    ...attributes,
+  })
+  transaction.setSelection(NodeSelection.create(transaction.doc, position))
+  editor.view.dispatch(transaction)
+}
+
 /** Interactive view for one local upload or committed private image. */
 export function InlineImageNodeView({
   node,
   editor,
   selected,
   extension,
+  getPos,
   updateAttributes,
   deleteNode,
 }: NodeViewProps) {
@@ -70,7 +167,7 @@ export function InlineImageNodeView({
   const uploadId = typeof node.attrs.uploadId === 'string' ? node.attrs.uploadId : ''
   const status = typeof node.attrs.status === 'string' ? node.attrs.status : ''
   const alt = typeof node.attrs.alt === 'string' ? node.attrs.alt : ''
-  const align = isAlignment(node.attrs.align) ? node.attrs.align : 'center'
+  const align = node.attrs.align === 'left' || node.attrs.align === 'right' ? node.attrs.align : 'center'
   const imageId = src ? parseInlineImageSrc(src) : null
   const isStable = imageId !== null && status !== 'error'
   const transactionRemovalError = status === 'removal-error' && typeof node.attrs.error === 'string'
@@ -80,6 +177,133 @@ export function InlineImageNodeView({
   const coordinator = options.inlineImages
   const [removePending, setRemovePending] = useState(false)
   const [removeError, setRemoveError] = useState<string | null>(null)
+
+  const imageRef = useRef<HTMLImageElement | null>(null)
+  const frameRef = useRef<HTMLSpanElement | null>(null)
+  const sessionRef = useRef<InlineImageResizeSession | null>(null)
+  const [previewWidth, setPreviewWidth] = useState<number | null>(null)
+  const [toolbarPlacement, setToolbarPlacement] = useState<'above' | 'below'>('above')
+
+  // The floating toolbar must stay inside its clipping scroll container; when
+  // the frame starts too close to the scrollport top it flips below the frame.
+  useEffect(() => {
+    if (!selected) return undefined
+    const update = () => {
+      const frame = frameRef.current
+      if (!frame) return
+      const clipper = inlineImageClipContainer(frame)
+      const frameTop = frame.getBoundingClientRect().top
+      const limitTop = clipper ? clipper.getBoundingClientRect().top : 0
+      setToolbarPlacement(frameTop - limitTop < INLINE_IMAGE_TOOLBAR_CLEARANCE ? 'below' : 'above')
+    }
+    update()
+    window.addEventListener('scroll', update, { capture: true, passive: true })
+    window.addEventListener('resize', update, { passive: true })
+    return () => {
+      window.removeEventListener('scroll', update, { capture: true } as AddEventListenerOptions)
+      window.removeEventListener('resize', update)
+    }
+  }, [selected])
+
+  const displayWidth = typeof node.attrs.displayWidth === 'number' ? node.attrs.displayWidth : null
+  const renderedWidth = previewWidth ?? displayWidth
+
+  const measuredEditorWidth = () => {
+    const domWidth = (editor.view.dom as HTMLElement).clientWidth
+    if (domWidth > 0) return domWidth
+    const frameWidth = frameRef.current?.getBoundingClientRect().width ?? 0
+    return frameWidth > 0 ? frameWidth : INLINE_IMAGE_MAX_DISPLAY_WIDTH
+  }
+
+  /** The width a fresh resize session starts from. */
+  const currentWidth = () => {
+    if (renderedWidth !== null) return renderedWidth
+    if (typeof node.attrs.naturalWidth === 'number') return node.attrs.naturalWidth
+    const measured = imageRef.current?.getBoundingClientRect().width ?? 0
+    return measured > 0 ? measured : INLINE_IMAGE_MIN_DISPLAY_WIDTH
+  }
+
+  const startResizeSession = (edge: InlineImageResizeEdge, startPointerX: number) => (
+    createInlineImageResizeSession({
+      edge,
+      startPointerX,
+      startWidth: currentWidth(),
+      editorWidth: measuredEditorWidth(),
+      onPreview: setPreviewWidth,
+      onCommit: (width) => {
+        setPreviewWidth(null)
+        updateSelectedAttributes({ displayWidth: width })
+      },
+    })
+  )
+
+  const discardSession = (session: InlineImageResizeSession | null) => {
+    sessionRef.current = null
+    setPreviewWidth(null)
+    if (session) session.cancel()
+  }
+
+  const onHandlePointerDown = (
+    edge: InlineImageResizeEdge,
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ) => {
+    if (!editor.isEditable || event.button !== 0 || sessionRef.current) return
+    event.preventDefault()
+    event.stopPropagation()
+    sessionRef.current = startResizeSession(edge, event.clientX)
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  const onHandlePointerMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const session = sessionRef.current
+    if (!session) return
+    event.preventDefault()
+    event.stopPropagation()
+    session.preview(event.clientX)
+  }
+
+  const onHandlePointerUp = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const session = sessionRef.current
+    if (!session) return
+    sessionRef.current = null
+    event.stopPropagation()
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    session.commit()
+  }
+
+  const onHandlePointerCancel = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (!sessionRef.current) return
+    discardSession(sessionRef.current)
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+  }
+
+  const onHandleKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    if (!editor.isEditable) return
+    if (event.key === 'Escape') {
+      discardSession(sessionRef.current)
+      return
+    }
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Home') return
+    event.preventDefault()
+    event.stopPropagation()
+    if (sessionRef.current) return
+
+    // One keyboard action is one short-lived session with a single commit.
+    const session = startResizeSession('right', 0)
+    session.keyboard(event.key, event.shiftKey)
+    session.commit()
+  }
+
+  const onHandleDoubleClick = () => {
+    if (!editor.isEditable) return
+    sessionRef.current = null
+    setPreviewWidth(null)
+    updateSelectedAttributes({ displayWidth: null })
+  }
 
   const retry = () => {
     if (!uploadId || !coordinator || !options.fileByUploadId) return
@@ -93,13 +317,8 @@ export function InlineImageNodeView({
       })
       .then((upload) => {
         updateAttributes({
-          src: upload.src,
-          alt: alt.slice(0, MAX_INLINE_ALT_LENGTH),
-          align,
           uploadId,
-          status: 'success',
-          progress: 100,
-          error: null,
+          ...inlineImageUploadSuccessAttributes(upload, alt, align),
         })
       })
       .catch((error: unknown) => {
@@ -130,8 +349,14 @@ export function InlineImageNodeView({
     }
   }
 
-  const onAltChange = (event: ChangeEvent<HTMLInputElement>) => {
-    updateAttributes({ alt: event.currentTarget.value.slice(0, MAX_INLINE_ALT_LENGTH) })
+  /** Attr updates from the selected chrome keep the node selected. */
+  const updateSelectedAttributes = (attributes: Record<string, unknown>) => {
+    const position = typeof getPos === 'function' ? getPos() : null
+    if (typeof position !== 'number' || !Number.isFinite(position)) {
+      updateAttributes(attributes)
+      return
+    }
+    applyInlineImageAttributes(editor, position, attributes)
   }
 
   return (
@@ -142,20 +367,48 @@ export function InlineImageNodeView({
       className="inline-block max-w-full align-middle"
     >
       {isStable ? (
-        <>
+        <span
+          ref={frameRef}
+          data-align={align}
+          data-selected={selected ? 'true' : undefined}
+          className="inline-image-node-frame"
+        >
           <img
+            ref={imageRef}
             src={src}
             alt={alt}
             data-align={align}
+            data-width={renderedWidth !== null ? String(renderedWidth) : undefined}
+            width={renderedWidth ?? undefined}
             draggable={false}
             className="block h-auto max-w-full"
           />
-          {transactionRemovalError && (
-            <span role="alert" className="mt-1 block text-sm text-red-700">
-              {transactionRemovalError}
-            </span>
+          {selected && (
+            <>
+              <InlineImageToolbar
+                alt={alt}
+                align={align}
+                editable={editor.isEditable}
+                removePending={removePending}
+                placement={toolbarPlacement}
+                onAltChange={(value) => updateSelectedAttributes({ alt: value.slice(0, MAX_INLINE_ALT_LENGTH) })}
+                onAlignChange={(nextAlign) => updateSelectedAttributes({ align: nextAlign })}
+                onCrop={() => undefined}
+                onResetSize={() => updateSelectedAttributes({ displayWidth: null })}
+                onRemove={remove}
+              />
+              <InlineImageResizeHandles
+                disabled={!editor.isEditable}
+                onPointerDown={onHandlePointerDown}
+                onPointerMove={onHandlePointerMove}
+                onPointerUp={onHandlePointerUp}
+                onPointerCancel={onHandlePointerCancel}
+                onKeyDown={onHandleKeyDown}
+                onDoubleClick={onHandleDoubleClick}
+              />
+            </>
           )}
-        </>
+        </span>
       ) : (
         <span
           role={status === 'error' ? 'alert' : 'status'}
@@ -201,51 +454,12 @@ export function InlineImageNodeView({
         </span>
       )}
 
-      {selected && isStable && (
+      {isStable && (transactionRemovalError || removeError) && (
         <span
-          contentEditable={false}
-          className="mt-2 flex flex-wrap items-end gap-2 rounded-md border border-slate-200 bg-white p-2 text-sm shadow-sm"
-          role="group"
-          aria-label="Image controls"
+          role="alert"
+          className="mt-1 block max-w-full text-sm text-red-700"
         >
-          <label className="flex min-w-48 flex-1 flex-col gap-1">
-            <span>Alt text</span>
-            <input
-              type="text"
-              aria-label="Image alt text"
-              value={alt}
-              maxLength={MAX_INLINE_ALT_LENGTH}
-              onChange={onAltChange}
-              disabled={!editor.isEditable}
-              className="rounded border border-slate-300 px-2 py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50"
-            />
-          </label>
-          <span className="flex gap-1" role="group" aria-label="Image alignment">
-            {INLINE_IMAGE_ALIGNMENTS.map((alignment) => (
-              <button
-                key={alignment}
-                type="button"
-                aria-label={`Align ${alignment}`}
-                aria-pressed={align === alignment}
-                onMouseDown={(event) => event.stopPropagation()}
-                onClick={() => updateAttributes({ align: alignment })}
-                disabled={!editor.isEditable}
-                className="rounded border border-slate-300 px-2 py-1 capitalize focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50"
-              >
-                {INLINE_IMAGE_ALIGNMENT_LABELS[alignment]}
-              </button>
-            ))}
-          </span>
-          {removeError && <span className="basis-full" role="alert">{removeError}</span>}
-          <button
-            type="button"
-            onMouseDown={(event) => event.stopPropagation()}
-            onClick={remove}
-            disabled={!editor.isEditable || removePending}
-            className="rounded border border-slate-300 px-2 py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50"
-          >
-            {removePending ? 'Removing…' : 'Remove'}
-          </button>
+          {transactionRemovalError ?? removeError}
         </span>
       )}
     </NodeViewWrapper>

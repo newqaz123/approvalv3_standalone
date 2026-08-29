@@ -6,7 +6,13 @@ import {
   INLINE_IMAGE_MIMES,
   MAX_INLINE_ALT_LENGTH,
   parseInlineImageSrc,
+  type InlineImageUpload,
 } from '@/lib/inline-images/policy'
+import {
+  parseInlineImagePresentation,
+  serializeInlineImagePresentation,
+  type InlineImagePresentation,
+} from '@/lib/inline-images/presentation'
 import type { InlineImageCoordinator } from '@/hooks/use-inline-description-images'
 import type { Node as ProseMirrorNode, NodeType } from '@tiptap/pm/model'
 import { InlineImageNodeView } from './inline-image-node-view'
@@ -41,6 +47,74 @@ export function createInlineImageMimeFilter(canInsert: () => boolean): string[] 
     value: (mime: string, fromIndex?: number) => canInsert() && includes(mime, fromIndex),
   })
   return mimeTypes
+}
+
+/** Every serialized data attribute owned by the presentation module. */
+const INLINE_IMAGE_PRESENTATION_DATA_ATTRIBUTES = [
+  'data-width',
+  'data-natural-width',
+  'data-natural-height',
+  'data-crop-x',
+  'data-crop-y',
+  'data-crop-width',
+  'data-crop-height',
+] as const
+
+function finiteNumberOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+/** Node attrs are the flat storage form of one presentation record. */
+export function inlineImageNodePresentation(
+  attrs: Record<string, unknown>,
+): InlineImagePresentation {
+  const cropX = finiteNumberOrNull(attrs.cropX)
+  const cropY = finiteNumberOrNull(attrs.cropY)
+  const cropWidth = finiteNumberOrNull(attrs.cropWidth)
+  const cropHeight = finiteNumberOrNull(attrs.cropHeight)
+  const hasCrop = cropX !== null && cropY !== null && cropWidth !== null && cropHeight !== null
+  return {
+    displayWidth: finiteNumberOrNull(attrs.displayWidth),
+    naturalWidth: finiteNumberOrNull(attrs.naturalWidth),
+    naturalHeight: finiteNumberOrNull(attrs.naturalHeight),
+    crop: hasCrop ? { x: cropX, y: cropY, width: cropWidth, height: cropHeight } : null,
+  }
+}
+
+/** Parses the serialized data attributes back through the presentation module. */
+export function parseInlineImageNodePresentation(element: HTMLElement): InlineImagePresentation {
+  const attributes: Record<string, string | null> = {}
+  for (const name of INLINE_IMAGE_PRESENTATION_DATA_ATTRIBUTES) {
+    attributes[name] = element.getAttribute(name)
+  }
+  return parseInlineImagePresentation(attributes)
+}
+
+/** Upload-success attrs shared by the editor insertion pipeline and NodeView retry. */
+export function inlineImageUploadSuccessAttributes(
+  upload: InlineImageUpload,
+  alt: string,
+  align: InlineImageAlignment,
+): {
+  src: string
+  alt: string
+  align: InlineImageAlignment
+  status: 'success'
+  progress: number
+  error: null
+  naturalWidth: number
+  naturalHeight: number
+} {
+  return {
+    src: upload.src,
+    alt: alt.slice(0, MAX_INLINE_ALT_LENGTH),
+    align,
+    status: 'success',
+    progress: 100,
+    error: null,
+    naturalWidth: upload.width,
+    naturalHeight: upload.height,
+  }
 }
 
 export type InlineImageUploadNodeSnapshot = {
@@ -325,6 +399,27 @@ export const InlineImageExtension = Image.extend<InlineImageExtensionOptions>({
       align: {
         default: 'center',
       },
+      displayWidth: {
+        default: null,
+      },
+      naturalWidth: {
+        default: null,
+      },
+      naturalHeight: {
+        default: null,
+      },
+      cropX: {
+        default: null,
+      },
+      cropY: {
+        default: null,
+      },
+      cropWidth: {
+        default: null,
+      },
+      cropHeight: {
+        default: null,
+      },
       uploadId: {
         default: null,
         rendered: false,
@@ -352,10 +447,18 @@ export const InlineImageExtension = Image.extend<InlineImageExtensionOptions>({
           const id = parseInlineImageSrc(element.getAttribute('src') ?? '')
           if (!id) return false
 
+          const presentation = parseInlineImageNodePresentation(element)
           return {
             src: canonicalInlineImageSrc(id),
             alt: (element.getAttribute('alt') ?? '').slice(0, MAX_INLINE_ALT_LENGTH),
             align: parseAlignment(element.getAttribute('data-align')),
+            displayWidth: presentation.displayWidth,
+            naturalWidth: presentation.naturalWidth,
+            naturalHeight: presentation.naturalHeight,
+            cropX: presentation.crop?.x ?? null,
+            cropY: presentation.crop?.y ?? null,
+            cropWidth: presentation.crop?.width ?? null,
+            cropHeight: presentation.crop?.height ?? null,
           }
         },
       },
@@ -363,9 +466,15 @@ export const InlineImageExtension = Image.extend<InlineImageExtensionOptions>({
   },
 
   renderHTML({ node }) {
-    return node.attrs.src
-      ? ['img', { src: node.attrs.src, alt: node.attrs.alt, 'data-align': node.attrs.align }]
-      : ['span', { 'data-inline-upload-placeholder': 'true' }]
+    if (!node.attrs.src) {
+      return ['span', { 'data-inline-upload-placeholder': 'true' }]
+    }
+    return ['img', {
+      src: node.attrs.src,
+      alt: node.attrs.alt,
+      'data-align': node.attrs.align,
+      ...serializeInlineImagePresentation(inlineImageNodePresentation(node.attrs)),
+    }]
   },
 
   // Markdown image input can contain remote URLs; image insertion is owned by
