@@ -507,10 +507,41 @@ export function createInlineImageCoordinator(
   return runtime
 }
 
+export type DeferredDisposalFence = {
+  setup(): void
+  cleanup(): void
+}
+
+/**
+ * Cancels Strict Mode effect-replay cleanup so a still-mounted coordinator is
+ * not disposed, while a genuine unmount still disposes exactly once.
+ */
+export function createDeferredDisposalFence(
+  dispose: () => void,
+  schedule: (callback: () => void) => void = queueMicrotask,
+): DeferredDisposalFence {
+  let generation = 0
+
+  return {
+    setup() {
+      generation += 1
+    },
+    cleanup() {
+      const generationAtCleanup = generation
+      schedule(() => {
+        if (generation !== generationAtCleanup) return
+        generation += 1
+        dispose()
+      })
+    },
+  }
+}
+
 /** Creates one coordinator per mounted form, including its unmount safety net. */
 export function useInlineDescriptionImages(): InlineImageCoordinator {
   const [, setRevision] = useState(0)
   const coordinatorRef = useRef<InlineImageCoordinatorRuntime | null>(null)
+  const fenceRef = useRef<DeferredDisposalFence | null>(null)
 
   if (!coordinatorRef.current) {
     coordinatorRef.current = createInlineImageCoordinator({
@@ -519,10 +550,19 @@ export function useInlineDescriptionImages(): InlineImageCoordinator {
   }
 
   const coordinator = coordinatorRef.current
+  if (!fenceRef.current) {
+    fenceRef.current = createDeferredDisposalFence(() => {
+      coordinator.dispose()
+    })
+  }
+
   useEffect(() => {
+    const fence = fenceRef.current!
+    fence.setup()
     return () => {
-      // The safety net only deletes successful staged drafts and never blocks unmount.
-      void coordinator.dispose()
+      // Replay-safe: Strict Mode cleanup is cancelled by the immediate remount setup.
+      // Genuine unmount still deletes successful staged drafts and never blocks unmount.
+      fence.cleanup()
     }
   }, [coordinator])
 

@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  createDeferredDisposalFence,
   createInlineImageCoordinator,
   inlineImageBlockingMessage,
   inlineImageReducer,
@@ -402,6 +403,88 @@ describe('inline image upload coordinator', () => {
     coordinator.dispose()
     await tick()
     assert.equal(deletes, 1)
+  })
+})
+
+describe('inline image coordinator disposal fence', () => {
+  function makeFence(dispose: () => void) {
+    const pending: Array<() => void> = []
+    const fence = createDeferredDisposalFence(dispose, (callback) => pending.push(callback))
+    const flush = () => {
+      const queued = pending.splice(0, pending.length)
+      for (const callback of queued) callback()
+    }
+    return { fence, flush, pending }
+  }
+
+  it('keeps the coordinator upload-capable after setup-cleanup-setup replay, then disposes once on genuine unmount', async () => {
+    const coordinator = makeCoordinator(async () => upload(IMAGE_A))
+    let disposeCalls = 0
+    const { fence, flush } = makeFence(() => {
+      disposeCalls += 1
+      coordinator.dispose()
+    })
+
+    fence.setup()
+    fence.cleanup()
+    fence.setup()
+    flush()
+
+    const result = await coordinator.upload('upload-a', file('a.png'), () => undefined)
+    assert.equal(result.id, IMAGE_A)
+    assert.equal(disposeCalls, 0)
+    assert.equal(coordinator.getState()[0]?.status, 'success')
+
+    fence.cleanup()
+    flush()
+    assert.equal(disposeCalls, 1)
+    await assert.rejects(
+      coordinator.upload('upload-b', file('b.png'), () => undefined),
+      /Inline image coordinator is disposed/,
+    )
+  })
+
+  it('does not dispose twice when cleanup is repeated for the same generation', async () => {
+    let disposeCalls = 0
+    const { fence, flush } = makeFence(() => {
+      disposeCalls += 1
+    })
+
+    fence.setup()
+    fence.cleanup()
+    fence.cleanup()
+    flush()
+    assert.equal(disposeCalls, 1)
+
+    flush()
+    assert.equal(disposeCalls, 1)
+  })
+
+  it('leaves staged-draft deletion to coordinator.dispose on genuine unmount', async () => {
+    const deleteCalls: string[] = []
+    const coordinator = makeCoordinator(
+      async () => upload(IMAGE_A),
+      async (imageId) => {
+        deleteCalls.push(imageId)
+      },
+    )
+    await coordinator.upload('upload-a', file('a.png'), () => undefined)
+    const { fence, flush } = makeFence(() => {
+      coordinator.dispose()
+    })
+
+    fence.setup()
+    fence.cleanup()
+    fence.setup()
+    flush()
+    await tick()
+    assert.deepEqual(deleteCalls, [])
+    assert.equal(coordinator.getState()[0]?.imageId, IMAGE_A)
+
+    fence.cleanup()
+    flush()
+    await tick()
+    assert.deepEqual(deleteCalls, [IMAGE_A])
   })
 })
 

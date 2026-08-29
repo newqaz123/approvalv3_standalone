@@ -63,6 +63,7 @@ const MISSING_IMAGE_UUID = '00000000-0000-4000-8000-000000000000'
 const BLOCKING_UPLOAD_MESSAGE = 'Wait for image uploads, or retry/remove failed images.'
 const EDIT_BLOCKING_MESSAGE = 'Apply or cancel the image edit before saving.'
 const UPLOAD_FAILED_TEXT = 'Image upload failed'
+const DISPOSED_COORDINATOR_TEXT = 'Inline image coordinator is disposed'
 
 const TEXT_COLOR_VALUES = {
   ink: '#1E293B',
@@ -423,6 +424,10 @@ async function canonicalSrc(img: Locator): Promise<string> {
   return src as string
 }
 
+async function expectNoDisposedCoordinatorError(scope: Locator): Promise<void> {
+  await expect(scope.getByText(DISPOSED_COORDINATOR_TEXT)).toHaveCount(0)
+}
+
 async function expectLoadedImage(img: Locator): Promise<void> {
   await expect
     .poll(
@@ -603,6 +608,7 @@ test.describe('Inline description images (release gate)', () => {
     await canonicalSrc(toolbarImg)
     await expect(toolbarImg).toHaveAttribute('alt', 'inline-toolbar')
     await expect(toolbarImg).toHaveAttribute('data-align', 'center')
+    await expectNoDisposedCoordinatorError(dialog)
     expect(routes.uploads.filter((upload) => upload.kind === 'pass')).toHaveLength(1)
 
     // ── 1. Selection uses only the floating toolbar, never the old row ──────
@@ -642,6 +648,7 @@ test.describe('Inline description images (release gate)', () => {
     await expect(stableImages(dialog)).toHaveCount(2, { timeout: 20_000 })
     await expect(dialog.locator('img[alt="inline-pasted"]')).toHaveCount(1)
     await canonicalSrc(dialog.locator('img[alt="inline-pasted"]'))
+    await expectNoDisposedCoordinatorError(dialog)
 
     await dropImageFile(page, editor, pngPath('inline-dropped.png'))
     await expect(stableImages(dialog)).toHaveCount(3, { timeout: 20_000 })
