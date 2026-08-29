@@ -104,4 +104,17 @@ describe('compact approval evidence HTML', () => {
     assert.ok(html.length > 0)
     assert.match(html, /Approval Evidence Packet/)
   })
+
+  it('prints crop frames with safe responsive and page-break CSS', async () => {
+    const html = await renderRequestEvidenceHTML(sampleData)
+
+    assert.match(html, /\.description \.rich-text__image-frame\s*\{[^}]*overflow:\s*hidden/)
+    assert.match(html, /\.description \.rich-text__image-frame\s*\{[^}]*max-width:\s*100%/)
+    assert.match(html, /\.description \.rich-text__image-frame\s*\{[^}]*break-inside:\s*avoid/)
+    assert.match(html, /\.description \.rich-text__image-frame\s*\{[^}]*page-break-inside:\s*avoid/)
+    assert.match(html, /\.description \.rich-text__image-frame\[data-align='left'\]/)
+    assert.match(html, /\.description \.rich-text__image-frame\[data-align='center'\]/)
+    assert.match(html, /\.description \.rich-text__image-frame\[data-align='right'\]/)
+    assert.match(html, /\.description \.rich-text__image-frame > img\s*\{[^}]*max-width:\s*none/)
+  })
 })

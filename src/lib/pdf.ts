@@ -331,7 +331,26 @@ export async function renderRequestEvidenceHTML(
     .description a::after { content: " (" attr(href) ")"; font-size: 9px; color: #64748b; }
     .description img { display: block; max-width: 100%; height: auto; margin: 8px auto; break-inside: avoid; page-break-inside: avoid; }
     .description img[data-align='left'] { margin-left: 0; margin-right: auto; }
+    .description img[data-align='center'] { margin-inline: auto; }
     .description img[data-align='right'] { margin-left: auto; margin-right: 0; }
+    .description .rich-text__image-frame {
+      position: relative;
+      display: block;
+      overflow: hidden;
+      max-width: 100%;
+      margin: 8px auto;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    .description .rich-text__image-frame[data-align='left'] { margin-left: 0; margin-right: auto; }
+    .description .rich-text__image-frame[data-align='center'] { margin-inline: auto; }
+    .description .rich-text__image-frame[data-align='right'] { margin-left: auto; margin-right: 0; }
+    .description .rich-text__image-frame > img {
+      position: absolute;
+      display: block;
+      max-width: none;
+      margin: 0;
+    }
     table {
       width: 100%;
       border-collapse: collapse;

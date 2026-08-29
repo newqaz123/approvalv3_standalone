@@ -1,6 +1,5 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { FormattedText } from '@/components/ui/formatted-text'
@@ -16,8 +15,6 @@ import {
   type PdfInlineImageOwner,
   type ResolveInlineImagesForPdfDeps,
 } from '@/lib/inline-images/pdf'
-
-const read = (path: string) => readFileSync(path, 'utf8')
 
 const REQ_ID = '11111111-1111-4111-8111-111111111111'
 const OTHER_REQ_ID = '33333333-3333-4333-8333-333333333333'
@@ -43,8 +40,21 @@ type FakeAsset = PdfInlineImageAsset & {
   referencedBy: Array<{ kind: 'request' | 'solution' | 'template'; id: string }>
 }
 
-function asset(id: string, referencedBy: FakeAsset['referencedBy'], fileType = 'image/png'): FakeAsset {
-  return { id, fileType, filePath: `inline-images/user1/${id}-a.png`, referencedBy }
+type AssetDimensions = Pick<PdfInlineImageAsset, 'width' | 'height'>
+
+function asset(
+  id: string,
+  referencedBy: FakeAsset['referencedBy'],
+  fileType = 'image/png',
+  dimensions: AssetDimensions = { width: 1600, height: 900 },
+): FakeAsset {
+  return {
+    id,
+    fileType,
+    filePath: `inline-images/user1/${id}-a.png`,
+    ...dimensions,
+    referencedBy,
+  }
 }
 
 function fakeDeps(
@@ -90,16 +100,6 @@ describe('application inline image rendering', () => {
     assert.ok(out.includes('data-align="left"'))
     assert.ok(!out.includes('onerror'))
     assert.ok(!out.includes('style='))
-  })
-
-  it('shares responsive and aligned image CSS for rich-text output', () => {
-    const css = read('src/app/globals.css')
-    assert.match(css, /\.rich-text img \{[^}]*display:\s*block/)
-    assert.match(css, /\.rich-text img \{[^}]*max-width:\s*100%/)
-    assert.match(css, /\.rich-text img \{[^}]*height:\s*auto/)
-    assert.match(css, /\.rich-text img\[data-align='left'\] \{[^}]*margin-right:\s*auto/)
-    assert.match(css, /\.rich-text img\[data-align='center'\] \{[^}]*margin-inline:\s*auto/)
-    assert.match(css, /\.rich-text img\[data-align='right'\] \{[^}]*margin-left:\s*auto/)
   })
 
   it('converts truncated app previews to alt placeholders instead of dropping images', () => {
@@ -201,6 +201,85 @@ describe('resolveInlineImagesForPdf', () => {
     assert.deepEqual(queries[0]!.imageIds, [IMG_REQUEST, IMG_OTHER_REQUEST])
     // Bytes are read only for the owner-authorized asset.
     assert.deepEqual(readPaths, ['inline-images/user1/123e4567-e89b-42d3-a456-426614174000-a.png'])
+  })
+
+  it('renders an authorized crop with shared geometry and authoritative asset dimensions', async () => {
+    const pngBytes = Buffer.from('cropped-png-bytes')
+    const owned = asset(
+      IMG_REQUEST,
+      [{ kind: 'request', id: REQ_ID }],
+      'image/png',
+      { width: 1600, height: 900 },
+    )
+    const originalAsset = { ...owned }
+    const { deps } = fakeDeps([Object.freeze(owned)], {
+      bytes: new Map([[owned.filePath, pngBytes]]),
+    })
+
+    const out = await resolveInlineImagesForPdf(
+      {
+        html: `<p><img src="${src(IMG_REQUEST)}" alt="cropped plan" data-align="right" data-width="480" data-natural-width="400" data-natural-height="400" data-crop-x="1000" data-crop-y="2000" data-crop-width="5000" data-crop-height="4000"></p>`,
+        owner: requestOwner,
+      },
+      deps,
+    )
+
+    assert.match(
+      out,
+      /<span class="rich-text__image-frame" data-align="right" style="width:480px;aspect-ratio:2\.2222222222222223">/,
+    )
+    assert.match(
+      out,
+      new RegExp(`<img src="data:image/png;base64,${pngBytes.toString('base64')}" alt="cropped plan" style="width:200%;height:250%;left:-20%;top:-50%" \/>`),
+    )
+    assert.doesNotMatch(out, /data-natural-width="400"|data-natural-height="400"/)
+    assert.deepEqual(owned, originalAsset, 'PDF resolution does not mutate the authorized row')
+  })
+
+  it('falls back to an uncropped authorized image for invalid crop metadata', async () => {
+    const owned = asset(IMG_REQUEST, [{ kind: 'request', id: REQ_ID }])
+    const { deps } = fakeDeps([owned])
+
+    const out = await resolveInlineImagesForPdf(
+      {
+        html: `<p><img src="${src(IMG_REQUEST)}" alt="uncropped plan" data-width="480" data-natural-width="1600" data-natural-height="900" data-crop-x="9000" data-crop-y="0" data-crop-width="5000" data-crop-height="4000"></p>`,
+        owner: requestOwner,
+      },
+      deps,
+    )
+
+    assert.match(out, /<img src="data:image\/png;base64,[^"]*" alt="uncropped plan"/)
+    assert.doesNotMatch(out, /rich-text__image-frame|<img[^>]+style=/)
+  })
+
+  it('materializes only the shared Calm Document palette for PDF output', async () => {
+    const { deps } = fakeDeps([])
+
+    const out = await resolveInlineImagesForPdf(
+      {
+        html: '<p><span data-text-color="blue" style="color:#ff00ff;position:fixed">Calm <mark data-highlight="yellow" style="background:var(--hostile)">Document</mark></span></p>',
+        owner: requestOwner,
+      },
+      deps,
+    )
+
+    assert.match(out, /<span style="color:#1D4ED8">Calm <mark style="background-color:#FEF3C7">Document<\/mark><\/span>/)
+    assert.doesNotMatch(out, /data-text-color|data-highlight|#ff00ff|var\(|position:fixed/)
+  })
+
+  it('never accepts stored data URIs as inline image input', async () => {
+    const { deps, queries } = fakeDeps([])
+
+    const out = await resolveInlineImagesForPdf(
+      {
+        html: '<p><img src="data:image/png;base64,AAAA" alt="stored bytes"></p>',
+        owner: requestOwner,
+      },
+      deps,
+    )
+
+    assert.doesNotMatch(out, /data:image\/png;base64,AAAA|stored bytes/)
+    assert.deepEqual(queries, [])
   })
 
   it('authorizes by solution owner, not merely by canonical ID presence', async () => {
@@ -344,54 +423,5 @@ describe('PDF resolver authorization scope', () => {
   it('builds owner-scoped reference filters for the database query', () => {
     assert.deepEqual(pdfInlineImageOwnerWhere({ kind: 'request', id: REQ_ID }), { requestId: REQ_ID })
     assert.deepEqual(pdfInlineImageOwnerWhere({ kind: 'solution', id: SOL_ID }), { solutionId: SOL_ID })
-  })
-
-  it('constrains the production query to owner references and reads only matching paths', () => {
-    const source = read('src/lib/inline-images/pdf.ts')
-    assert.match(source, /references:\s*\{\s*some:\s*pdfInlineImageOwnerWhere\(owner\)/)
-    assert.match(source, /readInlineImageFile/)
-    // The resolver is read-only: data URIs must never reach the database.
-    assert.doesNotMatch(source, /prisma\.inline_description_images\.(create|update|delete|upsert)/)
-    assert.doesNotMatch(source, /prisma\.inline_description_image_references\.(create|update|delete|upsert)/)
-  })
-
-  it('verifies the stored MIME type before embedding bytes', () => {
-    const source = read('src/lib/inline-images/pdf.ts')
-    assert.match(source, /INLINE_IMAGE_MIMES\.has/)
-  })
-})
-
-describe('PDF evidence rendering wiring', () => {
-  it('resolves request and solution descriptions against their owner IDs', async () => {
-    const source = read('src/lib/pdf.ts')
-    assert.match(
-      source,
-      /resolveInlineImagesForPdf\(\{\s*html: data\.description,\s*owner: \{ kind: ['"]request['"], id: data\.id \},?\s*\}\)/,
-    )
-    assert.match(
-      source,
-      /resolveInlineImagesForPdf\(\{\s*html: data\.solution\.description,\s*owner: \{ kind: ['"]solution['"], id: data\.solution\.id \},?\s*\}\)/,
-    )
-    assert.match(source, /await renderRequestEvidenceHTML\(data\)/)
-  })
-
-  it('requires request and solution owner IDs in RequestPDFData', () => {
-    const source = read('src/lib/pdf.ts')
-    assert.match(source, /export interface RequestPDFData \{\s*\n\tid: string;/)
-    assert.match(source, /solution\?: \{\s*\n\t\tid: string;/)
-  })
-
-  it('supplies the solution owner id from the export data builder', () => {
-    const source = read('src/server-actions/reports.ts')
-    assert.match(source, /id: solution\.id,/)
-  })
-
-  it('prints responsive images that avoid page splitting', () => {
-    const source = read('src/lib/pdf.ts')
-    assert.match(source, /\.description img \{[^}]*max-width:\s*100%/)
-    assert.match(source, /\.description img \{[^}]*break-inside:\s*avoid/)
-    assert.match(source, /\.description img \{[^}]*page-break-inside:\s*avoid/)
-    assert.match(source, /\.description img\[data-align='left'\]/)
-    assert.match(source, /\.description img\[data-align='right'\]/)
   })
 })

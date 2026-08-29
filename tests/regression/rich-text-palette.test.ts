@@ -96,6 +96,16 @@ describe('rich text palette contract', () => {
       assert.doesNotMatch(output, /#ff00ff|var\(|style=/)
     }
   })
+
+  it('keeps approved image presentation attributes in the PDF palette pass', () => {
+    const output = materializeRichTextPalette(
+      '<p><span data-text-color="teal"><img src="/api/inline-images/123e4567-e89b-42d3-a456-426614174000" alt="plan" data-align="right" data-width="480" /></span></p>',
+      'pdf',
+    )
+
+    assert.match(output, /<span style="color:#0F766E"><img src="\/api\/inline-images\/123e4567-e89b-42d3-a456-426614174000" alt="plan" data-align="right" data-width="480" \/><\/span>/)
+    assert.doesNotMatch(output, /data-text-color|style="color:teal"|#ff00ff|var\(/)
+  })
 })
 
 describe('restricted TipTap palette marks', () => {

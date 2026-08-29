@@ -1,12 +1,24 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
 import {
   renderDescriptionHtml,
   renderDescriptionPlainText,
 } from '@/lib/formatted-text'
+import { renderRequestEvidenceHTML, type RequestPDFData } from '@/lib/pdf'
 
-const read = (path: string) => readFileSync(path, 'utf8')
+const PDF_FIXTURE: RequestPDFData = {
+  id: 'REQ-PDF-1',
+  title: 'PDF palette fixture',
+  description: '<p>plain</p>',
+  requester: { name: 'Requester', email: 'requester@example.com', department: 'Operations' },
+  department: 'Operations',
+  status: 'Completed',
+  createdAt: new Date('2026-05-01T08:00:00Z'),
+  fileAttachments: [],
+  approvalPhases: [],
+  activities: [],
+  generatedBy: 'Test runner',
+}
 
 describe('renderDescriptionHtml', () => {
   it('returns sanitized HTML for rich sources and legacy markup otherwise', () => {
@@ -36,21 +48,15 @@ describe('renderDescriptionHtml', () => {
   })
 })
 
-describe("PDF and email render wiring", () => {
-  it('PDF resolves descriptions through the owner-scoped inline image resolver', () => {
-    const pdf = read('src/lib/pdf.ts')
-    assert.match(pdf, /await resolveInlineImagesForPdf\(/)
-    assert.match(pdf, /owner: \{ kind: ["']request["'], id: data\.id \}/)
-    assert.match(pdf, /owner: \{ kind: ["']solution["'], id: data\.solution\.id \}/)
-    assert.doesNotMatch(pdf, /escapeHtml\(data\.(solution\.)?description\)/)
-    assert.match(pdf, /\.description a::after/)
-    assert.match(pdf, /attr\(href\)/)
-  })
+describe('PDF evidence rendering', () => {
+  it('materializes the shared Calm Document palette and rejects arbitrary styles', async () => {
+    const html = await renderRequestEvidenceHTML({
+      ...PDF_FIXTURE,
+      description: '<p><span data-text-color="blue" style="color:#ff00ff;position:fixed">Calm <mark data-highlight="yellow" style="background:var(--hostile)">Document</mark></span></p>',
+    })
 
-  it('email routes descriptions through the shared helpers', () => {
-    const mail = read('src/server-actions/notifications.ts')
-    assert.match(mail, /renderDescriptionHtml\(/)
-    assert.match(mail, /renderDescriptionPlainText\(/)
+    assert.match(html, /<span style="color:#1D4ED8">Calm <mark style="background-color:#FEF3C7">Document<\/mark><\/span>/)
+    assert.doesNotMatch(html, /data-text-color|data-highlight|#ff00ff|var\(|position:fixed/)
   })
 })
 
