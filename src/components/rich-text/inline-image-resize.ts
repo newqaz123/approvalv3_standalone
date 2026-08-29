@@ -16,6 +16,60 @@ export const INLINE_IMAGE_KEYBOARD_STEP = 1
 export const INLINE_IMAGE_KEYBOARD_LARGE_STEP = 10
 
 /**
+ * Cancels a live session. `clearPreview` runs AFTER `cancel()` so the restore
+ * preview cancel reports cannot survive as a lingering local width — the
+ * rendered width falls back to the committed/natural width.
+ */
+export function discardInlineImageResizeSession(
+  session: InlineImageResizeSession | null,
+  clearPreview: () => void,
+): void {
+  if (session) session.cancel()
+  clearPreview()
+}
+
+/** Minimal structural keydown surface the escape guard depends on. */
+export type InlineImageResizeEscapeEvent = {
+  key: string
+  preventDefault(): void
+  stopPropagation(): void
+}
+
+export type InlineImageResizeEscapeTarget = {
+  addEventListener(
+    type: 'keydown',
+    listener: (event: InlineImageResizeEscapeEvent) => void,
+    options?: { capture?: boolean },
+  ): void
+  removeEventListener(
+    type: 'keydown',
+    listener: (event: InlineImageResizeEscapeEvent) => void,
+    options?: { capture?: boolean },
+  ): void
+}
+
+/**
+ * While a pointer-captured resize drag is live, Escape must cancel the drag
+ * itself. The guard listens on the window CAPTURE phase (pointer-down
+ * preventDefault keeps the handle from receiving focus, so target handlers
+ * never fire) and stops the event so dialog-level Escape dismissal (Radix)
+ * cannot close the surrounding dialog mid-drag. Returns a detach function.
+ */
+export function attachInlineImageResizeEscapeGuard(
+  target: InlineImageResizeEscapeTarget,
+  discard: () => void,
+): () => void {
+  const onKeyDown = (event: InlineImageResizeEscapeEvent) => {
+    if (event.key !== 'Escape') return
+    event.preventDefault()
+    event.stopPropagation()
+    discard()
+  }
+  target.addEventListener('keydown', onKeyDown, { capture: true })
+  return () => target.removeEventListener('keydown', onKeyDown, { capture: true })
+}
+
+/**
  * Pure resize session for one drag or one keyboard action.
  *
  * `preview` clamps the pointer delta against the editor width and reports the

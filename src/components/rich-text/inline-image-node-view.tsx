@@ -12,7 +12,9 @@ import { NodeViewWrapper, type NodeViewProps } from '@tiptap/react'
 import type { Editor } from '@tiptap/core'
 import { NodeSelection } from '@tiptap/pm/state'
 import {
+  attachInlineImageResizeEscapeGuard,
   createInlineImageResizeSession,
+  discardInlineImageResizeSession,
   type InlineImageResizeEdge,
   type InlineImageResizeSession,
 } from './inline-image-resize'
@@ -181,8 +183,11 @@ export function InlineImageNodeView({
   const imageRef = useRef<HTMLImageElement | null>(null)
   const frameRef = useRef<HTMLSpanElement | null>(null)
   const sessionRef = useRef<InlineImageResizeSession | null>(null)
+  const dragCaptureRef = useRef<{ element: HTMLButtonElement; pointerId: number } | null>(null)
   const [previewWidth, setPreviewWidth] = useState<number | null>(null)
   const [toolbarPlacement, setToolbarPlacement] = useState<'above' | 'below'>('above')
+  const [resizeActive, setResizeActive] = useState(false)
+  const discardSessionRef = useRef<(session: InlineImageResizeSession | null) => void>(() => undefined)
 
   // The floating toolbar must stay inside its clipping scroll container; when
   // the frame starts too close to the scrollport top it flips below the frame.
@@ -204,6 +209,17 @@ export function InlineImageNodeView({
       window.removeEventListener('resize', update)
     }
   }, [selected])
+
+  // Escape during a pointer-captured drag is intercepted on the window capture
+  // phase: the handle never receives focus (pointer-down preventDefault), and
+  // stopping the event keeps the surrounding dialog from dismissing.
+  useEffect(() => {
+    if (!resizeActive) return undefined
+    return attachInlineImageResizeEscapeGuard(
+      window,
+      () => discardSessionRef.current(sessionRef.current),
+    )
+  }, [resizeActive])
 
   const displayWidth = typeof node.attrs.displayWidth === 'number' ? node.attrs.displayWidth : null
   const renderedWidth = previewWidth ?? displayWidth
@@ -237,11 +253,18 @@ export function InlineImageNodeView({
     })
   )
 
+  /** Cancels a drag: cancel's restore preview must not outlive the clear. */
   const discardSession = (session: InlineImageResizeSession | null) => {
     sessionRef.current = null
-    setPreviewWidth(null)
-    if (session) session.cancel()
+    discardInlineImageResizeSession(session, () => setPreviewWidth(null))
+    const capture = dragCaptureRef.current
+    dragCaptureRef.current = null
+    if (capture && capture.element.hasPointerCapture(capture.pointerId)) {
+      capture.element.releasePointerCapture(capture.pointerId)
+    }
+    setResizeActive(false)
   }
+  discardSessionRef.current = discardSession
 
   const onHandlePointerDown = (
     edge: InlineImageResizeEdge,
@@ -251,6 +274,8 @@ export function InlineImageNodeView({
     event.preventDefault()
     event.stopPropagation()
     sessionRef.current = startResizeSession(edge, event.clientX)
+    dragCaptureRef.current = { element: event.currentTarget, pointerId: event.pointerId }
+    setResizeActive(true)
     event.currentTarget.setPointerCapture(event.pointerId)
   }
 
@@ -266,6 +291,8 @@ export function InlineImageNodeView({
     const session = sessionRef.current
     if (!session) return
     sessionRef.current = null
+    dragCaptureRef.current = null
+    setResizeActive(false)
     event.stopPropagation()
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId)

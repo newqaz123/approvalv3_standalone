@@ -6,7 +6,9 @@ import { Editor, type JSONContent } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import { NodeSelection } from '@tiptap/pm/state'
 import {
+  attachInlineImageResizeEscapeGuard,
   createInlineImageResizeSession,
+  discardInlineImageResizeSession,
 } from '../../src/components/rich-text/inline-image-resize'
 import {
   InlineImageExtension,
@@ -509,6 +511,167 @@ describe('inline image node view chrome', () => {
     const { markup } = renderNodeView({ selected: true })
     assert.doesNotMatch(markup, /Image controls/, 'the legacy action row label is gone')
     assert.doesNotMatch(markup, /mt-2 flex flex-wrap/, 'the legacy action row layout is gone')
+  })
+})
+
+describe('inline image resize escape guard', () => {
+  type FakeKeyboardEvent = {
+    key: string
+    defaultPrevented: boolean
+    propagationStopped: boolean
+    preventDefault(): void
+    stopPropagation(): void
+  }
+
+  function fakeKeydown(key: string): FakeKeyboardEvent {
+    return {
+      key,
+      defaultPrevented: false,
+      propagationStopped: false,
+      preventDefault() { this.defaultPrevented = true },
+      stopPropagation() { this.propagationStopped = true },
+    }
+  }
+
+  /** Mirrors DOM keydown order: window capture listeners run before the
+   * document-level listeners a Radix dialog uses for Escape dismissal. */
+  function createFakeWindow() {
+    const windowCapture: Array<(event: FakeKeyboardEvent) => void> = []
+    const documentBubble: Array<(event: FakeKeyboardEvent) => void> = []
+    return {
+      addEventListener(
+        type: string,
+        listener: (event: FakeKeyboardEvent) => void,
+        options?: { capture?: boolean },
+      ) {
+        if (type !== 'keydown') return
+        if (options?.capture) windowCapture.push(listener)
+        else documentBubble.push(listener)
+      },
+      removeEventListener(
+        type: string,
+        listener: (event: FakeKeyboardEvent) => void,
+        options?: { capture?: boolean },
+      ) {
+        if (type !== 'keydown') return
+        const list = options?.capture ? windowCapture : documentBubble
+        const index = list.indexOf(listener)
+        if (index !== -1) list.splice(index, 1)
+      },
+      dispatchKeydown(event: FakeKeyboardEvent) {
+        for (const listener of windowCapture) listener(event)
+        if (!event.propagationStopped) {
+          for (const listener of documentBubble) listener(event)
+        }
+        return { reachedDocument: !event.propagationStopped }
+      },
+    }
+  }
+
+  it('intercepts Escape on the window capture phase and stops dialog-level dismissal', () => {
+    const target = createFakeWindow()
+    const dialogDismissals: string[] = []
+    target.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') dialogDismissals.push('dialog dismissed')
+    })
+    const discards: string[] = []
+    const detach = attachInlineImageResizeEscapeGuard(target, () => discards.push('discard'))
+
+    const escape = fakeKeydown('Escape')
+    const result = target.dispatchKeydown(escape)
+    assert.equal(result.reachedDocument, false, 'stopPropagation must halt the event before document listeners')
+    assert.equal(escape.defaultPrevented, true)
+    assert.deepEqual(dialogDismissals, [], 'the dialog must not see Escape while a resize drag is live')
+    assert.deepEqual(discards, ['discard'])
+
+    const tab = fakeKeydown('Tab')
+    const tabResult = target.dispatchKeydown(tab)
+    assert.equal(tabResult.reachedDocument, true)
+    assert.equal(tab.defaultPrevented, false)
+    assert.deepEqual(discards, ['discard'], 'only Escape discards the session')
+
+    detach()
+    const laterEscape = fakeKeydown('Escape')
+    target.dispatchKeydown(laterEscape)
+    assert.deepEqual(dialogDismissals, ['dialog dismissed'], 'after detach the dialog regains Escape handling')
+    assert.deepEqual(discards, ['discard'])
+  })
+
+  it('Escape during an active drag commits nothing and leaves no preview on the real editor', () => {
+    const editor = createEditor(imageDoc(400))
+    try {
+      editor.view.dispatch(
+        editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, 1)),
+      )
+      let documentChanges = 0
+      editor.on('transaction', ({ transaction }) => {
+        if (transaction.docChanged) documentChanges += 1
+      })
+      const baseline = documentChanges
+
+      let previewWidth: number | null = null
+      const commits: Array<number | null> = []
+      const session = createInlineImageResizeSession({
+        edge: 'right',
+        startPointerX: 0,
+        startWidth: 400,
+        editorWidth: 800,
+        onPreview: (width) => { previewWidth = width },
+        onCommit: (width) => {
+          commits.push(width)
+          if (width !== null) {
+            applyInlineImageAttributes(editor, 1, { displayWidth: width })
+          }
+        },
+      })
+      session.preview(250)
+      session.preview(300)
+      assert.equal(previewWidth, 700)
+      assert.equal(documentChanges, baseline, 'previews must not dispatch')
+
+      const target = createFakeWindow()
+      const detach = attachInlineImageResizeEscapeGuard(
+        target,
+        () => discardInlineImageResizeSession(session, () => { previewWidth = null }),
+      )
+      target.dispatchKeydown(fakeKeydown('Escape'))
+      detach()
+
+      assert.deepEqual(commits, [], 'Escape must not commit a width')
+      assert.equal(previewWidth, null, 'the local preview width must not outlive the cancelled drag')
+      assert.equal(documentChanges, baseline)
+      const renderedWidth = previewWidth ?? editor.state.doc.nodeAt(1)?.attrs.displayWidth
+      assert.equal(renderedWidth, 400, 'rendering falls back to the committed width')
+      assert.equal(editor.state.doc.nodeAt(1)?.attrs.displayWidth, 400)
+    } finally {
+      editor.destroy()
+    }
+  })
+})
+
+describe('inline image resize discard', () => {
+  it('clears the local preview after cancel restores, leaving no lingering width', () => {
+    let previewWidth: number | null = null
+    const previews: number[] = []
+    const commits: Array<number | null> = []
+    const session = createInlineImageResizeSession({
+      edge: 'right',
+      startPointerX: 0,
+      startWidth: 400,
+      editorWidth: 800,
+      onPreview: (width) => { previews.push(width); previewWidth = width },
+      onCommit: (width) => commits.push(width),
+    })
+    session.preview(200)
+    assert.equal(previewWidth, 600)
+
+    discardInlineImageResizeSession(session, () => { previewWidth = null })
+
+    assert.equal(previewWidth, null, 'the clear must win over cancel’s start-width preview')
+    assert.deepEqual(commits, [])
+    assert.deepEqual(previews, [600, 400], 'cancel still previews its restore before the clear')
+    assert.equal(session.commit(), null)
+    assert.deepEqual(commits, [])
   })
 })
 
