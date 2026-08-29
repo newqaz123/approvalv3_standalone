@@ -78,4 +78,15 @@ describe('formatted description output contexts', () => {
       /\/api\/inline-images\/[0-9a-f-]{36}|data:image\//i,
     )
   })
+
+  it('fix round 3: does not redact fragments separated by an email block boundary', () => {
+    const html = renderDescriptionHtml(
+      '<strong>Safe /api/inline-</strong><p>images/123e4567-e89b-42d3-a456-426614174000 safe block</p>',
+    )
+
+    assert.equal(
+      html,
+      '<strong>Safe /api/inline-</strong><p>images/123e4567-e89b-42d3-a456-426614174000 safe block</p>',
+    )
+  })
 })

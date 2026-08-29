@@ -1,15 +1,5 @@
 import sanitizeHtml from 'sanitize-html'
 import { decodeHTML, escapeText } from 'entities'
-import { DomUtils, parseDocument } from 'htmlparser2'
-import {
-  Text as DomText,
-  isTag,
-  isText,
-  type ChildNode,
-  type Element,
-  type ParentNode,
-  type Text,
-} from 'domhandler'
 import {
   computeInlineImageFrameGeometry,
   parseInlineImagePresentation,
@@ -29,7 +19,6 @@ const EMAIL_IMAGE_REFERENCE_REPLACEMENT = '[redacted]'
 const VISIBLE_TEXT_BOUNDARY_TAGS = new Set(['p', 'br', 'ul', 'ol', 'li', 'h2', 'h3'])
 
 type VisibleTextSegment = {
-  node: Text
   start: number
   end: number
 }
@@ -129,39 +118,6 @@ export function truncateSanitizedRichTextHtml(
   })
 }
 
-function appendVisibleTextBoundary(parts: string[], cursor: { value: number }): void {
-  parts.push('\n')
-  cursor.value += 1
-}
-
-function collectVisibleText(
-  parent: ParentNode,
-  parts: string[],
-  segments: VisibleTextSegment[],
-  cursor: { value: number },
-): void {
-  for (const child of parent.children) {
-    if (isText(child)) {
-      const start = cursor.value
-      parts.push(child.data)
-      cursor.value += child.data.length
-      segments.push({ node: child, start, end: cursor.value })
-      continue
-    }
-    if (!isTag(child)) continue
-
-    if (child.name === 'br') {
-      appendVisibleTextBoundary(parts, cursor)
-      continue
-    }
-
-    collectVisibleText(child, parts, segments, cursor)
-    if (VISIBLE_TEXT_BOUNDARY_TAGS.has(child.name)) {
-      appendVisibleTextBoundary(parts, cursor)
-    }
-  }
-}
-
 function forbiddenVisibleTextMatches(visibleText: string): VisibleTextMatch[] {
   const matches: VisibleTextMatch[] = []
   for (const pattern of [PRIVATE_INLINE_IMAGE_URL_RE, IMAGE_DATA_URI_RE]) {
@@ -184,95 +140,111 @@ function forbiddenVisibleTextMatches(visibleText: string): VisibleTextMatch[] {
   return merged
 }
 
-function lowestCommonParent(left: Text, right: Text): ParentNode {
-  const rightParents = new Set<ParentNode>()
-  for (let parent = right.parent; parent !== null; parent = parent.parent) {
-    rightParents.add(parent)
+function collectEmailVisibleText(source: string): {
+  visibleText: string
+  segments: VisibleTextSegment[]
+} {
+  const parts: string[] = []
+  const segments: VisibleTextSegment[] = []
+  let cursor = 0
+  const appendBoundary = () => {
+    parts.push('\n')
+    cursor += 1
   }
-  for (let parent = left.parent; parent !== null; parent = parent.parent) {
-    if (rightParents.has(parent)) return parent
-  }
-  throw new Error('Visible text nodes must share a document parent')
+
+  sanitizeHtml(source, {
+    allowedTags: [...RICH_TEXT_ALLOWED_TAGS],
+    allowedAttributes: false,
+    transformTags: {
+      '*': (tagName, attribs) => {
+        if (VISIBLE_TEXT_BOUNDARY_TAGS.has(tagName)) appendBoundary()
+        return { tagName, attribs }
+      },
+    },
+    textFilter: (text) => {
+      const decoded = decodeHTML(text)
+      const start = cursor
+      parts.push(decoded)
+      cursor += decoded.length
+      segments.push({ start, end: cursor })
+      return text
+    },
+    exclusiveFilter: (frame) => {
+      if (VISIBLE_TEXT_BOUNDARY_TAGS.has(frame.tag)) appendBoundary()
+      return false
+    },
+  })
+
+  return { visibleText: parts.join(''), segments }
 }
 
-function childUnderParent(node: ChildNode, parent: ParentNode): ChildNode {
-  let child = node
-  while (child.parent !== parent) {
-    if (child.parent === null) throw new Error('Visible text node is outside its match parent')
-    child = child.parent
-  }
-  return child
+type RedactionFrame = {
+  emitted: boolean
+  redacted: boolean
 }
 
-function collectAffectedFormatting(
-  node: Text,
-  matchParent: ParentNode,
-  affected: Set<Element>,
-): void {
-  for (let parent = node.parent; parent !== null && parent !== matchParent; parent = parent.parent) {
-    if (isTag(parent)) affected.add(parent)
-  }
-}
+function redactVisibleTextSegment(
+  decoded: string,
+  segment: VisibleTextSegment,
+  matches: VisibleTextMatch[],
+): { text: string; redacted: boolean } {
+  let localCursor = 0
+  let redacted = false
+  const parts: string[] = []
 
-function elementDepth(element: Element): number {
-  let depth = 0
-  for (let parent = element.parent; parent !== null; parent = parent.parent) depth += 1
-  return depth
-}
+  for (const match of matches) {
+    if (match.end <= segment.start || match.start >= segment.end) continue
 
-function pruneEmptyAffectedFormatting(affected: Set<Element>): void {
-  const deepestFirst = [...affected].sort((left, right) => elementDepth(right) - elementDepth(left))
-  for (const element of deepestFirst) {
-    if (element.children.every((child) => isText(child) && child.data.length === 0)) {
-      DomUtils.removeElement(element)
-    }
-  }
-}
-
-function applyVisibleTextMatch(
-  match: VisibleTextMatch,
-  segments: VisibleTextSegment[],
-  affected: Set<Element>,
-): void {
-  const matchedSegments = segments.filter(
-    (segment) => segment.end > match.start && segment.start < match.end,
-  )
-  const first = matchedSegments[0]
-  const last = matchedSegments.at(-1)
-  if (!first || !last) return
-
-  if (first.node === last.node) {
-    const start = match.start - first.start
-    const end = match.end - first.start
-    first.node.data = first.node.data.slice(0, start)
-      + EMAIL_IMAGE_REFERENCE_REPLACEMENT
-      + first.node.data.slice(end)
-    return
-  }
-
-  const matchParent = lowestCommonParent(first.node, last.node)
-  const firstBranch = childUnderParent(first.node, matchParent)
-  for (const segment of matchedSegments) {
     const start = Math.max(0, match.start - segment.start)
-    const end = Math.min(segment.node.data.length, match.end - segment.start)
-    segment.node.data = segment.node.data.slice(0, start) + segment.node.data.slice(end)
-    collectAffectedFormatting(segment.node, matchParent, affected)
+    const end = Math.min(decoded.length, match.end - segment.start)
+    parts.push(decoded.slice(localCursor, start))
+    if (match.start >= segment.start) parts.push(EMAIL_IMAGE_REFERENCE_REPLACEMENT)
+    localCursor = end
+    redacted = true
   }
-  DomUtils.append(firstBranch, new DomText(EMAIL_IMAGE_REFERENCE_REPLACEMENT))
+  parts.push(decoded.slice(localCursor))
+  return { text: parts.join(''), redacted }
 }
 
 function redactEmailVisibleImageReferences(source: string): string {
-  const document = parseDocument(source, { decodeEntities: true })
-  const parts: string[] = []
-  const segments: VisibleTextSegment[] = []
-  collectVisibleText(document, parts, segments, { value: 0 })
+  const { visibleText, segments } = collectEmailVisibleText(source)
+  const matches = forbiddenVisibleTextMatches(visibleText)
+  if (matches.length === 0) return source
 
-  const affected = new Set<Element>()
-  for (const match of forbiddenVisibleTextMatches(parts.join('')).reverse()) {
-    applyVisibleTextMatch(match, segments, affected)
-  }
-  pruneEmptyAffectedFormatting(affected)
-  return DomUtils.getInnerHTML(document, { encodeEntities: 'utf8' })
+  const frames: RedactionFrame[] = []
+  let segmentIndex = 0
+  return sanitizeHtml(source, {
+    allowedTags: [...RICH_TEXT_ALLOWED_TAGS],
+    allowedAttributes: false,
+    transformTags: {
+      '*': (tagName, attribs) => {
+        frames.push({ emitted: false, redacted: false })
+        return { tagName, attribs }
+      },
+    },
+    textFilter: (text) => {
+      const segment = segments[segmentIndex++]
+      if (!segment) return ''
+
+      const result = redactVisibleTextSegment(decodeHTML(text), segment, matches)
+      for (const frame of frames) {
+        if (result.text.length > 0) frame.emitted = true
+        if (result.redacted) frame.redacted = true
+      }
+      return escapeText(result.text)
+    },
+    exclusiveFilter: (frame) => {
+      const state = frames.pop()
+      if (
+        state?.redacted
+        && !state.emitted
+        && !VISIBLE_TEXT_BOUNDARY_TAGS.has(frame.tag)
+      ) {
+        return 'excludeTag'
+      }
+      return false
+    },
+  })
 }
 
 /** Trusted HTML-email presentation with URL-free inline-image placeholders. */

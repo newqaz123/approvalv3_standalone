@@ -148,4 +148,20 @@ describe('trusted rich text presentation', () => {
       /\/api\/inline-images\/[0-9a-f-]{36}|data:image\//i,
     )
   })
+
+  it('fix round 3: treats block starts, block ends, and br as visible boundaries', () => {
+    const separated = materializeRichTextForEmail(
+      `<strong>Before data:</strong><p>image/png;base64,AAAA safe block</p><p>/api/inline-</p><strong>images/${IMAGE_ID} after</strong><p>Before data:<br><em>image/webp;base64,BBBB after</em></p>`,
+    )
+
+    assert.equal(
+      separated,
+      `<strong>Before data:</strong><p>image/png;base64,AAAA safe block</p><p>/api/inline-</p><strong>images/${IMAGE_ID} after</strong><p>Before data:<br /><em>image/webp;base64,BBBB after</em></p>`,
+    )
+
+    const adjacentInline = materializeRichTextForEmail(
+      `<p>Before data:<strong>image/png;base64,AAAA</strong> and /api/inline-<em>images/${IMAGE_ID}</em> after</p>`,
+    )
+    assert.equal(adjacentInline, '<p>Before [redacted] and [redacted] after</p>')
+  })
 })
