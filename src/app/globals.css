@@ -383,6 +383,14 @@
   .inline-image-crop-handle--top-right { top: -22px; right: -22px; }
   .inline-image-crop-handle--bottom-left { bottom: -22px; left: -22px; }
   .inline-image-crop-handle--bottom-right { bottom: -22px; right: -22px; }
+
+  .inline-image-crop-controls {
+    gap: 8px;
+  }
+  .inline-image-crop-button {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }
 
 /*

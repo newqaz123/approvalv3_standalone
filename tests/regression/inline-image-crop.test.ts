@@ -85,6 +85,19 @@ describe('inline image handle touch targets', () => {
     assert.match(coarseRules, /\.inline-image-crop-handle\s*\{[\s\S]*?width:\s*44px;[\s\S]*?height:\s*44px;/)
     assert.match(coarseRules, /\.inline-image-crop-handle::after\s*\{[\s\S]*?inset:\s*17px;/)
   })
+
+  it('expands Apply, Cancel, Reset, and crop preset buttons to 44px with 8px gaps on coarse pointers', () => {
+    const css = readFileSync('src/app/globals.css', 'utf8')
+    const coarseStart = css.indexOf('@media (pointer: coarse)')
+    assert.notEqual(coarseStart, -1)
+    const coarseRules = css.slice(coarseStart)
+
+    assert.match(coarseRules, /\.inline-image-crop-controls\s*\{[\s\S]*?gap:\s*8px;/)
+    assert.match(
+      coarseRules,
+      /\.inline-image-crop-button\s*\{[\s\S]*?min-width:\s*44px;[\s\S]*?min-height:\s*44px;/,
+    )
+  })
 })
 
 describe('inline image crop draft model', () => {
