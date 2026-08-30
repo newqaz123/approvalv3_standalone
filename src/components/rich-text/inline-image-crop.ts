@@ -3,9 +3,15 @@ import {
   parseInlineImagePresentation,
   pixelRectToNormalizedInlineImageCrop,
   serializeInlineImagePresentation,
+  type InlineImageLayout,
   type InlineImagePresentation,
   type NormalizedInlineImageCrop,
 } from '@/lib/inline-images/presentation'
+import {
+  canonicalCropToVisualCrop,
+  visualCropToCanonicalCrop,
+  type InlineImageRotation,
+} from '@/lib/inline-images/rotation'
 
 export type InlineImageCropPreset = 'free' | 'original' | '1:1' | '4:3' | '16:9'
 
@@ -15,6 +21,8 @@ export type InlineImageCropDraft = {
   panX: number
   panY: number
   preset: InlineImageCropPreset
+  layout: InlineImageLayout
+  rotation: InlineImageRotation
 }
 
 export type InlineImageCropEdge =
@@ -94,12 +102,15 @@ export function createInlineImageCropDraft(
     width: INLINE_IMAGE_CROP_SCALE,
     height: INLINE_IMAGE_CROP_SCALE,
   }
+  const visual = canonicalCropToVisualCrop(crop, presentation.rotation)
   return {
-    crop: clampCrop(crop),
+    crop: clampCrop(visual),
     zoom: 1,
     panX: 0,
     panY: 0,
-    preset: isFullCrop(crop) ? 'original' : 'free',
+    preset: isFullCrop(visual) ? 'original' : 'free',
+    layout: presentation.layout,
+    rotation: presentation.rotation,
   }
 }
 
@@ -119,6 +130,7 @@ export function applyInlineImageCropPreset(
 
   if (preset === 'original' || !hasNaturalDimensions(naturalWidth, naturalHeight)) {
     return {
+      ...draft,
       crop: { x: 0, y: 0, width: INLINE_IMAGE_CROP_SCALE, height: INLINE_IMAGE_CROP_SCALE },
       zoom: 1,
       panX: 0,
@@ -155,8 +167,8 @@ export function applyInlineImageCropPreset(
 }
 
 /**
- * Pans the image beneath the crop rectangle: the rectangle moves opposite the
- * drag in normalized source units and stays inside the source.
+ * Moves the crop rectangle with the pointer: positive deltas increase visual
+ * crop X/Y and the rectangle stays inside the source.
  */
 export function panInlineImageCrop(
   draft: InlineImageCropDraft,
@@ -165,7 +177,7 @@ export function panInlineImageCrop(
 ): InlineImageCropDraft {
   return {
     ...draft,
-    crop: clampCrop({ ...draft.crop, x: draft.crop.x - dx, y: draft.crop.y - dy }),
+    crop: clampCrop({ ...draft.crop, x: draft.crop.x + dx, y: draft.crop.y + dy }),
     panX: clampInteger(draft.panX + dx, -INLINE_IMAGE_CROP_SCALE, INLINE_IMAGE_CROP_SCALE),
     panY: clampInteger(draft.panY + dy, -INLINE_IMAGE_CROP_SCALE, INLINE_IMAGE_CROP_SCALE),
   }
@@ -259,7 +271,7 @@ export function stepInlineImageCropRegion(
   shiftKey: boolean,
 ): InlineImageCropDraft {
   const { dx, dy } = arrowDelta(key, shiftKey)
-  return panInlineImageCrop(draft, -dx, -dy)
+  return panInlineImageCrop(draft, dx, dy)
 }
 
 /** One wheel notch per event: scrolling up zooms in, clamped to the range. */
@@ -341,14 +353,20 @@ export function inlineImageCropApplyAttributes(input: {
   cropY: number | null
   cropWidth: number | null
   cropHeight: number | null
+  layout: InlineImageLayout
+  rotation: InlineImageRotation
 } {
+  const visualCrop = clampCrop(input.draft.crop)
+  const canonicalCrop = isFullCrop(visualCrop)
+    ? null
+    : visualCropToCanonicalCrop(visualCrop, input.draft.rotation)
   const validated = parseInlineImagePresentation(serializeInlineImagePresentation({
     displayWidth: input.displayWidth,
     naturalWidth: input.naturalWidth,
     naturalHeight: input.naturalHeight,
-    crop: isFullCrop(input.draft.crop) ? null : input.draft.crop,
-    layout: 'block',
-    rotation: 0,
+    crop: canonicalCrop,
+    layout: input.draft.layout,
+    rotation: input.draft.rotation,
   }))
 
   return {
@@ -359,5 +377,7 @@ export function inlineImageCropApplyAttributes(input: {
     cropY: validated.crop?.y ?? null,
     cropWidth: validated.crop?.width ?? null,
     cropHeight: validated.crop?.height ?? null,
+    layout: validated.layout,
+    rotation: validated.rotation,
   }
 }

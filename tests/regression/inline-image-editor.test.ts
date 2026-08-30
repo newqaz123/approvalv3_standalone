@@ -571,6 +571,8 @@ describe('inline image crop editor contract', () => {
         cropY: 3750,
         cropWidth: 2500,
         cropHeight: 2500,
+        layout: 'block',
+        rotation: 0,
       })
 
       const spec = imageRenderSpec(editor, { src: IMAGE_SRC, alt: 'diagram', align: 'center', ...attrs }) as ['img', Record<string, string>]
@@ -589,6 +591,7 @@ describe('inline image crop editor contract', () => {
 
       const parsed = imageParseAttrs(spec[1]) as Record<string, unknown>
       for (const [key, value] of Object.entries(attrs)) {
+        if (key === 'layout' || key === 'rotation') continue
         assert.equal(parsed[key], value, key)
       }
     } finally {

@@ -9,10 +9,13 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react'
 import {
+  computeInlineImageFrameGeometry,
+  INLINE_IMAGE_CROP_SCALE,
   parseInlineImagePresentation,
   serializeInlineImagePresentation,
   type InlineImagePresentation,
 } from '@/lib/inline-images/presentation'
+import { rotatedInlineImageDimensions } from '@/lib/inline-images/rotation'
 import type { InlineImageCoordinator } from '@/hooks/use-inline-description-images'
 import type { InlineImageCropCommandsController } from './inline-image-extension'
 import {
@@ -285,13 +288,18 @@ export function InlineImageCropEditor({
 
   const totalDelta = (originX: number, originY: number, clientX: number, clientY: number) => {
     const displayed = displayedSize()
+    const visual = rotatedInlineImageDimensions(
+      session.naturalWidth,
+      session.naturalHeight,
+      draftRef.current.rotation,
+    )
     return inlineImageCropDisplayDelta({
       dxPixels: clientX - originX,
       dyPixels: clientY - originY,
       displayedWidth: displayed.width,
       displayedHeight: displayed.height,
-      naturalWidth: session.naturalWidth,
-      naturalHeight: session.naturalHeight,
+      naturalWidth: visual.width,
+      naturalHeight: visual.height,
     })
   }
 
@@ -460,11 +468,17 @@ export function InlineImageCropEditor({
   }
 
   const onPresetChange = (preset: InlineImageCropPreset) => {
-    const next = applyInlineImageCropPreset(
-      draftRef.current,
-      preset,
+    const current = draftRef.current
+    const visual = rotatedInlineImageDimensions(
       session.naturalWidth,
       session.naturalHeight,
+      current.rotation,
+    )
+    const next = applyInlineImageCropPreset(
+      current,
+      preset,
+      visual.width,
+      visual.height,
     )
     updateDraft(next)
     setStatus(preset === 'original' ? 'Crop reset to the full original image' : describeCrop(next))
@@ -545,12 +559,10 @@ export function InlineImageCropEditor({
       <span
         className="inline-image-crop-surface"
         ref={surfaceRef}
-        style={session.layoutWidth > 0 ? {
-          width: `${session.layoutWidth}px`,
-          maxWidth: '100%',
-        } : undefined}
+        style={cropSurfaceStyle(session, draft)}
       >
-        <img src={src} alt={alt} draggable={false} className="inline-image-crop-source" />
+        {rotatedCropSource(src, alt, session, draft)}
+
         <span
           ref={regionRef}
           className="inline-image-crop-rect"
@@ -587,6 +599,80 @@ export function InlineImageCropEditor({
       <span role="status" aria-live="polite" className="inline-image-crop-status">
         {status}
       </span>
+    </span>
+  )
+}
+
+function cropDisplayWidth(session: InlineImageCropNodeSession): number | null {
+  if (session.layoutWidth > 0) return Math.round(session.layoutWidth)
+  return session.snapshot.displayWidth
+}
+
+function cropSceneGeometry(
+  session: InlineImageCropNodeSession,
+  draft: InlineImageCropDraft,
+) {
+  return computeInlineImageFrameGeometry({
+    crop: {
+      x: 0,
+      y: 0,
+      width: INLINE_IMAGE_CROP_SCALE,
+      height: INLINE_IMAGE_CROP_SCALE,
+    },
+    naturalWidth: session.naturalWidth,
+    naturalHeight: session.naturalHeight,
+    displayWidth: cropDisplayWidth(session),
+    rotation: draft.rotation,
+  })
+}
+
+function cropSurfaceStyle(
+  session: InlineImageCropNodeSession,
+  draft: InlineImageCropDraft,
+): React.CSSProperties | undefined {
+  const geometry = cropSceneGeometry(session, draft)
+  const rotated = Boolean(geometry && geometry.rotation !== 0)
+  if (session.layoutWidth <= 0 && !rotated) return undefined
+  return {
+    width: session.layoutWidth > 0
+      ? `${session.layoutWidth}px`
+      : geometry
+        ? `${geometry.frameWidth}px`
+        : undefined,
+    maxWidth: '100%',
+    height: rotated && geometry ? `${geometry.frameHeight}px` : undefined,
+    position: rotated ? 'relative' : undefined,
+    overflow: rotated ? 'hidden' : undefined,
+    touchAction: 'none',
+    overscrollBehavior: 'contain',
+  }
+}
+
+function rotatedCropSource(
+  src: string,
+  alt: string,
+  session: InlineImageCropNodeSession,
+  draft: InlineImageCropDraft,
+) {
+  const geometry = cropSceneGeometry(session, draft)
+  const image = (
+    <img src={src} alt={alt} draggable={false} className="inline-image-crop-source" />
+  )
+  if (!geometry || geometry.rotation === 0) return image
+  return (
+    <span
+      className="inline-image-rotation-scene"
+      style={{
+        position: 'absolute',
+        width: `${geometry.sceneWidth}px`,
+        height: `${geometry.sceneHeight}px`,
+        left: `${geometry.sceneOffsetX}px`,
+        top: `${geometry.sceneOffsetY}px`,
+        transform: `rotate(${geometry.rotation}deg)`,
+        transformOrigin: 'center',
+      }}
+    >
+      {image}
     </span>
   )
 }

@@ -169,7 +169,7 @@ describe('inline image crop draft model', () => {
 
   it('keeps every crop inside the normalized source after pan and resize', () => {
     const moved = panInlineImageCrop(
-      { crop: { x: 1000, y: 1000, width: 5000, height: 5000 }, zoom: 1, panX: 0, panY: 0, preset: 'free' },
+      { crop: { x: 1000, y: 1000, width: 5000, height: 5000 }, zoom: 1, panX: 0, panY: 0, preset: 'free', layout: 'block', rotation: 0 },
       9000,
       -9000,
     )
@@ -178,9 +178,9 @@ describe('inline image crop draft model', () => {
     assert.ok(moved.crop.y + moved.crop.height <= 10_000)
   })
 
-  it('pan moves the rectangle opposite the drag and accumulates pan coordinates', () => {
+  it('pan moves the rectangle with the drag and accumulates pan coordinates', () => {
     const draft = panInlineImageCrop(croppedDraft(), 500, 250)
-    assert.deepEqual(draft.crop, { x: 500, y: 750, width: 5000, height: 5000 })
+    assert.deepEqual(draft.crop, { x: 1500, y: 1250, width: 5000, height: 5000 })
     assert.equal(draft.panX, 500)
     assert.equal(draft.panY, 250)
   })
@@ -290,6 +290,17 @@ describe('inline image crop draft model', () => {
     assert.deepEqual(stepInlineImageCropEdge(base(), 'bottom', 'ArrowDown', true).crop, { x: 2000, y: 1000, width: 3000, height: 4100 })
   })
 
+  it('moves the crop box in the same direction as pointer and arrow deltas', () => {
+    const base = createInlineImageCropDraft(presentation({
+      crop: { x: 2000, y: 1000, width: 3000, height: 4000 },
+    }))
+    assert.deepEqual(panInlineImageCrop(base, 500, 250).crop, {
+      x: 2500, y: 1250, width: 3000, height: 4000,
+    })
+    assert.equal(stepInlineImageCropRegion(base, 'ArrowRight', false).crop.x, 2010)
+    assert.equal(stepInlineImageCropRegion(base, 'ArrowDown', false).crop.y, 1010)
+  })
+
   it('keyboard steps move the whole crop region without changing its size', () => {
     const base = () => createInlineImageCropDraft(presentation({
       crop: { x: 2000, y: 1000, width: 3000, height: 4000 },
@@ -348,7 +359,7 @@ describe('inline image crop draft model', () => {
     assert.equal(rebased.originY, 160)
 
     const afterPan = panInlineImageCrop(rebased.originDraft, 500, -250)
-    assert.deepEqual(afterPan.crop, { x: 2500, y: 3250, width: 4000, height: 4000 })
+    assert.deepEqual(afterPan.crop, { x: 3500, y: 2750, width: 4000, height: 4000 })
     assert.notDeepEqual(afterPan.crop, panInlineImageCrop(beforePinch, 500, -250).crop)
   })
 
@@ -387,6 +398,99 @@ describe('inline image crop draft model', () => {
   })
 })
 
+describe('inline image rotated crop draft', () => {
+  const rotatedNaturalWidth = 800
+  const rotatedNaturalHeight = 600
+
+  it('projects a canonical crop into visual 90° coordinates and maps Apply back', () => {
+    const rotated = createInlineImageCropDraft(presentation({
+      rotation: 90,
+      layout: 'inline',
+      crop: { x: 1000, y: 2000, width: 3000, height: 4000 },
+    }))
+    assert.deepEqual(rotated.crop, { x: 4000, y: 1000, width: 4000, height: 3000 })
+    assert.equal(rotated.rotation, 90)
+    assert.equal(rotated.layout, 'inline')
+
+    const applied = inlineImageCropApplyAttributes({
+      draft: rotated,
+      displayWidth: 160,
+      naturalWidth: rotatedNaturalWidth,
+      naturalHeight: rotatedNaturalHeight,
+    })
+    assert.deepEqual(
+      { x: applied.cropX, y: applied.cropY, width: applied.cropWidth, height: applied.cropHeight },
+      { x: 1000, y: 2000, width: 3000, height: 4000 },
+    )
+    assert.equal(applied.rotation, 90)
+    assert.equal(applied.layout, 'inline')
+  })
+
+  it('uses rotated 600×800 dimensions for 90° aspect presets', () => {
+    const rotated = createInlineImageCropDraft(presentation({
+      rotation: 90,
+      layout: 'inline',
+      crop: { x: 1000, y: 2000, width: 3000, height: 4000 },
+    }))
+    const square = applyInlineImageCropPreset(rotated, '1:1', 600, 800)
+    const ratio = cropAspectRatio({
+      crop: square.crop,
+      naturalWidth: 600,
+      naturalHeight: 800,
+    })
+    assert.ok(Math.abs(ratio - 1) < 0.01, `expected square visual aspect, got ${ratio}`)
+    assert.equal(square.rotation, 90)
+    assert.equal(square.layout, 'inline')
+  })
+
+  it('keeps visual pan, handle, reset, zoom, wheel, and pinch semantics after 90°', () => {
+    const rotated = createInlineImageCropDraft(presentation({
+      rotation: 90,
+      layout: 'inline',
+      crop: { x: 1000, y: 2000, width: 3000, height: 4000 },
+    }))
+    assert.deepEqual(panInlineImageCrop(rotated, 500, 250).crop, {
+      x: 4500, y: 1250, width: 4000, height: 3000,
+    })
+    assert.deepEqual(
+      panInlineImageCrop(rotated, 99_999, 99_999).crop,
+      { x: 6000, y: 7000, width: 4000, height: 3000 },
+    )
+    assert.deepEqual(
+      resizeInlineImageCropEdge(rotated, 'right', 1000, 0).crop,
+      { x: 4000, y: 1000, width: 5000, height: 3000 },
+    )
+
+    const reset = applyInlineImageCropPreset(rotated, 'original', 600, 800)
+    assert.deepEqual(reset.crop, FULL_CROP)
+    assert.equal(reset.preset, 'original')
+    assert.equal(reset.rotation, 90)
+    assert.equal(reset.layout, 'inline')
+    assert.equal(reset.zoom, 1)
+
+    const zoomed = zoomInlineImageCrop(rotated, 2)
+    assert.equal(zoomed.zoom, 2)
+    assert.equal(zoomed.crop.width, 2000)
+    assert.equal(zoomed.crop.height, 1500)
+    assert.equal(normalizeInlineImageCropWheelZoom(1, -100), 1.25)
+    assert.equal(normalizeInlineImageCropPinchZoom(2, 1.5), 3)
+  })
+
+  it('renders the rotated source scene and visual crop rectangle', () => {
+    const markup = renderCropEditor(cropSession({
+      rotation: 90,
+      layout: 'inline',
+      displayWidth: 160,
+      crop: { x: 1000, y: 2000, width: 3000, height: 4000 },
+    }))
+    assert.match(markup, /left:\s*40%/)
+    assert.match(markup, /top:\s*10%/)
+    assert.match(markup, /width:\s*40%/)
+    assert.match(markup, /height:\s*30%/)
+    assert.match(markup, /rotate\(90deg\)/)
+  })
+})
+
 describe('inline image crop apply serialization', () => {
   it('keeps display width and natural dimensions with a partial crop', () => {
     const draft = createInlineImageCropDraft(presentation({
@@ -406,6 +510,8 @@ describe('inline image crop apply serialization', () => {
       cropY: 1000,
       cropWidth: 3000,
       cropHeight: 4000,
+      layout: 'block',
+      rotation: 0,
     })
   })
 
@@ -429,6 +535,8 @@ describe('inline image crop apply serialization', () => {
       cropY: null,
       cropWidth: null,
       cropHeight: null,
+      layout: 'block',
+      rotation: 0,
     })
   })
 
