@@ -640,7 +640,7 @@ function cropSurfaceStyle(
         ? `${geometry.frameWidth}px`
         : undefined,
     maxWidth: '100%',
-    height: rotated && geometry ? `${geometry.frameHeight}px` : undefined,
+    aspectRatio: rotated && geometry ? String(geometry.aspectRatio) : undefined,
     position: rotated ? 'relative' : undefined,
     overflow: rotated ? 'hidden' : undefined,
     touchAction: 'none',
@@ -659,15 +659,16 @@ function rotatedCropSource(
     <img src={src} alt={alt} draggable={false} className="inline-image-crop-source" />
   )
   if (!geometry || geometry.rotation === 0) return image
+  if (!(geometry.frameWidth > 0 && geometry.frameHeight > 0)) return image
   return (
     <span
       className="inline-image-rotation-scene"
       style={{
         position: 'absolute',
-        width: `${geometry.sceneWidth}px`,
-        height: `${geometry.sceneHeight}px`,
-        left: `${geometry.sceneOffsetX}px`,
-        top: `${geometry.sceneOffsetY}px`,
+        width: `${geometry.sceneWidth / geometry.frameWidth * 100}%`,
+        height: `${geometry.sceneHeight / geometry.frameHeight * 100}%`,
+        left: `${geometry.sceneOffsetX / geometry.frameWidth * 100}%`,
+        top: `${geometry.sceneOffsetY / geometry.frameHeight * 100}%`,
         transform: `rotate(${geometry.rotation}deg)`,
         transformOrigin: 'center',
       }}

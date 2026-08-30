@@ -489,6 +489,48 @@ describe('inline image rotated crop draft', () => {
     assert.match(markup, /height:\s*30%/)
     assert.match(markup, /rotate\(90deg\)/)
   })
+
+  it('keeps rotated crop surface aspect when max-width shrinks the layout width', () => {
+    const started = startInlineImageCropSession({
+      src: IMAGE_SRC,
+      presentation: presentation({
+        rotation: 90,
+        layout: 'inline',
+        displayWidth: 320,
+      }),
+      decodedDimensions: null,
+      layoutWidth: 320,
+    })
+    assert.equal(started.ok, true)
+    if (!started.ok) return
+
+    const geometry = computeInlineImageFrameGeometry({
+      crop: FULL_CROP,
+      naturalWidth: NATURAL_WIDTH,
+      naturalHeight: NATURAL_HEIGHT,
+      displayWidth: 320,
+      rotation: 90,
+    })
+    assert.ok(geometry)
+
+    const markup = renderCropEditor(started.session)
+    const surface = cropSurfaceAttrs(markup)
+    assert.match(surface, /width:\s*320px/)
+    assert.match(surface, /max-width:\s*100%/)
+    assert.doesNotMatch(
+      surface,
+      /height:\s*[0-9.]+px/,
+      'fixed pixel height plus max-width 100% distorts overlay vs scene when the parent is narrower',
+    )
+    assert.match(surface, new RegExp(`aspect-ratio:\s*${geometry.aspectRatio}`))
+
+    const scene = markup.match(/class="inline-image-rotation-scene"([^>]*)>/)?.[1] ?? ''
+    assert.match(scene, /width:\s*[0-9.]+%/)
+    assert.match(scene, /height:\s*[0-9.]+%/)
+    assert.doesNotMatch(scene, /width:\s*[0-9.]+px/)
+    assert.doesNotMatch(scene, /height:\s*[0-9.]+px/)
+    endInlineImageCropSession({ session: started.session })
+  })
 })
 
 describe('inline image crop apply serialization', () => {
