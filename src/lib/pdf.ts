@@ -342,13 +342,30 @@ export async function renderRequestEvidenceHTML(
       break-inside: avoid;
       page-break-inside: avoid;
     }
+    .description .rich-text__image-frame[data-layout='inline'] {
+      display: inline-block;
+      vertical-align: middle;
+      margin-inline: .125rem;
+      break-inside: avoid;
+    }
     .description .rich-text__image-frame[data-align='left'] { margin-left: 0; margin-right: auto; }
     .description .rich-text__image-frame[data-align='center'] { margin-inline: auto; }
     .description .rich-text__image-frame[data-align='right'] { margin-left: auto; margin-right: 0; }
-    .description .rich-text__image-frame > img {
+    .description .rich-text__image-scene {
+      position: absolute;
+      transform-origin: center;
+    }
+    .description .rich-text__image-frame > img,
+    .description .rich-text__image-scene > img {
       position: absolute;
       display: block;
       max-width: none;
+      margin: 0;
+    }
+    .description .rich-text__image-frame[data-layout='inline'] > img:not([style]) {
+      position: static;
+      max-width: 100%;
+      height: auto;
       margin: 0;
     }
     table {

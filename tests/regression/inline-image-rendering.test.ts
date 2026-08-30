@@ -10,6 +10,10 @@ import {
 } from '@/lib/formatted-text'
 import { sanitizeRichText } from '@/lib/rich-text-sanitizer'
 import {
+  computeInlineImageFrameGeometry,
+  INLINE_IMAGE_CROP_SCALE,
+} from '@/lib/inline-images/presentation'
+import {
   pdfInlineImageOwnerWhere,
   resolveInlineImagesForPdf,
   type PdfInlineImageAsset,
@@ -517,6 +521,118 @@ describe('resolveInlineImagesForPdf', () => {
     }
   })
 
+  it('embeds authorized inline/block × quarter-turn × bare/cropped PDF HTML', async () => {
+    const pngBytes = Buffer.from('placement-rotation-png-bytes')
+    const ownedPath = 'inline-images/user1/123e4567-e89b-42d3-a456-426614174000-a.png'
+    const dataUri = `data:image/png;base64,${pngBytes.toString('base64')}`
+    const crop = { x: 1000, y: 2000, width: 3000, height: 4000 }
+    const fullCrop = {
+      x: 0,
+      y: 0,
+      width: INLINE_IMAGE_CROP_SCALE,
+      height: INLINE_IMAGE_CROP_SCALE,
+    }
+    const assetWidth = 1600
+    const assetHeight = 900
+    const displayWidth = 160
+
+    for (const layout of ['inline', 'block'] as const) {
+      const alignments = layout === 'block'
+        ? (['left', 'center', 'right'] as const)
+        : (['center'] as const)
+      for (const rotation of [0, 90, 180, 270] as const) {
+        for (const cropped of [false, true]) {
+          for (const align of alignments) {
+            const owned = asset(
+              IMG_REQUEST,
+              [{ kind: 'request', id: REQ_ID }],
+              'image/png',
+              { width: assetWidth, height: assetHeight },
+            )
+            const originalAsset = { ...owned }
+            const { deps, queries, readPaths } = fakeDeps([Object.freeze(owned)], {
+              bytes: new Map([[ownedPath, pngBytes]]),
+            })
+            const attrs = [
+              `data-align="${align}"`,
+              layout === 'inline' ? 'data-layout="inline"' : '',
+              rotation === 0 ? '' : `data-rotation="${rotation}"`,
+              `data-width="${displayWidth}"`,
+              'data-natural-width="400"',
+              'data-natural-height="400"',
+              cropped
+                ? `data-crop-x="${crop.x}" data-crop-y="${crop.y}" data-crop-width="${crop.width}" data-crop-height="${crop.height}"`
+                : '',
+            ].filter(Boolean).join(' ')
+
+            const out = await resolveInlineImagesForPdf(
+              {
+                html: `<p>before <img src="${src(IMG_REQUEST)}" alt="pdf plan" ${attrs}> after</p>`,
+                owner: requestOwner,
+              },
+              deps,
+            )
+
+            assert.ok(!out.includes(src(IMG_REQUEST)), 'canonical URL must be replaced')
+            assert.match(out, new RegExp(dataUri.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+            assert.equal(queries.length, 1)
+            assert.deepEqual(queries[0]!.owner, requestOwner)
+            assert.deepEqual(queries[0]!.imageIds, [IMG_REQUEST])
+            assert.deepEqual(readPaths, [ownedPath])
+            assert.deepEqual(owned, originalAsset, 'PDF resolution does not mutate the authorized row')
+            assert.deepEqual(
+              pdfInlineImageOwnerWhere(requestOwner),
+              { requestId: REQ_ID },
+              'authorization predicate remains owner-scoped',
+            )
+
+            if (layout === 'inline') {
+              assert.match(out, /class="rich-text__image-frame"[^>]*data-layout="inline"/)
+            } else {
+              assert.doesNotMatch(out, /data-layout="inline"/)
+              assert.match(out, new RegExp(`data-align="${align}"`))
+              for (const other of (['left', 'center', 'right'] as const).filter((value) => value !== align)) {
+                assert.doesNotMatch(out, new RegExp(`data-align="${other}"`))
+              }
+            }
+
+            if (!cropped && rotation === 0) {
+              if (layout === 'inline') {
+                assert.match(out, /style="[^"]*width:160px/)
+              } else {
+                assert.match(out, /\swidth="160" \/>/)
+                assert.doesNotMatch(out, /rich-text__image-frame|<img[^>]+style=/)
+              }
+              assert.doesNotMatch(out, /transform:rotate/)
+              continue
+            }
+
+            const geometry = computeInlineImageFrameGeometry({
+              crop: cropped ? crop : fullCrop,
+              naturalWidth: assetWidth,
+              naturalHeight: assetHeight,
+              displayWidth,
+              rotation,
+            })
+            assert.ok(geometry, 'trusted geometry must use authorized asset dimensions')
+            assert.equal(geometry.frameWidth, displayWidth)
+            assert.match(out, new RegExp(`aspect-ratio:${String(geometry.aspectRatio)}`))
+            assert.match(out, new RegExp(`left:${String(geometry.imageOffsetXPercent)}%`))
+            assert.match(out, new RegExp(`top:${String(geometry.imageOffsetYPercent)}%`))
+            assert.doesNotMatch(out, /data-natural-width="400"|data-natural-height="400"/)
+
+            if (rotation === 0) {
+              assert.doesNotMatch(out, /transform:rotate|rich-text__image-scene/)
+            } else {
+              assert.match(out, new RegExp(`transform:rotate\\(${rotation}deg\\)`))
+              assert.match(out, /class="rich-text__image-scene"/)
+            }
+          }
+        }
+      }
+    }
+  })
+
   it('keeps PDF stylesheet left/center/right margins for bare images and crop frames', () => {
     const pdf = readFileSync('src/lib/pdf.ts', 'utf8')
 
@@ -526,6 +642,14 @@ describe('resolveInlineImagesForPdf', () => {
     assert.match(pdf, /\.description \.rich-text__image-frame\[data-align='left'\] \{ margin-left: 0; margin-right: auto; \}/)
     assert.match(pdf, /\.description \.rich-text__image-frame\[data-align='center'\] \{ margin-inline: auto; \}/)
     assert.match(pdf, /\.description \.rich-text__image-frame\[data-align='right'\] \{ margin-left: auto; margin-right: 0; \}/)
+    assert.match(
+      pdf,
+      /\.description \.rich-text__image-frame\[data-layout='inline'\] \{[\s\S]*?display:\s*inline-block;[\s\S]*?vertical-align:\s*middle;[\s\S]*?margin-inline:\s*\.125rem;[\s\S]*?break-inside:\s*avoid/,
+    )
+    assert.match(
+      pdf,
+      /\.description \.rich-text__image-scene \{[\s\S]*?position:\s*absolute;[\s\S]*?transform-origin:\s*center/,
+    )
   })
 })
 
