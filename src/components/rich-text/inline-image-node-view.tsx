@@ -37,12 +37,15 @@ import {
 import type { InlineImageCoordinator } from '@/hooks/use-inline-description-images'
 import { MAX_INLINE_ALT_LENGTH, parseInlineImageSrc } from '@/lib/inline-images/policy'
 import {
+  INLINE_IMAGE_CROP_SCALE,
   INLINE_IMAGE_MAX_DISPLAY_WIDTH,
   INLINE_IMAGE_MIN_DISPLAY_WIDTH,
   computeInlineImageFrameGeometry,
   serializeInlineImagePresentation,
   type InlineImageFrameGeometry,
+  type InlineImageLayout,
 } from '@/lib/inline-images/presentation'
+import { rotateInlineImage, type InlineImageRotation } from '@/lib/inline-images/rotation'
 
 function extensionOptions(extension: NodeViewProps['extension']): InlineImageExtensionOptions {
   return extension.options as unknown as InlineImageExtensionOptions
@@ -190,6 +193,8 @@ export type InlineImageNodeFrameProps = {
   src: string
   alt: string
   align: InlineImageAlignment
+  layout: InlineImageLayout
+  rotation: InlineImageRotation
   selected: boolean
   renderedWidth: number | null
   editable: boolean
@@ -197,7 +202,7 @@ export type InlineImageNodeFrameProps = {
   placement: 'above' | 'below'
   /** Serialized presentation data attributes carried by the live editor img. */
   presentationAttributes: Record<string, string>
-  /** Trusted Task 1 frame geometry when the node carries a valid crop. */
+  /** Trusted Task 1 frame geometry when the node carries a valid crop or rotation. */
   cropGeometry: InlineImageFrameGeometry | null
   crop: {
     session: InlineImageCropNodeSession
@@ -207,6 +212,10 @@ export type InlineImageNodeFrameProps = {
   cropGuidance: string | null
   onAltChange: (value: string) => void
   onAlignChange: (align: InlineImageAlignment) => void
+  onLayoutChange: (layout: InlineImageLayout) => void
+  onRotateLeft: () => void
+  onRotateRight: () => void
+  onResetRotation: () => void
   onCrop: () => void
   onResetSize: () => void
   onRemove: () => void
@@ -214,12 +223,28 @@ export type InlineImageNodeFrameProps = {
 }
 
 /** Frame presenter: crop mode replaces the stable image and its selection chrome. */
+function inlineImageRotationSceneStyle(geometry: InlineImageFrameGeometry): React.CSSProperties | undefined {
+  if (!(geometry.frameWidth > 0 && geometry.frameHeight > 0) || geometry.rotation === 0) {
+    return undefined
+  }
+  return {
+    width: `${geometry.sceneWidth / geometry.frameWidth * 100}%`,
+    height: `${geometry.sceneHeight / geometry.frameHeight * 100}%`,
+    left: `${geometry.sceneOffsetX / geometry.frameWidth * 100}%`,
+    top: `${geometry.sceneOffsetY / geometry.frameHeight * 100}%`,
+    transform: `rotate(${geometry.rotation}deg)`,
+    transformOrigin: 'center',
+  }
+}
+
 export function InlineImageNodeFrame({
   frameRef,
   imageRef,
   src,
   alt,
   align,
+  layout,
+  rotation,
   selected,
   renderedWidth,
   editable,
@@ -231,6 +256,10 @@ export function InlineImageNodeFrame({
   cropGuidance,
   onAltChange,
   onAlignChange,
+  onLayoutChange,
+  onRotateLeft,
+  onRotateRight,
+  onResetRotation,
   onCrop,
   onResetSize,
   onRemove,
@@ -241,6 +270,7 @@ export function InlineImageNodeFrame({
       <span
         ref={frameRef}
         data-align={align}
+        data-layout={layout}
         data-crop-active="true"
         className="inline-image-node-frame"
       >
@@ -255,14 +285,35 @@ export function InlineImageNodeFrame({
     )
   }
 
+  const rotationStyle = cropGeometry ? inlineImageRotationSceneStyle(cropGeometry) : undefined
+  const framedImage = cropGeometry ? (
+    <img
+      ref={imageRef}
+      src={src}
+      alt={alt}
+      data-align={align}
+      draggable={false}
+      className="inline-image-crop-frame-image"
+      {...presentationAttributes}
+      style={{
+        position: 'absolute',
+        width: `${cropGeometry.imageWidthPercent}%`,
+        height: `${cropGeometry.imageHeightPercent}%`,
+        left: `${cropGeometry.imageOffsetXPercent}%`,
+        top: `${cropGeometry.imageOffsetYPercent}%`,
+      }}
+    />
+  ) : null
+
   return (
     <span
       ref={frameRef}
       data-align={align}
+      data-layout={layout}
       data-selected={selected ? 'true' : undefined}
       className="inline-image-node-frame"
     >
-      {cropGeometry ? (
+      {cropGeometry && framedImage ? (
         <span
           className="inline-image-crop-frame"
           style={{
@@ -270,21 +321,11 @@ export function InlineImageNodeFrame({
             aspectRatio: String(cropGeometry.aspectRatio),
           }}
         >
-          <img
-            src={src}
-            alt={alt}
-            data-align={align}
-            draggable={false}
-            className="inline-image-crop-frame-image"
-            {...presentationAttributes}
-            style={{
-              position: 'absolute',
-              width: `${cropGeometry.imageWidthPercent}%`,
-              height: `${cropGeometry.imageHeightPercent}%`,
-              left: `${cropGeometry.imageOffsetXPercent}%`,
-              top: `${cropGeometry.imageOffsetYPercent}%`,
-            }}
-          />
+          {rotationStyle ? (
+            <span className="inline-image-rotation-scene" style={rotationStyle}>
+              {framedImage}
+            </span>
+          ) : framedImage}
         </span>
       ) : (
         <img
@@ -304,11 +345,17 @@ export function InlineImageNodeFrame({
           <InlineImageToolbar
             alt={alt}
             align={align}
+            layout={layout}
+            rotation={rotation}
             editable={editable}
             removePending={removePending}
             placement={placement}
             onAltChange={onAltChange}
             onAlignChange={onAlignChange}
+            onLayoutChange={onLayoutChange}
+            onRotateLeft={onRotateLeft}
+            onRotateRight={onRotateRight}
+            onResetRotation={onResetRotation}
             onCrop={onCrop}
             onResetSize={onResetSize}
             onRemove={onRemove}
@@ -433,14 +480,21 @@ export function InlineImageNodeView({
   // application and PDF paths use (spec 7.2) — never its own crop math.
   const nodePresentation = inlineImageNodePresentation(node.attrs)
   const presentationAttributes = serializeInlineImagePresentation(nodePresentation)
-  const cropGeometry = nodePresentation.crop
+  const layout = nodePresentation.layout
+  const rotation = nodePresentation.rotation
+  const visibleCrop = nodePresentation.crop
+    ?? (rotation !== 0 && nodePresentation.naturalWidth !== null && nodePresentation.naturalHeight !== null
+      ? { x: 0, y: 0, width: INLINE_IMAGE_CROP_SCALE, height: INLINE_IMAGE_CROP_SCALE }
+      : null)
+  const cropGeometry = visibleCrop
     && nodePresentation.naturalWidth !== null
     && nodePresentation.naturalHeight !== null
     ? computeInlineImageFrameGeometry({
-      crop: nodePresentation.crop,
+      crop: visibleCrop,
       naturalWidth: nodePresentation.naturalWidth,
       naturalHeight: nodePresentation.naturalHeight,
       displayWidth: renderedWidth,
+      rotation,
     })
     : null
 
@@ -663,7 +717,8 @@ export function InlineImageNodeView({
       as="span"
       data-inline-image-node="true"
       data-align={align}
-      className="block w-full max-w-full"
+      data-layout={layout}
+      className="max-w-full"
     >
       {isStable ? (
         <InlineImageNodeFrame
@@ -672,6 +727,8 @@ export function InlineImageNodeView({
           src={src}
           alt={alt}
           align={align}
+          layout={layout}
+          rotation={rotation}
           selected={selected}
           renderedWidth={renderedWidth}
           editable={editor.isEditable}
@@ -687,6 +744,14 @@ export function InlineImageNodeView({
           cropGuidance={cropGuidance}
           onAltChange={(value) => updateSelectedAttributes({ alt: value.slice(0, MAX_INLINE_ALT_LENGTH) })}
           onAlignChange={(nextAlign) => updateSelectedAttributes({ align: nextAlign })}
+          onLayoutChange={(nextLayout) => updateSelectedAttributes({ layout: nextLayout })}
+          onRotateLeft={() => updateSelectedAttributes({
+            rotation: rotateInlineImage(rotation, 'left'),
+          })}
+          onRotateRight={() => updateSelectedAttributes({
+            rotation: rotateInlineImage(rotation, 'right'),
+          })}
+          onResetRotation={() => updateSelectedAttributes({ rotation: 0 })}
           onCrop={enterCrop}
           onResetSize={() => updateSelectedAttributes({ displayWidth: null })}
           onRemove={remove}

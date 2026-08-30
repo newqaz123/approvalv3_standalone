@@ -1046,6 +1046,8 @@ describe('inline image crop chrome', () => {
     src: IMAGE_SRC,
     alt: 'diagram',
     align: 'center' as const,
+    layout: 'block' as const,
+    rotation: 0 as const,
     selected: true,
     renderedWidth: 400,
     editable: true,
@@ -1061,6 +1063,10 @@ describe('inline image crop chrome', () => {
     cropGuidance: null as string | null,
     onAltChange: () => undefined,
     onAlignChange: () => undefined,
+    onLayoutChange: () => undefined,
+    onRotateLeft: () => undefined,
+    onRotateRight: () => undefined,
+    onResetRotation: () => undefined,
     onCrop: () => undefined,
     onResetSize: () => undefined,
     onRemove: () => undefined,
@@ -1143,6 +1149,7 @@ describe('inline image crop chrome', () => {
         naturalWidth: 1600,
         naturalHeight: 900,
         displayWidth: 480,
+        rotation: 0,
       }),
     } as never))
     assert.match(markup, /inline-image-crop-frame/)

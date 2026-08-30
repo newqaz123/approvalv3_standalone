@@ -1,9 +1,12 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { Editor, type JSONContent } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import { FileHandlePlugin } from '@tiptap/extension-file-handler'
+import { NodeSelection } from '@tiptap/pm/state'
 import {
   InlineImageExtension,
   collectInlineImageUploads,
@@ -14,7 +17,17 @@ import {
   newInlineImagePlacementAttributes,
   pendingInlineImageInsertionContent,
 } from '../../src/components/rich-text/inline-image-extension'
-import { removeInlineImageNode } from '../../src/components/rich-text/inline-image-node-view'
+import {
+  InlineImageNodeFrame,
+  applyInlineImageAttributes,
+  removeInlineImageNode,
+} from '../../src/components/rich-text/inline-image-node-view'
+import { InlineImageToolbar } from '../../src/components/rich-text/inline-image-toolbar'
+import { rotateInlineImage } from '../../src/lib/inline-images/rotation'
+import {
+  INLINE_IMAGE_CROP_SCALE,
+  computeInlineImageFrameGeometry,
+} from '../../src/lib/inline-images/presentation'
 import {
   HighlightColorTokenMark,
   TextColorTokenMark,
@@ -709,12 +722,12 @@ describe('inline image editor row alignment', () => {
 
     const wrapper = nodeView.match(/<NodeViewWrapper[\s\S]*?>/)
     assert.ok(wrapper, 'NodeViewWrapper opening tag must exist')
-    assert.match(
-      wrapper[0],
-      /className="block w-full max-w-full"/,
-      'the node wrapper must be a block full-width editor row',
-    )
+    assert.match(wrapper[0], /data-layout=\{layout\}/)
+    assert.match(wrapper[0], /className="max-w-full"/)
     assert.doesNotMatch(wrapper[0], /inline-block/, 'the row must not shrink-wrap as inline-block')
+    assert.match(cssRule(css, "[data-inline-image-node][data-layout='inline']"), /display:\s*inline;/)
+    assert.match(cssRule(css, "[data-inline-image-node][data-layout='block']"), /display:\s*block;/)
+    assert.match(cssRule(css, "[data-inline-image-node][data-layout='block']"), /width:\s*100%;/)
 
     const frame = cssRule(css, '.inline-image-node-frame')
     assert.match(frame, /display:\s*block;/)
@@ -901,5 +914,243 @@ describe('inline image placement defaults', () => {
     assert.equal(defaults.layout, 'inline')
     assert.equal(defaults.rotation, 0)
     assert.equal(defaults.displayWidth, 160)
+  })
+})
+
+function toolbarMarkup(overrides: Partial<Parameters<typeof InlineImageToolbar>[0]> = {}) {
+  return renderToStaticMarkup(createElement(InlineImageToolbar, {
+    alt: 'diagram',
+    align: 'right',
+    layout: 'inline',
+    rotation: 0,
+    editable: true,
+    removePending: false,
+    onAltChange: () => undefined,
+    onAlignChange: () => undefined,
+    onLayoutChange: () => undefined,
+    onRotateLeft: () => undefined,
+    onRotateRight: () => undefined,
+    onResetRotation: () => undefined,
+    onCrop: () => undefined,
+    onResetSize: () => undefined,
+    onRemove: () => undefined,
+    ...overrides,
+  }))
+}
+
+function nodeFrameMarkup(overrides: Record<string, unknown> = {}) {
+  return renderToStaticMarkup(createElement(InlineImageNodeFrame, {
+    frameRef: { current: null },
+    imageRef: { current: null },
+    src: IMAGE_SRC,
+    alt: 'diagram',
+    align: 'center',
+    layout: 'inline',
+    rotation: 0,
+    selected: true,
+    renderedWidth: 160,
+    editable: true,
+    removePending: false,
+    placement: 'above',
+    presentationAttributes: { 'data-width': '160', 'data-layout': 'inline' },
+    cropGeometry: null,
+    crop: null,
+    cropGuidance: null,
+    onAltChange: () => undefined,
+    onAlignChange: () => undefined,
+    onLayoutChange: () => undefined,
+    onRotateLeft: () => undefined,
+    onRotateRight: () => undefined,
+    onResetRotation: () => undefined,
+    onCrop: () => undefined,
+    onResetSize: () => undefined,
+    onRemove: () => undefined,
+    resizeHandlers: {
+      disabled: false,
+      onPointerDown: () => undefined,
+      onPointerMove: () => undefined,
+      onPointerUp: () => undefined,
+      onPointerCancel: () => undefined,
+      onKeyDown: () => undefined,
+      onDoubleClick: () => undefined,
+    },
+    ...overrides,
+  } as never))
+}
+
+function selectedImageDoc(attrs: Record<string, unknown> = {}): JSONContent {
+  return {
+    type: 'doc',
+    content: [{
+      type: 'paragraph',
+      content: [{
+        type: 'inlineImage',
+        attrs: {
+          src: IMAGE_SRC,
+          alt: 'diagram',
+          align: 'center',
+          layout: 'inline',
+          rotation: 0,
+          displayWidth: 160,
+          naturalWidth: 800,
+          naturalHeight: 600,
+          status: 'success',
+          ...attrs,
+        },
+      }],
+    }],
+  }
+}
+
+describe('inline image placement and rotation controls', () => {
+  it('presses Inline/Block by layout and hides alignment while inline', () => {
+    const inline = toolbarMarkup({ layout: 'inline', align: 'right' })
+    assert.match(inline, /aria-label="Image layout inline"[^>]*aria-pressed="true"/)
+    assert.match(inline, /aria-label="Image layout block"[^>]*aria-pressed="false"/)
+    assert.match(inline, /aria-label="Align left"[^>]*disabled/)
+    assert.match(inline, /aria-label="Align right"[^>]*disabled/)
+
+    const block = toolbarMarkup({ layout: 'block', align: 'right' })
+    assert.match(block, /aria-label="Image layout block"[^>]*aria-pressed="true"/)
+    assert.match(block, /aria-label="Align right"[^>]*aria-pressed="true"/)
+    assert.match(block, /aria-label="Align left"/)
+  })
+
+  it('exposes rotate left, rotate right, and reset rotation actions', () => {
+    const markup = toolbarMarkup({ rotation: 90 })
+    assert.match(markup, /aria-label="Rotate image left"/)
+    assert.match(markup, /aria-label="Rotate image right"/)
+    assert.match(markup, /aria-label="Reset image rotation"/)
+  })
+
+  it('commits layout and rotation through one selection-preserving transaction', () => {
+    const editor = createEditor(selectedImageDoc())
+    try {
+      applyInlineImageAttributes(editor, 1, { layout: 'block' })
+      const afterLayout = editor.state.doc.nodeAt(1)
+      assert.equal(afterLayout?.attrs.layout, 'block')
+      assert.equal(afterLayout?.attrs.align, 'center')
+      assert.ok(editor.state.selection instanceof NodeSelection)
+
+      let rotation = 0 as ReturnType<typeof rotateInlineImage>
+      for (const expected of [90, 180, 270, 0] as const) {
+        rotation = rotateInlineImage(rotation, 'right')
+        applyInlineImageAttributes(editor, 1, { rotation })
+        assert.equal(editor.state.doc.nodeAt(1)?.attrs.rotation, expected)
+        assert.ok(editor.state.selection instanceof NodeSelection)
+      }
+
+      applyInlineImageAttributes(editor, 1, { rotation: rotateInlineImage(0, 'left') })
+      assert.equal(editor.state.doc.nodeAt(1)?.attrs.rotation, 270)
+      applyInlineImageAttributes(editor, 1, { rotation: 0 })
+      assert.equal(editor.state.doc.nodeAt(1)?.attrs.rotation, 0)
+    } finally {
+      editor.destroy()
+    }
+  })
+
+  it('hides placement and rotation actions while crop mode is active', () => {
+    const markup = nodeFrameMarkup({
+      crop: {
+        session: {
+          editId: 'crop:test',
+          src: IMAGE_SRC,
+          snapshot: {
+            displayWidth: 160,
+            naturalWidth: 800,
+            naturalHeight: 600,
+            crop: null,
+            layout: 'inline',
+            rotation: 0,
+          },
+          naturalWidth: 800,
+          naturalHeight: 600,
+          layoutWidth: 160,
+        },
+        onApply: () => undefined,
+        onCancel: () => undefined,
+      },
+    })
+    assert.ok(markup.includes('data-crop-active="true"'))
+    assert.doesNotMatch(markup, /aria-label="Image layout inline"/)
+    assert.doesNotMatch(markup, /aria-label="Rotate image left"/)
+    assert.doesNotMatch(markup, /aria-label="Rotate image right"/)
+    assert.doesNotMatch(markup, /aria-label="Reset image rotation"/)
+  })
+
+  it('renders an inline 160px frame and a full-row block wrapper', () => {
+    const inline = nodeFrameMarkup({
+      layout: 'inline',
+      renderedWidth: 160,
+      presentationAttributes: { 'data-width': '160', 'data-layout': 'inline' },
+    })
+    assert.match(inline, /data-layout="inline"/)
+    assert.match(inline, /data-width="160"/)
+
+    const block = renderToStaticMarkup(createElement(InlineImageNodeFrame, {
+      frameRef: { current: null },
+      imageRef: { current: null },
+      src: IMAGE_SRC,
+      alt: 'diagram',
+      align: 'right',
+      layout: 'block',
+      rotation: 0,
+      selected: true,
+      renderedWidth: 320,
+      editable: true,
+      removePending: false,
+      placement: 'above',
+      presentationAttributes: { 'data-width': '320', 'data-layout': 'block' },
+      cropGeometry: null,
+      crop: null,
+      cropGuidance: null,
+      onAltChange: () => undefined,
+      onAlignChange: () => undefined,
+      onLayoutChange: () => undefined,
+      onRotateLeft: () => undefined,
+      onRotateRight: () => undefined,
+      onResetRotation: () => undefined,
+      onCrop: () => undefined,
+      onResetSize: () => undefined,
+      onRemove: () => undefined,
+      resizeHandlers: {
+        disabled: false,
+        onPointerDown: () => undefined,
+        onPointerMove: () => undefined,
+        onPointerUp: () => undefined,
+        onPointerCancel: () => undefined,
+        onKeyDown: () => undefined,
+        onDoubleClick: () => undefined,
+      },
+    } as never))
+    assert.match(block, /data-layout="block"/)
+    assert.match(block, /data-align="right"/)
+  })
+
+  it('renders a trusted rotation scene from shared geometry', () => {
+    const geometry = computeInlineImageFrameGeometry({
+      crop: { x: 0, y: 0, width: INLINE_IMAGE_CROP_SCALE, height: INLINE_IMAGE_CROP_SCALE },
+      naturalWidth: 800,
+      naturalHeight: 600,
+      displayWidth: 160,
+      rotation: 90,
+    })
+    assert.ok(geometry)
+    const markup = nodeFrameMarkup({
+      layout: 'inline',
+      rotation: 90,
+      renderedWidth: 160,
+      cropGeometry: geometry,
+      presentationAttributes: {
+        'data-width': '160',
+        'data-layout': 'inline',
+        'data-rotation': '90',
+        'data-natural-width': '800',
+        'data-natural-height': '600',
+      },
+    })
+    assert.match(markup, /inline-image-rotation-scene/)
+    assert.match(markup, /rotate\(90deg\)/)
+    assert.match(markup, /data-layout="inline"/)
   })
 })
