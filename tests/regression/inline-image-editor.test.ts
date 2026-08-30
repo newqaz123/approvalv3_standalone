@@ -10,6 +10,9 @@ import {
   createInlineImageCropCommandsController,
   createInlineImageMimeFilter,
   createInlineImageTransactionCleanupController,
+  inlineImageUploadSuccessAttributes,
+  newInlineImagePlacementAttributes,
+  pendingInlineImageInsertionContent,
 } from '../../src/components/rich-text/inline-image-extension'
 import { removeInlineImageNode } from '../../src/components/rich-text/inline-image-node-view'
 import {
@@ -17,7 +20,7 @@ import {
   TextColorTokenMark,
 } from '../../src/components/rich-text/rich-text-color-extensions'
 import { sanitizeRichText } from '../../src/lib/rich-text-sanitizer'
-import { emitSanitizedRichTextChange } from '../../src/components/rich-text/rich-text-editor'
+import { emitSanitizedRichTextChange, filenameAlt } from '../../src/components/rich-text/rich-text-editor'
 import { createInlineImageCoordinator } from '../../src/hooks/use-inline-description-images'
 import {
   createInlineImageCropDraft,
@@ -758,5 +761,145 @@ describe('inline image editor row alignment', () => {
     assert.match(pdf, /\.description \.rich-text__image-frame\[data-align='left'\]\s*\{\s*margin-left:\s*0;\s*margin-right:\s*auto;\s*\}/)
     assert.match(pdf, /\.description \.rich-text__image-frame\[data-align='center'\]\s*\{\s*margin-inline:\s*auto;\s*\}/)
     assert.match(pdf, /\.description \.rich-text__image-frame\[data-align='right'\]\s*\{\s*margin-left:\s*auto;\s*margin-right:\s*0;\s*\}/)
+  })
+})
+
+describe('inline image placement defaults', () => {
+  it('defaults new placements to inline 160px', () => {
+    assert.deepEqual(newInlineImagePlacementAttributes(), {
+      align: 'center',
+      layout: 'inline',
+      rotation: 0,
+      displayWidth: 160,
+    })
+  })
+
+  it('parses legacy images as block with no rotation', () => {
+    const parsed = imageParseAttrs({
+      src: IMAGE_SRC,
+      alt: 'diagram',
+      'data-align': 'right',
+    })
+    assert.notEqual(parsed, false)
+    const attrs = parsed as Record<string, unknown>
+    assert.equal(attrs.layout, 'block')
+    assert.equal(attrs.rotation, 0)
+    assert.equal(attrs.align, 'right')
+  })
+
+  it('parses and renders an explicit inline 90 degree node through sanitizer', () => {
+    const editor = createEditor()
+    try {
+      const parsed = imageParseAttrs({
+        src: IMAGE_SRC,
+        alt: 'diagram',
+        'data-align': 'center',
+        'data-layout': 'inline',
+        'data-rotation': '90',
+        'data-width': '160',
+      })
+      assert.notEqual(parsed, false)
+      const attrs = parsed as Record<string, unknown>
+      assert.equal(attrs.layout, 'inline')
+      assert.equal(attrs.rotation, 90)
+      assert.equal(attrs.displayWidth, 160)
+      const rendered = imageRenderSpec(editor, attrs)
+      assert.equal(rendered[0], 'img')
+      const htmlAttrs = rendered[1] as Record<string, string>
+      const html = `<img src="${htmlAttrs.src}" alt="${htmlAttrs.alt}" data-align="${htmlAttrs['data-align']}" data-layout="${htmlAttrs['data-layout']}" data-rotation="${htmlAttrs['data-rotation']}" data-width="${htmlAttrs['data-width']}">`
+      const sanitized = sanitizeRichText(html)
+      assert.match(sanitized, /data-layout="inline"/)
+      assert.match(sanitized, /data-rotation="90"/)
+      assert.match(sanitized, /data-width="160"/)
+    } finally {
+      editor.destroy()
+    }
+  })
+
+  it('inserts toolbar, paste, and drop pending nodes through FileHandler positions', () => {
+    const editor = createEditor({
+      type: 'doc',
+      content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Hello world' }] }],
+    })
+    const file = new File(['image'], 'floor-plan.png', { type: 'image/png' })
+    const plugin = FileHandlePlugin({
+      editor,
+      allowedMimeTypes: createInlineImageMimeFilter(() => true),
+      consumePasteEvent: true,
+      onPaste: (_current, files) => {
+        const target = files[0]
+        if (!target) return
+        editor.commands.insertContentAt(editor.state.selection.from, pendingInlineImageInsertionContent({
+          uploadId: 'paste-upload',
+          alt: filenameAlt(target.name),
+        }))
+      },
+      onDrop: (_current, files, position) => {
+        const target = files[0]
+        if (!target) return
+        editor.commands.insertContentAt(position, pendingInlineImageInsertionContent({
+          uploadId: 'drop-upload',
+          alt: filenameAlt(target.name),
+        }))
+      },
+    })
+    const dropView = {
+      posAtCoords: () => ({ pos: 7, inside: -1 }),
+    } as unknown as typeof editor.view
+    try {
+      editor.commands.insertContentAt(1, pendingInlineImageInsertionContent({
+        uploadId: 'toolbar-upload',
+        alt: filenameAlt('toolbar.png'),
+      }))
+      const paste = pasteEvent(file)
+      assert.equal(plugin.props.handlePaste!.call(plugin, editor.view, paste.event, undefined as never), true)
+      const drop = dropEvent(file)
+      assert.equal(plugin.props.handleDrop!.call(plugin, dropView, drop.event, undefined as never, false), true)
+
+      const nodes: Array<Record<string, unknown>> = []
+      editor.state.doc.descendants((node) => {
+        if (node.type.name === 'inlineImage') nodes.push({ ...node.attrs })
+        return true
+      })
+      assert.equal(nodes.length, 3)
+      for (const attrs of nodes) {
+        assert.equal(attrs.layout, 'inline')
+        assert.equal(attrs.rotation, 0)
+        assert.equal(attrs.displayWidth, 160)
+        assert.equal(attrs.align, 'center')
+        assert.equal(attrs.status, 'uploading')
+      }
+      assert.equal(nodes.some((attrs) => attrs.uploadId === 'toolbar-upload'), true)
+      assert.equal(nodes.some((attrs) => attrs.uploadId === 'paste-upload'), true)
+      assert.equal(nodes.some((attrs) => attrs.uploadId === 'drop-upload'), true)
+    } finally {
+      editor.destroy()
+    }
+  })
+
+  it('upload success retains current layout rotation and display width', () => {
+    const upload: InlineImageUpload = {
+      id: IMAGE_ID,
+      src: IMAGE_SRC,
+      alt: 'diagram',
+      fileType: 'image/png',
+      fileSize: 10,
+      width: 800,
+      height: 600,
+    }
+    const retained = inlineImageUploadSuccessAttributes(upload, 'diagram', 'left', {
+      layout: 'block',
+      rotation: 90,
+      displayWidth: 320,
+    })
+    assert.equal(retained.layout, 'block')
+    assert.equal(retained.rotation, 90)
+    assert.equal(retained.displayWidth, 320)
+    assert.equal(retained.align, 'left')
+
+    const defaults = inlineImageUploadSuccessAttributes(upload, 'diagram', 'center')
+    assert.equal(defaults.layout, 'inline')
+    assert.equal(defaults.rotation, 0)
+    assert.equal(defaults.displayWidth, 160)
   })
 })

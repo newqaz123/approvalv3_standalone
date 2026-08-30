@@ -9,10 +9,13 @@ import {
   type InlineImageUpload,
 } from '@/lib/inline-images/policy'
 import {
+  INLINE_IMAGE_DEFAULT_INLINE_WIDTH,
   parseInlineImagePresentation,
   serializeInlineImagePresentation,
+  type InlineImageLayout,
   type InlineImagePresentation,
 } from '@/lib/inline-images/presentation'
+import { normalizeInlineImageRotation, type InlineImageRotation } from '@/lib/inline-images/rotation'
 import type { InlineImageCoordinator } from '@/hooks/use-inline-description-images'
 import type { Node as ProseMirrorNode, NodeType } from '@tiptap/pm/model'
 import { InlineImageNodeView } from './inline-image-node-view'
@@ -96,6 +99,8 @@ const INLINE_IMAGE_PRESENTATION_DATA_ATTRIBUTES = [
   'data-crop-y',
   'data-crop-width',
   'data-crop-height',
+  'data-layout',
+  'data-rotation',
 ] as const
 
 function finiteNumberOrNull(value: unknown): number | null {
@@ -116,8 +121,40 @@ export function inlineImageNodePresentation(
     naturalWidth: finiteNumberOrNull(attrs.naturalWidth),
     naturalHeight: finiteNumberOrNull(attrs.naturalHeight),
     crop: hasCrop ? { x: cropX, y: cropY, width: cropWidth, height: cropHeight } : null,
-    layout: 'block',
+    layout: attrs.layout === 'inline' ? 'inline' : 'block',
+    rotation: normalizeInlineImageRotation(attrs.rotation),
+  }
+}
+
+/** Shared defaults for toolbar, paste, and drop insertions. */
+export function newInlineImagePlacementAttributes(): {
+  align: 'center'
+  layout: 'inline'
+  rotation: 0
+  displayWidth: number
+} {
+  return {
+    align: 'center',
+    layout: 'inline',
     rotation: 0,
+    displayWidth: INLINE_IMAGE_DEFAULT_INLINE_WIDTH,
+  }
+}
+
+/** Pending node payload used by toolbar, paste, and drop insertion. */
+export function pendingInlineImageInsertionContent(input: {
+  uploadId: string
+  alt: string
+}): { type: 'inlineImage'; attrs: Record<string, unknown> } {
+  return {
+    type: 'inlineImage',
+    attrs: {
+      uploadId: input.uploadId,
+      status: 'uploading',
+      progress: 0,
+      alt: input.alt,
+      ...newInlineImagePlacementAttributes(),
+    },
   }
 }
 
@@ -131,10 +168,17 @@ export function parseInlineImageNodePresentation(element: HTMLElement): InlineIm
 }
 
 /** Upload-success attrs shared by the editor insertion pipeline and NodeView retry. */
+export type InlineImagePresentationDefaults = {
+  layout?: InlineImageLayout
+  rotation?: InlineImageRotation
+  displayWidth?: number | null
+}
+
 export function inlineImageUploadSuccessAttributes(
   upload: InlineImageUpload,
   alt: string,
   align: InlineImageAlignment,
+  presentationDefaults?: InlineImagePresentationDefaults,
 ): {
   src: string
   alt: string
@@ -144,7 +188,20 @@ export function inlineImageUploadSuccessAttributes(
   error: null
   naturalWidth: number
   naturalHeight: number
+  layout: InlineImageLayout
+  rotation: InlineImageRotation
+  displayWidth: number | null
 } {
+  const placement = newInlineImagePlacementAttributes()
+  const layout = presentationDefaults?.layout === 'inline' || presentationDefaults?.layout === 'block'
+    ? presentationDefaults.layout
+    : placement.layout
+  const rotation = presentationDefaults?.rotation !== undefined
+    ? normalizeInlineImageRotation(presentationDefaults.rotation)
+    : placement.rotation
+  const displayWidth = presentationDefaults && Object.prototype.hasOwnProperty.call(presentationDefaults, 'displayWidth')
+    ? (typeof presentationDefaults.displayWidth === 'number' ? presentationDefaults.displayWidth : null)
+    : placement.displayWidth
   return {
     src: upload.src,
     alt: alt.slice(0, MAX_INLINE_ALT_LENGTH),
@@ -154,6 +211,9 @@ export function inlineImageUploadSuccessAttributes(
     error: null,
     naturalWidth: upload.width,
     naturalHeight: upload.height,
+    layout,
+    rotation,
+    displayWidth,
   }
 }
 
@@ -440,6 +500,12 @@ export const InlineImageExtension = Image.extend<InlineImageExtensionOptions>({
       align: {
         default: 'center',
       },
+      layout: {
+        default: 'block',
+      },
+      rotation: {
+        default: 0,
+      },
       displayWidth: {
         default: null,
       },
@@ -496,6 +562,8 @@ export const InlineImageExtension = Image.extend<InlineImageExtensionOptions>({
             displayWidth: presentation.displayWidth,
             naturalWidth: presentation.naturalWidth,
             naturalHeight: presentation.naturalHeight,
+            layout: presentation.layout,
+            rotation: presentation.rotation,
             cropX: presentation.crop?.x ?? null,
             cropY: presentation.crop?.y ?? null,
             cropWidth: presentation.crop?.width ?? null,

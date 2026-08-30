@@ -26,7 +26,10 @@ import {
 	createInlineImageTransactionCleanupController,
 	InlineImageExtension,
 	inlineImageUploadSuccessAttributes,
+	pendingInlineImageInsertionContent,
+	type InlineImageAlignment,
 	type InlineImageCropCommandsController,
+	type InlineImagePresentationDefaults,
 } from "@/components/rich-text/inline-image-extension";
 import type { InlineImageCoordinator } from "@/hooks/use-inline-description-images";
 import { RichTextColorControls } from "@/components/rich-text/rich-text-color-controls";
@@ -208,12 +211,30 @@ export default function RichTextEditor({
 				updateUploadNode(uploadId, { status: "uploading", progress });
 			})
 			.then((upload) => {
+				const currentEditor = editorRef.current;
+				let align: InlineImageAlignment = "center";
+				let presentationDefaults: InlineImagePresentationDefaults | undefined;
+				currentEditor?.state.doc.descendants((candidate) => {
+					if (candidate.type.name === "inlineImage" && candidate.attrs.uploadId === uploadId) {
+						align = candidate.attrs.align === "left" || candidate.attrs.align === "right"
+							? candidate.attrs.align
+							: "center";
+						presentationDefaults = {
+							layout: candidate.attrs.layout,
+							rotation: candidate.attrs.rotation,
+							displayWidth: candidate.attrs.displayWidth,
+						};
+						return false;
+					}
+					return true;
+				});
 				updateUploadNode(uploadId, {
 					uploadId,
 					...inlineImageUploadSuccessAttributes(
 						upload,
 						upload.alt || filenameAlt(file.name),
-						"center",
+						align,
+						presentationDefaults,
 					),
 				});
 			})
@@ -241,16 +262,10 @@ export default function RichTextEditor({
 			const inserted = currentEditor
 				.chain()
 				.focus()
-				.insertContentAt(insertionPosition, {
-					type: "inlineImage",
-					attrs: {
-						uploadId,
-						status: "uploading",
-						progress: 0,
-						alt: filenameAlt(file.name),
-						align: "center",
-					},
-				})
+				.insertContentAt(insertionPosition, pendingInlineImageInsertionContent({
+					uploadId,
+					alt: filenameAlt(file.name),
+				}))
 				.run();
 			if (!inserted) {
 				fileByUploadId.current.delete(uploadId);

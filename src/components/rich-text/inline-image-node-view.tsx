@@ -565,7 +565,11 @@ export function InlineImageNodeView({
       .then((upload) => {
         updateAttributes({
           uploadId,
-          ...inlineImageUploadSuccessAttributes(upload, alt, align),
+          ...inlineImageUploadSuccessAttributes(upload, alt, align, {
+            layout: node.attrs.layout,
+            rotation: node.attrs.rotation,
+            displayWidth: node.attrs.displayWidth,
+          }),
         })
       })
       .catch((error: unknown) => {
