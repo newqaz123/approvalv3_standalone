@@ -63,4 +63,12 @@ describe('formatted description editors', () => {
     assert.match(modal, /useInlineDescriptionImages\(\)/)
     assert.equal((modal.match(/inlineImages=\{inlineImages\}/g) ?? []).length, 2)
   })
+
+  it('exposes paragraph alignment on the main formatting toolbar', () => {
+    const source = read('src/components/rich-text/rich-text-editor.tsx')
+    assert.match(source, /label="Align left"/)
+    assert.match(source, /label="Align center"/)
+    assert.match(source, /label="Align right"/)
+    assert.match(source, /setRichTextBlockAlign/)
+  })
 })

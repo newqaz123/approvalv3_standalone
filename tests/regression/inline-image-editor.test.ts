@@ -742,6 +742,16 @@ describe('inline image editor row alignment', () => {
     assert.match(nodeView, /className="inline-image-node-frame"/)
   })
 
+  it('keeps the image action toolbar on one row above small images', () => {
+    const css = readFileSync('src/app/globals.css', 'utf8')
+    const toolbar = cssRule(css, '.inline-image-floating-toolbar')
+    assert.match(toolbar, /display:\s*flex;/)
+    assert.match(toolbar, /flex-wrap:\s*nowrap;/)
+    assert.match(toolbar, /white-space:\s*nowrap;/)
+    assert.match(toolbar, /width:\s*max-content;/)
+    assert.doesNotMatch(toolbar, /max-width:\s*min\(100%/)
+  })
+
   it('keeps sanitizer, app, and PDF alignment selectors equivalent for bare and cropped images', () => {
     const css = readFileSync('src/app/globals.css', 'utf8')
     const pdf = readFileSync('src/lib/pdf.ts', 'utf8')
@@ -919,18 +929,10 @@ describe('inline image placement defaults', () => {
 
 function toolbarMarkup(overrides: Partial<Parameters<typeof InlineImageToolbar>[0]> = {}) {
   return renderToStaticMarkup(createElement(InlineImageToolbar, {
-    alt: 'diagram',
-    align: 'right',
-    layout: 'inline',
-    rotation: 0,
     editable: true,
     removePending: false,
-    onAltChange: () => undefined,
-    onAlignChange: () => undefined,
-    onLayoutChange: () => undefined,
     onRotateLeft: () => undefined,
     onRotateRight: () => undefined,
-    onResetRotation: () => undefined,
     onCrop: () => undefined,
     onResetSize: () => undefined,
     onRemove: () => undefined,
@@ -956,12 +958,8 @@ function nodeFrameMarkup(overrides: Record<string, unknown> = {}) {
     cropGeometry: null,
     crop: null,
     cropGuidance: null,
-    onAltChange: () => undefined,
-    onAlignChange: () => undefined,
-    onLayoutChange: () => undefined,
     onRotateLeft: () => undefined,
     onRotateRight: () => undefined,
-    onResetRotation: () => undefined,
     onCrop: () => undefined,
     onResetSize: () => undefined,
     onRemove: () => undefined,
@@ -1003,24 +1001,17 @@ function selectedImageDoc(attrs: Record<string, unknown> = {}): JSONContent {
 }
 
 describe('inline image placement and rotation controls', () => {
-  it('presses Inline/Block by layout and hides alignment while inline', () => {
-    const inline = toolbarMarkup({ layout: 'inline', align: 'right' })
-    assert.match(inline, /aria-label="Image layout inline"[^>]*aria-pressed="true"/)
-    assert.match(inline, /aria-label="Image layout block"[^>]*aria-pressed="false"/)
-    assert.match(inline, /aria-label="Align left"[^>]*disabled/)
-    assert.match(inline, /aria-label="Align right"[^>]*disabled/)
-
-    const block = toolbarMarkup({ layout: 'block', align: 'right' })
-    assert.match(block, /aria-label="Image layout block"[^>]*aria-pressed="true"/)
-    assert.match(block, /aria-label="Align right"[^>]*aria-pressed="true"/)
-    assert.match(block, /aria-label="Align left"/)
-  })
-
-  it('exposes rotate left, rotate right, and reset rotation actions', () => {
-    const markup = toolbarMarkup({ rotation: 90 })
+  it('shows crop, rotate, reset size, and remove without alt, layout, or image align', () => {
+    const markup = toolbarMarkup()
     assert.match(markup, /aria-label="Rotate image left"/)
     assert.match(markup, /aria-label="Rotate image right"/)
-    assert.match(markup, /aria-label="Reset image rotation"/)
+    assert.match(markup, /aria-label="Crop image"/)
+    assert.match(markup, /aria-label="Reset image size"/)
+    assert.match(markup, /aria-label="Remove image"/)
+    assert.doesNotMatch(markup, /Image alt text/)
+    assert.doesNotMatch(markup, /Image layout/)
+    assert.doesNotMatch(markup, /Align left/)
+    assert.doesNotMatch(markup, /Reset image rotation/)
   })
 
   it('commits layout and rotation through one selection-preserving transaction', () => {
@@ -1072,10 +1063,9 @@ describe('inline image placement and rotation controls', () => {
       },
     })
     assert.ok(markup.includes('data-crop-active="true"'))
-    assert.doesNotMatch(markup, /aria-label="Image layout inline"/)
     assert.doesNotMatch(markup, /aria-label="Rotate image left"/)
     assert.doesNotMatch(markup, /aria-label="Rotate image right"/)
-    assert.doesNotMatch(markup, /aria-label="Reset image rotation"/)
+    assert.doesNotMatch(markup, /aria-label="Reset image size"/)
   })
 
   it('renders an inline 160px frame and a full-row block wrapper', () => {
@@ -1104,12 +1094,8 @@ describe('inline image placement and rotation controls', () => {
       cropGeometry: null,
       crop: null,
       cropGuidance: null,
-      onAltChange: () => undefined,
-      onAlignChange: () => undefined,
-      onLayoutChange: () => undefined,
       onRotateLeft: () => undefined,
       onRotateRight: () => undefined,
-      onResetRotation: () => undefined,
       onCrop: () => undefined,
       onResetSize: () => undefined,
       onRemove: () => undefined,

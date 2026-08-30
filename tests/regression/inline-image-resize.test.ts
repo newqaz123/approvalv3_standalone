@@ -497,11 +497,9 @@ describe('inline image node view chrome', () => {
   it('renders the floating toolbar with accessible icon names above the image', () => {
     const { markup } = renderNodeView({ selected: true, attrs: { displayWidth: 480 } })
     for (const name of [
-      'Image alt text',
-      'Align left',
-      'Align center',
-      'Align right',
       'Crop image',
+      'Rotate image left',
+      'Rotate image right',
       'Reset image size',
       'Remove image',
     ]) {

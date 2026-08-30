@@ -6,6 +6,9 @@ import Underline from "@tiptap/extension-underline";
 import Link from "@tiptap/extension-link";
 import FileHandler from "@tiptap/extension-file-handler";
 import {
+	AlignCenter,
+	AlignLeft,
+	AlignRight,
 	Bold,
 	Italic,
 	Underline as UnderlineIcon,
@@ -33,6 +36,12 @@ import {
 } from "@/components/rich-text/inline-image-extension";
 import type { InlineImageCoordinator } from "@/hooks/use-inline-description-images";
 import { RichTextColorControls } from "@/components/rich-text/rich-text-color-controls";
+import {
+	AlignedHeading,
+	AlignedParagraph,
+	currentRichTextBlockAlign,
+	setRichTextBlockAlign,
+} from "@/components/rich-text/rich-text-align-extensions";
 import {
 	HighlightColorTokenMark,
 	TextColorTokenMark,
@@ -289,8 +298,11 @@ export default function RichTextEditor({
 				removedUploadIds: removedUploadIds.current,
 				cropCommands: cropCommands.current ?? undefined,
 			}),
+			AlignedParagraph,
+			AlignedHeading.configure({ levels: [2, 3] }),
 			StarterKit.configure({
-				heading: { levels: [2, 3] },
+				paragraph: false,
+				heading: false,
 				// StarterKit v3 bundles link/underline; explicit extensions below
 				// override their config so only http/https/mailto survive autolink.
 				link: false,
@@ -482,6 +494,36 @@ export default function RichTextEditor({
 					}
 				>
 					<Heading3 className="h-4 w-4" />
+				</ToolbarButton>
+				<ToolbarButton
+					editor={editor}
+					label="Align left"
+					active={currentRichTextBlockAlign(editor) === "left"}
+					enabled={editor.isEditable}
+					disabled={commandsDisabled}
+					onClick={() => setRichTextBlockAlign(editor, "left")}
+				>
+					<AlignLeft className="h-4 w-4" />
+				</ToolbarButton>
+				<ToolbarButton
+					editor={editor}
+					label="Align center"
+					active={currentRichTextBlockAlign(editor) === "center"}
+					enabled={editor.isEditable}
+					disabled={commandsDisabled}
+					onClick={() => setRichTextBlockAlign(editor, "center")}
+				>
+					<AlignCenter className="h-4 w-4" />
+				</ToolbarButton>
+				<ToolbarButton
+					editor={editor}
+					label="Align right"
+					active={currentRichTextBlockAlign(editor) === "right"}
+					enabled={editor.isEditable}
+					disabled={commandsDisabled}
+					onClick={() => setRichTextBlockAlign(editor, "right")}
+				>
+					<AlignRight className="h-4 w-4" />
 				</ToolbarButton>
 				<ToolbarButton
 					editor={editor}

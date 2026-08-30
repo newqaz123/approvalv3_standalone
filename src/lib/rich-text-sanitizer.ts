@@ -8,6 +8,10 @@ import {
 } from '@/lib/inline-images/policy'
 import { sanitizeInlineImagePresentationAttributes } from '@/lib/inline-images/presentation'
 import {
+  normalizeRichTextAlignment,
+  serializeRichTextAlignment,
+} from '@/lib/rich-text-align'
+import {
   isHighlightColorToken,
   isTextColorToken,
 } from '@/lib/rich-text-palette'
@@ -24,6 +28,13 @@ function isAllowedHref(href: string | undefined): href is string {
   return typeof href === 'string' && ALLOWED_HREF_RE.test(href)
 }
 
+function alignedBlockTag(tagName: string, attribs: Record<string, string>) {
+  return {
+    tagName,
+    attribs: serializeRichTextAlignment(normalizeRichTextAlignment(attribs['data-text-align'])),
+  }
+}
+
 /** Whitelist-sanitize authored description HTML. Never throws. */
 export function sanitizeRichText(html: string): string {
   try {
@@ -33,6 +44,9 @@ export function sanitizeRichText(html: string): string {
         a: ['href', 'target', 'rel'],
         span: ['data-text-color'],
         mark: ['data-highlight'],
+        p: ['data-text-align'],
+        h2: ['data-text-align'],
+        h3: ['data-text-align'],
         img: [
           'src',
           'alt',
@@ -76,6 +90,9 @@ export function sanitizeRichText(html: string): string {
             : {}
           return { tagName: isHighlightColorToken(token) ? tagName : 'span', attribs: next }
         },
+        p: alignedBlockTag,
+        h2: alignedBlockTag,
+        h3: alignedBlockTag,
         img: (_tagName, attribs) => {
           const id = parseInlineImageSrc(attribs.src ?? '')
           if (!id) return { tagName: 'span', attribs: {} as Record<string, string> }

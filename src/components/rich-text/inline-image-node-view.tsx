@@ -35,7 +35,7 @@ import {
   type InlineImageExtensionOptions,
 } from './inline-image-extension'
 import type { InlineImageCoordinator } from '@/hooks/use-inline-description-images'
-import { MAX_INLINE_ALT_LENGTH, parseInlineImageSrc } from '@/lib/inline-images/policy'
+import { parseInlineImageSrc } from '@/lib/inline-images/policy'
 import {
   INLINE_IMAGE_CROP_SCALE,
   INLINE_IMAGE_MAX_DISPLAY_WIDTH,
@@ -210,12 +210,8 @@ export type InlineImageNodeFrameProps = {
     onCancel: () => void
   } | null
   cropGuidance: string | null
-  onAltChange: (value: string) => void
-  onAlignChange: (align: InlineImageAlignment) => void
-  onLayoutChange: (layout: InlineImageLayout) => void
   onRotateLeft: () => void
   onRotateRight: () => void
-  onResetRotation: () => void
   onCrop: () => void
   onResetSize: () => void
   onRemove: () => void
@@ -254,12 +250,8 @@ export function InlineImageNodeFrame({
   cropGeometry,
   crop,
   cropGuidance,
-  onAltChange,
-  onAlignChange,
-  onLayoutChange,
   onRotateLeft,
   onRotateRight,
-  onResetRotation,
   onCrop,
   onResetSize,
   onRemove,
@@ -343,19 +335,11 @@ export function InlineImageNodeFrame({
       {selected && (
         <>
           <InlineImageToolbar
-            alt={alt}
-            align={align}
-            layout={layout}
-            rotation={rotation}
             editable={editable}
             removePending={removePending}
             placement={placement}
-            onAltChange={onAltChange}
-            onAlignChange={onAlignChange}
-            onLayoutChange={onLayoutChange}
             onRotateLeft={onRotateLeft}
             onRotateRight={onRotateRight}
-            onResetRotation={onResetRotation}
             onCrop={onCrop}
             onResetSize={onResetSize}
             onRemove={onRemove}
@@ -742,16 +726,12 @@ export function InlineImageNodeView({
             onCancel: exitCropSession,
           } : null}
           cropGuidance={cropGuidance}
-          onAltChange={(value) => updateSelectedAttributes({ alt: value.slice(0, MAX_INLINE_ALT_LENGTH) })}
-          onAlignChange={(nextAlign) => updateSelectedAttributes({ align: nextAlign })}
-          onLayoutChange={(nextLayout) => updateSelectedAttributes({ layout: nextLayout })}
           onRotateLeft={() => updateSelectedAttributes({
             rotation: rotateInlineImage(rotation, 'left'),
           })}
           onRotateRight={() => updateSelectedAttributes({
             rotation: rotateInlineImage(rotation, 'right'),
           })}
-          onResetRotation={() => updateSelectedAttributes({ rotation: 0 })}
           onCrop={enterCrop}
           onResetSize={() => updateSelectedAttributes({ displayWidth: null })}
           onRemove={remove}

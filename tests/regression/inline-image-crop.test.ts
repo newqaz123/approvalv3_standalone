@@ -1074,12 +1074,8 @@ describe('inline image crop chrome', () => {
       onCancel: () => void
     } | null,
     cropGuidance: null as string | null,
-    onAltChange: () => undefined,
-    onAlignChange: () => undefined,
-    onLayoutChange: () => undefined,
     onRotateLeft: () => undefined,
     onRotateRight: () => undefined,
-    onResetRotation: () => undefined,
     onCrop: () => undefined,
     onResetSize: () => undefined,
     onRemove: () => undefined,

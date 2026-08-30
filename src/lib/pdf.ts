@@ -328,6 +328,9 @@ export async function renderRequestEvidenceHTML(
     .description ul, .description ol { margin: 6px 0 6px 20px; padding: 0; }
     .description li { margin: 2px 0; }
     .description a { color: #1d4ed8; text-decoration: underline; }
+    .description [data-text-align='left'] { text-align: left; }
+    .description [data-text-align='center'] { text-align: center; }
+    .description [data-text-align='right'] { text-align: right; }
     .description a::after { content: " (" attr(href) ")"; font-size: 9px; color: #64748b; }
     .description img { display: block; max-width: 100%; height: auto; margin: 8px auto; break-inside: avoid; page-break-inside: avoid; }
     .description img[data-align='left'] { margin-left: 0; margin-right: auto; }

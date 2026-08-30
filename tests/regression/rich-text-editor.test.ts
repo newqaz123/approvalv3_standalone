@@ -18,7 +18,8 @@ describe('RichTextEditor implementation', () => {
     for (const ext of ['StarterKit', 'Underline', 'Link']) {
       assert.match(source, new RegExp(`\\b${ext}\\b`))
     }
-    assert.match(source, /heading:\s*\{\s*levels:\s*\[2,\s*3\]/)
+    assert.match(source, /AlignedHeading\.configure\(\{\s*levels:\s*\[2,\s*3\]\s*\}\)/)
+    assert.match(source, /AlignedParagraph/)
     // TipTap v3 configures extensions via Link.configure({...}) — the
     // brief's original regex expected an object-literal `link: {autolink}`
     // shape that never occurs in this API.

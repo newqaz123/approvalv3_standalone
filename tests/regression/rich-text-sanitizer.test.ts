@@ -53,6 +53,25 @@ describe('sanitizeRichText', () => {
     }
   })
 
+  it('keeps semantic paragraph alignment and strips invalid or styled alignment', () => {
+    assert.equal(
+      sanitizeRichText('<p data-text-align="center">Mid</p>'),
+      '<p data-text-align="center">Mid</p>',
+    )
+    assert.equal(
+      sanitizeRichText('<h2 data-text-align="right">Title</h2>'),
+      '<h2 data-text-align="right">Title</h2>',
+    )
+    assert.equal(
+      sanitizeRichText('<p data-text-align="left">Start</p>'),
+      '<p>Start</p>',
+    )
+    assert.equal(
+      sanitizeRichText('<p data-text-align="justify" style="text-align:right">Nope</p>'),
+      '<p>Nope</p>',
+    )
+  })
+
   it('strips disallowed structural markup and styling attributes', () => {
     const out = sanitizeRichText('<table><tr><td>t</td></tr></table><p style="color:red" class="x" id="y">keep</p><span style="font-size:99px">s</span>')
     assert.ok(!out.includes('<table'))

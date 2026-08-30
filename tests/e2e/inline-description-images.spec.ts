@@ -853,42 +853,16 @@ test.describe('Inline description images (release gate)', () => {
     await floatingToolbar.getByRole('button', { name: 'Reset image size' }).click()
     await expect(toolbarImg).not.toHaveAttribute('data-width', /.+/)
 
-    // ── 3. Alt text and alignment controls update sanitized attributes ──────
-    const controls = dialog.getByRole('toolbar', { name: 'Image actions' })
-    await controls.getByLabel('Image alt text').fill('Renamed floor plan')
-    await expect(toolbarImg).toHaveAttribute('alt', 'Renamed floor plan')
-
-    await controls.getByRole('button', { name: 'Image layout block' }).click()
-    await expect(controls.getByRole('button', { name: 'Image layout block' })).toHaveAttribute('aria-pressed', 'true')
-    const alignRight = controls.getByRole('button', { name: 'Align right' })
-    await alignRight.click()
-    await expect(alignRight).toHaveAttribute('aria-pressed', 'true')
-    await expect(toolbarImg).toHaveAttribute('data-align', 'right')
-    await expect(inlineImageNodes(dialog).first()).toHaveAttribute('data-align', 'right')
-    const rightBox = await measureInlineImageAlignment(toolbarImg)
-    expect(rightBox.align).toBe('right')
-
-    const alignLeft = controls.getByRole('button', { name: 'Align left' })
-    await alignLeft.click()
-    await expect(toolbarImg).toHaveAttribute('data-align', 'left')
-    const leftBox = await measureInlineImageAlignment(toolbarImg)
-    expect(leftBox.align).toBe('left')
-
-    await controls.getByRole('button', { name: 'Align center' }).click()
-    await expect(toolbarImg).toHaveAttribute('data-align', 'center')
-    const centerBox = await measureInlineImageAlignment(toolbarImg)
-    expect(centerBox.align).toBe('center')
-
-    const paddingTolerance = 40
-    for (const box of [leftBox, centerBox, rightBox]) {
-      expect(box.nodeWidth, 'the node row must span the editor').toBeGreaterThan(box.editorWidth * 0.85)
-      expect(box.frameWidth, 'the visible frame must shrink-wrap the image').toBeLessThan(box.nodeWidth - 80)
-    }
-    expect(leftBox.frameX - leftBox.nodeX).toBeLessThan(paddingTolerance)
-    expect(Math.abs(centerBox.frameCenter - centerBox.nodeCenter)).toBeLessThan(paddingTolerance)
-    expect(rightBox.nodeRight - rightBox.frameRight).toBeLessThan(paddingTolerance)
-    expect(leftBox.frameX).toBeLessThan(centerBox.frameX - 40)
-    expect(centerBox.frameX).toBeLessThan(rightBox.frameX - 40)
+    // ── 3. Paragraph alignment lives on the main formatting toolbar ────────
+    const formatting = dialog.getByRole('toolbar', { name: 'Formatting' })
+    await formatting.getByRole('button', { name: 'Align right' }).click()
+    await expect(formatting.getByRole('button', { name: 'Align right' })).toHaveAttribute('aria-pressed', 'true')
+    await expect(editor.locator('p[data-text-align="right"]')).toBeVisible()
+    await formatting.getByRole('button', { name: 'Align left' }).click()
+    await expect(formatting.getByRole('button', { name: 'Align left' })).toHaveAttribute('aria-pressed', 'true')
+    await formatting.getByRole('button', { name: 'Align center' }).click()
+    await expect(formatting.getByRole('button', { name: 'Align center' })).toHaveAttribute('aria-pressed', 'true')
+    await expect(editor.locator('p[data-text-align="center"]')).toBeVisible()
 
     // ── 2. Paste and drop each invoke the same upload route ─────────────────
     // Insertion happens at the current selection, so nodes are identified by
@@ -1042,25 +1016,10 @@ test.describe('Inline description images (release gate)', () => {
       expect(value).toBeTruthy()
     }
 
-    await editorImg.click()
-    await toolbar.getByRole('button', { name: 'Image layout block' }).click()
-    await expect(toolbar.getByRole('button', { name: 'Image layout block' })).toHaveAttribute('aria-pressed', 'true')
-    await toolbar.getByRole('button', { name: 'Align left' }).click()
-    const leftBox = await measureInlineImageAlignment(editorImg)
-    await toolbar.getByRole('button', { name: 'Align center' }).click()
-    const centerBox = await measureInlineImageAlignment(editorImg)
-    await toolbar.getByRole('button', { name: 'Align right' }).click()
-    const rightBox = await measureInlineImageAlignment(editorImg)
-    expect(leftBox.frameX).toBeLessThan(centerBox.frameX - 20)
-    expect(centerBox.frameX).toBeLessThan(rightBox.frameX - 20)
-
-    await toolbar.getByRole('button', { name: 'Image layout inline' }).click()
-    await expect(toolbar.getByRole('button', { name: 'Image layout inline' })).toHaveAttribute('aria-pressed', 'true')
-    const inlineX = (await measureVisibleFrame(editorImg)).x
-    await toolbar.getByRole('button', { name: 'Align left' }).click()
-    await toolbar.getByRole('button', { name: 'Align right' }).click()
-    expect(Math.abs((await measureVisibleFrame(editorImg)).x - inlineX)).toBeLessThanOrEqual(1)
-    await expect(editorImg).toHaveAttribute('data-align', 'right')
+    const formatting = dialog.getByRole('toolbar', { name: 'Formatting' })
+    await formatting.getByRole('button', { name: 'Align center' }).click()
+    await expect(formatting.getByRole('button', { name: 'Align center' })).toHaveAttribute('aria-pressed', 'true')
+    await expect(editor.locator('p[data-text-align="center"]')).toBeVisible()
 
     const editorScene = dialog.locator('.inline-image-rotation-scene').first()
     await expect(editorScene).toBeVisible()
@@ -1115,8 +1074,8 @@ test.describe('Inline description images (release gate)', () => {
       const toolbar = dialog.getByRole('toolbar', { name: 'Image actions' })
       await editorImg.click()
       await expect(toolbar).toBeVisible()
-      await expect(toolbar.getByRole('button', { name: 'Image layout inline' })).toBeVisible()
       await expect(toolbar.getByRole('button', { name: 'Rotate image right' })).toBeVisible()
+      await expect(toolbar.getByRole('button', { name: 'Reset image size' })).toBeVisible()
 
       const viewport = page.viewportSize()
       if (!viewport) throw new Error('Mobile viewport is missing')
@@ -1298,10 +1257,6 @@ test.describe('Inline description images (release gate)', () => {
     await expect(editorImg).toHaveAttribute('data-width', resizedPresentation.width as string)
 
     const toolbar = dialog.getByRole('toolbar', { name: 'Image actions' })
-    await toolbar.getByLabel('Image alt text').fill('E2E committed inline image')
-    await toolbar.getByRole('button', { name: 'Image layout block' }).click()
-    await toolbar.getByRole('button', { name: 'Align right' }).click()
-    await expect(editorImg).toHaveAttribute('data-align', 'right')
     const baselinePresentation = await serializedPresentation(editorImg)
 
     // ── 5. Exercise every crop preset, pan, zoom, Cancel, Reset, Apply ────
