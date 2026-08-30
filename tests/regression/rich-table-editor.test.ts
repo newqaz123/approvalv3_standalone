@@ -345,6 +345,21 @@ describe('table hover affordance predicates', () => {
     assert.doesNotMatch(source, /container\.addEventListener\("dragover"/)
   })
 
+  it('grip menus toggle: both grips tagged and excluded from outside-close', () => {
+    // Clicking an open menu's own grip must toggle it closed: the capture
+    // pointerdown listener has to skip both grip types, not just the row one.
+    const source = readFileSync(
+      'src/components/rich-text/rich-text-table-hover-controls.tsx',
+      'utf8',
+    )
+    assert.match(source, /data-row-grip=""\s*\n[\s\S]{0,200}table-row/)
+    assert.match(source, /data-col-grip=""\s*\n[\s\S]{0,200}table-column/)
+    assert.match(
+      source,
+      /closest\("\[data-row-grip\], \[data-col-grip\]"\)/,
+    )
+  })
+
   it('keeps hover alive across the gutter travel distance and over the controls', () => {
     // Row gutter buttons start 62px left of the table edge; the grace margin
     // must cover that travel and hovering a control itself must never clear

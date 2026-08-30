@@ -1,6 +1,14 @@
 "use client";
 
-import { GripHorizontal, Merge, Plus, Split } from "lucide-react";
+import {
+	ArrowDownToLine,
+	ArrowUpToLine,
+	GripHorizontal,
+	Merge,
+	Plus,
+	Split,
+	Trash2,
+} from "lucide-react";
 import { useEditorState, type Editor } from "@tiptap/react";
 import {
 	useCallback,
@@ -42,6 +50,17 @@ type HoverState = {
 
 type DragState = { kind: "row" | "col"; from: number; tableStart: number };
 
+type Pointer = { x: number; y: number; wrapperWidth: number; wrapperHeight: number };
+
+type GripMenuState = {
+	/** "row" = row gutter grip, "col" = column gutter grip. */
+	kind: "row" | "col";
+	/** Cell the menu was opened on (absolute document position). */
+	cellStart: number;
+	x: number;
+	y: number;
+};
+
 /** Grace margin (px) around the table where hover controls stay alive. */
 const HOVER_GRACE_MARGIN = 64;
 
@@ -79,12 +98,17 @@ export function RichTextTableHoverControls({
 	});
 
 	const controlsRef = useRef<HTMLDivElement | null>(null);
+	const gripMenuRef = useRef<HTMLDivElement | null>(null);
 	const [hover, setHover] = useState<HoverState | null>(null);
 	const [drag, setDrag] = useState<DragState | null>(null);
 	const [dropTarget, setDropTarget] = useState<number | null>(null);
+	const [gripMenu, setGripMenu] = useState<GripMenuState | null>(null);
 	const hoverRef = useRef<HoverState | null>(null);
 	const dragRef = useRef<DragState | null>(null);
 	const dropTargetRef = useRef<number | null>(null);
+	// Last pointer position in container space: merge/split and row menus
+	// anchor near the mouse instead of a far table corner.
+	const pointerRef = useRef<Pointer | null>(null);
 
 	const clearHover = useCallback(() => {
 		hoverRef.current = null;
@@ -108,12 +132,42 @@ export function RichTextTableHoverControls({
 			if (!transaction.docChanged) return;
 			clearHover();
 			clearDrag();
+			setGripMenu(null);
 		};
 		editor.on("transaction", onTransaction);
 		return () => {
 			editor.off("transaction", onTransaction);
 		};
 	}, [editor, clearHover, clearDrag]);
+
+	// Close the row menu on outside pointerdown or Escape while it is open.
+	useEffect(() => {
+		if (!gripMenu) return undefined;
+		const onPointerDown = (event: PointerEvent) => {
+			const menu = gripMenuRef.current;
+			if (menu && event.target instanceof Node && menu.contains(event.target)) {
+				return;
+			}
+			// Pointerdown on the grip itself is the toggle; its click handler
+			// closes the menu.
+			if (
+				event.target instanceof Element &&
+				event.target.closest("[data-row-grip], [data-col-grip]")
+			) {
+				return;
+			}
+			setGripMenu(null);
+		};
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (event.key === "Escape") setGripMenu(null);
+		};
+		window.addEventListener("pointerdown", onPointerDown, true);
+		window.addEventListener("keydown", onKeyDown);
+		return () => {
+			window.removeEventListener("pointerdown", onPointerDown, true);
+			window.removeEventListener("keydown", onKeyDown);
+		};
+	}, [gripMenu]);
 
 	const measureFromCell = useCallback(
 		(cell: HoveredTableCell): HoverState | null => {
@@ -203,6 +257,13 @@ export function RichTextTableHoverControls({
 			if (disabled || dragRef.current) return;
 			const container = containerRef.current;
 			if (!container) return;
+			const bounds = container.getBoundingClientRect();
+			pointerRef.current = {
+				x: event.clientX - bounds.left,
+				y: event.clientY - bounds.top,
+				wrapperWidth: bounds.width,
+				wrapperHeight: bounds.height,
+			};
 			// Moving onto (or across) the overlay's own controls must never clear
 			// the hover they depend on; they only exist while hover is active.
 			if (
@@ -378,12 +439,24 @@ export function RichTextTableHoverControls({
 					>
 						<div
 							draggable
+							data-col-grip=""
 							onDragStart={(event) => {
 								event.dataTransfer.effectAllowed = "move";
 								event.dataTransfer.setData("text/plain", "table-column");
 								startDrag("col", activeHover.cell.col, activeHover.cell.tableStart);
 							}}
 							onDragEnd={clearDrag}
+							onClick={() => {
+								const p = pointerRef.current;
+								setGripMenu((prev) => prev
+									? null
+									: {
+										kind: "col",
+										cellStart: activeHover.cell.cellStart,
+										x: p ? p.x + 10 : 40,
+										y: p ? p.y + 20 : 60,
+									});
+							}}
 							className="flex h-full w-full cursor-grab items-center justify-center"
 						>
 							<GripHorizontal className="h-3.5 w-3.5 rotate-90" />
@@ -416,12 +489,24 @@ export function RichTextTableHoverControls({
 					>
 						<div
 							draggable
+							data-row-grip=""
 							onDragStart={(event) => {
 								event.dataTransfer.effectAllowed = "move";
 								event.dataTransfer.setData("text/plain", "table-row");
 								startDrag("row", activeHover.cell.row, activeHover.cell.tableStart);
 							}}
 							onDragEnd={clearDrag}
+							onClick={() => {
+								const p = pointerRef.current;
+								setGripMenu((prev) => prev
+									? null
+									: {
+										kind: "row",
+										cellStart: activeHover.cell.cellStart,
+										x: p ? p.x + 10 : 40,
+										y: p ? p.y + 20 : 60,
+									});
+							}}
 							className="flex h-full w-full cursor-grab items-center justify-center"
 						>
 							<GripHorizontal className="h-3.5 w-3.5" />
@@ -477,13 +562,19 @@ export function RichTextTableHoverControls({
 				))
 			)}
 
-			{/* Contextual merge/split bar above the table */}
-			{showMergeBar && hover && (
+			{/* Contextual merge/split bar anchored near the mouse */}
+			{showMergeBar && pointerRef.current && (
 				<div
 					className="rich-text-table-hover-bar absolute z-20 flex items-center gap-1 rounded-md border border-slate-200 bg-white p-1 shadow-md"
 					style={{
-						left: hover.tableRect.left,
-						top: Math.max(0, hover.tableRect.top - 40),
+						left: Math.min(
+							Math.max(4, pointerRef.current.x + 14),
+							Math.max(4, pointerRef.current.wrapperWidth - 170),
+						),
+						top: Math.min(
+							Math.max(4, pointerRef.current.y - 44),
+							Math.max(4, pointerRef.current.wrapperHeight - 44),
+						),
 					}}
 				>
 					{mergeVisible && (
@@ -510,6 +601,78 @@ export function RichTextTableHoverControls({
 							Split cell
 						</button>
 					)}
+				</div>
+			)}
+
+			{/* Floating row/column menu near the mouse (grip click) */}
+			{gripMenu && (
+				<div
+					ref={gripMenuRef}
+					className="rich-text-table-hover-bar absolute z-30 flex w-44 flex-col rounded-md border border-slate-200 bg-white p-1 shadow-md"
+					style={{
+						left: Math.min(
+							Math.max(4, gripMenu.x),
+							Math.max(4, (pointerRef.current?.wrapperWidth ?? 400) - 180),
+						),
+						top: Math.min(
+							Math.max(4, gripMenu.y),
+							Math.max(4, (pointerRef.current?.wrapperHeight ?? 200) - 150),
+						),
+					}}
+				>
+					{(gripMenu.kind === "row"
+						? [
+							{ key: "above", label: "Insert row above", icon: <ArrowUpToLine className="h-3.5 w-3.5" />, command: "addRowBefore" as const },
+							{ key: "below", label: "Insert row below", icon: <ArrowDownToLine className="h-3.5 w-3.5" />, command: "addRowAfter" as const },
+						  ]
+						: [
+							{ key: "left", label: "Insert column left", icon: <ArrowUpToLine className="h-3.5 w-3.5" />, command: "addColumnBefore" as const },
+							{ key: "right", label: "Insert column right", icon: <ArrowDownToLine className="h-3.5 w-3.5" />, command: "addColumnAfter" as const },
+						  ]
+					).map((item) => (
+						<button
+							key={item.key}
+							type="button"
+							aria-label={item.label}
+							className="inline-flex items-center gap-1.5 rounded px-2 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-100"
+							onMouseDown={(event) => event.preventDefault()}
+							onClick={() => {
+								editor
+									.chain()
+									.setCellSelection({
+										anchorCell: gripMenu.cellStart,
+										headCell: gripMenu.cellStart,
+									})
+									[item.command]()
+									.run();
+								setGripMenu(null);
+							}}
+						>
+							{item.icon}
+							{item.label}
+						</button>
+					))}
+					<hr className="my-1 h-px border-0 bg-slate-200" aria-hidden="true" />
+					<button
+						type="button"
+						aria-label={gripMenu.kind === "row" ? "Delete row" : "Delete column"}
+						className="inline-flex items-center gap-1.5 rounded px-2 py-1.5 text-left text-xs text-red-700 hover:bg-red-50"
+						onMouseDown={(event) => event.preventDefault()}
+						onClick={() => {
+							editor
+								.chain()
+								.setCellSelection({
+									anchorCell: gripMenu.cellStart,
+									headCell: gripMenu.cellStart,
+								})
+								[gripMenu.kind === "row" ? "deleteRow" : "deleteColumn"]()
+								.run();
+							setGripMenu(null);
+						}}
+					>
+						<Trash2 className="h-3.5 w-3.5" />
+						{gripMenu.kind === "row" ? "Delete row" : "Delete column"}
+					</button>
 				</div>
 			)}
 		</div>
