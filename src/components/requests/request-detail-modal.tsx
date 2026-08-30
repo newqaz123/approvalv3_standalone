@@ -582,9 +582,9 @@ export function RequestDetailModal({
                 <FileText className="h-4 w-4 text-indigo-500" />
                 Description
               </h3>
-              <p className="text-sm text-slate-700 leading-relaxed">
+              <div className="text-sm text-slate-700 leading-relaxed">
                 <FormattedText source={request.description} />
-              </p>
+              </div>
             </div>
 
             <Separator className="bg-slate-200" />
@@ -707,9 +707,9 @@ export function RequestDetailModal({
                   <div className="space-y-3">
                     <div>
                       <p className="text-sm font-medium">{solution.title}</p>
-                      <p className="text-sm text-gray-600 mt-1">
+                      <div className="text-sm text-gray-600 mt-1">
                         <FormattedText source={solution.description} />
-                      </p>
+                      </div>
                     </div>
 
                     {/* Cost Estimate */}
@@ -1108,9 +1108,9 @@ export function RequestDetailModal({
                 <FileText className="h-4 w-4 text-indigo-500" />
                 Description
               </h3>
-              <p className="text-sm text-slate-700 leading-relaxed">
+              <div className="text-sm text-slate-700 leading-relaxed">
                 <FormattedText source={request.description} />
-              </p>
+              </div>
             </div>
 
             <Separator className="bg-slate-200" />
@@ -1233,9 +1233,9 @@ export function RequestDetailModal({
                   <div className="space-y-3">
                     <div>
                       <p className="text-sm font-medium">{solution.title}</p>
-                      <p className="text-sm text-gray-600 mt-1">
+                      <div className="text-sm text-gray-600 mt-1">
                         <FormattedText source={solution.description} />
-                      </p>
+                      </div>
                     </div>
 
                     {/* Cost Estimate */}

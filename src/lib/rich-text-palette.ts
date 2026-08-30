@@ -53,6 +53,11 @@ export function materializeRichTextPalette(
     allowedTags: [...RICH_TEXT_ALLOWED_TAGS],
     allowedAttributes: false,
     transformTags: {
+      // transformTags output bypasses the allowedAttributes filter, while a
+      // missing entry would drop colspan/rowspan/colwidth under
+      // allowedAttributes:false. Table cells pass through untouched.
+      th: (tagName, attribs) => ({ tagName, attribs }),
+      td: (tagName, attribs) => ({ tagName, attribs }),
       span: (tagName, attribs) => {
         const token = attribs['data-text-color']
         const next: Record<string, string> = isTextColorToken(token)

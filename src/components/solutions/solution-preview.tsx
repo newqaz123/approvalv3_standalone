@@ -111,12 +111,14 @@ export function SolutionPreview({
 						<h3 className="text-sm font-medium text-muted-foreground mb-2">
 							Description
 						</h3>
-						<p className="text-base whitespace-pre-wrap">
+						<div className="text-base whitespace-pre-wrap">
 							<FormattedText
 								source={data.description}
-								maxVisibleCharacters={showFullDescription ? undefined : 300}
+								maxVisibleCharacters={
+									descriptionTooLong && !showFullDescription ? 300 : undefined
+								}
 							/>
-						</p>
+						</div>
 						{descriptionTooLong && (
 							<button
 								type="button"

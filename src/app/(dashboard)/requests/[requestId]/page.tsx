@@ -156,9 +156,9 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
         {/* Description */}
         <div className="bg-white rounded-lg border p-6">
           <h2 className="text-lg font-semibold mb-3">Description</h2>
-          <p className="text-gray-700">
+          <div className="text-gray-700">
             <FormattedText source={request.description} />
-          </p>
+          </div>
         </div>
 
         {/* Requester Info */}
@@ -201,9 +201,9 @@ export default async function RequestDetailPage({ params }: RequestDetailPagePro
 
               <div>
                 <p className="text-sm text-gray-500">Description</p>
-                <p className="text-gray-700 mt-1">
+                <div className="text-gray-700 mt-1">
                   <FormattedText source={solution.description} />
-                </p>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

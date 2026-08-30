@@ -305,9 +305,9 @@ export function CompletedSolutionModal({
 								</p>
 							</div>
 						</div>
-						<p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed mb-3">
+						<div className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed mb-3">
 							<FormattedText source={data.solution.description} />
-						</p>
+						</div>
 						{data.solution.timeline && (
 							<div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400 mb-3">
 								<Clock3 className="w-4 h-4 text-slate-400" />
@@ -330,9 +330,9 @@ export function CompletedSolutionModal({
 							Original Request Description
 						</h3>
 						<div className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed bg-slate-50/70 dark:bg-slate-800/30 rounded-xl p-4 border border-slate-100 dark:border-slate-800">
-							<p>
+							<div>
 								<FormattedText source={data.requestDescription} />
-							</p>
+							</div>
 						</div>
 					</section>
 

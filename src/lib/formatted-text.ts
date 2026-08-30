@@ -183,6 +183,16 @@ function tokensToVisibleString(tokens: FormattedTextToken[]): string {
 }
 
 export function visibleFormattedText(source: string): string {
+	// Rich HTML must be measured by its visible text: counting the legacy
+	// tokenization of raw markup would inflate the length with tags and
+	// attributes (a sparse table alone can exceed any preview budget).
+	// Images become alt placeholders (mirroring renderDescriptionPlainText)
+	// so image-only descriptions still measure as visible content.
+	if (containsRichTextHtml(source)) {
+		return richTextToPlainText(
+			inlineImageAltPlaceholder(sanitizeRichText(source)),
+		);
+	}
 	return tokensToVisibleString(tokenizeFormattedText(source));
 }
 

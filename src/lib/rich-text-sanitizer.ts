@@ -18,7 +18,7 @@ import {
 
 export const RICH_TEXT_ALLOWED_TAGS = [
   'p', 'br', 'strong', 'em', 'u', 's', 'ul', 'ol', 'li', 'h2', 'h3', 'a', 'img',
-  'span', 'mark',
+  'span', 'mark', 'table', 'thead', 'tbody', 'tr', 'th', 'td',
 ] as const
 
 /** Exact allowed link schemes. Scheme-less/relative hrefs are stripped (text kept). */
@@ -47,6 +47,11 @@ export function sanitizeRichText(html: string): string {
         p: ['data-text-align'],
         h2: ['data-text-align'],
         h3: ['data-text-align'],
+        // Table structure. colspan/rowspan are TipTap's cell attributes;
+        // colwidth/data-colwidth survive round-trips of tables pasted with
+        // explicit column widths. Values are entity-escaped by sanitize-html.
+        th: ['colspan', 'rowspan', 'colwidth', 'data-colwidth'],
+        td: ['colspan', 'rowspan', 'colwidth', 'data-colwidth'],
         img: [
           'src',
           'alt',
@@ -135,7 +140,7 @@ export function richTextToPlainText(html: string): string {
   const sanitized = sanitizeRichText(html)
   const withBlockSeparators = sanitized
     .replace(/<br\s*\/?>/gi, ' ')
-    .replace(/<\/(?:p|h2|h3|li|ul|ol)>/gi, ' ')
+    .replace(/<\/(?:p|h2|h3|li|ul|ol|table|tr|td|th)>/gi, ' ')
   const stripped = sanitizeHtml(withBlockSeparators, {
     allowedTags: [],
     allowedAttributes: {},

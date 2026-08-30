@@ -34,6 +34,27 @@ describe("formatted description tokenizer", () => {
 		);
 	});
 
+	it("measures rich HTML by visible text, not raw markup", () => {
+		// A sparse table's markup alone exceeds 300 characters; only the cell
+		// text may count toward preview budgets.
+		const row = '<tr><td>a</td><td>b</td><td>c</td></tr>';
+		const rich =
+			`<table><tbody><tr><th>Column one</th><th>Column two</th><th>Column three</th></tr>${row}${row}${row}${row}${row}${row}</tbody></table>`;
+		assert.ok(rich.length > 300);
+		assert.equal(
+			visibleFormattedText(rich),
+			"Column one Column two Column three " + Array(6).fill("a b c").join(" "),
+		);
+	});
+
+	it("counts sanitized images as alt placeholders so image-rich previews can expand", () => {
+		const image =
+			'<p><img src="/api/inline-images/123e4567-e89b-42d3-a456-426614174000" alt="Diagram" data-align="center"></p>';
+		const source = image.repeat(4);
+		assert.ok(source.length > 300);
+		assert.equal(visibleFormattedText(source), "[Image: Diagram] [Image: Diagram] [Image: Diagram] [Image: Diagram]");
+	});
+
 	it("turns each newline into a line-break token and preserves it in plain text", () => {
 		assert.deepEqual(
 			tokenizeFormattedText("first\nsecond\r\nthird").filter(
@@ -79,12 +100,13 @@ describe("formatted description tokenizer", () => {
 		assert.equal(visibleFormattedText("**open ** close"), "open  close");
 	});
 
-	it("treats HTML and script-looking input as text and escapes HTML output", () => {
+	it("treats script-looking input through the rich boundary when it carries a whitelisted tag", () => {
 		const source = "<script>alert(1)</script> **<img src=x onerror=alert(1)>**";
-		assert.equal(
-			visibleFormattedText(source),
-			"<script>alert(1)</script> <img src=x onerror=alert(1)>",
-		);
+		// containsRichTextHtml is the storage-level boundary: this source is
+		// rendered as rich HTML everywhere (FormattedText, email, PDF), so the
+		// visible-text measurement must agree with the rich renderer, not the
+		// legacy tokenizer.
+		assert.equal(visibleFormattedText(source), "****");
 		assert.equal(
 			renderFormattedTextHtml(source),
 			"&lt;script&gt;alert(1)&lt;/script&gt; <strong>&lt;img src=x onerror=alert(1)&gt;</strong>",

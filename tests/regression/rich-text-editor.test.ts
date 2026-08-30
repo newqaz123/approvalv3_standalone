@@ -15,7 +15,7 @@ describe('RichTextEditor implementation', () => {
   const source = read('src/components/rich-text/rich-text-editor.tsx')
 
   it('configures only the approved extension set', () => {
-    for (const ext of ['StarterKit', 'Underline', 'Link']) {
+    for (const ext of ['StarterKit', 'Underline', 'Link', 'TableKit']) {
       assert.match(source, new RegExp(`\\b${ext}\\b`))
     }
     assert.match(source, /AlignedHeading\.configure\(\{\s*levels:\s*\[2,\s*3\]\s*\}\)/)

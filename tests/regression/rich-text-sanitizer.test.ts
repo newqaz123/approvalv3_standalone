@@ -73,12 +73,43 @@ describe('sanitizeRichText', () => {
   })
 
   it('strips disallowed structural markup and styling attributes', () => {
-    const out = sanitizeRichText('<table><tr><td>t</td></tr></table><p style="color:red" class="x" id="y">keep</p><span style="font-size:99px">s</span>')
-    assert.ok(!out.includes('<table'))
+    const out = sanitizeRichText('<div><section>s</section></div><p style="color:red" class="x" id="y">keep</p><span style="font-size:99px">s</span>')
+    assert.ok(!out.includes('<div'))
+    assert.ok(!out.includes('<section'))
     assert.ok(!out.includes('style='))
     assert.ok(!out.includes('class='))
     assert.ok(!out.includes('id='))
     assert.ok(out.includes('keep'))
+  })
+
+  it('keeps table structure with span and cell metadata', () => {
+    const out = sanitizeRichText(
+      '<table><thead><tr><th colspan="2" rowspan="1">Header</th></tr></thead><tbody><tr><td data-colwidth="100">a</td><td>b</td></tr></tbody></table>',
+    )
+    for (const tag of ['<table>', '<thead>', '<tbody>', '<tr>', '<th', '<td']) {
+      assert.ok(out.includes(tag), `missing ${tag}`)
+    }
+    assert.ok(out.includes('colspan="2"'))
+    assert.ok(out.includes('rowspan="1"'))
+    assert.ok(out.includes('data-colwidth="100"'))
+    assert.ok(out.includes('Header'))
+  })
+
+  it('strips hostile cell attributes and escapes hostile attribute values', () => {
+    const out = sanitizeRichText('<td style="x" class="y" id="z" onclick="a()" bgcolor="red" width="50" colspan="<script>">c</td>')
+    assert.ok(!out.includes('style='))
+    assert.ok(!out.includes('class='))
+    assert.ok(!out.includes('id='))
+    assert.ok(!out.includes('onclick'))
+    assert.ok(!out.includes('bgcolor'))
+    assert.ok(!out.includes('width="50"'))
+    assert.ok(!out.includes('<script'))
+    assert.ok(out.includes('c</td>'))
+  })
+
+  it('keeps paragraph alignment inside table cells', () => {
+    const out = sanitizeRichText('<td><p data-text-align="center">Mid</p></td>')
+    assert.ok(out.includes('<td><p data-text-align="center">Mid</p></td>'))
   })
 
   it('keeps exact semantic tokens and strips arbitrary pasted color styles', () => {
@@ -222,6 +253,7 @@ describe('containsRichTextHtml', () => {
     assert.ok(containsRichTextHtml('<p>hi</p>'))
     assert.ok(containsRichTextHtml('  <h2>t</h2>'))
     assert.ok(containsRichTextHtml('<ul><li>x</li></ul>'))
+    assert.ok(containsRichTextHtml('<table><tbody><tr><td>x</td></tr></tbody></table>'))
   })
 
   it('rejects prose that merely mentions a tag mid-sentence', () => {
@@ -236,5 +268,12 @@ describe('richTextToPlainText', () => {
   it('strips tags, decodes entities, and collapses whitespace', () => {
     assert.equal(richTextToPlainText('<p>a &amp; b</p><strong>c</strong>').trim(), 'a & b c')
     assert.equal(richTextToPlainText('<p> a   b </p>'), 'a b')
+  })
+
+  it('separates table cell text so plain previews stay readable', () => {
+    assert.equal(
+      richTextToPlainText('<table><tbody><tr><td>alpha</td><td>beta</td></tr><tr><td>gamma</td><td>delta</td></tr></tbody></table>'),
+      'alpha beta gamma delta',
+    )
   })
 })

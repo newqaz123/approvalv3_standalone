@@ -48,4 +48,17 @@ describe('formatted description rendering', () => {
       /visibleFormattedText\(data\.description\)/,
     )
   })
+
+  it('solution preview truncates only when too long, so short image-rich descriptions render fully', () => {
+    // Invariant: the collapsed 300-character branch must be gated on
+    // descriptionTooLong. Otherwise a short image-rich description would be
+    // degraded to alt placeholders with no "Show more" control to reveal the
+    // real images (descriptionTooLong is also the only gate for that button).
+    const source = read('src/components/solutions/solution-preview.tsx')
+    assert.match(
+      source,
+      /maxVisibleCharacters=\{\s*descriptionTooLong && !showFullDescription \? 300 : undefined\s*\}/,
+    )
+    assert.match(source, /\{descriptionTooLong && \(/)
+  })
 })

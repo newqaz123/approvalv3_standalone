@@ -103,9 +103,9 @@ export function SolutionDetail({
           <div>
             <h4 className="mb-2 text-sm font-medium">Description</h4>
             <ScrollArea className="h-40 rounded-md border p-3">
-              <p className="text-sm text-gray-700">
+              <div className="text-sm text-gray-700">
                 <FormattedText source={solution.description} />
-              </p>
+              </div>
             </ScrollArea>
           </div>
 

@@ -173,4 +173,54 @@ describe('trusted rich text presentation', () => {
     )
     assert.equal(adjacentInline, '<p>Before [redacted] and [redacted] after</p>')
   })
+
+  it('keeps table structure intact through the app materializer', () => {
+    const html = materializeRichTextForApp(
+      '<table><tbody><tr><th colspan="2">Header</th></tr><tr><td>a</td><td>b</td></tr></tbody></table>',
+    )
+
+    assert.equal(
+      html,
+      '<table><tbody><tr><th colspan="2">Header</th></tr><tr><td>a</td><td>b</td></tr></tbody></table>',
+    )
+  })
+
+  it('inline-styles tables for email clients that drop stylesheets', () => {
+    const html = materializeRichTextForEmail(
+      '<table><tbody><tr><th colspan="2">Header</th></tr><tr><td>a</td><td>b</td></tr></tbody></table>',
+    )
+
+    assert.match(html, /<table style="border-collapse:collapse;width:100%;margin:8px 0">/)
+    assert.match(
+      html,
+      /<th colspan="2" style="border:1px solid #cbd5e1;padding:6px 8px;vertical-align:top;background-color:#f1f5f9;text-align:left;font-weight:700">Header<\/th>/,
+    )
+    assert.match(
+      html,
+      /<td style="border:1px solid #cbd5e1;padding:6px 8px;vertical-align:top">a<\/td>/,
+    )
+    assert.doesNotMatch(html, /class=/)
+  })
+
+  it('redacts image references inside table cells in email output', () => {
+    const html = materializeRichTextForEmail(
+      `<table><tbody><tr><td>See ${IMAGE_SRC} now</td><td>safe cell</td></tr></tbody></table>`,
+    )
+
+    assert.ok(html.includes('[redacted]'))
+    assert.doesNotMatch(html, /\/api\/inline-images\//)
+    assert.ok(html.includes('safe cell'))
+  })
+
+  it('balances truncated table markup instead of emitting broken tables', () => {
+    const html = truncateSanitizedRichTextHtml(
+      '<table><tbody><tr><td>alpha</td><td>beta</td></tr></tbody></table>',
+      7,
+    )
+
+    assert.ok(html.startsWith('<table>'))
+    assert.ok(html.endsWith('</table>'))
+    assert.ok(html.includes('alpha'))
+    assert.ok(!html.includes('beta'))
+  })
 })

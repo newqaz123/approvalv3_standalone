@@ -5,6 +5,7 @@ import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import Link from "@tiptap/extension-link";
 import FileHandler from "@tiptap/extension-file-handler";
+import { TableKit } from "@tiptap/extension-table";
 import {
 	AlignCenter,
 	AlignLeft,
@@ -36,6 +37,7 @@ import {
 } from "@/components/rich-text/inline-image-extension";
 import type { InlineImageCoordinator } from "@/hooks/use-inline-description-images";
 import { RichTextColorControls } from "@/components/rich-text/rich-text-color-controls";
+import { RichTextTableControls } from "@/components/rich-text/rich-text-table-controls";
 import {
 	AlignedHeading,
 	AlignedParagraph,
@@ -319,6 +321,10 @@ export default function RichTextEditor({
 			}),
 			Underline,
 			...RICH_TEXT_COLOR_EXTENSIONS,
+			// Tables serialize to table/tbody/tr/th/td only; column resizing is
+			// off (the package default), so no colgroup/col/style output ever
+			// reaches the sanitizer.
+			TableKit.configure({ table: { resizable: false } }),
 			Link.configure({ autolink: true, openOnClick: false }),
 			FileHandler.configure({
 				allowedMimeTypes: createInlineImageMimeFilter(() => canInsertImagesRef.current),
@@ -586,6 +592,7 @@ export default function RichTextEditor({
 					disabled={commandsDisabled}
 					compact={false}
 				/>
+				<RichTextTableControls editor={editor} disabled={commandsDisabled} />
 				<ToolbarButton
 					editor={editor}
 					label="Undo"

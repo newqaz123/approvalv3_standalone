@@ -50,6 +50,44 @@
 .rich-text img[data-align='left'] { margin-right: auto; }
 .rich-text img[data-align='center'] { margin-inline: auto; }
 .rich-text img[data-align='right'] { margin-left: auto; }
+
+/*
+ * Description tables. The same .rich-text surface renders the editor body
+ * and read-only FormattedText output; fixed layout keeps pasted wide tables
+ * inside the description column.
+ */
+.rich-text table {
+  border-collapse: collapse;
+  width: 100%;
+  table-layout: fixed;
+  margin-block: .75rem;
+}
+.rich-text th,
+.rich-text td {
+  border: 1px solid #e2e8f0;
+  padding: .375rem .5rem;
+  vertical-align: top;
+  text-align: left;
+}
+.rich-text th {
+  background: #f8fafc;
+  font-weight: 600;
+}
+.rich-text th > :first-child,
+.rich-text td > :first-child { margin-top: 0; }
+.rich-text th > :last-child,
+.rich-text td > :last-child { margin-bottom: 0; }
+/* Editor-only feedback while cells are selected (ProseMirror selectedCell). */
+.rich-text .selectedCell {
+  position: relative;
+}
+.rich-text .selectedCell:after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgb(59 130 246 / 0.12);
+  pointer-events: none;
+}
 .rich-text__image-frame {
   position: relative;
   display: block;

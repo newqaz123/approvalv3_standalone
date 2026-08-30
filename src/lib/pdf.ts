@@ -336,6 +336,11 @@ export async function renderRequestEvidenceHTML(
     .description img[data-align='left'] { margin-left: 0; margin-right: auto; }
     .description img[data-align='center'] { margin-inline: auto; }
     .description img[data-align='right'] { margin-left: auto; margin-right: 0; }
+    .description table { margin: 8px 0; table-layout: fixed; font-size: 11px; }
+    .description th, .description td { border: 1px solid #cbd5e1; padding: 4px 8px; white-space: normal; }
+    .description th { background: #f1f5f9; font-weight: 700; }
+    .description th p, .description td p { margin: 0; }
+    .description tr { break-inside: avoid; page-break-inside: avoid; }
     .description .rich-text__image-frame {
       position: relative;
       display: block;

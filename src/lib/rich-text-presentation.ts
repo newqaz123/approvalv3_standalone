@@ -20,7 +20,7 @@ const SANITIZED_ATTRIBUTE_RE = /(?:^|\s)([a-z][a-z0-9-]*)="([^"]*)"/gi
 const PRIVATE_INLINE_IMAGE_URL_RE = /\/api\/inline-images\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/gi
 const IMAGE_DATA_URI_RE = /data:image\/[^\s<\]]+/gi
 const EMAIL_IMAGE_REFERENCE_REPLACEMENT = '[redacted]'
-const VISIBLE_TEXT_BOUNDARY_TAGS = new Set(['p', 'br', 'ul', 'ol', 'li', 'h2', 'h3'])
+const VISIBLE_TEXT_BOUNDARY_TAGS = new Set(['p', 'br', 'ul', 'ol', 'li', 'h2', 'h3', 'table', 'tr', 'td', 'th'])
 
 type VisibleTextSegment = {
   start: number
@@ -149,6 +149,37 @@ export function materializeRichTextForApp(source: string): string {
   const sanitized = sanitizeRichText(source)
   const palette = materializeRichTextPalette(sanitized, 'app')
   return materializeTrustedImages(palette)
+}
+
+const EMAIL_TABLE_STYLE = 'border-collapse:collapse;width:100%;margin:8px 0'
+const EMAIL_TABLE_CELL_STYLE = 'border:1px solid #cbd5e1;padding:6px 8px;vertical-align:top'
+const EMAIL_TABLE_HEADER_CELL_STYLE = `${EMAIL_TABLE_CELL_STYLE};background-color:#f1f5f9;text-align:left;font-weight:700`
+
+/**
+ * Inline-styled trusted table markup for email clients that drop <style>.
+ * Runs after the palette materializer (whose internal sanitize pass would
+ * strip style attributes); transformTags output bypasses attribute filtering,
+ * so the structural cell attributes survive the restyle.
+ */
+function materializeTrustedTablesForEmail(sanitized: string): string {
+  return sanitizeHtml(sanitized, {
+    allowedTags: [...RICH_TEXT_ALLOWED_TAGS],
+    allowedAttributes: false,
+    transformTags: {
+      table: (tagName, attribs) => ({
+        tagName,
+        attribs: { ...attribs, style: EMAIL_TABLE_STYLE },
+      }),
+      th: (tagName, attribs) => ({
+        tagName,
+        attribs: { ...attribs, style: EMAIL_TABLE_HEADER_CELL_STYLE },
+      }),
+      td: (tagName, attribs) => ({
+        tagName,
+        attribs: { ...attribs, style: EMAIL_TABLE_CELL_STYLE },
+      }),
+    },
+  })
 }
 
 /**
@@ -327,5 +358,7 @@ export function materializeRichTextForEmail(
   const truncated = maxVisibleCharacters === undefined
     ? redacted
     : truncateSanitizedRichTextHtml(redacted, maxVisibleCharacters)
-  return materializeRichTextPalette(truncated, 'email')
+  return materializeTrustedTablesForEmail(
+    materializeRichTextPalette(truncated, 'email'),
+  )
 }
