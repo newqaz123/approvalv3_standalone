@@ -427,6 +427,95 @@ async function panCropSurface(page: Page, crop: Locator): Promise<{ before: Crop
   return { before, after }
 }
 
+async function measureViewportOverflow(page: Page): Promise<{ scrollWidth: number; innerWidth: number }> {
+  return page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    innerWidth: window.innerWidth,
+  }))
+}
+
+function boxInsideViewport(
+  box: { x: number; y: number; width: number; height: number },
+  innerWidth: number,
+  innerHeight: number,
+): boolean {
+  return box.x >= -1
+    && box.y >= -1
+    && box.x + box.width <= innerWidth + 1
+    && box.y + box.height <= innerHeight + 1
+}
+
+async function touchPanCropSurface(crop: Locator): Promise<{ before: CropRegionBox; after: CropRegionBox }> {
+  const region = crop.getByRole('group', { name: 'Crop region' })
+  const before = await measureCropRegionBox(region)
+  await region.evaluate((element) => {
+    const rect = element.getBoundingClientRect()
+    const originX = rect.left + rect.width / 2
+    const originY = rect.top + rect.height / 2
+    const fire = (type: string, x: number, y: number) => {
+      element.dispatchEvent(new PointerEvent(type, {
+        pointerId: 1,
+        pointerType: 'touch',
+        clientX: x,
+        clientY: y,
+        bubbles: true,
+        cancelable: true,
+        buttons: type === 'pointerup' ? 0 : 1,
+      }))
+    }
+    fire('pointerdown', originX, originY)
+    fire('pointermove', originX + 24, originY + 16)
+    fire('pointerup', originX + 24, originY + 16)
+  })
+  await expect
+    .poll(
+      async () => {
+        const current = await measureCropRegionBox(region)
+        return current.left > before.left && current.top > before.top
+      },
+      { timeout: 15_000, message: 'touch crop pan must move the crop box right and down' },
+    )
+    .toBe(true)
+  const after = await measureCropRegionBox(region)
+  expect(after.left).toBeGreaterThan(before.left)
+  expect(after.top).toBeGreaterThan(before.top)
+  return { before, after }
+}
+
+async function pinchCropZoom(crop: Locator): Promise<void> {
+  const region = crop.getByRole('group', { name: 'Crop region' })
+  const zoom = crop.getByRole('slider', { name: 'Image zoom' })
+  const before = Number(await zoom.inputValue())
+  await region.evaluate((element) => {
+    const rect = element.getBoundingClientRect()
+    const cx = rect.left + rect.width / 2
+    const cy = rect.top + rect.height / 2
+    const fire = (type: string, id: number, x: number, y: number) => {
+      element.dispatchEvent(new PointerEvent(type, {
+        pointerId: id,
+        pointerType: 'touch',
+        isPrimary: id === 1,
+        clientX: x,
+        clientY: y,
+        bubbles: true,
+        cancelable: true,
+        buttons: type === 'pointerup' ? 0 : 1,
+      }))
+    }
+    fire('pointerdown', 1, cx - 20, cy)
+    fire('pointerdown', 2, cx + 20, cy)
+    fire('pointermove', 2, cx + 80, cy)
+    fire('pointerup', 2, cx + 80, cy)
+    fire('pointerup', 1, cx - 20, cy)
+  })
+  await expect
+    .poll(
+      async () => Number(await zoom.inputValue()),
+      { timeout: 15_000, message: 'pinch must increase crop zoom' },
+    )
+    .toBeGreaterThan(before)
+}
+
 async function selectTextOccurrence(editor: Locator, text: string, occurrence = 0): Promise<void> {
   const found = await editor.evaluate(
     (root, target) => {
@@ -979,6 +1068,200 @@ test.describe('Inline description images (release gate)', () => {
 
     await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
     await expect(dialog).toBeHidden({ timeout: 20_000 })
+  })
+
+  test.describe('mobile inline image interactions', () => {
+    test.use({ viewport: { width: 375, height: 812 }, hasTouch: true, isMobile: true })
+
+    test('mobile inline image: touch crop, overflow, and 44px targets', async ({ page }) => {
+      test.setTimeout(240_000)
+
+      const email = process.env.E2E_REQUESTER_EMAIL as string
+      const password = process.env.E2E_REQUESTER_PASSWORD as string
+      const requestId = process.env.E2E_INLINE_REQUEST_ID as string
+
+      await login(page, email, password)
+      await expectMigrationApplied(page)
+
+      const dialog = await openResubmitDialog(page, requestId)
+      const editor = richEditor(dialog)
+      await expect(editor).toBeVisible({ timeout: 20_000 })
+      await editor.click()
+      await editor.press('Control+End')
+      await editor.type('Before ')
+
+      await imagePickerInput(dialog).setInputFiles(pngPath('inline-toolbar.png'))
+      const editorImg = stableImages(dialog).first()
+      await expect(editorImg).toBeVisible({ timeout: 20_000 })
+      await expectLoadedImage(editorImg)
+      await expect(editorImg).toHaveAttribute('data-layout', 'inline')
+      await expect(editorImg).toHaveAttribute('data-width', '160')
+
+      await editor.click()
+      await editor.press('End')
+      await editor.type(' after')
+
+      const inlineFlow = await measureInlineTextAndImage(editor)
+      expect(inlineFlow.sameParagraph, 'Before, image, and after must share one paragraph').toBe(true)
+      expect(inlineFlow.sameLine, 'Before/after must share a line with the image when 375px width permits').toBe(true)
+
+      const frame = await measureVisibleFrame(editorImg)
+      expect(frame.width).toBeLessThanOrEqual(160 + 1)
+      expect(frame.width).toBeGreaterThan(0)
+
+      let overflow = await measureViewportOverflow(page)
+      expect(overflow.scrollWidth, '375px viewport must not scroll horizontally').toBeLessThanOrEqual(overflow.innerWidth)
+
+      const toolbar = dialog.getByRole('toolbar', { name: 'Image actions' })
+      await editorImg.click()
+      await expect(toolbar).toBeVisible()
+      await expect(toolbar.getByRole('button', { name: 'Image layout inline' })).toBeVisible()
+      await expect(toolbar.getByRole('button', { name: 'Rotate image right' })).toBeVisible()
+
+      const viewport = page.viewportSize()
+      if (!viewport) throw new Error('Mobile viewport is missing')
+
+      const toolbarBox = await toolbar.boundingBox()
+      if (!toolbarBox) throw new Error('Image toolbar has no bounding box')
+      expect(
+        boxInsideViewport(toolbarBox, viewport.width, viewport.height),
+        'image toolbar must stay inside the viewport',
+      ).toBe(true)
+
+      const actionButtons = toolbar.getByRole('button')
+      const actionCount = await actionButtons.count()
+      expect(actionCount).toBeGreaterThan(0)
+      const actionBoxes: Array<{ x: number; y: number; width: number; height: number }> = []
+      for (let index = 0; index < actionCount; index += 1) {
+        const box = await actionButtons.nth(index).boundingBox()
+        if (!box) continue
+        expect(box.width, 'image action target width').toBeGreaterThanOrEqual(44)
+        expect(box.height, 'image action target height').toBeGreaterThanOrEqual(44)
+        actionBoxes.push(box)
+      }
+      for (let left = 0; left < actionBoxes.length; left += 1) {
+        for (let right = left + 1; right < actionBoxes.length; right += 1) {
+          const a = actionBoxes[left]
+          const b = actionBoxes[right]
+          const overlap = a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
+          expect(overlap, 'adjacent image actions must not overlap').toBe(false)
+          const sameRow = a.y < b.y + b.height && b.y < a.y + a.height
+          if (sameRow) {
+            const gap = a.x < b.x ? b.x - (a.x + a.width) : a.x - (b.x + b.width)
+            expect(gap, 'coarse-pointer toolbar gap').toBeGreaterThanOrEqual(8)
+          }
+        }
+      }
+
+      await toolbar.getByRole('button', { name: 'Rotate image right' }).click()
+      await expect(editorImg).toHaveAttribute('data-rotation', '90')
+
+      let crop = await enterCrop(dialog, editorImg)
+      const cropControls = crop.getByRole('group', { name: 'Crop controls' })
+      await expect(cropControls).toBeVisible()
+      const cropControlsBox = await cropControls.boundingBox()
+      if (!cropControlsBox) throw new Error('Crop controls have no bounding box')
+      expect(
+        boxInsideViewport(cropControlsBox, viewport.width, viewport.height),
+        'crop controls must stay inside the viewport',
+      ).toBe(true)
+
+      const scene = crop.locator('.inline-image-rotation-scene').first()
+      await expect(scene).toBeVisible()
+      const rotation = await scene.evaluate((element) => getComputedStyle(element).transform)
+      expect(rotation, 'rotated crop must show a 90deg visual orientation').not.toBe('none')
+      expect(await editorImg.getAttribute('data-rotation')).toBe('90')
+
+      const cropButtons = cropControls.getByRole('button')
+      const cropButtonCount = await cropButtons.count()
+      for (let index = 0; index < cropButtonCount; index += 1) {
+        const box = await cropButtons.nth(index).boundingBox()
+        if (!box) continue
+        expect(box.width, 'crop control target width').toBeGreaterThanOrEqual(44)
+        expect(box.height, 'crop control target height').toBeGreaterThanOrEqual(44)
+      }
+      const handles = crop.locator('.inline-image-crop-handle')
+      const handleCount = await handles.count()
+      expect(handleCount).toBeGreaterThan(0)
+      for (let index = 0; index < handleCount; index += 1) {
+        const box = await handles.nth(index).boundingBox()
+        if (!box) continue
+        expect(box.width, 'crop handle target width').toBeGreaterThanOrEqual(44)
+        expect(box.height, 'crop handle target height').toBeGreaterThanOrEqual(44)
+      }
+
+      await expect(crop.getByRole('button', { name: 'Apply crop' })).toBeVisible()
+      await expect(crop.getByRole('button', { name: 'Cancel crop' })).toBeVisible()
+      await expect(crop.getByRole('button', { name: 'Reset crop' })).toBeVisible()
+      await expect(dialog.getByRole('button', { name: 'Resubmit Request', exact: true })).toBeVisible()
+
+      const scrollBefore = await editor.evaluate((element) => {
+        let node: HTMLElement | null = element
+        while (node) {
+          const overflowY = getComputedStyle(node).overflowY
+          if (overflowY === 'auto' || overflowY === 'scroll') {
+            return { top: node.scrollTop, left: node.scrollLeft }
+          }
+          node = node.parentElement
+        }
+        return {
+          top: document.scrollingElement?.scrollTop ?? 0,
+          left: document.scrollingElement?.scrollLeft ?? 0,
+        }
+      })
+      await page.evaluate(() => window.getSelection()?.removeAllRanges())
+
+      const pan = await touchPanCropSurface(crop)
+      expect(pan.after.left).toBeGreaterThan(pan.before.left)
+      expect(pan.after.top).toBeGreaterThan(pan.before.top)
+
+      const scrollAfter = await editor.evaluate((element) => {
+        let node: HTMLElement | null = element
+        while (node) {
+          const overflowY = getComputedStyle(node).overflowY
+          if (overflowY === 'auto' || overflowY === 'scroll') {
+            return { top: node.scrollTop, left: node.scrollLeft }
+          }
+          node = node.parentElement
+        }
+        return {
+          top: document.scrollingElement?.scrollTop ?? 0,
+          left: document.scrollingElement?.scrollLeft ?? 0,
+        }
+      })
+      expect(scrollAfter.top).toBe(scrollBefore.top)
+      expect(scrollAfter.left).toBe(scrollBefore.left)
+      expect(await page.evaluate(() => window.getSelection()?.toString() ?? '')).toBe('')
+
+      await pinchCropZoom(crop)
+
+      await crop.getByRole('button', { name: 'Reset crop' }).click()
+      await expect(crop.getByRole('button', { name: 'Crop aspect original' })).toHaveAttribute('aria-pressed', 'true')
+      await crop.getByRole('button', { name: 'Cancel crop' }).click()
+      await expect(crop).toHaveCount(0)
+
+      crop = await enterCrop(dialog, editorImg)
+      await expect(crop.getByRole('button', { name: 'Apply crop' })).toBeVisible()
+      await crop.getByRole('button', { name: 'Apply crop' }).click()
+      await expect(crop).toHaveCount(0)
+
+      for (const width of [320, 414, 768] as const) {
+        await page.setViewportSize({ width, height: 812 })
+        overflow = await measureViewportOverflow(page)
+        expect(
+          overflow.scrollWidth,
+          `${width}px viewport must not scroll horizontally`,
+        ).toBeLessThanOrEqual(overflow.innerWidth)
+        const responsiveWidth = (await measureVisibleFrame(editorImg)).width
+        expect(responsiveWidth).toBeGreaterThan(0)
+        expect(responsiveWidth).toBeLessThanOrEqual(Math.min(160, overflow.innerWidth) + 1)
+        const stillSameParagraph = (await measureInlineTextAndImage(editor)).sameParagraph
+        expect(stillSameParagraph).toBe(true)
+      }
+
+      await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+      await expect(dialog).toBeHidden({ timeout: 20_000 })
+    })
   })
 
   test('scenarios 3, 5, 6, 8, and 9: crop lifecycle, persistence, palette round-trip, and responsive controls', async ({ page }) => {
