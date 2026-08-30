@@ -2,8 +2,11 @@ import sanitizeHtml from 'sanitize-html'
 import { decodeHTML, escapeText } from 'entities'
 import {
   computeInlineImageFrameGeometry,
+  INLINE_IMAGE_CROP_SCALE,
   materializeInlineImageDisplayWidth,
   parseInlineImagePresentation,
+  type InlineImageFrameGeometry,
+  type InlineImagePresentation,
 } from '@/lib/inline-images/presentation'
 import { inlineImageAltPlaceholder } from '@/lib/inline-images/policy'
 import { materializeRichTextPalette } from '@/lib/rich-text-palette'
@@ -37,44 +40,107 @@ function sanitizedImageAttributes(imageHtml: string): Record<string, string> {
   return attributes
 }
 
-function serializeGeometryNumber(value: number): string {
-  return String(value)
+const FULL_SOURCE_CROP = {
+  x: 0,
+  y: 0,
+  width: INLINE_IMAGE_CROP_SCALE,
+  height: INLINE_IMAGE_CROP_SCALE,
 }
 
-function materializeCroppedImages(sanitized: string): string {
+function serializeGeometryNumber(value: number): string | null {
+  return Number.isFinite(value) ? String(value) : null
+}
+
+function geometryDeclaration(name: string, value: number, unit: string): string | null {
+  const serialized = serializeGeometryNumber(value)
+  return serialized === null ? null : `${name}:${serialized}${unit}`
+}
+
+function joinStyle(parts: Array<string | null>): string {
+  return parts.filter((part): part is string => part !== null).join(';')
+}
+
+function unrotatedFallback(
+  imageHtml: string,
+  attributes: Record<string, string>,
+  presentation: InlineImagePresentation,
+): string {
+  const aligned = materializeInlineImageDisplayWidth(imageHtml, presentation.displayWidth)
+  if (presentation.layout !== 'inline') return aligned
+
+  const src = attributes.src ?? ''
+  const alt = attributes.alt ?? ''
+  const align = attributes['data-align'] ?? 'center'
+  const width = presentation.displayWidth
+  const frameStyle = width === null ? '' : ` style="width:${String(width)}px"`
+  const widthAttr = width === null ? '' : ` width="${String(width)}"`
+  return `<span class="rich-text__image-frame" data-layout="inline" data-align="${align}"${frameStyle}><img src="${src}" alt="${alt}"${widthAttr} /></span>`
+}
+
+function materializeTrustedImage(
+  attributes: Record<string, string>,
+  presentation: InlineImagePresentation,
+  geometry: InlineImageFrameGeometry,
+): string {
+  const src = attributes.src ?? ''
+  const alt = attributes.alt ?? ''
+  const align = attributes['data-align'] ?? 'center'
+  const layoutAttr = presentation.layout === 'inline' ? ' data-layout="inline"' : ''
+  const frameStyle = joinStyle([
+    geometryDeclaration('width', geometry.frameWidth, 'px'),
+    geometryDeclaration('aspect-ratio', geometry.aspectRatio, ''),
+  ])
+  const imageStyle = joinStyle([
+    geometryDeclaration('width', geometry.imageWidthPercent, '%'),
+    geometryDeclaration('height', geometry.imageHeightPercent, '%'),
+    geometryDeclaration('left', geometry.imageOffsetXPercent, '%'),
+    geometryDeclaration('top', geometry.imageOffsetYPercent, '%'),
+  ])
+  const image = `<img src="${src}" alt="${alt}" style="${imageStyle}" />`
+  if (geometry.rotation === 0) {
+    return `<span class="rich-text__image-frame"${layoutAttr} data-align="${align}" style="${frameStyle}">${image}</span>`
+  }
+
+  const sceneStyle = joinStyle([
+    geometryDeclaration('width', geometry.sceneWidth / geometry.frameWidth * 100, '%'),
+    geometryDeclaration('height', geometry.sceneHeight / geometry.frameHeight * 100, '%'),
+    geometryDeclaration('left', geometry.sceneOffsetX / geometry.frameWidth * 100, '%'),
+    geometryDeclaration('top', geometry.sceneOffsetY / geometry.frameHeight * 100, '%'),
+    `transform:rotate(${geometry.rotation}deg)`,
+  ])
+  return `<span class="rich-text__image-frame"${layoutAttr} data-align="${align}" style="${frameStyle}"><span class="rich-text__image-scene" style="${sceneStyle}">${image}</span></span>`
+}
+
+function materializeTrustedImages(sanitized: string): string {
   return sanitized.replace(SANITIZED_IMAGE_RE, (imageHtml) => {
     const attributes = sanitizedImageAttributes(imageHtml)
     const presentation = parseInlineImagePresentation(attributes)
-    if (presentation.crop === null) {
-      return materializeInlineImageDisplayWidth(imageHtml, presentation.displayWidth)
-    }
+    const crop = presentation.crop ?? (
+      presentation.rotation !== 0
+      && presentation.naturalWidth !== null
+      && presentation.naturalHeight !== null
+        ? FULL_SOURCE_CROP
+        : null
+    )
     if (
-      presentation.naturalWidth === null
+      crop === null
+      || presentation.naturalWidth === null
       || presentation.naturalHeight === null
     ) {
-      return imageHtml
+      return unrotatedFallback(imageHtml, attributes, presentation)
     }
 
     const geometry = computeInlineImageFrameGeometry({
-      crop: presentation.crop,
+      crop,
       naturalWidth: presentation.naturalWidth,
       naturalHeight: presentation.naturalHeight,
       displayWidth: presentation.displayWidth,
+      rotation: presentation.rotation,
     })
-    if (geometry === null) return imageHtml
-
-    const frameStyle = [
-      `width:${serializeGeometryNumber(geometry.frameWidth)}px`,
-      `aspect-ratio:${serializeGeometryNumber(geometry.aspectRatio)}`,
-    ].join(';')
-    const imageStyle = [
-      `width:${serializeGeometryNumber(geometry.imageWidthPercent)}%`,
-      `height:${serializeGeometryNumber(geometry.imageHeightPercent)}%`,
-      `left:${serializeGeometryNumber(geometry.imageOffsetXPercent)}%`,
-      `top:${serializeGeometryNumber(geometry.imageOffsetYPercent)}%`,
-    ].join(';')
-
-    return `<span class="rich-text__image-frame" data-align="${attributes['data-align']}" style="${frameStyle}"><img src="${attributes.src}" alt="${attributes.alt}" style="${imageStyle}" /></span>`
+    if (geometry === null) {
+      return unrotatedFallback(imageHtml, attributes, presentation)
+    }
+    return materializeTrustedImage(attributes, presentation, geometry)
   })
 }
 
@@ -82,7 +148,7 @@ function materializeCroppedImages(sanitized: string): string {
 export function materializeRichTextForApp(source: string): string {
   const sanitized = sanitizeRichText(source)
   const palette = materializeRichTextPalette(sanitized, 'app')
-  return materializeCroppedImages(palette)
+  return materializeTrustedImages(palette)
 }
 
 /**
