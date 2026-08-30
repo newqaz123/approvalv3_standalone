@@ -94,6 +94,15 @@ type SerializedImagePresentation = {
   cropY: string | null
   cropWidth: string | null
   cropHeight: string | null
+  layout: string | null
+  rotation: string | null
+}
+
+type CropRegionBox = {
+  left: number
+  top: number
+  width: number
+  height: number
 }
 
 /**
@@ -137,7 +146,7 @@ test.beforeAll(async () => {
   })
   if (missing.length > 0) {
     throw new Error(
-      `[inline-description-images] Missing required E2E environment variable(s): ${missing.join(', ')}. ` +
+      `BLOCKED_BROWSER_ENV [inline-description-images] Missing required E2E environment variable(s): ${missing.join(', ')}. ` +
         'This release gate does not skip — supply all ten variables to run it ' +
         '(TEST_BASE_URL, E2E_REQUESTER_EMAIL, E2E_REQUESTER_PASSWORD, E2E_INLINE_REQUEST_ID, ' +
         'E2E_INLINE_UNRELATED_EMAIL, E2E_INLINE_UNRELATED_PASSWORD, E2E_INLINE_ADMIN_EMAIL, ' +
@@ -253,7 +262,73 @@ async function serializedPresentation(img: Locator): Promise<SerializedImagePres
     cropY: await img.getAttribute('data-crop-y'),
     cropWidth: await img.getAttribute('data-crop-width'),
     cropHeight: await img.getAttribute('data-crop-height'),
+    layout: await img.getAttribute('data-layout'),
+    rotation: await img.getAttribute('data-rotation'),
   }
+}
+
+async function measureVisibleFrame(image: Locator): Promise<{ width: number; height: number; x: number }> {
+  return image.evaluate((element) => {
+    const visible = element.closest('.inline-image-crop-frame')
+      ?? element.closest('.inline-image-node-frame')
+      ?? element
+    const box = visible.getBoundingClientRect()
+    return { width: box.width, height: box.height, x: box.left }
+  })
+}
+
+async function measureCropRegionBox(region: Locator): Promise<CropRegionBox> {
+  const box = await region.boundingBox()
+  if (!box) throw new Error('Crop region has no bounding box')
+  return { left: box.x, top: box.y, width: box.width, height: box.height }
+}
+
+async function measureInlineTextAndImage(editor: Locator): Promise<{
+  sameParagraph: boolean
+  sameLine: boolean
+  beforeRight: number
+  imageLeft: number
+  imageRight: number
+  afterLeft: number
+}> {
+  return editor.evaluate((root) => {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+    let beforeNode: Text | null = null
+    let afterNode: Text | null = null
+    while (walker.nextNode()) {
+      const node = walker.currentNode as Text
+      const text = node.data
+      if (text.includes('Before') && !beforeNode) beforeNode = node
+      if (text.includes('after')) afterNode = node
+    }
+    const image = root.querySelector('[data-inline-image-node]')
+    if (!beforeNode || !afterNode || !(image instanceof HTMLElement)) {
+      throw new Error('Editor is missing Before/after text or the inline image')
+    }
+    const beforeParagraph = beforeNode.parentElement?.closest('p')
+    const afterParagraph = afterNode.parentElement?.closest('p')
+    const imageParagraph = image.closest('p')
+    const beforeRange = document.createRange()
+    const beforeIndex = Math.max(0, beforeNode.data.indexOf('Before'))
+    beforeRange.setStart(beforeNode, beforeIndex)
+    beforeRange.setEnd(beforeNode, beforeIndex + 'Before'.length)
+    const afterRange = document.createRange()
+    const afterIndex = Math.max(0, afterNode.data.indexOf('after'))
+    afterRange.setStart(afterNode, afterIndex)
+    afterRange.setEnd(afterNode, afterIndex + 'after'.length)
+    const beforeBox = beforeRange.getBoundingClientRect()
+    const afterBox = afterRange.getBoundingClientRect()
+    const imageBox = image.getBoundingClientRect()
+    const verticalOverlap = (a: DOMRect, b: DOMRect) => a.top < b.bottom && b.top < a.bottom
+    return {
+      sameParagraph: beforeParagraph === afterParagraph && afterParagraph === imageParagraph && beforeParagraph !== null,
+      sameLine: verticalOverlap(beforeBox, imageBox) && verticalOverlap(afterBox, imageBox),
+      beforeRight: beforeBox.right,
+      imageLeft: imageBox.left,
+      imageRight: imageBox.right,
+      afterLeft: afterBox.left,
+    }
+  })
 }
 
 async function dragResizeHandle(
@@ -328,23 +403,28 @@ async function increaseCropZoom(crop: Locator, steps = 8): Promise<string> {
   return value
 }
 
-async function panCropSurface(page: Page, crop: Locator): Promise<void> {
+async function panCropSurface(page: Page, crop: Locator): Promise<{ before: CropRegionBox; after: CropRegionBox }> {
   const region = crop.getByRole('group', { name: 'Crop region' })
-  const beforeStyle = await region.getAttribute('style')
-  const box = await region.boundingBox()
-  if (!box) throw new Error('Crop region has no bounding box for a real pan gesture')
-  const startX = box.x + box.width / 2
-  const startY = box.y + box.height / 2
+  const before = await measureCropRegionBox(region)
+  const startX = before.left + before.width / 2
+  const startY = before.top + before.height / 2
   await page.mouse.move(startX, startY)
   await page.mouse.down()
-  await page.mouse.move(startX + Math.min(24, box.width / 4), startY, { steps: 4 })
+  await page.mouse.move(startX + 24, startY + 16, { steps: 4 })
   await page.mouse.up()
   await expect
     .poll(
-      () => region.getAttribute('style'),
-      { timeout: 15_000, message: 'real crop pan must change the crop region' },
+      async () => {
+        const current = await measureCropRegionBox(region)
+        return current.left > before.left && current.top > before.top
+      },
+      { timeout: 15_000, message: 'real crop pan must move the crop box right and down' },
     )
-    .not.toBe(beforeStyle)
+    .toBe(true)
+  const after = await measureCropRegionBox(region)
+  expect(after.left).toBeGreaterThan(before.left)
+  expect(after.top).toBeGreaterThan(before.top)
+  return { before, after }
 }
 
 async function selectTextOccurrence(editor: Locator, text: string, occurrence = 0): Promise<void> {
@@ -666,6 +746,8 @@ test.describe('Inline description images (release gate)', () => {
     await canonicalSrc(toolbarImg)
     await expect(toolbarImg).toHaveAttribute('alt', 'inline-toolbar')
     await expect(toolbarImg).toHaveAttribute('data-align', 'center')
+    await expect(toolbarImg).toHaveAttribute('data-layout', 'inline')
+    await expect(toolbarImg).toHaveAttribute('data-width', '160')
     await expectNoDisposedCoordinatorError(dialog)
     expect(routes.uploads.filter((upload) => upload.kind === 'pass')).toHaveLength(1)
 
@@ -687,6 +769,8 @@ test.describe('Inline description images (release gate)', () => {
     await controls.getByLabel('Image alt text').fill('Renamed floor plan')
     await expect(toolbarImg).toHaveAttribute('alt', 'Renamed floor plan')
 
+    await controls.getByRole('button', { name: 'Image layout block' }).click()
+    await expect(controls.getByRole('button', { name: 'Image layout block' })).toHaveAttribute('aria-pressed', 'true')
     const alignRight = controls.getByRole('button', { name: 'Align right' })
     await alignRight.click()
     await expect(alignRight).toHaveAttribute('aria-pressed', 'true')
@@ -809,6 +893,94 @@ test.describe('Inline description images (release gate)', () => {
       .toBeGreaterThanOrEqual(deletesBeforeCancel + stableBeforeCancel)
   })
 
+  test('placement, rotation, and crop persist across editor and application view', async ({ page }) => {
+    test.setTimeout(240_000)
+
+    const email = process.env.E2E_REQUESTER_EMAIL as string
+    const password = process.env.E2E_REQUESTER_PASSWORD as string
+    const requestId = process.env.E2E_INLINE_REQUEST_ID as string
+
+    await login(page, email, password)
+    await expectMigrationApplied(page)
+
+    const dialog = await openResubmitDialog(page, requestId)
+    const editor = richEditor(dialog)
+    await expect(editor).toBeVisible({ timeout: 20_000 })
+    await editor.click()
+    await editor.press('Control+End')
+    await editor.type('Before ')
+
+    await imagePickerInput(dialog).setInputFiles(pngPath('inline-toolbar.png'))
+    const editorImg = stableImages(dialog).first()
+    await expect(editorImg).toBeVisible({ timeout: 20_000 })
+    await expectLoadedImage(editorImg)
+    await expect(editorImg).toHaveAttribute('data-layout', 'inline')
+    await expect(editorImg).toHaveAttribute('data-width', '160')
+
+    await editor.click()
+    await editor.press('End')
+    await editor.type(' after')
+
+    const inlineFlow = await measureInlineTextAndImage(editor)
+    expect(inlineFlow.sameParagraph, 'Before, image, and after must share one paragraph').toBe(true)
+    expect(inlineFlow.sameLine, 'Before/after must share a line with the image when width permits').toBe(true)
+    expect(inlineFlow.beforeRight).toBeLessThanOrEqual(inlineFlow.imageLeft + 2)
+    expect(inlineFlow.imageRight).toBeLessThanOrEqual(inlineFlow.afterLeft + 2)
+
+    const toolbar = dialog.getByRole('toolbar', { name: 'Image actions' })
+    await editorImg.click()
+    await expect(toolbar).toBeVisible()
+    const beforeRotate = await measureVisibleFrame(editorImg)
+    await toolbar.getByRole('button', { name: 'Rotate image right' }).click()
+    await expect(editorImg).toHaveAttribute('data-rotation', '90')
+    const afterRotate = await measureVisibleFrame(editorImg)
+    expect(Math.abs(afterRotate.width - beforeRotate.width)).toBeLessThanOrEqual(1)
+    expect(afterRotate.height).toBeGreaterThan(beforeRotate.height + 20)
+
+    let crop = await enterCrop(dialog, editorImg)
+    await chooseCropPreset(crop, '1:1')
+    const pan = await panCropSurface(page, crop)
+    expect(pan.after.left).toBeGreaterThan(pan.before.left)
+    expect(pan.after.top).toBeGreaterThan(pan.before.top)
+    await crop.getByRole('button', { name: 'Apply crop' }).click()
+    await expect(crop).toHaveCount(0)
+
+    const applied = await serializedPresentation(editorImg)
+    expect(applied.layout).toBe('inline')
+    expect(applied.rotation).toBe('90')
+    expect(applied.width).toBe('160')
+    for (const value of [applied.cropX, applied.cropY, applied.cropWidth, applied.cropHeight]) {
+      expect(value).toBeTruthy()
+    }
+
+    await editorImg.click()
+    await toolbar.getByRole('button', { name: 'Image layout block' }).click()
+    await expect(toolbar.getByRole('button', { name: 'Image layout block' })).toHaveAttribute('aria-pressed', 'true')
+    await toolbar.getByRole('button', { name: 'Align left' }).click()
+    const leftBox = await measureInlineImageAlignment(editorImg)
+    await toolbar.getByRole('button', { name: 'Align center' }).click()
+    const centerBox = await measureInlineImageAlignment(editorImg)
+    await toolbar.getByRole('button', { name: 'Align right' }).click()
+    const rightBox = await measureInlineImageAlignment(editorImg)
+    expect(leftBox.frameX).toBeLessThan(centerBox.frameX - 20)
+    expect(centerBox.frameX).toBeLessThan(rightBox.frameX - 20)
+
+    await toolbar.getByRole('button', { name: 'Image layout inline' }).click()
+    await expect(toolbar.getByRole('button', { name: 'Image layout inline' })).toHaveAttribute('aria-pressed', 'true')
+    const inlineX = (await measureVisibleFrame(editorImg)).x
+    await toolbar.getByRole('button', { name: 'Align left' }).click()
+    await toolbar.getByRole('button', { name: 'Align right' }).click()
+    expect(Math.abs((await measureVisibleFrame(editorImg)).x - inlineX)).toBeLessThanOrEqual(1)
+    await expect(editorImg).toHaveAttribute('data-align', 'right')
+
+    const editorScene = dialog.locator('.inline-image-rotation-scene').first()
+    await expect(editorScene).toBeVisible()
+    expect(await editorScene.evaluate((element) => getComputedStyle(element).transform)).not.toBe('none')
+
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(dialog).toBeHidden({ timeout: 20_000 })
+  })
+
   test('scenarios 3, 5, 6, 8, and 9: crop lifecycle, persistence, palette round-trip, and responsive controls', async ({ page }) => {
     test.setTimeout(300_000)
 
@@ -837,11 +1009,14 @@ test.describe('Inline description images (release gate)', () => {
     const editorImg = stableImages(dialog).first()
     await expect(editorImg).toBeVisible({ timeout: 20_000 })
     await expectLoadedImage(editorImg)
+    await expect(editorImg).toHaveAttribute('data-layout', 'inline')
+    await expect(editorImg).toHaveAttribute('data-width', '160')
     const resizedPresentation = await dragResizeHandle(page, dialog, editorImg)
     await expect(editorImg).toHaveAttribute('data-width', resizedPresentation.width as string)
 
     const toolbar = dialog.getByRole('toolbar', { name: 'Image actions' })
     await toolbar.getByLabel('Image alt text').fill('E2E committed inline image')
+    await toolbar.getByRole('button', { name: 'Image layout block' }).click()
     await toolbar.getByRole('button', { name: 'Align right' }).click()
     await expect(editorImg).toHaveAttribute('data-align', 'right')
     const baselinePresentation = await serializedPresentation(editorImg)
@@ -890,20 +1065,32 @@ test.describe('Inline description images (release gate)', () => {
     await expect(crop).toHaveCount(0)
     await expect(submitButton).toBeEnabled()
 
+    await editorImg.click()
+    await toolbar.getByRole('button', { name: 'Rotate image right' }).click()
+    await expect(editorImg).toHaveAttribute('data-rotation', '90')
+
     const savedPresentation = await serializedPresentation(editorImg)
     expect(savedPresentation.src).toBe(baselinePresentation.src)
     expect(savedPresentation.width).toBe(baselinePresentation.width)
     expect(savedPresentation.naturalWidth).toBe('320')
     expect(savedPresentation.naturalHeight).toBe('180')
+    expect(savedPresentation.rotation).toBe('90')
     for (const value of [savedPresentation.cropX, savedPresentation.cropY, savedPresentation.cropWidth, savedPresentation.cropHeight]) {
       expect(value).toBeTruthy()
     }
-    const editorCropFrame = editorImg.locator('xpath=..')
-    await expect(editorCropFrame).toHaveClass(/inline-image-crop-frame/)
+    const editorCropFrame = dialog.locator('.inline-image-crop-frame').first()
+    await expect(editorCropFrame).toBeVisible()
     const editorFrameStyle = await editorCropFrame.getAttribute('style')
     const editorCropImageStyle = await editorImg.getAttribute('style')
     expect(editorFrameStyle).toContain('aspect-ratio')
     expect(editorCropImageStyle).toContain('%')
+    const editorScene = dialog.locator('.inline-image-rotation-scene').first()
+    await expect(editorScene).toBeVisible()
+    const editorTransform = await editorScene.evaluate((element) => getComputedStyle(element).transform)
+    const editorFrameBox = await editorCropFrame.evaluate((element) => {
+      const box = element.getBoundingClientRect()
+      return { width: box.width, height: box.height }
+    })
 
     // ── 8. Every Calm Document token applies to semantic editor marks. ────
     const colorControls = dialog.locator('[aria-label="Text color and highlight controls"]')
@@ -952,7 +1139,7 @@ test.describe('Inline description images (release gate)', () => {
     await expect(detailImg).toHaveAttribute('src', savedPresentation.src)
     await expect(detailImg).toHaveAttribute('alt', 'E2E committed inline image')
     await expectLoadedImage(detailImg)
-    const savedFrame = detailImg.locator('xpath=..')
+    const savedFrame = detailImg.locator('xpath=ancestor::span[contains(@class,"rich-text__image-frame")]').first()
     await expect(savedFrame).toHaveAttribute('data-align', 'right')
     await expect(savedFrame).toHaveClass(/rich-text__image-frame/)
     expect(normalizedInlineStyle(await savedFrame.getAttribute('style'))).toBe(
@@ -961,6 +1148,16 @@ test.describe('Inline description images (release gate)', () => {
     expect(normalizedInlineStyle(await detailImg.getAttribute('style'))).toBe(
       normalizedInlineStyle(editorCropImageStyle),
     )
+    const savedScene = savedFrame.locator('.rich-text__image-scene').first()
+    await expect(savedScene).toBeVisible()
+    const savedTransform = await savedScene.evaluate((element) => getComputedStyle(element).transform)
+    expect(savedTransform).toBe(editorTransform)
+    const savedBox = await savedFrame.evaluate((element) => {
+      const box = element.getBoundingClientRect()
+      return { width: box.width, height: box.height }
+    })
+    expect(Math.abs(savedBox.width - editorFrameBox.width)).toBeLessThanOrEqual(2)
+    expect(Math.abs(savedBox.height - editorFrameBox.height)).toBeLessThanOrEqual(2)
     await expectMaterializedPalette(descriptionCard)
 
     const imageResponse = await page.request.get(savedPresentation.src)
