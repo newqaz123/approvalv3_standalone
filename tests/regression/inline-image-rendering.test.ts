@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { FormattedText } from '@/components/ui/formatted-text'
@@ -433,6 +434,98 @@ describe('resolveInlineImagesForPdf', () => {
     )
 
     assert.match(out, /data:image\/png;base64,[^"]*" alt="a" data-align="right"/)
+  })
+
+  it('embeds authorized bare images for left, center, and right data-align', async () => {
+    const pngBytes = Buffer.from('aligned-bare-png-bytes')
+    const ownedPath = 'inline-images/user1/123e4567-e89b-42d3-a456-426614174000-a.png'
+    const dataUri = `data:image/png;base64,${pngBytes.toString('base64')}`
+
+    for (const align of ['left', 'center', 'right'] as const) {
+      const { deps, queries, readPaths } = fakeDeps(
+        [asset(IMG_REQUEST, [{ kind: 'request', id: REQ_ID }])],
+        { bytes: new Map([[ownedPath, pngBytes]]) },
+      )
+
+      const out = await resolveInlineImagesForPdf(
+        {
+          html: `<p><img src="${src(IMG_REQUEST)}" alt="aligned plan" data-align="${align}" data-width="480"></p>`,
+          owner: requestOwner,
+        },
+        deps,
+      )
+
+      assert.match(
+        out,
+        new RegExp(`<img src="${dataUri.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}" alt="aligned plan" data-align="${align}" data-width="480" width="480" />`),
+      )
+      assert.doesNotMatch(out, /rich-text__image-frame|<img[^>]+style=/)
+      for (const other of (['left', 'center', 'right'] as const).filter((value) => value !== align)) {
+        assert.doesNotMatch(out, new RegExp(`data-align="${other}"`))
+      }
+      assert.ok(!out.includes(src(IMG_REQUEST)), 'internal URL must be replaced')
+      assert.equal(queries.length, 1)
+      assert.deepEqual(queries[0]!.owner, requestOwner)
+      assert.deepEqual(queries[0]!.imageIds, [IMG_REQUEST])
+      assert.deepEqual(readPaths, [ownedPath])
+    }
+  })
+
+  it('embeds authorized crop frames for left, center, and right data-align', async () => {
+    const pngBytes = Buffer.from('aligned-crop-png-bytes')
+    const ownedPath = 'inline-images/user1/123e4567-e89b-42d3-a456-426614174000-a.png'
+    const dataUri = `data:image/png;base64,${pngBytes.toString('base64')}`
+    const cropAttrs = 'data-width="480" data-natural-width="400" data-natural-height="400" data-crop-x="1000" data-crop-y="2000" data-crop-width="5000" data-crop-height="4000"'
+
+    for (const align of ['left', 'center', 'right'] as const) {
+      const owned = asset(
+        IMG_REQUEST,
+        [{ kind: 'request', id: REQ_ID }],
+        'image/png',
+        { width: 1600, height: 900 },
+      )
+      const originalAsset = { ...owned }
+      const { deps, queries, readPaths } = fakeDeps([Object.freeze(owned)], {
+        bytes: new Map([[ownedPath, pngBytes]]),
+      })
+
+      const out = await resolveInlineImagesForPdf(
+        {
+          html: `<p><img src="${src(IMG_REQUEST)}" alt="cropped plan" data-align="${align}" ${cropAttrs}></p>`,
+          owner: requestOwner,
+        },
+        deps,
+      )
+
+      assert.match(
+        out,
+        new RegExp(`<span class="rich-text__image-frame" data-align="${align}" style="width:480px;aspect-ratio:2\\.2222222222222223">`),
+      )
+      assert.match(
+        out,
+        new RegExp(`<img src="${dataUri.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}" alt="cropped plan" style="width:200%;height:250%;left:-20%;top:-50%" />`),
+      )
+      assert.doesNotMatch(out, /data-natural-width="400"|data-natural-height="400"/)
+      for (const other of (['left', 'center', 'right'] as const).filter((value) => value !== align)) {
+        assert.doesNotMatch(out, new RegExp(`data-align="${other}"`))
+      }
+      assert.deepEqual(owned, originalAsset, 'PDF resolution does not mutate the authorized row')
+      assert.equal(queries.length, 1)
+      assert.deepEqual(queries[0]!.owner, requestOwner)
+      assert.deepEqual(queries[0]!.imageIds, [IMG_REQUEST])
+      assert.deepEqual(readPaths, [ownedPath])
+    }
+  })
+
+  it('keeps PDF stylesheet left/center/right margins for bare images and crop frames', () => {
+    const pdf = readFileSync('src/lib/pdf.ts', 'utf8')
+
+    assert.match(pdf, /\.description img\[data-align='left'\] \{ margin-left: 0; margin-right: auto; \}/)
+    assert.match(pdf, /\.description img\[data-align='center'\] \{ margin-inline: auto; \}/)
+    assert.match(pdf, /\.description img\[data-align='right'\] \{ margin-left: auto; margin-right: 0; \}/)
+    assert.match(pdf, /\.description \.rich-text__image-frame\[data-align='left'\] \{ margin-left: 0; margin-right: auto; \}/)
+    assert.match(pdf, /\.description \.rich-text__image-frame\[data-align='center'\] \{ margin-inline: auto; \}/)
+    assert.match(pdf, /\.description \.rich-text__image-frame\[data-align='right'\] \{ margin-left: auto; margin-right: 0; \}/)
   })
 })
 
