@@ -113,6 +113,7 @@ function appImage(extra: string, align = 'center'): string {
 describe('application image placement and rotation output', () => {
   const cases = [
     { layout: 'inline', rotation: 0, cropped: false },
+    { layout: 'inline', rotation: 0, cropped: true },
     { layout: 'inline', rotation: 90, cropped: false },
     { layout: 'inline', rotation: 270, cropped: true },
     { layout: 'block', rotation: 180, cropped: true },
@@ -165,6 +166,34 @@ describe('application image placement and rotation output', () => {
       assert.match(html, new RegExp(`transform:rotate\\(${testCase.rotation}deg\\)`))
       assert.match(html, /class="rich-text__image-scene"/)
     }
+  })
+
+  it('keeps absolute crop offsets for unrotated inline cropped images', () => {
+    const html = materializeRichTextForApp(
+      `<p>before ${appImage(
+        ` data-layout="inline" data-width="160" data-natural-width="800" data-natural-height="600" data-crop-x="${PARTIAL_CROP.x}" data-crop-y="${PARTIAL_CROP.y}" data-crop-width="${PARTIAL_CROP.width}" data-crop-height="${PARTIAL_CROP.height}"`,
+      )} after</p>`,
+    )
+    const geometry = computeInlineImageFrameGeometry({
+      crop: PARTIAL_CROP,
+      naturalWidth: 800,
+      naturalHeight: 600,
+      displayWidth: 160,
+      rotation: 0,
+    })
+    assert.ok(geometry)
+    assert.match(html, /data-layout="inline"/)
+    assert.match(html, new RegExp(`left:${String(geometry.imageOffsetXPercent)}%`))
+    assert.match(html, new RegExp(`top:${String(geometry.imageOffsetYPercent)}%`))
+
+    const croppedDirectChild = /data-layout="inline"[^>]*>\s*<img[^>]*style="[^"]*left:/.test(html)
+    const css = read('src/app/globals.css')
+    const staticDirectInlineImg = /\.rich-text__image-frame\[data-layout='inline'\] > img \{[\s\S]*?position:\s*static/.test(css)
+    assert.equal(
+      croppedDirectChild && staticDirectInlineImg,
+      false,
+      'inline cropped rotation-0 images must keep absolute left/top crop; do not static-position every [data-layout=inline] > img',
+    )
   })
 
   it('strips stored style, class, and arbitrary rotation from generated application output', () => {
