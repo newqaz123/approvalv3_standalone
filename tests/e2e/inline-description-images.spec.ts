@@ -1196,7 +1196,7 @@ test.describe('Inline description images (release gate)', () => {
       await expect(dialog.getByRole('button', { name: 'Resubmit Request', exact: true })).toBeVisible()
 
       const scrollBefore = await editor.evaluate((element) => {
-        let node: HTMLElement | null = element
+        let node: Element | null = element
         while (node) {
           const overflowY = getComputedStyle(node).overflowY
           if (overflowY === 'auto' || overflowY === 'scroll') {
@@ -1216,7 +1216,7 @@ test.describe('Inline description images (release gate)', () => {
       expect(pan.after.top).toBeGreaterThan(pan.before.top)
 
       const scrollAfter = await editor.evaluate((element) => {
-        let node: HTMLElement | null = element
+        let node: Element | null = element
         while (node) {
           const overflowY = getComputedStyle(node).overflowY
           if (overflowY === 'auto' || overflowY === 'scroll') {

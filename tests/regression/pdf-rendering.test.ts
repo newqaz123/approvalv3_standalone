@@ -115,7 +115,10 @@ describe('compact approval evidence HTML', () => {
     assert.match(html, /\.description \.rich-text__image-frame\[data-align='left'\]/)
     assert.match(html, /\.description \.rich-text__image-frame\[data-align='center'\]/)
     assert.match(html, /\.description \.rich-text__image-frame\[data-align='right'\]/)
-    assert.match(html, /\.description \.rich-text__image-frame > img\s*\{[^}]*max-width:\s*none/)
+    assert.match(
+      html,
+      /\.description \.rich-text__image-frame > img,\s*\.description \.rich-text__image-scene > img\s*\{[^}]*max-width:\s*none/,
+    )
   })
 
   it('applies unambiguous left/center/right margins to bare images and crop frames', async () => {
