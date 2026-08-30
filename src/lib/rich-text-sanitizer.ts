@@ -11,6 +11,7 @@ import {
   normalizeRichTextAlignment,
   serializeRichTextAlignment,
 } from '@/lib/rich-text-align'
+import { normalizeTableVerticalAlign } from '@/lib/rich-table-vertical-align'
 import {
   isHighlightColorToken,
   isTextColorToken,
@@ -35,6 +36,19 @@ function alignedBlockTag(tagName: string, attribs: Record<string, string>) {
   }
 }
 
+const TABLE_CELL_ATTRS = ['colspan', 'rowspan', 'colwidth', 'data-colwidth'] as const
+
+/** Keeps structural cell metadata and only the validated vertical align token. */
+function tableCellTag(tagName: string, attribs: Record<string, string>) {
+  const next: Record<string, string> = {}
+  for (const key of TABLE_CELL_ATTRS) {
+    if (attribs[key] !== undefined) next[key] = attribs[key]
+  }
+  const verticalAlign = normalizeTableVerticalAlign(attribs['data-vertical-align'])
+  if (verticalAlign !== null) next['data-vertical-align'] = verticalAlign
+  return { tagName, attribs: next }
+}
+
 /** Whitelist-sanitize authored description HTML. Never throws. */
 export function sanitizeRichText(html: string): string {
   try {
@@ -50,8 +64,8 @@ export function sanitizeRichText(html: string): string {
         // Table structure. colspan/rowspan are TipTap's cell attributes;
         // colwidth/data-colwidth survive round-trips of tables pasted with
         // explicit column widths. Values are entity-escaped by sanitize-html.
-        th: ['colspan', 'rowspan', 'colwidth', 'data-colwidth'],
-        td: ['colspan', 'rowspan', 'colwidth', 'data-colwidth'],
+        th: ['colspan', 'rowspan', 'colwidth', 'data-colwidth', 'data-vertical-align'],
+        td: ['colspan', 'rowspan', 'colwidth', 'data-colwidth', 'data-vertical-align'],
         img: [
           'src',
           'alt',
@@ -98,6 +112,8 @@ export function sanitizeRichText(html: string): string {
         p: alignedBlockTag,
         h2: alignedBlockTag,
         h3: alignedBlockTag,
+        th: tableCellTag,
+        td: tableCellTag,
         img: (_tagName, attribs) => {
           const id = parseInlineImageSrc(attribs.src ?? '')
           if (!id) return { tagName: 'span', attribs: {} as Record<string, string> }

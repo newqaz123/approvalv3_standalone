@@ -14,6 +14,7 @@ import {
   RICH_TEXT_ALLOWED_TAGS,
   sanitizeRichText,
 } from '@/lib/rich-text-sanitizer'
+import { normalizeTableVerticalAlign } from '@/lib/rich-table-vertical-align'
 
 const SANITIZED_IMAGE_RE = /<img\b[^>]*>/gi
 const SANITIZED_ATTRIBUTE_RE = /(?:^|\s)([a-z][a-z0-9-]*)="([^"]*)"/gi
@@ -152,8 +153,16 @@ export function materializeRichTextForApp(source: string): string {
 }
 
 const EMAIL_TABLE_STYLE = 'border-collapse:collapse;width:100%;margin:8px 0'
-const EMAIL_TABLE_CELL_STYLE = 'border:1px solid #cbd5e1;padding:6px 8px;vertical-align:top'
+const EMAIL_TABLE_CELL_BOX_STYLE = 'border:1px solid #cbd5e1;padding:6px 8px'
+const EMAIL_TABLE_CELL_STYLE = `${EMAIL_TABLE_CELL_BOX_STYLE};vertical-align:top`
 const EMAIL_TABLE_HEADER_CELL_STYLE = `${EMAIL_TABLE_CELL_STYLE};background-color:#f1f5f9;text-align:left;font-weight:700`
+
+/** The authored vertical align replaces the default top alignment. */
+function emailTableCellStyle(baseStyle: string, attribs: Record<string, string>): string {
+  const verticalAlign = normalizeTableVerticalAlign(attribs['data-vertical-align'])
+  if (verticalAlign === null) return baseStyle
+  return baseStyle.replace('vertical-align:top', `vertical-align:${verticalAlign}`)
+}
 
 /**
  * Inline-styled trusted table markup for email clients that drop <style>.
@@ -172,11 +181,17 @@ function materializeTrustedTablesForEmail(sanitized: string): string {
       }),
       th: (tagName, attribs) => ({
         tagName,
-        attribs: { ...attribs, style: EMAIL_TABLE_HEADER_CELL_STYLE },
+        attribs: {
+          ...attribs,
+          style: emailTableCellStyle(EMAIL_TABLE_HEADER_CELL_STYLE, attribs),
+        },
       }),
       td: (tagName, attribs) => ({
         tagName,
-        attribs: { ...attribs, style: EMAIL_TABLE_CELL_STYLE },
+        attribs: {
+          ...attribs,
+          style: emailTableCellStyle(EMAIL_TABLE_CELL_STYLE, attribs),
+        },
       }),
     },
   })

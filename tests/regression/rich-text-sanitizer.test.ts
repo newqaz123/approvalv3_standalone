@@ -112,6 +112,26 @@ describe('sanitizeRichText', () => {
     assert.ok(out.includes('<td><p data-text-align="center">Mid</p></td>'))
   })
 
+  it('keeps validated vertical align tokens on table cells', () => {
+    for (const value of ['top', 'middle', 'bottom']) {
+      const out = sanitizeRichText(`<td colspan="2" data-vertical-align="${value}">c</td>`)
+      assert.ok(out.includes(`data-vertical-align="${value}"`), value)
+      assert.ok(out.includes('colspan="2"'), value)
+    }
+    assert.equal(
+      sanitizeRichText('<th data-vertical-align="middle">h</th>'),
+      '<th data-vertical-align="middle">h</th>',
+    )
+  })
+
+  it('strips invalid vertical align tokens while keeping structural attributes', () => {
+    for (const value of ['center', 'baseline', '<script>', '']) {
+      const out = sanitizeRichText(`<td data-vertical-align="${value}" rowspan="2">c</td>`)
+      assert.ok(!out.includes('data-vertical-align'), value)
+      assert.ok(out.includes('rowspan="2"'), value)
+    }
+  })
+
   it('keeps exact semantic tokens and strips arbitrary pasted color styles', () => {
     assert.equal(
       sanitizeRichText('<span data-text-color="blue" style="font-size:99px">A</span><span style="color:#ff00ff">B</span><mark data-highlight="yellow" class="x">C</mark>'),

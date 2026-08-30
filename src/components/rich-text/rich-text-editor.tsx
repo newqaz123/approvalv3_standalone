@@ -5,7 +5,10 @@ import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import Link from "@tiptap/extension-link";
 import FileHandler from "@tiptap/extension-file-handler";
-import { TableKit } from "@tiptap/extension-table";
+import {
+	RichTableKit,
+} from "@/components/rich-text/rich-table-extensions";
+import { RichTextTableHoverControls } from "@/components/rich-text/rich-text-table-hover-controls";
 import {
 	AlignCenter,
 	AlignLeft,
@@ -173,6 +176,7 @@ export default function RichTextEditor({
 		typeof createInlineImageCropCommandsController
 	> | null>(null);
 	const [cropCommandsDisabled, setCropCommandsDisabled] = useState(false);
+	const tableSurfaceRef = useRef<HTMLDivElement | null>(null);
 
 	inlineImagesRef.current = inlineImages;
 	disabledRef.current = disabled;
@@ -322,9 +326,9 @@ export default function RichTextEditor({
 			Underline,
 			...RICH_TEXT_COLOR_EXTENSIONS,
 			// Tables serialize to table/tbody/tr/th/td only; column resizing is
-			// off (the package default), so no colgroup/col/style output ever
-			// reaches the sanitizer.
-			TableKit.configure({ table: { resizable: false } }),
+			// off (explicit), so no colgroup/col/style output ever reaches the
+			// sanitizer. RichTableKit adds the curated vertical-align attribute.
+			RichTableKit,
 			Link.configure({ autolink: true, openOnClick: false }),
 			FileHandler.configure({
 				allowedMimeTypes: createInlineImageMimeFilter(() => canInsertImagesRef.current),
@@ -614,7 +618,14 @@ export default function RichTextEditor({
 					<Redo2 className="h-4 w-4" />
 				</ToolbarButton>
 			</div>
-			<EditorContent editor={editor} />
+			<div ref={tableSurfaceRef} className="relative">
+				<EditorContent editor={editor} />
+				<RichTextTableHoverControls
+					editor={editor}
+					disabled={commandsDisabled}
+					containerRef={tableSurfaceRef}
+				/>
+			</div>
 		</div>
 	);
 }

@@ -202,6 +202,21 @@ describe('trusted rich text presentation', () => {
     assert.doesNotMatch(html, /class=/)
   })
 
+  it('carries authored vertical align into email cell styles', () => {
+    const html = materializeRichTextForEmail(
+      '<table><tbody><tr><td data-vertical-align="middle">mid</td><td>top</td></tr></tbody></table>',
+    )
+
+    assert.match(
+      html,
+      /<td data-vertical-align="middle" style="border:1px solid #cbd5e1;padding:6px 8px;vertical-align:middle">mid<\/td>/,
+    )
+    assert.match(
+      html,
+      /<td style="border:1px solid #cbd5e1;padding:6px 8px;vertical-align:top">top<\/td>/,
+    )
+  })
+
   it('redacts image references inside table cells in email output', () => {
     const html = materializeRichTextForEmail(
       `<table><tbody><tr><td>See ${IMAGE_SRC} now</td><td>safe cell</td></tr></tbody></table>`,

@@ -339,6 +339,8 @@ export async function renderRequestEvidenceHTML(
     .description table { margin: 8px 0; table-layout: fixed; font-size: 11px; }
     .description th, .description td { border: 1px solid #cbd5e1; padding: 4px 8px; white-space: normal; }
     .description th { background: #f1f5f9; font-weight: 700; }
+    .description th[data-vertical-align='middle'], .description td[data-vertical-align='middle'] { vertical-align: middle; }
+    .description th[data-vertical-align='bottom'], .description td[data-vertical-align='bottom'] { vertical-align: bottom; }
     .description th p, .description td p { margin: 0; }
     .description tr { break-inside: avoid; page-break-inside: avoid; }
     .description .rich-text__image-frame {

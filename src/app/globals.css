@@ -73,6 +73,12 @@
   background: #f8fafc;
   font-weight: 600;
 }
+.rich-text th[data-vertical-align='top'],
+.rich-text td[data-vertical-align='top'] { vertical-align: top; }
+.rich-text th[data-vertical-align='middle'],
+.rich-text td[data-vertical-align='middle'] { vertical-align: middle; }
+.rich-text th[data-vertical-align='bottom'],
+.rich-text td[data-vertical-align='bottom'] { vertical-align: bottom; }
 .rich-text th > :first-child,
 .rich-text td > :first-child { margin-top: 0; }
 .rich-text th > :last-child,
@@ -87,6 +93,45 @@
   inset: 0;
   background: rgb(59 130 246 / 0.12);
   pointer-events: none;
+}
+
+/*
+ * Lexical-style table hover affordances. The overlay never intercepts
+ * pointer input; only its buttons and merge bar opt back in. Grips are
+ * pointer-only decorations (keyboard users get the toolbar menu).
+ */
+.rich-text-table-hover-controls {
+  pointer-events: none;
+}
+.rich-text-table-hover-button {
+  pointer-events: auto;
+  display: inline-flex;
+  height: 1.5rem;
+  width: 1.5rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.375rem;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #64748b;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.08);
+}
+.rich-text-table-hover-button:hover {
+  background: #f1f5f9;
+  color: #334155;
+}
+.rich-text-table-hover-grip,
+.rich-text-table-hover-grip > div {
+  cursor: grab;
+}
+.rich-text-table-hover-grip:active > div {
+  cursor: grabbing;
+}
+.rich-text-table-drop-indicator {
+  pointer-events: none;
+}
+.rich-text-table-hover-bar {
+  pointer-events: auto;
 }
 .rich-text__image-frame {
   position: relative;

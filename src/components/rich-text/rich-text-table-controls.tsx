@@ -1,7 +1,8 @@
 "use client";
 
-import { Table as TableIcon, ChevronDown, Trash2 } from "lucide-react";
+import { Table as TableIcon, ChevronDown, Trash2, Check } from "lucide-react";
 import { useEditorState, type Editor } from "@tiptap/react";
+import { cellAround } from "@tiptap/pm/tables";
 import { useRef, useState, type MouseEvent, type ReactNode } from "react";
 import {
 	Popover,
@@ -14,6 +15,12 @@ import {
 	TooltipProvider,
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+	moveTableColumnTo,
+	moveTableRowTo,
+	normalizeTableVerticalAlign,
+	selectionTableCell,
+} from "@/components/rich-text/rich-table-extensions";
 
 export type RichTextTableControlsProps = {
 	editor: Editor;
@@ -31,6 +38,9 @@ const MENU_DANGER_ITEM_CLASS =
 
 const MENU_DIVIDER_CLASS = "my-1 h-px border-0 bg-slate-200";
 
+const MENU_LABEL_CLASS =
+	"px-2 pt-1 text-[0.6875rem] font-semibold uppercase tracking-wide text-slate-400";
+
 const INSERT_TABLE_ARGS = { rows: 3, cols: 3, withHeaderRow: true } as const;
 
 type TableMenuItem = {
@@ -40,7 +50,15 @@ type TableMenuItem = {
 	danger?: boolean;
 };
 
+/** Vertical align of the cell the selection currently sits in. */
+function currentCellVerticalAlign(editor: Editor): string | null {
+	const cell = cellAround(editor.state.selection.$from);
+	const node = cell ? editor.state.doc.nodeAt(cell.pos) : null;
+	return normalizeTableVerticalAlign(node?.attrs.verticalAlign);
+}
+
 function tableMenuItems(editor: Editor): TableMenuItem[] {
+	const cell = selectionTableCell(editor);
 	return [
 		{
 			label: "Add column before",
@@ -72,10 +90,62 @@ function tableMenuItems(editor: Editor): TableMenuItem[] {
 			enabled: editor.can().deleteRow(),
 			run: (current) => current.chain().focus().deleteRow().run(),
 		},
+		// Keyboard-operable reorder path mirroring the drag handles.
+		{
+			label: "Move row up",
+			enabled:
+				cell !== null && cell.row > 0,
+			run: (current) => {
+				const info = selectionTableCell(current);
+				return info !== null
+					? moveTableRowTo(current, info.tableStart, info.row, info.row - 1)
+					: false;
+			},
+		},
+		{
+			label: "Move row down",
+			enabled: cell !== null && cell.row < cell.height - 1,
+			run: (current) => {
+				const info = selectionTableCell(current);
+				return info !== null
+					? moveTableRowTo(current, info.tableStart, info.row, info.row + 1)
+					: false;
+			},
+		},
+		{
+			label: "Move column left",
+			enabled: cell !== null && cell.col > 0,
+			run: (current) => {
+				const info = selectionTableCell(current);
+				return info !== null
+					? moveTableColumnTo(current, info.tableStart, info.col, info.col - 1)
+					: false;
+			},
+		},
+		{
+			label: "Move column right",
+			enabled: cell !== null && cell.col < cell.width - 1,
+			run: (current) => {
+				const info = selectionTableCell(current);
+				return info !== null
+					? moveTableColumnTo(current, info.tableStart, info.col, info.col + 1)
+					: false;
+			},
+		},
 		{
 			label: "Toggle header row",
 			enabled: editor.can().toggleHeaderRow(),
 			run: (current) => current.chain().focus().toggleHeaderRow().run(),
+		},
+		{
+			label: "Merge cells",
+			enabled: editor.can().mergeCells(),
+			run: (current) => current.chain().focus().mergeCells().run(),
+		},
+		{
+			label: "Split cell",
+			enabled: editor.can().splitCell(),
+			run: (current) => current.chain().focus().splitCell().run(),
 		},
 		{
 			label: "Delete table",
@@ -85,6 +155,12 @@ function tableMenuItems(editor: Editor): TableMenuItem[] {
 		},
 	];
 }
+
+const VERTICAL_ALIGN_OPTIONS = [
+	{ value: "top", label: "Align top" },
+	{ value: "middle", label: "Align middle" },
+	{ value: "bottom", label: "Align bottom" },
+] as const;
 
 function preventFocusTransfer(event: MouseEvent): void {
 	// Keeping focus off the menu buttons preserves the editor selection so a
@@ -126,6 +202,7 @@ export function RichTextTableControls({
 	const insideTable = editor.isActive("table");
 	const canInsertTable = editor.can().insertTable(INSERT_TABLE_ARGS);
 	const items = tableMenuItems(editor);
+	const activeVerticalAlign = currentCellVerticalAlign(editor);
 
 	function runItem(item: TableMenuItem) {
 		if (controlsDisabled || !item.enabled) return;
@@ -139,6 +216,21 @@ export function RichTextTableControls({
 	function insertTable() {
 		if (controlsDisabled || !canInsertTable) return;
 		if (editor.chain().focus().insertTable(INSERT_TABLE_ARGS).run()) {
+			returnFocusToEditor.current = true;
+			setOpen(false);
+			restoreEditorFocus(editor);
+		}
+	}
+
+	function setVerticalAlign(value: string | null) {
+		if (controlsDisabled || !insideTable) return;
+		if (
+			editor
+				.chain()
+				.focus()
+				.setCellAttribute("verticalAlign", value)
+				.run()
+		) {
 			returnFocusToEditor.current = true;
 			setOpen(false);
 			restoreEditorFocus(editor);
@@ -213,6 +305,50 @@ export function RichTextTableControls({
 							{item.label}
 						</button>
 					))}
+				</div>
+				<hr className={MENU_DIVIDER_CLASS} aria-hidden="true" />
+				<p className={MENU_LABEL_CLASS}>Vertical align</p>
+				<div>
+					{VERTICAL_ALIGN_OPTIONS.map((option) => {
+						const selected = activeVerticalAlign === option.value;
+						return (
+							<button
+								key={option.value}
+								type="button"
+								aria-label={option.label}
+								aria-pressed={selected}
+								disabled={controlsDisabled || !insideTable}
+								onPointerDown={preventFocusTransfer}
+								onMouseDown={preventFocusTransfer}
+								onClick={() => setVerticalAlign(option.value)}
+								className={MENU_ITEM_CLASS}
+							>
+								<Check
+									className={`h-3.5 w-3.5 shrink-0 ${selected ? "" : "invisible"}`}
+									aria-hidden="true"
+								/>
+								{option.label}
+							</button>
+						);
+					})}
+					<button
+						type="button"
+						aria-label="Default vertical align"
+						aria-pressed={activeVerticalAlign === null}
+						disabled={controlsDisabled || !insideTable}
+						onPointerDown={preventFocusTransfer}
+						onMouseDown={preventFocusTransfer}
+						onClick={() => setVerticalAlign(null)}
+						className={MENU_ITEM_CLASS}
+					>
+						<Check
+							className={`h-3.5 w-3.5 shrink-0 ${
+								activeVerticalAlign === null ? "" : "invisible"
+							}`}
+							aria-hidden="true"
+						/>
+						Default (top)
+					</button>
 				</div>
 			</PopoverContent>
 		</Popover>
