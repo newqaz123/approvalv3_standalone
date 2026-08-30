@@ -68,6 +68,8 @@
   padding: .375rem .5rem;
   vertical-align: top;
   text-align: left;
+  /* Anchor for the absolutely-positioned column-resize handle. */
+  position: relative;
 }
 .rich-text th {
   background: #f8fafc;
@@ -96,10 +98,38 @@
 }
 
 /*
+ * Column resizing (TipTap resizable tables): the handle hugs the right edge
+ * of each cell; the resize cursor applies to the whole editor while dragging.
+ */
+.rich-text .column-resize-handle {
+  position: absolute;
+  right: -2px;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+  background: rgb(59 130 246 / 0.55);
+  cursor: col-resize;
+  z-index: 4;
+}
+.rich-text.resize-cursor,
+.rich-text table.resize-cursor {
+  cursor: col-resize;
+}
+
+/*
  * Lexical-style table hover affordances. The overlay never intercepts
  * pointer input; only its buttons and merge bar opt back in. Grips are
  * pointer-only decorations (keyboard users get the toolbar menu).
  */
+/*
+ * Table menu: long item lists must scroll inside the viewport instead of
+ * pushing the vertical-align group below the fold.
+ */
+.rich-text-table-menu {
+  width: min(16rem, calc(100vw - 1rem));
+  max-height: min(28rem, calc(100svh - 2rem));
+  overflow-y: auto;
+}
 .rich-text-table-hover-controls {
   pointer-events: none;
 }

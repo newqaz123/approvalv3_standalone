@@ -17,6 +17,7 @@ import {
 } from '@/lib/inline-images/presentation'
 import { readInlineImageFile } from '@/lib/inline-images/storage'
 import { materializeRichTextPalette } from '@/lib/rich-text-palette'
+import { materializeTableCellWidths } from '@/lib/rich-text-presentation'
 import { containsRichTextHtml, sanitizeRichText } from '@/lib/rich-text-sanitizer'
 
 export type PdfInlineImageOwner =
@@ -202,7 +203,7 @@ export async function resolveInlineImagesForPdf(
     : renderFormattedTextHtml(input.html)
   const imageIds = extractInlineImageIds(sanitized)
   if (imageIds.length === 0) {
-    return materializeRichTextPalette(sanitized, 'pdf')
+    return materializeTableCellWidths(materializeRichTextPalette(sanitized, 'pdf'))
   }
 
   const dataUris = new Map<string, { dataUri: string; asset: PdfInlineImageAsset }>()
@@ -237,7 +238,9 @@ export async function resolveInlineImagesForPdf(
   // Materialize palette marks after authorization and byte resolution, before
   // adding generated crop-frame attributes; the image frame is trusted output,
   // not authored presentation input.
-  const paletteHtml = materializeRichTextPalette(sanitized, 'pdf')
+  const paletteHtml = materializeTableCellWidths(
+    materializeRichTextPalette(sanitized, 'pdf'),
+  )
   return paletteHtml.replace(IMG_TAG_RE, (tag) => {
     const imageId = imgSrcId(tag)
     const resolved = imageId ? dataUris.get(imageId) : undefined

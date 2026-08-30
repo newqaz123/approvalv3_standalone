@@ -149,7 +149,7 @@ function materializeTrustedImages(sanitized: string): string {
 export function materializeRichTextForApp(source: string): string {
   const sanitized = sanitizeRichText(source)
   const palette = materializeRichTextPalette(sanitized, 'app')
-  return materializeTrustedImages(palette)
+  return materializeTrustedImages(materializeTableCellWidths(palette))
 }
 
 const EMAIL_TABLE_STYLE = 'border-collapse:collapse;width:100%;margin:8px 0'
@@ -159,9 +159,51 @@ const EMAIL_TABLE_HEADER_CELL_STYLE = `${EMAIL_TABLE_CELL_STYLE};background-colo
 
 /** The authored vertical align replaces the default top alignment. */
 function emailTableCellStyle(baseStyle: string, attribs: Record<string, string>): string {
+  let style = baseStyle
   const verticalAlign = normalizeTableVerticalAlign(attribs['data-vertical-align'])
-  if (verticalAlign === null) return baseStyle
-  return baseStyle.replace('vertical-align:top', `vertical-align:${verticalAlign}`)
+  if (verticalAlign !== null) {
+    style = style.replace('vertical-align:top', `vertical-align:${verticalAlign}`)
+  }
+  const width = cellWidthStyle(attribs)
+  if (width !== null) style += `;${width}`
+  return style
+}
+
+const TABLE_COLWIDTH_RE = /^\d{1,4}(?:,\d{1,4})*$/
+
+/**
+ * Stored cell column width (TipTap colwidth attribute) as an inline style.
+ * Multi-value widths belong to colspan spans; skip them rather than guess.
+ */
+function cellWidthStyle(attribs: Record<string, string>): string | null {
+  const raw = attribs.colwidth
+  if (!raw || !TABLE_COLWIDTH_RE.test(raw)) return null
+  const parts = raw.split(',')
+  if (parts.length !== 1) return null
+  const px = Number.parseInt(parts[0]!, 10)
+  if (!Number.isFinite(px) || px <= 0) return null
+  return `width:${px}px`
+}
+
+/**
+ * Honors stored column widths on app/PDF output. Everything passes through
+ * untouched (trusted post-sanitizer markup, including palette styles); only
+ * th/td gain a width style.
+ */
+export function materializeTableCellWidths(sanitized: string): string {
+  return sanitizeHtml(sanitized, {
+    allowedTags: [...RICH_TEXT_ALLOWED_TAGS],
+    allowedAttributes: false,
+    transformTags: {
+      '*': (tagName, attribs) => {
+        if (tagName !== 'th' && tagName !== 'td') return { tagName, attribs }
+        const width = cellWidthStyle(attribs)
+        return width === null
+          ? { tagName, attribs }
+          : { tagName, attribs: { ...attribs, style: width } }
+      },
+    },
+  })
 }
 
 /**

@@ -117,6 +117,14 @@ function findFirstNode(
 }
 
 describe('RichTableKit vertical align schema', () => {
+  it('enables column resizing so stored colwidths persist', () => {
+    const source = readFileSync(
+      'src/components/rich-text/rich-table-extensions.ts',
+      'utf8',
+    )
+    assert.match(source, /Table\.configure\(\{ resizable: true \}\)/)
+  })
+
   it('normalizes only the curated vertical align tokens', () => {
     assert.equal(normalizeTableVerticalAlign('middle'), 'middle')
     assert.equal(normalizeTableVerticalAlign('top'), 'top')

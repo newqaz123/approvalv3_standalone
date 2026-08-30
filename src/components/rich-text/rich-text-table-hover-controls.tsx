@@ -36,6 +36,8 @@ type HoverState = {
 	tableRect: Rect;
 	rowRect: Rect;
 	cellRect: Rect;
+	wrapperWidth: number;
+	wrapperHeight: number;
 };
 
 type DragState = { kind: "row" | "col"; from: number; tableStart: number };
@@ -127,6 +129,8 @@ export function RichTextTableHoverControls({
 				tableRect: relativeTo(tableEl.getBoundingClientRect(), containerRect),
 				rowRect: relativeTo(rowEl.getBoundingClientRect(), containerRect),
 				cellRect: relativeTo(cellEl.getBoundingClientRect(), containerRect),
+				wrapperWidth: containerRect.width,
+				wrapperHeight: containerRect.height,
 			};
 		},
 		[containerRef, editor],
@@ -134,8 +138,22 @@ export function RichTextTableHoverControls({
 
 	const updateHover = useCallback(
 		(clientX: number, clientY: number): HoverState | null => {
-			const coords = editor.view.posAtCoords({ left: clientX, top: clientY });
-			const cell = coords ? hoveredTableCellAt(editor, coords.pos) : null;
+			// DOM hit-testing first: posAtCoords snaps boundary positions to the
+			// previous cell, which mis-highlights rows when hovering top edges.
+			let cell: HoveredTableCell | null = null;
+			const hit = document.elementFromPoint(clientX, clientY);
+			const cellEl = hit?.closest("td, th");
+			if (cellEl && containerRef.current?.contains(cellEl)) {
+				try {
+					cell = hoveredTableCellAt(editor, editor.view.posAtDOM(cellEl, 0));
+				} catch {
+					cell = null;
+				}
+			}
+			if (!cell) {
+				const coords = editor.view.posAtCoords({ left: clientX, top: clientY });
+				cell = coords ? hoveredTableCellAt(editor, coords.pos) : null;
+			}
 			if (!cell) {
 				// Grace zone: moving toward the gutter buttons leaves the table,
 				// but the controls must survive so they can actually be clicked.
@@ -202,14 +220,17 @@ export function RichTextTableHoverControls({
 					y: event.clientY - containerRect.top,
 				};
 				if (pointerInTableGraceZone(pointer, current.tableRect, HOVER_GRACE_MARGIN)) {
-					// Project gutter movement back onto the table so the row and
-					// column controls track the pointer while it slides along them.
+					// Inside the table: track normally. In the gutter: project the
+					// movement back onto the table so the row and column controls
+					// track the pointer while it slides along them.
 					const table = current.tableRect;
 					const insideX =
 						pointer.x >= table.left && pointer.x <= table.left + table.width;
 					const insideY =
 						pointer.y >= table.top && pointer.y <= table.top + table.height;
-					if (!insideX || !insideY) {
+					if (insideX && insideY) {
+						updateHover(event.clientX, event.clientY);
+					} else {
 						updateHover(
 							containerRect.left + (insideX ? pointer.x : table.left + table.width / 2),
 							containerRect.top + (insideY ? pointer.y : table.top + table.height / 2),
@@ -311,8 +332,23 @@ export function RichTextTableHoverControls({
 
 	if (disabled) return null;
 
-	const showHoverControls = hover !== null && drag === null;
+// The overlay must stay mounted while dragging: unmounting the source
+	// grip inside the dragstart handler makes the browser cancel the drag.
+	const showHoverControls = hover !== null;
 	const activeHover = hover;
+	// Column-control centers clamp inside the frame so the rightmost column's
+	// grip (offset +26px) can never spill past the editor edge. These are only
+	// read when showHoverControls is true (activeHover non-null).
+	const colCenterRaw = hover ? hover.cellRect.left + hover.cellRect.width / 2 : 0;
+	const wrapperWidth = hover ? hover.wrapperWidth : 0;
+	const colCenter = Math.min(
+		Math.max(14, colCenterRaw),
+		Math.max(14, wrapperWidth - 40),
+	);
+	const colGripLeft = Math.min(
+		Math.max(14, colCenterRaw + 26),
+		Math.max(14, wrapperWidth - 14),
+	);
 
 	return (
 		<div ref={controlsRef} className="rich-text-table-hover-controls absolute inset-0 z-10">
@@ -324,8 +360,8 @@ export function RichTextTableHoverControls({
 						aria-label="Insert column after this column"
 						className="rich-text-table-hover-button absolute z-20 -translate-x-1/2"
 						style={{
-							left: activeHover.cellRect.left + activeHover.cellRect.width / 2,
-							top: activeHover.tableRect.top - 30,
+							left: colCenter,
+							top: Math.max(2, activeHover.tableRect.top - 30),
 						}}
 						onMouseDown={(event) => event.preventDefault()}
 						onClick={() => insertColumnRightAt(editor, activeHover.cell)}
@@ -336,8 +372,8 @@ export function RichTextTableHoverControls({
 						aria-hidden="true"
 						className="rich-text-table-hover-button rich-text-table-hover-grip absolute z-20 -translate-x-1/2"
 						style={{
-							left: activeHover.cellRect.left + activeHover.cellRect.width / 2 + 26,
-							top: activeHover.tableRect.top - 30,
+							left: colGripLeft,
+							top: Math.max(2, activeHover.tableRect.top - 30),
 						}}
 					>
 						<div
@@ -360,7 +396,7 @@ export function RichTextTableHoverControls({
 						aria-label="Insert row below this row"
 						className="rich-text-table-hover-button absolute z-20"
 						style={{
-							left: activeHover.tableRect.left - 62,
+							left: Math.max(2, activeHover.tableRect.left - 62),
 							top:
 								activeHover.rowRect.top + activeHover.rowRect.height / 2 - 12,
 						}}
@@ -373,7 +409,7 @@ export function RichTextTableHoverControls({
 						aria-hidden="true"
 						className="rich-text-table-hover-button rich-text-table-hover-grip absolute z-20"
 						style={{
-							left: activeHover.tableRect.left - 32,
+							left: Math.max(30, activeHover.tableRect.left - 32),
 							top:
 								activeHover.rowRect.top + activeHover.rowRect.height / 2 - 12,
 						}}
@@ -398,8 +434,11 @@ export function RichTextTableHoverControls({
 						aria-label="Add row at end of table"
 						className="rich-text-table-hover-button absolute z-20"
 						style={{
-							left: activeHover.tableRect.left - 28,
-							top: activeHover.tableRect.top + activeHover.tableRect.height + 6,
+							left: Math.max(2, activeHover.tableRect.left - 28),
+							top: Math.min(
+								activeHover.tableRect.top + activeHover.tableRect.height + 6,
+								activeHover.wrapperHeight - 28,
+							),
 						}}
 						onMouseDown={(event) => event.preventDefault()}
 						onClick={() => appendTableRow(editor, activeHover.cell)}

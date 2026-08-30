@@ -289,24 +289,6 @@ export function RichTextTableControls({
 					Insert table
 				</button>
 				<hr className={MENU_DIVIDER_CLASS} aria-hidden="true" />
-				<div>
-					{items.map((item) => (
-						<button
-							key={item.label}
-							type="button"
-							aria-label={item.label}
-							disabled={controlsDisabled || !item.enabled}
-							onPointerDown={preventFocusTransfer}
-							onMouseDown={preventFocusTransfer}
-							onClick={() => runItem(item)}
-							className={item.danger ? MENU_DANGER_ITEM_CLASS : MENU_ITEM_CLASS}
-						>
-							<TableMenuIcon danger={item.danger} />
-							{item.label}
-						</button>
-					))}
-				</div>
-				<hr className={MENU_DIVIDER_CLASS} aria-hidden="true" />
 				<p className={MENU_LABEL_CLASS}>Vertical align</p>
 				<div>
 					{VERTICAL_ALIGN_OPTIONS.map((option) => {
@@ -349,6 +331,24 @@ export function RichTextTableControls({
 						/>
 						Default (top)
 					</button>
+				</div>
+				<hr className={MENU_DIVIDER_CLASS} aria-hidden="true" />
+				<div>
+					{items.map((item) => (
+						<button
+							key={item.label}
+							type="button"
+							aria-label={item.label}
+							disabled={controlsDisabled || !item.enabled}
+							onPointerDown={preventFocusTransfer}
+							onMouseDown={preventFocusTransfer}
+							onClick={() => runItem(item)}
+							className={item.danger ? MENU_DANGER_ITEM_CLASS : MENU_ITEM_CLASS}
+						>
+							<TableMenuIcon danger={item.danger} />
+							{item.label}
+						</button>
+					))}
 				</div>
 			</PopoverContent>
 		</Popover>

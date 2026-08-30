@@ -174,6 +174,25 @@ describe('trusted rich text presentation', () => {
     assert.equal(adjacentInline, '<p>Before [redacted] and [redacted] after</p>')
   })
 
+  it('honors stored cell column widths in app output', () => {
+    const html = materializeRichTextForApp(
+      '<table><tbody><tr><td colspan="1" rowspan="1" colwidth="331">a</td><td>b</td></tr></tbody></table>',
+    )
+
+    assert.match(html, /<td colspan="1" rowspan="1" colwidth="331" style="width:331px">a<\/td>/)
+    assert.match(html, /<td>b<\/td>/)
+  })
+
+  it('skips multi-value colwidth spans and palette styles survive the width pass', () => {
+    const html = materializeRichTextForApp(
+      '<table><tbody><tr><td colwidth="331,120">a</td></tr></tbody></table><p><span data-text-color="blue">colored</span></p>',
+    )
+
+    assert.doesNotMatch(html, /colwidth="331,120" style=/)
+    assert.match(html, /<td colwidth="331,120">a<\/td>/)
+    assert.match(html, /<span style="color:#1D4ED8">colored<\/span>/)
+  })
+
   it('keeps table structure intact through the app materializer', () => {
     const html = materializeRichTextForApp(
       '<table><tbody><tr><th colspan="2">Header</th></tr><tr><td>a</td><td>b</td></tr></tbody></table>',
@@ -200,6 +219,17 @@ describe('trusted rich text presentation', () => {
       /<td style="border:1px solid #cbd5e1;padding:6px 8px;vertical-align:top">a<\/td>/,
     )
     assert.doesNotMatch(html, /class=/)
+  })
+
+  it('carries stored column widths into email cell styles', () => {
+    const html = materializeRichTextForEmail(
+      '<table><tbody><tr><td colwidth="250" data-vertical-align="middle">a</td><td>b</td></tr></tbody></table>',
+    )
+
+    assert.match(
+      html,
+      /<td colwidth="250" data-vertical-align="middle" style="border:1px solid #cbd5e1;padding:6px 8px;vertical-align:middle;width:250px">a<\/td>/,
+    )
   })
 
   it('carries authored vertical align into email cell styles', () => {
