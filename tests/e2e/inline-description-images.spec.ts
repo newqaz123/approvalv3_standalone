@@ -1053,20 +1053,27 @@ test.describe('Inline description images (release gate)', () => {
     await expect(submitButton).toBeDisabled()
     await expect(dialog.getByText(EDIT_BLOCKING_MESSAGE, { exact: true })).toBeVisible()
 
-    // Reset returns to Original/zoom 1, then a non-full crop is applied.
+    // Reset returns to Original/zoom 1. Cancel this session so the committed
+    // crop is applied later in the rotated view (spec: crop what you see).
     await increaseCropZoom(crop, 4)
     await crop.getByRole('button', { name: 'Reset crop' }).click()
     await expect(crop.getByRole('button', { name: 'Crop aspect original' })).toHaveAttribute('aria-pressed', 'true')
     await expect(crop.getByRole('slider', { name: 'Image zoom' })).toHaveValue('1')
+    await crop.getByRole('button', { name: 'Cancel crop' }).click()
+    await expect(crop).toHaveCount(0)
+    await expect(submitButton).toBeEnabled()
+
+    await editorImg.click()
+    await toolbar.getByRole('button', { name: 'Rotate image right' }).click()
+    await expect(editorImg).toHaveAttribute('data-rotation', '90')
+
+    crop = await enterCrop(dialog, editorImg)
     await chooseCropPreset(crop, '4:3')
     await increaseCropZoom(crop, 4)
     await panCropSurface(page, crop)
     await crop.getByRole('button', { name: 'Apply crop' }).click()
     await expect(crop).toHaveCount(0)
     await expect(submitButton).toBeEnabled()
-
-    await editorImg.click()
-    await toolbar.getByRole('button', { name: 'Rotate image right' }).click()
     await expect(editorImg).toHaveAttribute('data-rotation', '90')
 
     const savedPresentation = await serializedPresentation(editorImg)
