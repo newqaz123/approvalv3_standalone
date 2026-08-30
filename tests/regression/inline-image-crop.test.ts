@@ -61,6 +61,8 @@ function presentation(overrides: Partial<InlineImagePresentation> = {}): InlineI
     naturalWidth: NATURAL_WIDTH,
     naturalHeight: NATURAL_HEIGHT,
     crop: null,
+    layout: 'block',
+    rotation: 0,
     ...overrides,
   }
 }
@@ -496,6 +498,8 @@ describe('inline image crop session lifecycle', () => {
         naturalWidth: NATURAL_WIDTH,
         naturalHeight: NATURAL_HEIGHT,
         crop: { x: 0, y: 0, width: 10_001, height: 100 },
+        layout: 'block',
+        rotation: 0,
       },
       decodedDimensions: null,
       coordinator,
@@ -512,7 +516,7 @@ describe('inline image crop session lifecycle', () => {
     const cropCommands = createInlineImageCropCommandsController()
     const result = startInlineImageCropSession({
       src: IMAGE_SRC,
-      presentation: { displayWidth: 480, naturalWidth: null, naturalHeight: null, crop: null },
+      presentation: { displayWidth: 480, naturalWidth: null, naturalHeight: null, crop: null, layout: 'block', rotation: 0 },
       decodedDimensions: null,
       coordinator,
       cropCommands,
@@ -529,7 +533,7 @@ describe('inline image crop session lifecycle', () => {
     const { coordinator } = spyCoordinator()
     const result = startInlineImageCropSession({
       src: IMAGE_SRC,
-      presentation: { displayWidth: 480, naturalWidth: null, naturalHeight: null, crop: null },
+      presentation: { displayWidth: 480, naturalWidth: null, naturalHeight: null, crop: null, layout: 'block', rotation: 0 },
       decodedDimensions: { width: 640, height: 480 },
       coordinator,
     })
@@ -560,7 +564,7 @@ describe('inline image crop session lifecycle', () => {
     const { coordinator, begun } = spyCoordinator()
     const result = startInlineImageCropSession({
       src: IMAGE_SRC,
-      presentation: { displayWidth: 480, naturalWidth: null, naturalHeight: null, crop: null },
+      presentation: { displayWidth: 480, naturalWidth: null, naturalHeight: null, crop: null, layout: 'block', rotation: 0 },
       decodedDimensions: { width: 640.5, height: 480 },
       coordinator,
     })
@@ -663,6 +667,8 @@ describe('inline image crop editor integration', () => {
         naturalWidth: NATURAL_WIDTH,
         naturalHeight: NATURAL_HEIGHT,
         crop: null,
+        layout: 'block',
+        rotation: 0,
       }
       const draft = zoomInlineImageCrop(createInlineImageCropDraft(snapshot), 4)
       const attrs = inlineImageCropApplyAttributes({
@@ -713,6 +719,8 @@ describe('inline image crop editor integration', () => {
           naturalWidth: NATURAL_WIDTH,
           naturalHeight: NATURAL_HEIGHT,
           crop: { x: 1000, y: 2000, width: 5000, height: 4000 },
+          layout: 'block',
+          rotation: 0,
         },
         decodedDimensions: null,
         coordinator,

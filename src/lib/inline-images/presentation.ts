@@ -1,3 +1,12 @@
+import {
+  canonicalCropToVisualCrop,
+  normalizeInlineImageRotation,
+  rotatedInlineImageDimensions,
+  type InlineImageRotation,
+} from '@/lib/inline-images/rotation'
+
+export type { InlineImageRotation } from '@/lib/inline-images/rotation'
+
 export type NormalizedInlineImageCrop = {
   x: number
   y: number
@@ -5,11 +14,15 @@ export type NormalizedInlineImageCrop = {
   height: number
 }
 
+export type InlineImageLayout = 'inline' | 'block'
+
 export type InlineImagePresentation = {
   displayWidth: number | null
   naturalWidth: number | null
   naturalHeight: number | null
   crop: NormalizedInlineImageCrop | null
+  layout: InlineImageLayout
+  rotation: InlineImageRotation
 }
 
 export type InlineImageFrameGeometry = {
@@ -20,10 +33,16 @@ export type InlineImageFrameGeometry = {
   imageHeightPercent: number
   imageOffsetXPercent: number
   imageOffsetYPercent: number
+  sceneWidth: number
+  sceneHeight: number
+  sceneOffsetX: number
+  sceneOffsetY: number
+  rotation: InlineImageRotation
 }
 
 export const INLINE_IMAGE_MIN_DISPLAY_WIDTH = 80
 export const INLINE_IMAGE_MAX_DISPLAY_WIDTH = 2048
+export const INLINE_IMAGE_DEFAULT_INLINE_WIDTH = 160
 export const INLINE_IMAGE_CROP_SCALE = 10_000
 
 const INLINE_IMAGE_MAX_NATURAL_DIMENSION = 65_535
@@ -62,6 +81,10 @@ function isValidCrop(crop: NormalizedInlineImageCrop): boolean {
     && crop.y + crop.height <= INLINE_IMAGE_CROP_SCALE
 }
 
+function parseInlineImageLayout(value: string | null | undefined): InlineImageLayout {
+  return value === 'inline' ? 'inline' : 'block'
+}
+
 export function parseInlineImagePresentation(
   attributes: Record<string, string | null | undefined>,
 ): InlineImagePresentation {
@@ -98,7 +121,14 @@ export function parseInlineImagePresentation(
     }
   }
 
-  return { displayWidth, naturalWidth, naturalHeight, crop }
+  return {
+    displayWidth,
+    naturalWidth,
+    naturalHeight,
+    crop,
+    layout: parseInlineImageLayout(attributes['data-layout']),
+    rotation: normalizeInlineImageRotation(attributes['data-rotation']),
+  }
 }
 
 export function serializeInlineImagePresentation(
@@ -129,6 +159,15 @@ export function serializeInlineImagePresentation(
       attributes['data-crop-width'] = String(presentation.crop.width)
       attributes['data-crop-height'] = String(presentation.crop.height)
     }
+  }
+
+  if (presentation.layout === 'inline') {
+    attributes['data-layout'] = 'inline'
+  }
+
+  const rotation = normalizeInlineImageRotation(presentation.rotation)
+  if (rotation !== 0) {
+    attributes['data-rotation'] = String(rotation)
   }
 
   return attributes
@@ -234,6 +273,7 @@ export function computeInlineImageFrameGeometry(input: {
   naturalWidth: number
   naturalHeight: number
   displayWidth: number | null
+  rotation?: InlineImageRotation
 }): InlineImageFrameGeometry | null {
   if (!isValidCrop(input.crop)) return null
   if (!isValidNaturalDimension(input.naturalWidth) || !isValidNaturalDimension(input.naturalHeight)) {
@@ -247,19 +287,39 @@ export function computeInlineImageFrameGeometry(input: {
     return null
   }
 
-  const aspectRatio = cropAspectRatio(input)
+  const rotation = normalizeInlineImageRotation(input.rotation ?? 0)
+  const visualCrop = canonicalCropToVisualCrop(input.crop, rotation)
+  const rotatedNatural = rotatedInlineImageDimensions(
+    input.naturalWidth,
+    input.naturalHeight,
+    rotation,
+  )
+  const aspectRatio = cropAspectRatio({
+    crop: visualCrop,
+    naturalWidth: rotatedNatural.width,
+    naturalHeight: rotatedNatural.height,
+  })
   if (!Number.isFinite(aspectRatio) || aspectRatio <= 0) return null
 
-  const physicalCropWidth = input.crop.width / INLINE_IMAGE_CROP_SCALE * input.naturalWidth
+  const physicalCropWidth = visualCrop.width / INLINE_IMAGE_CROP_SCALE * rotatedNatural.width
   const frameWidth = input.displayWidth ?? physicalCropWidth
+  const frameHeight = frameWidth / aspectRatio
+  const swapScene = rotation === 90 || rotation === 270
+  const sceneWidth = swapScene ? frameHeight : frameWidth
+  const sceneHeight = swapScene ? frameWidth : frameHeight
 
   return {
     frameWidth,
-    frameHeight: frameWidth / aspectRatio,
+    frameHeight,
     aspectRatio,
     imageWidthPercent: INLINE_IMAGE_CROP_SCALE / input.crop.width * 100,
     imageHeightPercent: INLINE_IMAGE_CROP_SCALE / input.crop.height * 100,
     imageOffsetXPercent: -input.crop.x / input.crop.width * 100,
     imageOffsetYPercent: -input.crop.y / input.crop.height * 100,
+    sceneWidth,
+    sceneHeight,
+    sceneOffsetX: (frameWidth - sceneWidth) / 2,
+    sceneOffsetY: (frameHeight - sceneHeight) / 2,
+    rotation,
   }
 }

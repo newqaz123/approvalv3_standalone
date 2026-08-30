@@ -173,6 +173,25 @@ describe('sanitizeRichText', () => {
     assert.ok(out.includes('data-align="center"'))
   })
 
+  it('keeps semantic layout and rotation and strips arbitrary transforms', () => {
+    const out = sanitizeRichText('<p><img src="/api/inline-images/123e4567-e89b-42d3-a456-426614174000" alt="Plan" data-align="center" data-layout="inline" data-rotation="90" style="transform:rotate(12deg)" class="evil"></p>')
+    assert.ok(out.includes('<img'))
+    assert.ok(out.includes('src="/api/inline-images/123e4567-e89b-42d3-a456-426614174000"'))
+    assert.ok(out.includes('data-layout="inline"'))
+    assert.ok(out.includes('data-rotation="90"'))
+    assert.ok(!out.includes('style='))
+    assert.ok(!out.includes('class='))
+    assert.ok(!out.includes('rotate(12deg)'))
+  })
+
+  it('drops invalid layout and rotation while keeping the canonical image', () => {
+    const out = sanitizeRichText('<img src="/api/inline-images/123e4567-e89b-42d3-a456-426614174000" alt="Plan" data-layout="float-left" data-rotation="45deg">')
+    assert.ok(out.includes('<img'))
+    assert.ok(out.includes('src="/api/inline-images/123e4567-e89b-42d3-a456-426614174000"'))
+    assert.ok(!out.includes('data-layout='))
+    assert.ok(!out.includes('data-rotation='))
+  })
+
   it('never throws on garbage input', () => {
     assert.doesNotThrow(() => sanitizeRichText('<<<>>><p'))
     assert.doesNotThrow(() => sanitizeRichText(''))

@@ -347,6 +347,8 @@ export function inlineImageCropApplyAttributes(input: {
     naturalWidth: input.naturalWidth,
     naturalHeight: input.naturalHeight,
     crop: isFullCrop(input.draft.crop) ? null : input.draft.crop,
+    layout: 'block',
+    rotation: 0,
   }))
 
   return {

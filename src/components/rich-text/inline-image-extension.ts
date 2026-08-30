@@ -116,6 +116,8 @@ export function inlineImageNodePresentation(
     naturalWidth: finiteNumberOrNull(attrs.naturalWidth),
     naturalHeight: finiteNumberOrNull(attrs.naturalHeight),
     crop: hasCrop ? { x: cropX, y: cropY, width: cropWidth, height: cropHeight } : null,
+    layout: 'block',
+    rotation: 0,
   }
 }
 

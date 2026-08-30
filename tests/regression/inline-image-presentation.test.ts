@@ -51,6 +51,8 @@ describe('inline image presentation metadata', () => {
       naturalWidth: 1,
       naturalHeight: 65535,
       crop: null,
+      layout: 'block',
+      rotation: 0,
     })
 
     for (const attributes of [
@@ -76,6 +78,8 @@ describe('inline image presentation metadata', () => {
       naturalWidth: 1600,
       naturalHeight: 900,
       crop: { x: 1000, y: 2000, width: 5000, height: 4000 },
+      layout: 'block',
+      rotation: 0,
     })
 
     assert.deepEqual(parseInlineImagePresentation({
@@ -102,6 +106,8 @@ describe('inline image presentation metadata', () => {
       naturalWidth: 1600,
       naturalHeight: 900,
       crop: null,
+      layout: 'block',
+      rotation: 0,
     })
 
     for (const overrides of [
@@ -132,6 +138,8 @@ describe('inline image presentation metadata', () => {
       naturalWidth: 1600,
       naturalHeight: 900,
       crop: { x: 1000, y: 2000, width: 5000, height: 4000 },
+      layout: 'block',
+      rotation: 0,
     })
 
     assert.deepEqual(Object.entries(serialized), [
@@ -149,6 +157,8 @@ describe('inline image presentation metadata', () => {
       naturalWidth: 1600,
       naturalHeight: null,
       crop: { x: 0, y: 0, width: 10000, height: 10000 },
+      layout: 'block',
+      rotation: 0,
     }), {})
   })
 
@@ -162,6 +172,60 @@ describe('inline image presentation metadata', () => {
       'data-width': '480',
       ...VALID_CROP_ATTRIBUTES,
     })
+  })
+
+  it('defaults missing layout to block and missing rotation to 0', () => {
+    assert.deepEqual(parseInlineImagePresentation({}), {
+      displayWidth: null,
+      naturalWidth: null,
+      naturalHeight: null,
+      crop: null,
+      layout: 'block',
+      rotation: 0,
+    })
+  })
+
+  it('parses allowlisted layout and quarter-turn rotation', () => {
+    const parsed = parseInlineImagePresentation({
+      'data-layout': 'inline',
+      'data-rotation': '270',
+    })
+    assert.equal(parsed.layout, 'inline')
+    assert.equal(parsed.rotation, 270)
+  })
+
+  it('drops invalid layout and rotation instead of serializing them', () => {
+    assert.deepEqual(
+      sanitizeInlineImagePresentationAttributes({
+        'data-layout': 'float-left',
+        'data-rotation': '45deg',
+      }),
+      {},
+    )
+  })
+
+  it('serializes only explicit inline layout and nonzero rotation', () => {
+    assert.deepEqual(serializeInlineImagePresentation({
+      displayWidth: 160,
+      naturalWidth: null,
+      naturalHeight: null,
+      crop: null,
+      layout: 'inline',
+      rotation: 90,
+    }), {
+      'data-width': '160',
+      'data-layout': 'inline',
+      'data-rotation': '90',
+    })
+
+    assert.deepEqual(serializeInlineImagePresentation({
+      displayWidth: null,
+      naturalWidth: null,
+      naturalHeight: null,
+      crop: null,
+      layout: 'block',
+      rotation: 0,
+    }), {})
   })
 })
 
@@ -236,6 +300,11 @@ describe('inline image pure geometry', () => {
       imageHeightPercent: 250,
       imageOffsetXPercent: -20,
       imageOffsetYPercent: -50,
+      sceneWidth: 480,
+      sceneHeight: 216,
+      sceneOffsetX: 0,
+      sceneOffsetY: 0,
+      rotation: 0,
     })
 
     assert.deepEqual(computeInlineImageFrameGeometry({
@@ -251,6 +320,11 @@ describe('inline image pure geometry', () => {
       imageHeightPercent: 250,
       imageOffsetXPercent: -20,
       imageOffsetYPercent: -50,
+      sceneWidth: 800,
+      sceneHeight: 360,
+      sceneOffsetX: 0,
+      sceneOffsetY: 0,
+      rotation: 0,
     })
   })
 
@@ -263,5 +337,38 @@ describe('inline image pure geometry', () => {
     ]) {
       assert.equal(computeInlineImageFrameGeometry(input), null)
     }
+  })
+
+  it('uses rotated crop aspect and centered scene geometry for quarter turns', () => {
+    const crop = { x: 0, y: 0, width: 5000, height: 10000 }
+    const unrotated = computeInlineImageFrameGeometry({
+      crop,
+      naturalWidth: 800,
+      naturalHeight: 600,
+      displayWidth: 200,
+      rotation: 0,
+    })
+    assert.equal(unrotated?.frameWidth, 200)
+    assert.equal(unrotated?.frameHeight, 300)
+    assert.equal(unrotated?.sceneWidth, 200)
+    assert.equal(unrotated?.sceneHeight, 300)
+    assert.equal(unrotated?.sceneOffsetX, 0)
+    assert.equal(unrotated?.sceneOffsetY, 0)
+    assert.equal(unrotated?.rotation, 0)
+
+    const rotated = computeInlineImageFrameGeometry({
+      crop,
+      naturalWidth: 800,
+      naturalHeight: 600,
+      displayWidth: 200,
+      rotation: 90,
+    })
+    assert.equal(rotated?.frameWidth, 200)
+    assert.equal(rotated?.frameHeight, 200 / 1.5)
+    assert.equal(rotated?.sceneWidth, rotated?.frameHeight)
+    assert.equal(rotated?.sceneHeight, rotated?.frameWidth)
+    assert.equal(rotated?.sceneOffsetX, (200 - (200 / 1.5)) / 2)
+    assert.equal(rotated?.sceneOffsetY, ((200 / 1.5) - 200) / 2)
+    assert.equal(rotated?.rotation, 90)
   })
 })

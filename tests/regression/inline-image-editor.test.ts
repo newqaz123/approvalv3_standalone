@@ -552,6 +552,8 @@ describe('inline image crop editor contract', () => {
           naturalWidth: 1600,
           naturalHeight: 900,
           crop: null,
+          layout: 'block',
+          rotation: 0,
         }),
         4,
       )

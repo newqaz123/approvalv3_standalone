@@ -44,6 +44,8 @@ export function sanitizeRichText(html: string): string {
           'data-crop-y',
           'data-crop-width',
           'data-crop-height',
+          'data-layout',
+          'data-rotation',
         ],
       },
       allowedSchemes: ['http', 'https', 'mailto'],
