@@ -117,4 +117,15 @@ describe('compact approval evidence HTML', () => {
     assert.match(html, /\.description \.rich-text__image-frame\[data-align='right'\]/)
     assert.match(html, /\.description \.rich-text__image-frame > img\s*\{[^}]*max-width:\s*none/)
   })
+
+  it('applies unambiguous left/center/right margins to bare images and crop frames', async () => {
+    const html = await renderRequestEvidenceHTML(sampleData)
+
+    assert.match(html, /\.description img\[data-align='left'\] \{ margin-left: 0; margin-right: auto; \}/)
+    assert.match(html, /\.description img\[data-align='center'\] \{ margin-inline: auto; \}/)
+    assert.match(html, /\.description img\[data-align='right'\] \{ margin-left: auto; margin-right: 0; \}/)
+    assert.match(html, /\.description \.rich-text__image-frame\[data-align='left'\] \{ margin-left: 0; margin-right: auto; \}/)
+    assert.match(html, /\.description \.rich-text__image-frame\[data-align='center'\] \{ margin-inline: auto; \}/)
+    assert.match(html, /\.description \.rich-text__image-frame\[data-align='right'\] \{ margin-left: auto; margin-right: 0; \}/)
+  })
 })

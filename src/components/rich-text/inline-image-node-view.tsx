@@ -659,7 +659,7 @@ export function InlineImageNodeView({
       as="span"
       data-inline-image-node="true"
       data-align={align}
-      className="inline-block max-w-full align-middle"
+      className="block w-full max-w-full"
     >
       {isStable ? (
         <InlineImageNodeFrame

@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { Editor, type JSONContent } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import { FileHandlePlugin } from '@tiptap/extension-file-handler'
@@ -684,5 +685,73 @@ describe('inline image editor contract', () => {
     } finally {
       editor.destroy()
     }
+  })
+})
+
+function cssRule(source: string, selector: string): string {
+  const match = source.match(new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{[^}]*\\}`))
+  assert.ok(match, `missing CSS rule for ${selector}`)
+  return match[0]
+}
+
+describe('inline image editor row alignment', () => {
+  it('gives the node view a full-width row and shrink-wraps the visible frame', () => {
+    const nodeView = readFileSync('src/components/rich-text/inline-image-node-view.tsx', 'utf8')
+    const css = readFileSync('src/app/globals.css', 'utf8')
+
+    const wrapper = nodeView.match(/<NodeViewWrapper[\s\S]*?>/)
+    assert.ok(wrapper, 'NodeViewWrapper opening tag must exist')
+    assert.match(
+      wrapper[0],
+      /className="block w-full max-w-full"/,
+      'the node wrapper must be a block full-width editor row',
+    )
+    assert.doesNotMatch(wrapper[0], /inline-block/, 'the row must not shrink-wrap as inline-block')
+
+    const frame = cssRule(css, '.inline-image-node-frame')
+    assert.match(frame, /display:\s*block;/)
+    assert.match(frame, /width:\s*fit-content;/)
+    assert.match(frame, /max-width:\s*100%;/)
+
+    assert.match(cssRule(css, ".inline-image-node-frame[data-align='left']"), /margin-right:\s*auto;/)
+    assert.match(cssRule(css, ".inline-image-node-frame[data-align='center']"), /margin-inline:\s*auto;/)
+    assert.match(cssRule(css, ".inline-image-node-frame[data-align='right']"), /margin-left:\s*auto;/)
+
+    assert.match(nodeView, /data-crop-active="true"/)
+    assert.match(nodeView, /className="inline-image-node-frame"/)
+  })
+
+  it('keeps sanitizer, app, and PDF alignment selectors equivalent for bare and cropped images', () => {
+    const css = readFileSync('src/app/globals.css', 'utf8')
+    const pdf = readFileSync('src/lib/pdf.ts', 'utf8')
+
+    assert.equal(
+      sanitizeRichText(`<img src="${IMAGE_SRC}" alt="diagram" data-align="left">`),
+      `<img src="${IMAGE_SRC}" alt="diagram" data-align="left" />`,
+    )
+    assert.equal(
+      sanitizeRichText(`<img src="${IMAGE_SRC}" alt="diagram" data-align="center">`),
+      `<img src="${IMAGE_SRC}" alt="diagram" data-align="center" />`,
+    )
+    assert.equal(
+      sanitizeRichText(`<img src="${IMAGE_SRC}" alt="diagram" data-align="right">`),
+      `<img src="${IMAGE_SRC}" alt="diagram" data-align="right" />`,
+    )
+
+    for (const source of [css, pdf]) {
+      assert.match(source, /img\[data-align='left'\]\s*\{[^}]*margin-right:\s*auto;/)
+      assert.match(source, /img\[data-align='center'\]\s*\{[^}]*margin-inline:\s*auto;/)
+      assert.match(source, /img\[data-align='right'\]\s*\{[^}]*margin-left:\s*auto;/)
+      assert.match(source, /\.rich-text__image-frame\[data-align='left'\]\s*\{[^}]*margin-right:\s*auto;/)
+      assert.match(source, /\.rich-text__image-frame\[data-align='center'\]\s*\{[^}]*margin-inline:\s*auto;/)
+      assert.match(source, /\.rich-text__image-frame\[data-align='right'\]\s*\{[^}]*margin-left:\s*auto;/)
+    }
+
+    assert.match(pdf, /\.description img\[data-align='left'\]\s*\{\s*margin-left:\s*0;\s*margin-right:\s*auto;\s*\}/)
+    assert.match(pdf, /\.description img\[data-align='center'\]\s*\{\s*margin-inline:\s*auto;\s*\}/)
+    assert.match(pdf, /\.description img\[data-align='right'\]\s*\{\s*margin-left:\s*auto;\s*margin-right:\s*0;\s*\}/)
+    assert.match(pdf, /\.description \.rich-text__image-frame\[data-align='left'\]\s*\{\s*margin-left:\s*0;\s*margin-right:\s*auto;\s*\}/)
+    assert.match(pdf, /\.description \.rich-text__image-frame\[data-align='center'\]\s*\{\s*margin-inline:\s*auto;\s*\}/)
+    assert.match(pdf, /\.description \.rich-text__image-frame\[data-align='right'\]\s*\{\s*margin-left:\s*auto;\s*margin-right:\s*0;\s*\}/)
   })
 })

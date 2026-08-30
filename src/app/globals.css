@@ -80,6 +80,7 @@
 .inline-image-node-frame {
   position: relative;
   display: block;
+  width: fit-content;
   max-width: 100%;
   margin-block: 0.75rem;
 }

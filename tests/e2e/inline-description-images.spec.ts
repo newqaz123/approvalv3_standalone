@@ -202,6 +202,47 @@ function stableImages(scope: LocatorScope): Locator {
   return scope.locator('[data-inline-image-node] img')
 }
 
+type InlineImageAlignmentBox = {
+  align: string | null
+  frameX: number
+  frameRight: number
+  frameCenter: number
+  frameWidth: number
+  nodeX: number
+  nodeRight: number
+  nodeCenter: number
+  nodeWidth: number
+  editorWidth: number
+}
+
+/** Live bounding boxes for the full-width node row and shrink-wrapped frame. */
+async function measureInlineImageAlignment(image: Locator): Promise<InlineImageAlignmentBox> {
+  return image.evaluate((element) => {
+    const visible = element.closest('.inline-image-crop-frame') ?? element
+    const frame = element.closest('.inline-image-node-frame')
+    const node = element.closest('[data-inline-image-node]')
+    const editor = element.closest('.rich-text')
+    if (!(frame instanceof HTMLElement) || !(node instanceof HTMLElement) || !(editor instanceof HTMLElement)) {
+      throw new Error('Image is missing its editor row or visible frame')
+    }
+    const frameBox = frame.getBoundingClientRect()
+    const nodeBox = node.getBoundingClientRect()
+    const editorBox = editor.getBoundingClientRect()
+    return {
+      align: frame.getAttribute('data-align'),
+      frameX: frameBox.left,
+      frameRight: frameBox.right,
+      frameCenter: frameBox.left + frameBox.width / 2,
+      frameWidth: visible.getBoundingClientRect().width,
+      nodeX: nodeBox.left,
+      nodeRight: nodeBox.right,
+      nodeCenter: nodeBox.left + nodeBox.width / 2,
+      nodeWidth: nodeBox.width,
+      editorWidth: editorBox.width,
+    }
+  })
+}
+
 async function serializedPresentation(img: Locator): Promise<SerializedImagePresentation> {
   return {
     src: await canonicalSrc(img),
@@ -651,12 +692,30 @@ test.describe('Inline description images (release gate)', () => {
     await expect(alignRight).toHaveAttribute('aria-pressed', 'true')
     await expect(toolbarImg).toHaveAttribute('data-align', 'right')
     await expect(inlineImageNodes(dialog).first()).toHaveAttribute('data-align', 'right')
+    const rightBox = await measureInlineImageAlignment(toolbarImg)
+    expect(rightBox.align).toBe('right')
 
     const alignLeft = controls.getByRole('button', { name: 'Align left' })
     await alignLeft.click()
     await expect(toolbarImg).toHaveAttribute('data-align', 'left')
+    const leftBox = await measureInlineImageAlignment(toolbarImg)
+    expect(leftBox.align).toBe('left')
+
     await controls.getByRole('button', { name: 'Align center' }).click()
     await expect(toolbarImg).toHaveAttribute('data-align', 'center')
+    const centerBox = await measureInlineImageAlignment(toolbarImg)
+    expect(centerBox.align).toBe('center')
+
+    const paddingTolerance = 40
+    for (const box of [leftBox, centerBox, rightBox]) {
+      expect(box.nodeWidth, 'the node row must span the editor').toBeGreaterThan(box.editorWidth * 0.85)
+      expect(box.frameWidth, 'the visible frame must shrink-wrap the image').toBeLessThan(box.nodeWidth - 80)
+    }
+    expect(leftBox.frameX - leftBox.nodeX).toBeLessThan(paddingTolerance)
+    expect(Math.abs(centerBox.frameCenter - centerBox.nodeCenter)).toBeLessThan(paddingTolerance)
+    expect(rightBox.nodeRight - rightBox.frameRight).toBeLessThan(paddingTolerance)
+    expect(leftBox.frameX).toBeLessThan(centerBox.frameX - 40)
+    expect(centerBox.frameX).toBeLessThan(rightBox.frameX - 40)
 
     // ── 2. Paste and drop each invoke the same upload route ─────────────────
     // Insertion happens at the current selection, so nodes are identified by
