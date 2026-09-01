@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { AlertCircle, FileText, File } from "lucide-react";
+import { AlertCircle, FileText, File, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -14,12 +14,12 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { FormattedText } from "@/components/ui/formatted-text";
 import { visibleFormattedText } from "@/lib/formatted-text";
+import { describeUploadProgress } from "@/lib/attachments/upload-progress";
 
 interface FileWithProgress {
 	file: File;
 	id: string;
 	status: "pending" | "uploading" | "success" | "error";
-	progress: number;
 	error?: string;
 }
 
@@ -49,6 +49,7 @@ export function SolutionPreview({
 	isSubmitting,
 }: SolutionPreviewProps) {
 	const [showFullDescription, setShowFullDescription] = useState(false);
+	const uploadSummary = describeUploadProgress(data.files ?? []);
 	const descriptionTooLong =
 		Array.from(visibleFormattedText(data.description)).length > 300;
 
@@ -188,8 +189,9 @@ export function SolutionPreview({
 													{(file.size / 1024 / 1024).toFixed(2)} MB
 												</p>
 												{isUploading && (
-													<p className="text-xs text-blue-600 mt-1">
-														Uploading... {fileItem.progress}%
+													<p className="flex items-center gap-1.5 text-xs text-blue-600 mt-1">
+														<Loader2 className="h-3 w-3 animate-spin" />
+														{uploadSummary?.label ?? "Uploading..."}
 													</p>
 												)}
 												{isError && (

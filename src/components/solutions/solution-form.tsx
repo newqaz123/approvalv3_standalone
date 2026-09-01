@@ -262,7 +262,6 @@ export function SolutionForm({
         file: item.file,
         id: item.id,
         status: item.status,
-        progress: item.status === 'success' ? 100 : 0,
         error: item.error,
       })),
   }
