@@ -1,11 +1,13 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import { Upload, File, FileImage, FileText, X, RotateCcw } from 'lucide-react'
+import { Upload, File, FileImage, FileText, X, RotateCcw, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Progress } from '@/components/ui/progress'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import type { AttachmentUploadItem } from '@/lib/attachments/upload-batch'
+import { describeUploadProgress } from '@/lib/attachments/upload-progress'
 import {
   MAX_ATTACHMENT_BYTES,
   MAX_ATTACHMENTS_PER_FORM,
@@ -43,6 +45,7 @@ export function SolutionFileUpload({
   existingFiles = [],
   onRemoveExistingFile,
 }: SolutionFileUploadProps) {
+  const uploadProgress = describeUploadProgress(items)
   const [dragActive, setDragActive] = useState(false)
   const [errors, setErrors] = useState<string[]>([])
 
@@ -309,7 +312,16 @@ export function SolutionFileUpload({
                       </span>
                     </div>
                     {showProgress && (
-                      <p className="text-xs text-gray-500 mt-1">Uploading...</p>
+                      <>
+                        <p className="flex items-center gap-1.5 text-xs text-gray-500 mt-1">
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                          {uploadProgress.label ?? 'Uploading...'}
+                        </p>
+                        <Progress
+                          value={(uploadProgress.doneCount / Math.max(uploadProgress.totalCount, 1)) * 100}
+                          className="h-1.5 mt-2"
+                        />
+                      </>
                     )}
                     {isError && item.error && (
                       <p className="text-xs text-red-600 mt-1">{item.error}</p>
