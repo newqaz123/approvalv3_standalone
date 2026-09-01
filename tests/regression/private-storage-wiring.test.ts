@@ -12,7 +12,10 @@ it('routes every attachment filesystem operation through private storage', () =>
   assert.match(filesAction, /writeAttachmentFile/)
   assert.match(filesAction, /deleteAttachmentFile/)
   assert.match(requestsAction, /deleteAttachmentFile/)
+  // Appended attachments are read through the private storage layer; the
+  // package helper must not reconstruct the legacy public/ root itself.
   assert.match(pdfPackage, /readAttachmentFile/)
+  assert.doesNotMatch(pdfPackage, /node:fs|process\.cwd/)
 })
 
 it('routes resubmitSolution attachments through private storage', () => {

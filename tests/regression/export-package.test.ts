@@ -35,7 +35,7 @@ describe('completed approval export package utilities', () => {
     assert.equal(isMergeableExportFile({ fileName: 'slides.pptx', fileType: '' }), false)
   })
 
-  it('builds default package items with the approval report first and mergeable attachments selected', () => {
+  it('builds default package items with only the approval report selected', () => {
     const items = buildDefaultExportPackageItems({
       requestAttachments: [
         {
@@ -74,8 +74,8 @@ describe('completed approval export package utilities', () => {
           id: 'approval-report',
           type: 'approval-report',
           attachmentId: undefined,
-          sourceLabel: 'Approval Evidence',
-          fileName: 'Approval Evidence Report',
+          sourceLabel: 'Approval Report',
+          fileName: 'Approval Report',
           fileType: undefined,
           fileSize: undefined,
           filePath: undefined,
@@ -96,7 +96,7 @@ describe('completed approval export package utilities', () => {
           filePath: 'uploads/r1/scope.pdf',
           description: 'Scope document',
           kind: 'pdf',
-          selected: true,
+          selected: false,
           mergeable: true,
           order: 1,
         },
@@ -126,12 +126,38 @@ describe('completed approval export package utilities', () => {
           filePath: 'uploads/r1/photo.png',
           description: undefined,
           kind: 'image',
-          selected: true,
+          selected: false,
           mergeable: true,
           order: 3,
         },
       ]
     )
+  })
+
+  it('appends selected mergeable attachments after the approval report in display order', () => {
+    const items = buildDefaultExportPackageItems({
+      requestAttachments: [
+        { id: 'r1', fileName: 'scope.pdf', fileType: 'application/pdf', fileSize: 100, filePath: 'uploads/r1/scope.pdf' },
+        { id: 'r2', fileName: 'slides.pptx', fileType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', fileSize: 200, filePath: 'uploads/r1/slides.pptx' },
+      ],
+      solutionAttachments: [
+        { id: 's1', fileName: 'photo.png', fileType: 'image/png', fileSize: 300, filePath: 'uploads/r1/photo.png' },
+      ],
+    }).map((item) => ({ ...item, selected: true }))
+
+    assert.deepEqual(buildSelectedExportPackageRequestItems(items), [
+      { type: 'approval-report' },
+      { type: 'request-attachment', attachmentId: 'r1' },
+      { type: 'solution-attachment', attachmentId: 's1' },
+    ])
+
+    const reportDeselected = items.map((item) =>
+      item.type === 'approval-report' ? { ...item, selected: false } : item
+    )
+    assert.deepEqual(buildSelectedExportPackageRequestItems(reportDeselected), [
+      { type: 'request-attachment', attachmentId: 'r1' },
+      { type: 'solution-attachment', attachmentId: 's1' },
+    ])
   })
 
   it('moves package items and rewrites contiguous order values', () => {
@@ -176,26 +202,43 @@ describe('completed approval export package utilities', () => {
     )
   })
 
-  it('builds ordered request payload from selected mergeable items only', () => {
+  it('keeps the export payload order in sync with the displayed order', () => {
     const items = buildDefaultExportPackageItems({
       requestAttachments: [
         { id: 'r1', fileName: 'scope.pdf', fileType: 'application/pdf', fileSize: 100, filePath: 'uploads/r1/scope.pdf' },
-        { id: 'r2', fileName: 'slides.pptx', fileType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', fileSize: 200, filePath: 'uploads/r1/slides.pptx' },
       ],
       solutionAttachments: [
         { id: 's1', fileName: 'photo.png', fileType: 'image/png', fileSize: 300, filePath: 'uploads/r1/photo.png' },
       ],
-    }).map((item) =>
-      item.id === 'request-r1'
-        ? { ...item, selected: false }
-        : item
-    )
+    }).map((item) => ({ ...item, selected: true }))
 
     const moved = moveExportPackageItem(items, 'solution-s1', 'approval-report')
 
     assert.deepEqual(buildSelectedExportPackageRequestItems(moved), [
       { type: 'solution-attachment', attachmentId: 's1' },
       { type: 'approval-report' },
+      { type: 'request-attachment', attachmentId: 'r1' },
+    ])
+  })
+
+  it('moves unsupported rows freely while keeping them out of the payload', () => {
+    const items = buildDefaultExportPackageItems({
+      requestAttachments: [
+        { id: 'r1', fileName: 'scope.pdf', fileType: 'application/pdf', fileSize: 100, filePath: 'uploads/r1/scope.pdf' },
+        { id: 'r2', fileName: 'slides.pptx', fileType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', fileSize: 200, filePath: 'uploads/r1/slides.pptx' },
+      ],
+      solutionAttachments: [],
+    }).map((item) => ({ ...item, selected: true }))
+
+    const moved = moveExportPackageItem(items, 'request-r2', 'approval-report')
+
+    assert.deepEqual(
+      moved.map((item) => item.id),
+      ['request-r2', 'approval-report', 'request-r1']
+    )
+    assert.deepEqual(buildSelectedExportPackageRequestItems(moved), [
+      { type: 'approval-report' },
+      { type: 'request-attachment', attachmentId: 'r1' },
     ])
   })
 })

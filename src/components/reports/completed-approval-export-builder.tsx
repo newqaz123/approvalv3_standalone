@@ -1,15 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState, useTransition } from 'react'
-import {
-  ArrowDown,
-  ArrowUp,
-  CheckCircle2,
-  FileArchive,
-  FileText,
-  GripVertical,
-  Loader2,
-} from 'lucide-react'
+import { ArrowDown, ArrowUp, CheckCircle2, FileArchive, FileText, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
@@ -30,12 +22,12 @@ interface CompletedApprovalExportBuilderProps {
 }
 
 const kindLabel: Record<ExportPackageItem['kind'], string> = {
-  'approval-report': 'Compact evidence',
+  'approval-report': 'Approval packet',
   pdf: 'PDF',
   image: 'Image',
   docx: 'DOCX to PDF',
   xlsx: 'XLSX to PDF',
-  unsupported: 'Not mergeable',
+  unsupported: 'Unsupported format',
 }
 
 export function CompletedApprovalExportBuilder({
@@ -60,8 +52,10 @@ export function CompletedApprovalExportBuilder({
   }, [defaultItems])
 
   const orderedItems = reorderExportPackageItems(items)
-  const selectedItems = orderedItems.filter((item) => item.selected)
-  const selectedMergeableCount = selectedItems.filter((item) => item.mergeable).length
+  const selectedMergeableCount = orderedItems.filter((item) => item.selected && item.mergeable).length
+  const reportSelected = orderedItems.some(
+    (item) => item.type === 'approval-report' && item.selected
+  )
 
   const setItemSelected = (itemId: string, selected: boolean) => {
     setItems((current) =>
@@ -89,7 +83,7 @@ export function CompletedApprovalExportBuilder({
     const requestItems = buildSelectedExportPackageRequestItems(items)
 
     if (requestItems.length === 0) {
-      setError('Select at least one mergeable item.')
+      setError('Select the approval report to export.')
       return
     }
 
@@ -108,10 +102,11 @@ export function CompletedApprovalExportBuilder({
         <div>
           <h3 className="flex items-center gap-2 text-sm font-black text-slate-900 dark:text-slate-100">
             <FileArchive className="h-4 w-4 text-emerald-600" />
-            Select + Rearrange Export Builder
+            Approval Packet Export
           </h3>
           <p className="mt-1 text-xs text-slate-500">
-            Approval evidence is first by default. Select attachments and rearrange the final PDF order.
+            Select attachments to append and arrange the packet order. The
+            approval report is always included.
           </p>
         </div>
         <div className="flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700">
@@ -126,22 +121,18 @@ export function CompletedApprovalExportBuilder({
             key={item.id}
             className={cn(
               'grid grid-cols-[auto_1fr_auto] gap-3 px-4 py-3',
-              !item.mergeable && 'bg-slate-50/70 dark:bg-slate-950/30'
+              item.type !== 'approval-report' && 'bg-slate-50/70 dark:bg-slate-950/30'
             )}
           >
-            <div className="flex items-center gap-3">
-              <Checkbox
-                checked={item.selected}
-                disabled={!item.mergeable}
-                onCheckedChange={(checked) => setItemSelected(item.id, checked === true)}
-                aria-label={`Select ${item.fileName}`}
-              />
-              <GripVertical className="h-4 w-4 text-slate-300" />
-            </div>
+            <Checkbox
+              checked={item.selected}
+              disabled={!item.mergeable}
+              onCheckedChange={(checked) => setItemSelected(item.id, checked === true)}
+              aria-label={`Select ${item.fileName}`}
+            />
 
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs font-black text-slate-400">#{index + 1}</span>
                 <FileText className="h-4 w-4 text-slate-500" />
                 <span className="truncate text-sm font-bold text-slate-900 dark:text-slate-100">
                   {item.fileName}
@@ -192,23 +183,24 @@ export function CompletedApprovalExportBuilder({
 
       <div className="flex flex-col gap-3 border-t border-slate-100 p-4 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-xs text-slate-500">
-          Unsupported files stay visible for evidence tracking but cannot be merged into the PDF package.
+          Unsupported formats stay listed in the report&apos;s Attachment Index
+          but cannot be appended to the PDF.
         </p>
         <Button
           type="button"
           onClick={handleExport}
-          disabled={isPending || selectedMergeableCount === 0}
+          disabled={isPending || !reportSelected}
           className="bg-emerald-600 text-white hover:bg-emerald-700"
         >
           {isPending ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Building package...
+              Building packet...
             </>
           ) : (
             <>
               <FileArchive className="mr-2 h-4 w-4" />
-              Export Selected Package
+              Export Approval Packet
             </>
           )}
         </Button>

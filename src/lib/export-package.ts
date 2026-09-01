@@ -73,8 +73,8 @@ export function buildDefaultExportPackageItems(input: BuildDefaultExportPackageI
     {
       id: 'approval-report',
       type: 'approval-report',
-      sourceLabel: 'Approval Evidence',
-      fileName: 'Approval Evidence Report',
+      sourceLabel: 'Approval Report',
+      fileName: 'Approval Report',
       kind: 'approval-report',
       selected: true,
       mergeable: true,
@@ -160,7 +160,9 @@ function buildAttachmentPackageItem(
     filePath: attachment.filePath,
     description: attachment.description,
     kind,
-    selected: mergeable,
+    // Only the approval report starts selected. Supported attachments stay
+    // available for the user to append after the report in this packet.
+    selected: false,
     mergeable,
     order,
   }

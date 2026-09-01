@@ -71,6 +71,20 @@ describe('pdf package helpers', () => {
     )
   })
 
+  it('rejects solution attachment IDs that only exist on the request', () => {
+    assert.throws(
+      () =>
+        validateExportPackageRequestItems(
+          [{ type: 'solution-attachment', attachmentId: 'allowed-request' }],
+          {
+            requestAttachmentIds: new Set(['allowed-request']),
+            solutionAttachmentIds: new Set(['allowed-solution']),
+          }
+        ),
+      /allowed-request/
+    )
+  })
+
   it('requires at least one selected package item', () => {
     assert.throws(
       () =>

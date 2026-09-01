@@ -1,11 +1,14 @@
 /**
  * PDF Generation Library
  *
- * Provides utilities for generating compact approval evidence PDF documents.
- * Uses Puppeteer with headless Chromium for HTML-to-PDF conversion.
+ * Renders the approved Slate editorial / satin ink approval packet with
+ * Puppeteer: a compact slate-blue banner and footer chrome repeated on every
+ * report page, plus a flowing tinted-band section body. Uses headless
+ * Chromium for HTML-to-PDF conversion.
  */
 
 import puppeteer from "puppeteer";
+import type { PDFOptions } from "puppeteer";
 import { resolveInlineImagesForPdf } from "@/lib/inline-images/pdf";
 
 export interface RequestPDFData {
@@ -71,7 +74,100 @@ export interface RequestPDFData {
 	generatedBy: string;
 }
 
-export async function generatePdfFromHTML(html: string): Promise<Buffer> {
+export interface PdfRenderOptions {
+	/**
+	 * Document chrome repeats per-page chrome (banner header, page-number
+	 * footer). Report pages opt in; attachment pages stay full-view without
+	 * header or footer.
+	 */
+	documentChrome?: boolean;
+	/** Puppeteer header template rendered on every page. */
+	headerTemplate?: string;
+	/** Puppeteer footer template rendered on every page. */
+	footerTemplate?: string;
+}
+
+export interface DocumentFooterChromeInput {
+	reference: string;
+	generatedBy: string;
+}
+
+/**
+ * Builds the repeated per-page banner chrome (Puppeteer header template).
+ * Margin-box templates ignore page CSS, so every style is inline.
+ */
+export function buildDocumentBannerTemplate(data: RequestPDFData): string {
+	const createdLabel = formatDateShort(data.createdAt);
+	const completedLabel = data.completedAt
+		? formatDateShort(data.completedAt)
+		: "";
+	const workflowRange = completedLabel
+		? `${createdLabel} – ${completedLabel}`
+		: createdLabel;
+	const titleSize =
+		data.title.length > 64 ? 16 : data.title.length > 36 ? 20 : 27;
+
+	return `<div style="width:100%;padding:0 12mm 0;box-sizing:border-box;font-family:Arial,Helvetica,sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact;">
+  <div style="position:relative;overflow:hidden;border:1px solid #344b60;border-radius:8px;background:linear-gradient(110deg, #3a5269 0%, #465f76 58%, #526c83 100%);color:#fbfcfd;box-shadow:0 8px 18px rgba(38,62,83,.16);padding:5.5mm 8.5mm 5mm;">
+    <div style="position:absolute;left:0;right:0;top:0;height:1.2mm;background:linear-gradient(90deg, rgba(255,255,255,.38), rgba(255,255,255,0) 68%);"></div>
+    <div style="display:flex;align-items:center;gap:6mm;">
+      <div style="font-size:${titleSize}px;line-height:1.05;font-weight:700;letter-spacing:-.02em;color:#ffffff;">${escapeHtml(data.title)}</div>
+      <div style="margin-left:auto;flex:none;color:#edf3f7;font-size:8px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;">${escapeHtml(data.status)}</div>
+    </div>
+    <div style="margin-top:3mm;padding-top:2.2mm;border-top:1px solid rgba(232,240,247,.3);">
+      <span style="color:#d8e2ea;font-size:9.5px;font-weight:500;">${escapeHtml(data.requester.name)} · ${escapeHtml(data.department)} · ${escapeHtml(workflowRange)}</span>
+    </div>
+    <div style="position:absolute;left:8.5mm;right:8.5mm;bottom:0;height:1px;background:linear-gradient(90deg,#b3c7d8,rgba(179,199,216,0));opacity:.72;"></div>
+  </div>
+</div>`;
+}
+
+/**
+ * Builds the repeated per-page footer chrome. Without input it renders live
+ * page numbers only; with document identity it prefixes the reference and
+ * generated-by line like the approved packet foot.
+ */
+export function buildDocumentFooterTemplate(
+	input?: DocumentFooterChromeInput,
+): string {
+	const pageNumbers = `Page <span class="pageNumber"></span> of <span class="totalPages"></span>`;
+	if (!input) {
+		return `<div style="width: 100%; text-align: center; font-family: Arial, Helvetica, sans-serif; font-size: 8px; color: #7c8798;">${pageNumbers}</div>`;
+	}
+	return `<div style="width:100%;box-sizing:border-box;display:flex;justify-content:space-between;gap:8mm;padding:2mm 12mm 0;border-top:1px solid #dce4ea;font-family:Arial,Helvetica,sans-serif;font-size:8.5px;color:#71808c;-webkit-print-color-adjust:exact;print-color-adjust:exact;">
+  <span>Reference ${escapeHtml(input.reference)} · Generated on ${formatDate(new Date())} by ${escapeHtml(input.generatedBy)}</span>
+  <span style="white-space:nowrap;font-weight:600;">${pageNumbers}</span>
+</div>`;
+}
+
+export function resolvePdfRenderOptions(
+	options: PdfRenderOptions = {},
+): PDFOptions {
+	const pdfOptions: PDFOptions = {
+		format: "A4",
+		printBackground: true,
+		margin: { top: "14mm", right: "18mm", bottom: "12mm", left: "12mm" },
+	};
+	if (!options.documentChrome) {
+		return pdfOptions;
+	}
+	return {
+		...pdfOptions,
+		// The banner chrome occupies the top margin on every report page. The
+		// margin-box banner starts ~5.5mm below the page top and the tallest
+		// banner plate (two-line title plus shadow) reaches ~40mm, so 45mm keeps
+		// the banner fully above the first section band on every page.
+		margin: { top: "45mm", right: "12mm", bottom: "14mm", left: "12mm" },
+		displayHeaderFooter: true,
+		headerTemplate: options.headerTemplate ?? "<span></span>",
+		footerTemplate: options.footerTemplate ?? buildDocumentFooterTemplate(),
+	};
+}
+
+export async function generatePdfFromHTML(
+	html: string,
+	options: PdfRenderOptions = {},
+): Promise<Buffer> {
 	const browser = await puppeteer.launch({
 		headless: true,
 		args: [
@@ -89,11 +185,7 @@ export async function generatePdfFromHTML(html: string): Promise<Buffer> {
 
 		await page.setContent(html, { waitUntil: "networkidle0" });
 
-		const pdf = await page.pdf({
-			format: "A4",
-			printBackground: true,
-			margin: { top: "14mm", right: "18mm", bottom: "12mm", left: "12mm" },
-		});
+		const pdf = await page.pdf(resolvePdfRenderOptions(options));
 
 		return Buffer.from(pdf);
 	} finally {
@@ -104,7 +196,14 @@ export async function generatePdfFromHTML(html: string): Promise<Buffer> {
 export async function generateRequestPDF(
 	data: RequestPDFData,
 ): Promise<Buffer> {
-	return generatePdfFromHTML(await renderRequestEvidenceHTML(data));
+	return generatePdfFromHTML(await renderRequestEvidenceHTML(data), {
+		documentChrome: true,
+		headerTemplate: buildDocumentBannerTemplate(data),
+		footerTemplate: buildDocumentFooterTemplate({
+			reference: data.referenceId || data.id || "-",
+			generatedBy: data.generatedBy,
+		}),
+	});
 }
 
 function formatDate(date: Date | string): string {
@@ -142,9 +241,11 @@ function escapeHtml(text: string | number | null | undefined): string {
 
 function formatCurrency(amount: number, currency: string): string {
 	try {
+		// Currency renders with its ISO code (THB 1.00) like the approved mockup.
 		return new Intl.NumberFormat("th-TH", {
 			style: "currency",
 			currency,
+			currencyDisplay: "code",
 		}).format(amount);
 	} catch {
 		return `${currency} ${amount.toLocaleString("en-US")}`;
@@ -157,6 +258,16 @@ function statusClass(
 	if (status === "approved") return "approved";
 	if (status === "rejected") return "rejected";
 	return "pending";
+}
+
+const DOCUMENT_ICON_SVG = `<svg viewBox="0 0 16 16"><path fill="#4b96fa" d="M3 1.5h6.2L13 5.3v9.2a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-12a1 1 0 0 1 1-1z"/><path fill="#fff" d="M4.5 7h7v1.2h-7zM4.5 9.4h7v1.2h-7zM4.5 11.8h4.5V13H4.5z"/></svg>`;
+const SPREADSHEET_ICON_SVG = `<svg viewBox="0 0 16 16"><path fill="#21a366" d="M3 1.5h6.2L13 5.3v9.2a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-12a1 1 0 0 1 1-1z"/><path fill="#fff" d="M4.5 7.5h2v2h-2zM7 7.5h2v2H7zM9.5 7.5h2v2h-2zM4.5 10h2v2h-2zM7 10h2v2H7zM9.5 10h2v2h-2z"/></svg>`;
+
+function attachmentIconSvg(fileName: string): string {
+	return fileName.toLowerCase().endsWith(".xlsx") ||
+		fileName.toLowerCase().endsWith(".xls")
+		? SPREADSHEET_ICON_SVG
+		: DOCUMENT_ICON_SVG;
 }
 
 export async function renderRequestEvidenceHTML(
@@ -174,16 +285,9 @@ export async function renderRequestEvidenceHTML(
 				owner: { kind: "solution", id: data.solution.id },
 			})
 		: "";
-	const generatedAt = formatDate(new Date());
-	const createdLabel = formatDateShort(data.createdAt);
-	const completedLabel = data.completedAt
-		? formatDateShort(data.completedAt)
-		: "Not completed";
-	const attachmentCount =
-		data.fileAttachments.length + (data.solution?.fileAttachments.length ?? 0);
-	const reference = data.referenceId || data.id || "-";
 	const requestAttachments = data.fileAttachments;
 	const solutionAttachments = data.solution?.fileAttachments ?? [];
+	const attachmentCount = requestAttachments.length + solutionAttachments.length;
 
 	return `<!DOCTYPE html>
 <html>
@@ -195,134 +299,106 @@ export async function renderRequestEvidenceHTML(
       margin: 0;
       padding: 0;
       font-family: Arial, Helvetica, sans-serif;
-      color: #17231f;
-      font-size: 11px;
-      line-height: 1.38;
+      color: #263443;
+      font-size: 10.5px;
+      line-height: 1.46;
       background: #ffffff;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
     }
-    .hero {
-      padding: 18px 20px;
-      border-radius: 14px;
-      background: linear-gradient(135deg, #103f34 0%, #1e6453 100%);
-      color: white;
-      margin-bottom: 12px;
-    }
-    .kicker {
-      font-size: 9px;
-      letter-spacing: .16em;
-      text-transform: uppercase;
-      opacity: .78;
-    }
-    h1 {
-      margin: 6px 0 4px;
-      font-size: 22px;
-      line-height: 1.1;
-    }
-    h3 {
-      margin: 10px 0 6px;
-      color: #254139;
+    p { margin: 0 0 2.2mm; }
+    ul, ol { margin: 1mm 0 2.2mm 4.5mm; padding: 0; }
+    li { margin: 1.1mm 0; }
+
+    /* Main sections: tinted header band, no closed card borders. */
+    .sec { min-height: 0; margin-bottom: 5.5mm; }
+    /* Natural-flow pagination: sections render continuously in the approved
+       order and Chromium splits them wherever the current page runs out of
+       room, so the page count varies with content length. */
+    .sec-head {
+      background: #edf3f7;
+      color: #263b50;
       font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .07em;
+      text-transform: uppercase;
+      padding: 2.5mm 4mm;
+      border-radius: 4px;
+      margin-bottom: 3mm;
+      page-break-after: avoid;
+      break-after: avoid;
     }
-    .hero-meta {
+    /* Sub-parts: hairline rule under the heading. */
+    .subhead {
       font-size: 10px;
-      opacity: .84;
-    }
-    .summary-panel {
-      border: 1px solid #dbe5e0;
-      border-radius: 14px;
-      padding: 10px;
-      margin-bottom: 10px;
-      page-break-inside: avoid;
-      background: #ffffff;
-    }
-    .metrics {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 12px;
-    }
-    .metric {
-      position: relative;
-      border: 1px solid #dfe9e4;
-      border-radius: 10px;
-      padding: 10px 10px 10px 14px;
-      background: #f8fbf8;
-      min-height: 48px;
-    }
-    .metric::before {
-      content: '';
-      position: absolute;
-      left: 0;
-      top: 10px;
-      bottom: 10px;
-      width: 4px;
-      border-radius: 0 4px 4px 0;
-      background: #1e6453;
-    }
-    .metric.status-card { background: #f5fbf7; }
-    .metric.requester-card { background: #f8fafc; }
-    .metric.department-card { background: #f7f8fb; }
-    .metric.date-card { background: #fbfaf5; }
-    .metric.requester-card::before { background: #3f6275; }
-    .metric.department-card::before { background: #5a5688; }
-    .metric.date-card::before { background: #a66a1f; }
-    .metric span {
-      display: block;
-      color: #63736d;
-      font-size: 8px;
-      letter-spacing: .08em;
+      font-weight: 800;
+      letter-spacing: .06em;
       text-transform: uppercase;
-      margin-bottom: 3px;
+      color: #263b50;
+      padding-bottom: 1.5mm;
+      border-bottom: 1px solid #263b50;
+      margin-bottom: 2.5mm;
     }
-    .metric strong {
-      font-size: 11px;
-    }
-    .section {
-      border: 1px solid #dbe5e0;
-      border-radius: 12px;
-      padding: 11px 12px;
-      margin-bottom: 10px;
-      page-break-inside: avoid;
-    }
-    .section h2 {
-      margin: 0 0 8px;
-      font-size: 12px;
-      letter-spacing: .1em;
-      text-transform: uppercase;
-      color: #153f35;
-    }
-    .grid-2 {
+
+    /* Approved cost is a full-width horizontal strip; the solution rich text
+       below it is never constrained by a side column. */
+    .cost-row {
       display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-    }
-    .solution-grid {
-      display: grid;
-      grid-template-columns: minmax(0, 1.7fr) minmax(170px, .8fr);
-      gap: 10px;
-      align-items: start;
-    }
-    .solution-meta {
-      border: 1px solid #e7edea;
-      border-radius: 9px;
-      background: #f8fbf8;
-      padding: 8px;
-    }
-    .solution-meta p {
-      margin: 0 0 7px;
-    }
-    .solution-meta p:last-child {
-      margin-bottom: 0;
-    }
-    .muted {
-      color: #66736e;
-    }
-    .description {
-      white-space: pre-wrap;
-      background: #f8faf9;
+      grid-template-columns: auto 1fr 1fr;
+      border: 1px solid #cbd9e4;
+      background: #f1f6f9;
       border-radius: 8px;
-      padding: 8px;
-      border: 1px solid #edf2ef;
+      margin-bottom: 3mm;
+      page-break-inside: avoid;
+      break-inside: avoid;
     }
+    .cost-row > div { padding: 2.5mm 4mm; border-right: 1px solid #dce7ee; min-width: 0; }
+    .cost-row > div:last-child { border-right: 0; }
+    .lbl { font-size: 7px; letter-spacing: .1em; text-transform: uppercase; color: #71808c; font-weight: 600; }
+    .cost-row .amt { font-size: 15px; font-weight: 800; color: #4c718e; margin-top: 0.5mm; }
+    .cost-row .val { margin-top: 0.5mm; font-weight: 600; }
+
+    /* Approval status reads as plain typographic text, not an app-style chip. */
+    .pill { display: inline; font-size: 8.5px; font-weight: 700; text-transform: capitalize; }
+    .pill.approved { color: #4c718e; }
+    .pill.rejected { color: #b42318; }
+    .pill.pending { color: #71808c; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 10px; }
+    /* Column headers repeat when a table continues onto the next page. */
+    thead { display: table-header-group; }
+    /* Report table rows never split across a page boundary. */
+    .sec tr { break-inside: avoid; page-break-inside: avoid; }
+    th {
+      text-align: left;
+      background: #f5f8fa;
+      font-size: 7.5px;
+      font-weight: 700;
+      letter-spacing: .09em;
+      text-transform: uppercase;
+      color: #71808c;
+      padding: 3px 6px;
+      border-bottom: 1px solid #dce4ea;
+    }
+    td {
+      padding: 3.5px 6px;
+      border-bottom: 1px solid #dce4ea;
+      text-align: left;
+      vertical-align: top;
+    }
+    tr:last-child td { border-bottom: 0; }
+    .nowrap { white-space: nowrap; }
+    .sub { color: #71808c; font-size: 9px; margin-top: 1px; }
+
+    /* Attachment index rows separated by hairlines. */
+    .file { display: grid; grid-template-columns: 16px 1fr auto; gap: 8px; align-items: center; padding: 1.4mm 0; }
+    .file + .file { border-top: 1px solid #dce4ea; }
+    .file svg { width: 15px; height: 15px; }
+    .file .sz { color: #71808c; font-size: 9.5px; white-space: nowrap; }
+
+    .phase + .phase { margin-top: 3.5mm; }
+    .phase { page-break-inside: avoid; break-inside: avoid; }
+
     .description h2 { font-size: 16px; font-weight: 700; margin: 12px 0 4px; }
     .description h3 { font-size: 14px; font-weight: 700; margin: 10px 0 4px; }
     .description ul, .description ol { margin: 6px 0 6px 20px; padding: 0; }
@@ -378,129 +454,66 @@ export async function renderRequestEvidenceHTML(
       height: auto;
       margin: 0;
     }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 10px;
-    }
-    th, td {
-      border-bottom: 1px solid #e7edea;
-      padding: 5px 4px;
-      text-align: left;
-      vertical-align: top;
-    }
-    th {
-      color: #52625c;
-      font-size: 8px;
-      letter-spacing: .08em;
-      text-transform: uppercase;
-      background: #f7faf8;
-    }
-    .status {
-      display: inline-block;
-      border-radius: 999px;
-      padding: 2px 7px;
-      font-weight: 700;
-      text-transform: capitalize;
-    }
-    .status.approved { background: #dff5e8; color: #14643d; }
-    .status.rejected { background: #fee2e2; color: #991b1b; }
-    .status.pending { background: #f1f5f9; color: #475569; }
-    .footer {
-      margin-top: 14px;
-      padding-top: 8px;
-      border-top: 1px solid #e5e7eb;
-      color: #8a9691;
-      font-size: 9px;
-      text-align: center;
-    }
   </style>
 </head>
 <body>
-  <div class="hero">
-    <div class="kicker">Approval Evidence Packet</div>
-    <h1>${escapeHtml(data.title)}</h1>
-    <div class="hero-meta">Reference: ${escapeHtml(reference)} • Generated ${generatedAt}</div>
-  </div>
-
-  <div class="summary-panel">
-    <div class="metrics">
-      <div class="metric status-card"><span>Status</span><strong>${escapeHtml(data.status)}</strong></div>
-      <div class="metric requester-card"><span>Requester</span><strong>${escapeHtml(data.requester.name)}</strong></div>
-      <div class="metric department-card"><span>Department</span><strong>${escapeHtml(data.department)}</strong></div>
-      <div class="metric date-card"><span>Dates</span><strong>${escapeHtml(createdLabel)} → ${escapeHtml(completedLabel)}</strong></div>
-    </div>
+  <div class="sec">
+    <div class="sec-head">Original Request</div>
+    <div class="description">${requestDescriptionHtml}</div>
   </div>
 
   ${
 		data.solution
 			? `
-  <div class="section">
-    <h2>Engineering Solution</h2>
-    <div class="solution-grid">
-      <div>
-        <strong>${escapeHtml(data.solution.title)}</strong>
-        <div class="description">${solutionDescriptionHtml}</div>
-      </div>
-      <div class="solution-meta">
-        <p><strong>Approved Cost</strong><br>${escapeHtml(formatCurrency(data.solution.costEstimate, data.solution.currency))}</p>
-        <p><strong>Submitted</strong><br>${escapeHtml(data.solution.submittedBy)}<br>${formatDate(data.solution.submittedAt)}</p>
-        ${data.solution.timeline ? `<p><strong>Timeline</strong><br>${escapeHtml(data.solution.timeline)}</p>` : ""}
-      </div>
+  <div class="sec">
+    <div class="sec-head">Engineering Solution</div>
+    <div class="cost-row">
+      <div><span class="lbl">Approved Cost</span><div class="amt">${escapeHtml(formatCurrency(data.solution.costEstimate, data.solution.currency))}</div></div>
+      <div><span class="lbl">Submitted</span><div class="val"><strong>${escapeHtml(data.solution.submittedBy)}</strong> · ${formatDate(data.solution.submittedAt)}</div></div>
+      ${data.solution.timeline ? `<div><span class="lbl">Timeline</span><div class="val"><strong>${escapeHtml(data.solution.timeline)}</strong></div></div>` : ""}
     </div>
-    ${data.solution.conceptDesign ? `<br><strong>Concept Design</strong><div class="description">${escapeHtml(data.solution.conceptDesign)}</div>` : ""}
+    <p><strong>${escapeHtml(data.solution.title)}</strong></p>
+    <div class="description">${solutionDescriptionHtml}</div>
+    ${data.solution.conceptDesign ? `<div class="subhead" style="margin-top:3mm">Concept Design</div><div class="description">${escapeHtml(data.solution.conceptDesign)}</div>` : ""}
   </div>
   `
 			: ""
 	}
 
-  <div class="section">
-    <h2>Original Request</h2>
-    <div class="description">${requestDescriptionHtml}</div>
+  <div class="sec">
+    <div class="sec-head">Attachment Index</div>
+    ${
+			attachmentCount === 0
+				? '<p class="sub">No attachments recorded.</p>'
+				: `${requestAttachments
+						.map(
+							(file) => `
+    <div class="file">
+      ${attachmentIconSvg(file.fileName)}
+      <span>${escapeHtml(file.fileName)}<div class="sub">Request · uploaded by ${escapeHtml(file.uploadedBy)}</div></span>
+      <span class="sz">${formatFileSize(file.fileSize)}</span>
+    </div>`,
+						)
+						.join("")}${solutionAttachments
+						.map(
+							(file) => `
+    <div class="file">
+      ${attachmentIconSvg(file.fileName)}
+      <span>${escapeHtml(file.fileName)}<div class="sub">Solution</div></span>
+      <span class="sz">${formatFileSize(file.fileSize)}</span>
+    </div>`,
+						)
+						.join("")}`
+		}
   </div>
 
-  <div class="section">
-    <h2>Attachment Index</h2>
-    <table>
-      <thead>
-        <tr><th>Source</th><th>File</th><th>Size</th><th>Date</th></tr>
-      </thead>
-      <tbody>
-        ${requestAttachments
-					.map(
-						(file) => `
-          <tr>
-            <td>Request</td>
-            <td>${escapeHtml(file.fileName)}<br><span class="muted">Uploaded by ${escapeHtml(file.uploadedBy)}</span></td>
-            <td>${formatFileSize(file.fileSize)}</td>
-            <td>${formatDateShort(file.createdAt)}</td>
-          </tr>
-        `,
-					)
-					.join("")}
-        ${solutionAttachments
-					.map(
-						(file) => `
-          <tr>
-            <td>Solution</td>
-            <td>${escapeHtml(file.fileName)}</td>
-            <td>${formatFileSize(file.fileSize)}</td>
-            <td>${formatDateShort(file.createdAt)}</td>
-          </tr>
-        `,
-					)
-					.join("")}
-        ${attachmentCount === 0 ? '<tr><td colspan="4" class="muted">No attachments recorded.</td></tr>' : ""}
-      </tbody>
-    </table>
-  </div>
-
-  <div class="section">
-    <h2>Approval Chain</h2>
+  <div class="sec">
+    <div class="sec-head">Approval Chain</div>
     ${data.approvalPhases
 			.map(
 				(phase) => `
-      <h3>${escapeHtml(phase.phaseName)}</h3>
+    <div class="phase">
+      <div class="subhead">${escapeHtml(phase.phaseName)}</div>
       <table>
         <thead>
           <tr><th>Stage</th><th>Approver</th><th>Level</th><th>Department</th><th>Status</th><th>Approved</th><th>Comments</th></tr>
@@ -509,50 +522,44 @@ export async function renderRequestEvidenceHTML(
           ${phase.approvals
 						.map(
 							(approval) => `
-            <tr>
-              <td>${escapeHtml(approval.stage)}</td>
-              <td>${escapeHtml(approval.approverName)}</td>
-              <td>${approval.requiredLevel}</td>
-              <td>${escapeHtml(approval.approverDepartment || approval.approverRole || "-")}</td>
-              <td><span class="status ${statusClass(approval.status)}">${escapeHtml(approval.status)}</span></td>
-              <td>${approval.approvedAt ? formatDate(approval.approvedAt) : "-"}</td>
-              <td>${escapeHtml(approval.comments || "-")}</td>
-            </tr>
-          `,
+          <tr>
+            <td>${escapeHtml(approval.stage)}</td>
+            <td>${escapeHtml(approval.approverName)}</td>
+            <td>${approval.requiredLevel}</td>
+            <td>${escapeHtml(approval.approverDepartment || approval.approverRole || "-")}</td>
+            <td><span class="pill ${statusClass(approval.status)}">${escapeHtml(approval.status)}</span></td>
+            <td class="nowrap">${approval.approvedAt ? formatDate(approval.approvedAt) : "-"}</td>
+            <td>${escapeHtml(approval.comments || "-")}</td>
+          </tr>`,
 						)
 						.join("")}
         </tbody>
       </table>
-    `,
+    </div>`,
 			)
 			.join("")}
   </div>
 
-  <div class="section">
-    <h2>Activity Log</h2>
+  <div class="sec">
+    <div class="sec-head">Activity Log</div>
     <table>
       <thead>
-        <tr><th>Action</th><th>User</th><th>Date</th><th>Comments</th></tr>
+        <tr><th style="width:21%">Action</th><th style="width:12%">User</th><th style="width:25%">Date</th><th style="width:42%">Comments</th></tr>
       </thead>
       <tbody>
         ${data.activities
 					.map(
 						(activity) => `
-          <tr>
-            <td>${escapeHtml(activity.action)}</td>
-            <td>${escapeHtml(activity.userName)}</td>
-            <td>${formatDate(activity.createdAt)}</td>
-            <td>${escapeHtml(activity.comments || "-")}</td>
-          </tr>
-        `,
+        <tr>
+          <td>${escapeHtml(activity.action)}</td>
+          <td>${escapeHtml(activity.userName)}</td>
+          <td class="nowrap">${formatDate(activity.createdAt)}</td>
+          <td>${escapeHtml(activity.comments || "-")}</td>
+        </tr>`,
 					)
 					.join("")}
       </tbody>
     </table>
-  </div>
-
-  <div class="footer">
-    Generated on ${generatedAt} by ${escapeHtml(data.generatedBy)} from Approval System
   </div>
 </body>
 </html>`;

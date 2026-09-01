@@ -21,10 +21,16 @@ describe("completed approval export builder wiring", () => {
 		assert.match(builder, /buildSelectedExportPackageRequestItems/);
 		assert.match(builder, /buildPackageItemsKey/);
 		assert.match(builder, /\[packageItemsKey\]/);
-		assert.match(builder, /moveExportPackageItem/);
-		assert.match(builder, /Export Selected Package/);
-		assert.match(builder, /Unsupported files stay visible/);
+		assert.match(builder, /Approval Packet Export/);
+		assert.match(builder, /Export Approval Packet/);
+		assert.match(builder, /cannot be appended/);
 		assert.match(builder, /disabled=\{!item\.mergeable\}/);
+		assert.match(builder, /moveExportPackageItem/);
+		assert.match(builder, /aria-label=\{`Move \$\{item\.fileName\} up`\}/);
+		assert.match(builder, /aria-label=\{`Move \$\{item\.fileName\} down`\}/);
+		assert.match(builder, /disabled=\{index === 0\}/);
+		assert.match(builder, /disabled=\{index === orderedItems\.length - 1\}/);
+		assert.doesNotMatch(builder, /rearrange|GripVertical|dnd-kit/i);
 	});
 
 	it("keeps completed export builders hidden until the export action is clicked", () => {
@@ -75,6 +81,17 @@ describe("completed approval export builder wiring", () => {
 		assert.match(router, /handleExportPackage/);
 		assert.match(router, /onExportPackage=\{handleExportPackage\}/);
 		assert.match(router, /Evidence package exported successfully/);
+	});
+
+	it("appends selected attachments to the approval report in the package server action", () => {
+		const reportsAction = readFileSync("src/server-actions/reports.ts", "utf8");
+
+		assert.match(reportsAction, /exportRequestPackageAsPDF/);
+		assert.match(reportsAction, /validateExportPackageRequestItems/);
+		assert.match(reportsAction, /generateRequestPDF\(pdfData\)/);
+		assert.match(reportsAction, /buildExportableAttachment/);
+		assert.match(reportsAction, /convertAttachmentToPdf/);
+		assert.match(reportsAction, /mergePdfBuffers/);
 	});
 
 	it("replaces legacy request detail export buttons with the package builder", () => {

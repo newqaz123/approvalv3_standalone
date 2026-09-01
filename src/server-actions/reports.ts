@@ -389,6 +389,8 @@ export async function exportRequestPackageAsPDF(requestId: string, items: Export
       solutionAttachmentIds: new Set(solutionAttachments.keys()),
     })
 
+    // Convert each selected attachment and merge every item in the exact
+    // payload order chosen in the export builder.
     const pdfBuffers: Buffer[] = []
     let approvalReportBuffer: Buffer | undefined
     for (const item of items) {
