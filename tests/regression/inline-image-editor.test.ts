@@ -475,6 +475,7 @@ describe('inline image transaction cleanup', () => {
         hasActiveImageEdits: false,
         hasBlockingOperations: false,
         blockingReason: null,
+        getState: () => [],
         reset: async () => undefined,
         clear: () => undefined,
       }),
