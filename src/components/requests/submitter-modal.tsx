@@ -25,6 +25,7 @@ import {
 	DollarSign,
 	Clock,
 	FileUp,
+	Loader2,
 } from "lucide-react";
 import {
 	Dialog,
@@ -54,6 +55,7 @@ import {
 	validateAttachmentMetadata,
 } from "@/lib/attachments/policy";
 import { useSolutionAttachments } from "@/hooks/use-solution-attachments";
+import { describeUploadProgress } from "@/lib/attachments/upload-progress";
 import {
 	inlineImageBlockingMessage,
 	useInlineDescriptionImages,
@@ -464,6 +466,8 @@ export function SubmitterModal({
 		inlineImages.blockingReason,
 	);
 	const [isBusy, setIsBusy] = useState(false);
+	// Count-based, honest upload feedback for solution/resubmit batches.
+	const uploadProgress = describeUploadProgress(attachmentItems);
 	const [submitError, setSubmitError] = useState<string | null>(null);
 
 	const isSolutionMode = mode === "solution" || mode === "resubmit";
@@ -1092,8 +1096,9 @@ export function SubmitterModal({
 												</button>
 											</div>
 											{item.status === "uploading" && (
-												<p className="text-xs text-slate-500 mt-1">
-													Uploading...
+												<p className="flex items-center gap-1.5 text-xs text-slate-500 mt-1">
+													<Loader2 className="h-3 w-3 animate-spin" />
+													{uploadProgress.label ?? "Uploading..."}
 												</p>
 											)}
 											{item.status === "success" && (
@@ -1190,22 +1195,31 @@ export function SubmitterModal({
 								: "bg-emerald-600 hover:bg-emerald-700",
 						)}
 					>
-						{mode === "request" && (
+						{isBusy ? (
 							<>
-								<Send className="w-4 h-4 mr-1.5" />
-								Submit Request
+								<Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+								Submitting...
 							</>
-						)}
-						{mode === "solution" && (
+						) : (
 							<>
-								<CheckCircle2 className="w-4 h-4 mr-1.5" />
-								Submit Solution
-							</>
-						)}
-						{mode === "resubmit" && (
-							<>
-								<RotateCcw className="w-4 h-4 mr-1.5" />
-								Resubmit Solution
+								{mode === "request" && (
+									<>
+										<Send className="w-4 h-4 mr-1.5" />
+										Submit Request
+									</>
+								)}
+								{mode === "solution" && (
+									<>
+										<CheckCircle2 className="w-4 h-4 mr-1.5" />
+										Submit Solution
+									</>
+								)}
+								{mode === "resubmit" && (
+									<>
+										<RotateCcw className="w-4 h-4 mr-1.5" />
+										Resubmit Solution
+									</>
+								)}
 							</>
 						)}
 					</Button>
