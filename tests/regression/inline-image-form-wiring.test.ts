@@ -514,6 +514,7 @@ describe('inline image form wiring contracts', () => {
       const cancel = source.split('const handleCancel')[1]?.split('const formatFileSize')[0] ?? ''
       assert.match(cancel, /return/)
       assert.match(cancel, /router\.back\(\)/)
+      assert.match(source, /onClick=\{handleCancelClick\}/)
     })
 
     it('still copies template description HTML when a template is selected', () => {
@@ -547,6 +548,7 @@ describe('inline image form wiring contracts', () => {
       assert.match(cancel, /await inlineImages\.reset\(\)/)
       assert.match(cancel, /return/)
       assert.match(cancel, /router\.back\(\)/)
+      assert.match(source, /onClick=\{handleCancelClick\}/)
     })
 
     it('keeps solution attachments independent from inline images', () => {

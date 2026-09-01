@@ -58,6 +58,8 @@ import {
 	inlineImageBlockingMessage,
 	useInlineDescriptionImages,
 } from "@/hooks/use-inline-description-images";
+import { isDraftFieldDirty, requestDiscardDraft } from "@/lib/discard-draft";
+import { DiscardDraftDialog } from "@/components/ui/discard-draft-dialog";
 import { ApproverSearchField } from "@/components/approvals/approver-search-field";
 import { filterApproversByQuery } from "@/lib/approver-search";
 
@@ -465,6 +467,7 @@ export function SubmitterModal({
 	);
 	const [isBusy, setIsBusy] = useState(false);
 	const [submitError, setSubmitError] = useState<string | null>(null);
+	const [discardOpen, setDiscardOpen] = useState(false);
 
 	const isSolutionMode = mode === "solution" || mode === "resubmit";
 
@@ -677,7 +680,35 @@ export function SubmitterModal({
 	// via reset, plus the inline image coordinator) before closing. Cleanup
 	// errors are surfaced and the modal stays open.
 	const requestClose = () => {
-		void handleCloseWithCleanup();
+		const initialRequestTitle = initialData?.title || "";
+		const initialRequestDescription = initialData?.description || "";
+		const initialSolutionTitle =
+			initialData?.solution?.title ||
+			(mode === "solution" ? initialData?.requestTitle || "" : "");
+		const initialSolutionDescription = initialData?.solution?.description || "";
+		const formIsDirty =
+			mode === "request"
+				? title.trim() !== initialRequestTitle.trim() ||
+					isDraftFieldDirty(description, initialRequestDescription) ||
+					selectedTemplate !== (initialData?.templateId || "")
+				: solutionTitle.trim() !== initialSolutionTitle.trim() ||
+					isDraftFieldDirty(solutionDescription, initialSolutionDescription) ||
+					cost !== (initialData?.solution?.cost?.toString() || "") ||
+					timeline !== (initialData?.solution?.timeline || "") ||
+					useCustomHierarchy ||
+					customApprovers.length > 0 ||
+					deletedFileIds.length > 0;
+		requestDiscardDraft(
+			{
+				formIsDirty,
+				hasFiles: files.length > 0 || attachmentItems.length > 0,
+				hasInlineImageDrafts: inlineImages.getState().length > 0,
+			},
+			() => setDiscardOpen(true),
+			() => {
+				void handleCloseWithCleanup();
+			},
+		);
 	};
 
 	const handleCloseWithCleanup = async () => {
@@ -1211,6 +1242,14 @@ export function SubmitterModal({
 					</Button>
 				</div>
 			</DialogContent>
+			<DiscardDraftDialog
+				open={discardOpen}
+				onOpenChange={setDiscardOpen}
+				onConfirm={() => {
+					void handleCloseWithCleanup();
+				}}
+				confirmDisabled={isBusy}
+			/>
 		</Dialog>
 	);
 }

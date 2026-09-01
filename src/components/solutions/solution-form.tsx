@@ -37,6 +37,8 @@ import {
   inlineImageBlockingMessage,
   useInlineDescriptionImages,
 } from '@/hooks/use-inline-description-images'
+import { isDraftFieldDirty, requestDiscardDraft } from '@/lib/discard-draft'
+import { DiscardDraftDialog } from '@/components/ui/discard-draft-dialog'
 
 const solutionFormSchema = z.object({
   title: z.string().min(1, 'Title is required').max(200),
@@ -80,6 +82,7 @@ export function SolutionForm({
   const router = useRouter()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [showPreview, setShowPreview] = useState(false)
+  const [discardOpen, setDiscardOpen] = useState(false)
   // One coordinator for the whole form lifetime, shared by the editor and the
   // final confirm so preview/edit transitions keep the same upload session.
   const inlineImages = useInlineDescriptionImages()
@@ -139,6 +142,8 @@ export function SolutionForm({
     }
   }
 
+  const { isDirty } = form.formState
+
   const handleCancel = async () => {
     // Await hook reset() (cleanup unlinked drafts + clear local state) and the
     // inline image coordinator reset before navigating away. Surface cleanup
@@ -153,6 +158,22 @@ export function SolutionForm({
       return
     }
     router.back()
+  }
+
+  const handleCancelClick = () => {
+    requestDiscardDraft(
+      {
+        formIsDirty:
+          isDirty ||
+          isDraftFieldDirty(form.getValues('description'), previousSolution?.description || ''),
+        hasFiles: items.length > 0,
+        hasInlineImageDrafts: inlineImages.getState().length > 0,
+      },
+      () => setDiscardOpen(true),
+      () => {
+        void handleCancel()
+      },
+    )
   }
 
   const handleSubmit = async (values: SolutionFormValues, isConfirmed: boolean = false) => {
@@ -517,7 +538,7 @@ export function SolutionForm({
               <Button
                 type="button"
                 variant="outline"
-                onClick={handleCancel}
+                onClick={handleCancelClick}
                 disabled={isSubmitting}
               >
                 Cancel
@@ -529,6 +550,14 @@ export function SolutionForm({
           </div>
         </form>
       </Form>
+      <DiscardDraftDialog
+        open={discardOpen}
+        onOpenChange={setDiscardOpen}
+        onConfirm={() => {
+          void handleCancel()
+        }}
+        confirmDisabled={isSubmitting}
+      />
     </div>
   )
 }

@@ -182,6 +182,7 @@ function makeStubCoordinator(reason: StubbedBlockingReason): Record<string, unkn
     hasActiveImageEdits: reason === 'image-edit',
     hasBlockingOperations: reason !== null,
     blockingReason: reason,
+    getState: () => [],
     reset: async () => undefined,
     clear: () => undefined,
   }

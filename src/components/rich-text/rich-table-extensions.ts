@@ -52,7 +52,7 @@ export const RichTableKit = Extension.create({
 	name: "richTableKit",
 	addExtensions() {
 		return [
-			Table.configure({ resizable: true }),
+			Table.configure({ resizable: true, cellMinWidth: 120 }),
 			TableRow,
 			RichTableCell,
 			RichTableHeader,

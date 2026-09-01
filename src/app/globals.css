@@ -53,12 +53,13 @@
 
 /*
  * Description tables. The same .rich-text surface renders the editor body
- * and read-only FormattedText output; fixed layout keeps pasted wide tables
- * inside the description column.
+ * and read-only FormattedText output. Tables hug their content; max-width
+ * plus fixed layout keeps pasted wide tables inside the description column.
  */
 .rich-text table {
   border-collapse: collapse;
-  width: 100%;
+  width: auto;
+  max-width: 100%;
   table-layout: fixed;
   margin-block: .75rem;
 }
@@ -68,6 +69,8 @@
   padding: .375rem .5rem;
   vertical-align: top;
   text-align: left;
+  min-width: 8rem;
+  min-height: 2.25rem;
   /* Anchor for the absolutely-positioned column-resize handle. */
   position: relative;
 }
