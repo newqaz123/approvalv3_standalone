@@ -157,13 +157,64 @@ describe('slate editorial report body', () => {
     assert.deepEqual([...order].sort((left, right) => left - right), order)
   })
 
-  it('styles sections with tinted headers and hairline subheads instead of closed cards', async () => {
+  it('styles section headers as Editorial Index: numbered, transparent, dark-slate baseline rule', async () => {
     const html = await renderRequestEvidenceHTML(sampleData)
 
-    assert.match(html, /\.sec-head\s*\{[^}]*background:\s*#edf3f7/)
+    // Transparent header strip replaces the filled rounded band.
+    assert.match(html, /\.sec-head\s*\{[^}]*background:\s*transparent/)
+    assert.doesNotMatch(html, /\.sec-head\s*\{[^}]*#edf3f7/)
+    assert.doesNotMatch(html, /\.sec-head\s*\{[^}]*border-radius/)
+    // Editorial grid: pale-slate number column, title, accent mark.
+    assert.match(html, /\.sec-head\s*\{[^}]*display:\s*grid/)
+    assert.match(html, /\.sec-head\s*\{[^}]*grid-template-columns:\s*10mm 1fr auto/)
+    assert.match(html, /\.sec-head\s*\{[^}]*align-items:\s*end/)
+    // Large restrained pale-slate serif number at left via ::before.
+    assert.match(html, /\.sec-head::before\s*\{[^}]*content:\s*"0" counter\(sec-index\)/)
+    assert.match(html, /\.sec-head::before\s*\{[^}]*font-family:\s*Georgia/)
+    assert.match(html, /\.sec-head::before\s*\{[^}]*color:\s*#91a2af/)
+    // Short muted-slate accent mark at right via ::after.
+    assert.match(html, /\.sec-head::after\s*\{[^}]*content:\s*""/)
+    assert.match(html, /\.sec-head::after\s*\{[^}]*background:\s*#91aabe/)
+    // Strong dark-slate bottom rule under the header.
+    assert.match(html, /\.sec-head\s*\{[^}]*border-bottom:\s*2px solid #314b61/)
+    // Existing uppercase slate title and keep-together pagination stay.
     assert.match(html, /\.sec-head\s*\{[^}]*text-transform:\s*uppercase/)
+    assert.match(html, /\.sec-head\s*\{[^}]*page-break-after:\s*avoid/)
+    assert.match(html, /\.sec-head\s*\{[^}]*break-after:\s*avoid/)
+    // Hairline subheads inside sections stay unchanged.
     assert.match(html, /\.subhead\s*\{[^}]*border-bottom:\s*1px solid #263b50/)
     assert.doesNotMatch(html, /\.section\b|section-card/)
+  })
+
+  it('numbers the five sections with CSS counters and leaves section markup unchanged', async () => {
+    const html = await renderRequestEvidenceHTML(sampleData)
+
+    assert.match(html, /body\s*\{[^}]*counter-reset:\s*sec-index/)
+    assert.match(html, /\.sec-head\s*\{[^}]*counter-increment:\s*sec-index/)
+    // Exactly five section headers, in order, with no baked-in numbers.
+    const heads = [...html.matchAll(/<div class="sec-head">([^<]*)<\/div>/g)].map((match) => match[1])
+    assert.deepEqual(heads, [
+      'Original Request',
+      'Engineering Solution',
+      'Attachment Index',
+      'Approval Chain',
+      'Activity Log',
+    ])
+    assert.doesNotMatch(html, /<div class="sec-head">\s*0\d/)
+  })
+
+  it('keeps the packet outside section headers unchanged by the Editorial Index treatment', async () => {
+    const html = await renderRequestEvidenceHTML(sampleData)
+
+    // Natural-flow pagination untouched.
+    assert.doesNotMatch(html, /sec-new-page|break-before:\s*page|page-break-before:\s*always/)
+    // Body typography untouched.
+    assert.match(html, /body\s*\{[^}]*font-size:\s*10\.5px/)
+    assert.match(html, /body\s*\{[^}]*line-height:\s*1\.46/)
+    // Table and cost-strip behavior untouched.
+    assert.match(html, /thead\s*\{[^}]*display:\s*table-header-group/)
+    assert.match(html, /\.sec tr\s*\{[^}]*break-inside:\s*avoid/)
+    assert.match(html, /\.cost-row\s*\{[^}]*grid-template-columns:\s*auto 1fr 1fr/)
   })
 
   it('renders approval status as plain typographic text without app-style chips', async () => {
@@ -189,6 +240,65 @@ describe('slate editorial report body', () => {
     const solutionRichText = html.indexOf('Use approved spare motor')
     assert.ok(solutionSection !== -1 && costRow > solutionSection, 'cost strip belongs to the solution section')
     assert.ok(solutionRichText > costRow, 'solution rich text must follow the cost strip at full width')
+  })
+
+  it('renders the solution facts as a compact square metadata rail with hairline dividers', async () => {
+    const html = await renderRequestEvidenceHTML(sampleData)
+
+    // Square hairline-only framing replaces the rounded bordered card, and
+    // the tint matches the table-head tone instead of the old saturated panel.
+    assert.match(html, /\.cost-row\s*\{[^}]*background:\s*#f5f8fa/)
+    assert.match(html, /\.cost-row\s*\{[^}]*border-top:\s*1px solid #dce4ea/)
+    assert.match(html, /\.cost-row\s*\{[^}]*border-bottom:\s*1px solid #dce4ea/)
+    assert.doesNotMatch(html, /\.cost-row\s*\{[^}]*border-radius/)
+    assert.doesNotMatch(html, /\.cost-row\s*\{[^}]*border:\s*1px solid #cbd9e4/)
+    assert.doesNotMatch(html, /\.cost-row\s*\{[^}]*#f1f6f9/)
+    // Compact cell padding with vertical hairline dividers between cells.
+    assert.match(html, /\.cost-row > div\s*\{[^}]*padding:\s*1\.6mm 3\.5mm/)
+    assert.match(html, /\.cost-row > div\s*\{[^}]*border-right:\s*1px solid #dce4ea/)
+    assert.match(html, /\.cost-row > div:last-child\s*\{[^}]*border-right:\s*0/)
+    // Smaller amount/value hierarchy under the tiny uppercase label.
+    assert.match(html, /\.cost-row \.amt\s*\{[^}]*font-size:\s*13px/)
+    assert.match(html, /\.cost-row \.val\s*\{[^}]*font-size:\s*10px/)
+    // The three-column markup and keep-together pagination stay intact.
+    assert.match(html, /\.cost-row\s*\{[^}]*grid-template-columns:\s*auto 1fr 1fr/)
+    assert.match(html, /\.cost-row\s*\{[^}]*page-break-inside:\s*avoid/)
+    assert.match(html, /\.cost-row\s*\{[^}]*break-inside:\s*avoid/)
+  })
+
+  it('renders approval phase labels subordinate to section headers with a short left marker', async () => {
+    const html = await renderRequestEvidenceHTML(sampleData)
+
+    // Phase labels drop the full-width bottom rule that mimicked .sec-head ...
+    assert.match(html, /\.phase > \.subhead\s*\{[^}]*border-bottom:\s*0/)
+    // ... and gain a short pale-slate left marker with compact spacing.
+    assert.match(html, /\.phase > \.subhead\s*\{[^}]*border-left:\s*3px solid #91aabe/)
+    assert.match(html, /\.phase > \.subhead\s*\{[^}]*padding:\s*0\.6mm 0 0\.6mm 2mm/)
+    assert.match(html, /\.phase > \.subhead\s*\{[^}]*margin-bottom:\s*1\.8mm/)
+    assert.match(html, /\.phase > \.subhead\s*\{[^}]*text-transform:\s*uppercase/)
+    // Muted phase color and a slightly smaller size read below the header.
+    assert.match(html, /\.phase > \.subhead\s*\{[^}]*color:\s*#465b6d/)
+    assert.match(html, /\.phase > \.subhead\s*\{[^}]*font-size:\s*9\.5px/)
+    // Each phase stays on one page.
+    assert.match(html, /\.phase\s*\{[^}]*page-break-inside:\s*avoid/)
+    assert.match(html, /\.phase\s*\{[^}]*break-inside:\s*avoid/)
+    // Phase markup still uses the single subhead class inside .phase.
+    assert.match(html, /<div class="phase">\s*<div class="subhead">/)
+  })
+
+  it('keeps the generic subhead rule and Editorial Index header unchanged by the refinement', async () => {
+    const html = await renderRequestEvidenceHTML(sampleData)
+
+    // The generic subhead keeps its full hairline rule for other uses
+    // (e.g. Concept Design); the phase override is the only scoped change.
+    assert.match(html, /\.subhead\s*\{[^}]*border-bottom:\s*1px solid #263b50/)
+    assert.match(html, /\.subhead\s*\{[^}]*padding-bottom:\s*1\.5mm/)
+    assert.equal([...html.matchAll(/\.phase > \.subhead/g)].length, 1)
+    // The approved Editorial Index header stays exactly as before.
+    assert.match(html, /\.sec-head\s*\{[^}]*border-bottom:\s*2px solid #314b61/)
+    assert.match(html, /\.sec-head\s*\{[^}]*grid-template-columns:\s*10mm 1fr auto/)
+    assert.match(html, /\.sec-head::before\s*\{[^}]*content:\s*"0" counter\(sec-index\)/)
+    assert.match(html, /\.sec-head::after\s*\{[^}]*background:\s*#91aabe/)
   })
 
   it('escapes unsafe content across sections and keeps compact table columns', async () => {

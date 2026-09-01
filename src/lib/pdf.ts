@@ -305,28 +305,53 @@ export async function renderRequestEvidenceHTML(
       background: #ffffff;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
+      counter-reset: sec-index;
     }
     p { margin: 0 0 2.2mm; }
     ul, ol { margin: 1mm 0 2.2mm 4.5mm; padding: 0; }
     li { margin: 1.1mm 0; }
 
-    /* Main sections: tinted header band, no closed card borders. */
+    /* Main sections: Editorial Index headers, no closed card borders. */
     .sec { min-height: 0; margin-bottom: 5.5mm; }
     /* Natural-flow pagination: sections render continuously in the approved
        order and Chromium splits them wherever the current page runs out of
-       room, so the page count varies with content length. */
+       room, so the page count varies with content length. The Editorial
+       Index header numbers itself through CSS counters, so the section
+       markup and its text stay untouched. */
     .sec-head {
-      background: #edf3f7;
+      display: grid;
+      grid-template-columns: 10mm 1fr auto;
+      align-items: end;
+      column-gap: 2mm;
+      background: transparent;
       color: #263b50;
       font-size: 11px;
       font-weight: 800;
       letter-spacing: .07em;
       text-transform: uppercase;
-      padding: 2.5mm 4mm;
-      border-radius: 4px;
+      padding: 0 0 1.6mm;
+      border-bottom: 2px solid #314b61;
       margin-bottom: 3mm;
       page-break-after: avoid;
       break-after: avoid;
+      counter-increment: sec-index;
+    }
+    /* Large restrained pale-slate editorial number at the left. */
+    .sec-head::before {
+      content: "0" counter(sec-index);
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 21px;
+      font-weight: 400;
+      line-height: 1;
+      letter-spacing: 0;
+      color: #91a2af;
+    }
+    /* Short muted-slate accent mark at the right. */
+    .sec-head::after {
+      content: "";
+      width: 6mm;
+      height: 0.8mm;
+      background: #91aabe;
     }
     /* Sub-parts: hairline rule under the heading. */
     .subhead {
@@ -340,23 +365,25 @@ export async function renderRequestEvidenceHTML(
       margin-bottom: 2.5mm;
     }
 
-    /* Approved cost is a full-width horizontal strip; the solution rich text
-       below it is never constrained by a side column. */
+    /* Approved cost / submitted / timeline: compact square metadata rail.
+       Table-head tint with hairline framing only (no rounded card), so the
+       strip reads as data, not a container; the solution rich text below it
+       is never constrained by a side column. */
     .cost-row {
       display: grid;
       grid-template-columns: auto 1fr 1fr;
-      border: 1px solid #cbd9e4;
-      background: #f1f6f9;
-      border-radius: 8px;
+      background: #f5f8fa;
+      border-top: 1px solid #dce4ea;
+      border-bottom: 1px solid #dce4ea;
       margin-bottom: 3mm;
       page-break-inside: avoid;
       break-inside: avoid;
     }
-    .cost-row > div { padding: 2.5mm 4mm; border-right: 1px solid #dce7ee; min-width: 0; }
+    .cost-row > div { padding: 1.6mm 3.5mm; border-right: 1px solid #dce4ea; min-width: 0; }
     .cost-row > div:last-child { border-right: 0; }
     .lbl { font-size: 7px; letter-spacing: .1em; text-transform: uppercase; color: #71808c; font-weight: 600; }
-    .cost-row .amt { font-size: 15px; font-weight: 800; color: #4c718e; margin-top: 0.5mm; }
-    .cost-row .val { margin-top: 0.5mm; font-weight: 600; }
+    .cost-row .amt { font-size: 13px; font-weight: 800; color: #4c718e; margin-top: 0.4mm; }
+    .cost-row .val { font-size: 10px; margin-top: 0.4mm; font-weight: 600; }
 
     /* Approval status reads as plain typographic text, not an app-style chip. */
     .pill { display: inline; font-size: 8.5px; font-weight: 700; text-transform: capitalize; }
@@ -398,6 +425,18 @@ export async function renderRequestEvidenceHTML(
 
     .phase + .phase { margin-top: 3.5mm; }
     .phase { page-break-inside: avoid; break-inside: avoid; }
+    /* Phase labels stay clearly subordinate to .sec-head: no full-width
+       rule, just a short pale-slate marker and compact spacing. Scoped to
+       .phase so other subheads (e.g. Concept Design) keep the hairline. */
+    .phase > .subhead {
+      border-bottom: 0;
+      border-left: 3px solid #91aabe;
+      color: #465b6d;
+      font-size: 9.5px;
+      text-transform: uppercase;
+      padding: 0.6mm 0 0.6mm 2mm;
+      margin-bottom: 1.8mm;
+    }
 
     .description h2 { font-size: 16px; font-weight: 700; margin: 12px 0 4px; }
     .description h3 { font-size: 14px; font-weight: 700; margin: 10px 0 4px; }
