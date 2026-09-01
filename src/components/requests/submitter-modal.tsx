@@ -55,7 +55,11 @@ import {
 	validateAttachmentMetadata,
 } from "@/lib/attachments/policy";
 import { useSolutionAttachments } from "@/hooks/use-solution-attachments";
-import { describeUploadProgress } from "@/lib/attachments/upload-progress";
+import {
+	describeUploadProgress,
+	requestPhaseLabel,
+	type RequestUploadProgress,
+} from "@/lib/attachments/upload-progress";
 import {
 	inlineImageBlockingMessage,
 	useInlineDescriptionImages,
@@ -105,13 +109,16 @@ interface SubmitterModalProps {
 		rejectedAt?: string;
 	};
 	availableUsers?: User[];
-	onSubmitRequest?: (data: {
-		title: string;
-		description: string;
-		templateId?: string;
-		files: File[];
-		inlineImageSessionId: string;
-	}) => Promise<{ success: boolean; error?: string }>;
+	onSubmitRequest?: (
+		data: {
+			title: string;
+			description: string;
+			templateId?: string;
+			files: File[];
+			inlineImageSessionId: string;
+		},
+		onUploadProgress?: (progress: RequestUploadProgress) => void,
+	) => Promise<{ success: boolean; error?: string }>;
 	onSubmitSolution?: (data: {
 		title: string;
 		description: string;
@@ -466,6 +473,9 @@ export function SubmitterModal({
 		inlineImages.blockingReason,
 	);
 	const [isBusy, setIsBusy] = useState(false);
+	// Request-mode phase/file progress, reported by the caller during submit.
+	const [requestProgress, setRequestProgress] =
+		useState<RequestUploadProgress | null>(null);
 	// Count-based, honest upload feedback for solution/resubmit batches.
 	const uploadProgress = describeUploadProgress(attachmentItems);
 	const [submitError, setSubmitError] = useState<string | null>(null);
@@ -587,16 +597,22 @@ export function SubmitterModal({
 
 		if (mode === "request" && onSubmitRequest) {
 			setIsBusy(true);
+			setRequestProgress(null);
 			try {
 				// Await the caller's server action; only a confirmed success may
-				// clear the draft session and close the modal.
-				const result = await onSubmitRequest({
-					title,
-					description,
-					templateId: selectedTemplate || undefined,
-					files,
-					inlineImageSessionId: inlineImages.uploadSessionId,
-				});
+				// clear the draft session and close the modal. The optional
+				// progress callback lets the caller stream create/upload phases
+				// back into the modal while the user waits.
+				const result = await onSubmitRequest(
+					{
+						title,
+						description,
+						templateId: selectedTemplate || undefined,
+						files,
+						inlineImageSessionId: inlineImages.uploadSessionId,
+					},
+					setRequestProgress,
+				);
 				if (!result.success) {
 					setSubmitError(result.error || "Failed to submit");
 					return;
@@ -1128,26 +1144,48 @@ export function SubmitterModal({
 						)}
 						{!isSolutionMode && files.length > 0 && (
 							<div className="space-y-2">
+								{isBusy && requestPhaseLabel(requestProgress) && (
+									<p className="flex items-center gap-1.5 text-xs text-blue-600">
+										<Loader2 className="h-3 w-3 animate-spin" />
+										{requestPhaseLabel(requestProgress)}
+									</p>
+								)}
 								{files.map((file: File, index: number) => {
+									// Caller-reported upload status, by file order.
+									const isUploaded =
+										requestProgress !== null &&
+										index < requestProgress.uploaded;
+									const isUploadingNow =
+										requestProgress !== null &&
+										requestProgress.phase === "uploading" &&
+										index === requestProgress.uploaded;
 									return (
 										<div
 											key={`new-${file.name}-${index}-${file.lastModified || Date.now()}`}
 											className="flex items-start gap-3 p-3 border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900"
 										>
-											{getFileIcon(
-												file.name.split(".").pop()?.toLowerCase() || "",
+											{isUploaded ? (
+												<CheckCircle2 className="w-5 h-5 text-green-600 flex-shrink-0" />
+											) : isUploadingNow ? (
+												<Loader2 className="w-5 h-5 text-blue-600 animate-spin flex-shrink-0" />
+											) : (
+												getFileIcon(
+													file.name.split(".").pop()?.toLowerCase() || "",
+												)
 											)}
 											<div className="flex-1 min-w-0 space-y-2">
 												<div className="flex items-center justify-between">
 													<p className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">
 														{file.name}
 													</p>
-													<button
-														onClick={() => removeFile(index)}
-														className="p-1 text-slate-400 hover:text-red-500 transition-colors"
-													>
-														<Trash2 className="w-4 h-4" />
-													</button>
+													{!isBusy && (
+														<button
+															onClick={() => removeFile(index)}
+															className="p-1 text-slate-400 hover:text-red-500 transition-colors"
+														>
+															<Trash2 className="w-4 h-4" />
+														</button>
+													)}
 												</div>
 												<input
 													type="text"

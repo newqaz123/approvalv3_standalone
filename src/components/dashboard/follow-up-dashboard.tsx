@@ -20,6 +20,7 @@ import {
 } from "@/lib/follow-up-dashboard";
 import { createRequest } from "@/server-actions/requests";
 import { uploadFileAction } from "@/server-actions/files";
+import type { RequestUploadProgress } from "@/lib/attachments/upload-progress";
 
 type DrawerKey =
 	| "active"
@@ -53,14 +54,22 @@ export function FollowUpDashboard({ data }: { data: FollowUpDashboardData }) {
 	// clicks meant for the visible rows — requests stopped opening entirely.
 	const isFinePointer = useMediaQuery("(pointer: fine)");
 
-	const handleSubmitRequest = async (form: {
-		title: string;
-		description: string;
-		templateId?: string;
-		files: File[];
-		inlineImageSessionId: string;
-	}): Promise<{ success: boolean; error?: string }> => {
+	const handleSubmitRequest = async (
+		form: {
+			title: string;
+			description: string;
+			templateId?: string;
+			files: File[];
+			inlineImageSessionId: string;
+		},
+		onUploadProgress?: (p: RequestUploadProgress) => void,
+	): Promise<{ success: boolean; error?: string }> => {
 		try {
+			onUploadProgress?.({
+				phase: "creating",
+				uploaded: 0,
+				total: form.files.length,
+			});
 			const result = await createRequest({
 				title: form.title,
 				description: form.description,
@@ -69,7 +78,13 @@ export function FollowUpDashboard({ data }: { data: FollowUpDashboardData }) {
 
 			if (result.success && result.requestId) {
 				if (form.files.length > 0) {
-					for (const file of form.files) {
+					for (const [i, file] of form.files.entries()) {
+						onUploadProgress?.({
+							phase: "uploading",
+							uploaded: i,
+							total: form.files.length,
+							fileName: file.name,
+						});
 						const formData = new FormData();
 						formData.append("file", file);
 						formData.append("requestId", result.requestId);
@@ -81,6 +96,11 @@ export function FollowUpDashboard({ data }: { data: FollowUpDashboardData }) {
 						}
 					}
 				}
+				onUploadProgress?.({
+					phase: "finalizing",
+					uploaded: form.files.length,
+					total: form.files.length,
+				});
 				toast.success("Request created successfully");
 				setShowNewRequestModal(false);
 				router.refresh();

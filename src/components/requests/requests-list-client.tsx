@@ -10,6 +10,7 @@ import { createRequest, exportRequestsXlsx } from '@/server-actions/requests'
 import type { GetRequestsFilters } from '@/server-actions/requests'
 import { DEFAULT_WR_FILTER } from '@/components/requests/request-filters'
 import { uploadFileAction } from '@/server-actions/files'
+import type { RequestUploadProgress } from '@/lib/attachments/upload-progress'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 
@@ -38,8 +39,9 @@ export function RequestsListClient({
     templateId?: string
     files: File[]
     inlineImageSessionId: string
-  }): Promise<{ success: boolean; error?: string }> => {
+  }, onUploadProgress?: (p: RequestUploadProgress) => void): Promise<{ success: boolean; error?: string }> => {
     try {
+      onUploadProgress?.({ phase: 'creating', uploaded: 0, total: data.files.length })
       const result = await createRequest({
         title: data.title,
         description: data.description,
@@ -49,7 +51,8 @@ export function RequestsListClient({
       if (result.success && result.requestId) {
         // Upload files if any
         if (data.files && data.files.length > 0) {
-          for (const file of data.files) {
+          for (const [i, file] of data.files.entries()) {
+            onUploadProgress?.({ phase: 'uploading', uploaded: i, total: data.files.length, fileName: file.name })
             const formData = new FormData()
             formData.append('file', file)
             formData.append('requestId', result.requestId)
@@ -60,6 +63,7 @@ export function RequestsListClient({
             }
           }
         }
+        onUploadProgress?.({ phase: 'finalizing', uploaded: data.files.length, total: data.files.length })
 
         toast.success('Request created successfully')
         setShowNewRequestModal(false)

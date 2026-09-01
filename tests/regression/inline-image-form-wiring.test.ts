@@ -619,13 +619,13 @@ describe('inline image form wiring contracts', () => {
     it('types the request callback as an async success result with the upload session', () => {
       assert.match(
         source,
-        /onSubmitRequest\?: \(data: \{[\s\S]*?inlineImageSessionId: string;[\s\S]*?\}\) => Promise<\{ success: boolean; error\?: string \}>/,
+        /onSubmitRequest\?: \(\s*data: \{[\s\S]*?inlineImageSessionId: string;[\s\S]*?\},\s*onUploadProgress\?: \(progress: RequestUploadProgress\) => void,[\s\S]*?\) => Promise<\{ success: boolean; error\?: string \}>/,
       )
       assert.match(source, /inlineImageSessionId: string;/)
     })
 
     it('awaits the request callback and only clears after confirmed success', () => {
-      assert.match(source, /const result = await onSubmitRequest\(\{[\s\S]*?inlineImageSessionId: inlineImages\.uploadSessionId,[\s\S]*?\}\)/)
+      assert.match(source, /const result = await onSubmitRequest\([\s\S]*?inlineImageSessionId: inlineImages\.uploadSessionId,[\s\S]*?\},[\s\S]*?setRequestProgress,[\s\S]*?\);/)
       assert.match(source, /if \(!result\.success\) \{[\s\S]*?setSubmitError\(result\.error \|\| "Failed to submit"\)[\s\S]*?return;[\s\S]*?\}/)
       const requestBranch = source.split('if (mode === "request" && onSubmitRequest)')[1]?.split('if (isSolutionMode)')[0] ?? ''
       assert.match(requestBranch, /inlineImages\.clear\(\)/)
