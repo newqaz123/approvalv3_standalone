@@ -438,6 +438,9 @@ export function SubmitterModal({
 		setUseCustomHierarchy(false);
 		setCustomApprovers([]);
 		setDeletedFileIds([]);
+		// Stale submit progress would mark freshly selected files as uploaded
+		// (index < uploaded renders a green check) on the next open.
+		setRequestProgress(null);
 	}, []);
 
 	useEffect(() => {
@@ -1152,10 +1155,19 @@ export function SubmitterModal({
 								)}
 								{files.map((file: File, index: number) => {
 									// Caller-reported upload status, by file order.
+									// `uploaded` includes failures (the caller
+									// continues past them), so check failedIndices
+									// before treating a file as successful.
+									const isFailed =
+										requestProgress?.failedIndices?.includes(
+											index,
+										) ?? false;
 									const isUploaded =
+										!isFailed &&
 										requestProgress !== null &&
 										index < requestProgress.uploaded;
 									const isUploadingNow =
+										!isFailed &&
 										requestProgress !== null &&
 										requestProgress.phase === "uploading" &&
 										index === requestProgress.uploaded;
@@ -1164,7 +1176,9 @@ export function SubmitterModal({
 											key={`new-${file.name}-${index}-${file.lastModified || Date.now()}`}
 											className="flex items-start gap-3 p-3 border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900"
 										>
-											{isUploaded ? (
+											{isFailed ? (
+												<AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0" />
+											) : isUploaded ? (
 												<CheckCircle2 className="w-5 h-5 text-green-600 flex-shrink-0" />
 											) : isUploadingNow ? (
 												<Loader2 className="w-5 h-5 text-blue-600 animate-spin flex-shrink-0" />

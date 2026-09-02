@@ -49,21 +49,24 @@ export function RequestsListClient({
       })
 
       if (result.success && result.requestId) {
-        // Upload files if any
+        // Upload files if any. Failures are collected (the loop continues) so
+        // the modal can render them as errors instead of green checks.
+        const failedIndices: number[] = []
         if (data.files && data.files.length > 0) {
           for (const [i, file] of data.files.entries()) {
-            onUploadProgress?.({ phase: 'uploading', uploaded: i, total: data.files.length, fileName: file.name })
+            onUploadProgress?.({ phase: 'uploading', uploaded: i, total: data.files.length, fileName: file.name, failedIndices: [...failedIndices] })
             const formData = new FormData()
             formData.append('file', file)
             formData.append('requestId', result.requestId)
 
             const uploadResult = await uploadFileAction(null, formData)
             if (!uploadResult.success) {
+              failedIndices.push(i)
               toast.error(`Failed to upload ${file.name}: ${uploadResult.error}`)
             }
           }
         }
-        onUploadProgress?.({ phase: 'finalizing', uploaded: data.files.length, total: data.files.length })
+        onUploadProgress?.({ phase: 'finalizing', uploaded: data.files.length, total: data.files.length, failedIndices: [...failedIndices] })
 
         toast.success('Request created successfully')
         setShowNewRequestModal(false)

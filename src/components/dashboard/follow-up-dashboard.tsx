@@ -77,6 +77,9 @@ export function FollowUpDashboard({ data }: { data: FollowUpDashboardData }) {
 			});
 
 			if (result.success && result.requestId) {
+				// Failures are collected (the loop continues) so the modal can
+				// render them as errors instead of green checks.
+				const failedIndices: number[] = [];
 				if (form.files.length > 0) {
 					for (const [i, file] of form.files.entries()) {
 						onUploadProgress?.({
@@ -84,12 +87,14 @@ export function FollowUpDashboard({ data }: { data: FollowUpDashboardData }) {
 							uploaded: i,
 							total: form.files.length,
 							fileName: file.name,
+							failedIndices: [...failedIndices],
 						});
 						const formData = new FormData();
 						formData.append("file", file);
 						formData.append("requestId", result.requestId);
 						const uploadResult = await uploadFileAction(null, formData);
 						if (!uploadResult.success) {
+							failedIndices.push(i);
 							toast.error(
 								`Failed to upload ${file.name}: ${uploadResult.error}`,
 							);
@@ -100,6 +105,7 @@ export function FollowUpDashboard({ data }: { data: FollowUpDashboardData }) {
 					phase: "finalizing",
 					uploaded: form.files.length,
 					total: form.files.length,
+					failedIndices: [...failedIndices],
 				});
 				toast.success("Request created successfully");
 				setShowNewRequestModal(false);

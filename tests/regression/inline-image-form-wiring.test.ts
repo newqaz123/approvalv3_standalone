@@ -629,6 +629,15 @@ describe('inline image form wiring contracts', () => {
       assert.match(source, /if \(!result\.success\) \{[\s\S]*?setSubmitError\(result\.error \|\| "Failed to submit"\)[\s\S]*?return;[\s\S]*?\}/)
       const requestBranch = source.split('if (mode === "request" && onSubmitRequest)')[1]?.split('if (isSolutionMode)')[0] ?? ''
       assert.match(requestBranch, /inlineImages\.clear\(\)/)
+      // Ordering: clear() must come AFTER the awaited callback and its failure
+      // branch — separate regexes above cannot catch a reorder on their own.
+      const awaitIdx = requestBranch.indexOf('await onSubmitRequest(')
+      const failIdx = requestBranch.indexOf('if (!result.success)')
+      const clearIdx = requestBranch.indexOf('inlineImages.clear()')
+      assert.ok(awaitIdx !== -1, 'awaited callback present in request branch')
+      assert.ok(failIdx !== -1, 'failure branch present in request branch')
+      assert.ok(clearIdx !== -1, 'clear() present in request branch')
+      assert.ok(awaitIdx < failIdx && failIdx < clearIdx, 'clear() must run after the awaited callback and its failure branch')
     })
 
     it('passes the upload session through solution and resubmit callback data', () => {

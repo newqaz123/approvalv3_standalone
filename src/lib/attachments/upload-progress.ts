@@ -13,6 +13,12 @@ export interface RequestUploadProgress {
 	total: number;
 	/** File currently uploading. */
 	fileName?: string;
+	/**
+	 * Indices of files whose upload failed. The count in `uploaded` includes
+	 * them (the loop continues past failures), so consumers must render these
+	 * as errors, never as successes.
+	 */
+	failedIndices?: number[];
 }
 
 export interface UploadProgressSummary {
