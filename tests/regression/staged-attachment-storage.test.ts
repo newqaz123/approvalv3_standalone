@@ -45,7 +45,7 @@ describe('createStagedAttachmentPath', () => {
 describe('isStagedAttachmentPath', () => {
   it('is true only for unprefixed stage/<uuid>/<filename>', () => {
     assert.equal(isStagedAttachmentPath(`stage/${UUID}/a.pdf`), true)
-    assert.equal(isStagedAttachmentPath(` stage/${UUID}/a.pdf `), true, 'trims')
+    assert.equal(isStagedAttachmentPath(` stage/${UUID}/a.pdf `), false, 'rejects surrounding whitespace')
     assert.equal(isStagedAttachmentPath(createStagedAttachmentPath(UUID, 'photo.png')), true)
     assert.equal(isStagedAttachmentPath(`stage/${UUID}/drawing..pdf`), true, 'sanitizer-valid .. substring')
   })
