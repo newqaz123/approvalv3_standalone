@@ -49,7 +49,7 @@ export function getModalTypeForStatus(
   isRequesterDepartment: boolean,
   isEngineering: boolean
 ): {
-  modalType: 'submitter' | 'approver' | 'solution' | 'completed-request' | 'completed-solution' | 'completed-final' | 'resubmit-request' | 'resubmit-solution' | 'resubmit-final' | 'submit-final'
+  modalType: 'approver' | 'solution' | 'completed-request' | 'completed-solution' | 'completed-final' | 'resubmit-request' | 'resubmit-solution' | 'resubmit-final' | 'submit-final'
   mode?: 'request' | 'solution' | 'final' | 'resubmit'
   showSubmitSolutionButton?: boolean
   showSubmitFinalApprovalButton?: boolean
