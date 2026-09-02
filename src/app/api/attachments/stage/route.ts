@@ -1,17 +1,26 @@
 import { NextResponse } from 'next/server'
 import { randomUUID } from 'node:crypto'
+import { stat } from 'node:fs/promises'
 import { auth } from '@/lib/auth-config'
 import {
   createStagedAttachmentPath,
   isStagedAttachmentPath,
+  resolveStoredAttachmentPath,
   writeAttachmentFile,
   deleteAttachmentFile,
 } from '@/lib/attachments/storage'
 import { validateAttachmentMetadata } from '@/lib/attachments/policy'
 
+function isEnoent(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && (error as { code?: unknown }).code === 'ENOENT'
+}
+
 /**
  * POST /api/attachments/stage — upload ONE not-yet-submitted attachment into
- * the staging subtree (`stage/<uuid>-<name>`). The XHR client uses real
+ * the staging subtree (`stage/<uuid>/<name>`). The XHR client uses real
  * byte-level progress for this upload; the file only becomes a request
  * attachment when createRequest atomically adopts it. Nothing here touches
  * the database, so abandoned stages are just files under stage/.
@@ -54,17 +63,17 @@ export async function POST(request: Request) {
   try {
     const bytes = Buffer.from(await file.arrayBuffer())
     await writeAttachmentFile(stagedPath, bytes)
+    const info = await stat(resolveStoredAttachmentPath(stagedPath))
+    return NextResponse.json({
+      stagedPath,
+      fileName: file.name,
+      fileType: file.type,
+      fileSize: info.size,
+    })
   } catch (error) {
     console.error('Failed to stage attachment:', error)
     return NextResponse.json({ error: 'Failed to store file' }, { status: 500 })
   }
-
-  return NextResponse.json({
-    stagedPath,
-    fileName: file.name,
-    fileType: file.type,
-    fileSize: file.size,
-  })
 }
 
 /**
@@ -98,10 +107,11 @@ export async function DELETE(request: Request) {
   try {
     await deleteAttachmentFile(stagedPath)
   } catch (error) {
-    // Missing file is already-cleaned — idempotent success. Anything else
-    // (permissions, IO) still reports success to keep cancel flows simple;
-    // the file is invisible to the app either way.
-    console.warn('Staged attachment cleanup issue:', error)
+    if (isEnoent(error)) {
+      return NextResponse.json({ error: 'Staged attachment not found' }, { status: 404 })
+    }
+    console.error('Failed to delete staged attachment:', error)
+    return NextResponse.json({ error: 'Failed to delete staged file' }, { status: 500 })
   }
   return NextResponse.json({ success: true })
 }
