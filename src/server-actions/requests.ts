@@ -8,7 +8,17 @@ import { z } from 'zod'
 import { createApprovalChain, getApproversAtLevel } from './approvals'
 import { requireAdmin } from '@/lib/auth'
 import { getCurrentUser, getUserById } from '@/lib/cache/user-cache'
-import { deleteAttachmentFile } from '@/lib/attachments/storage'
+import {
+  attachmentFileExists,
+  createStoredAttachmentPath,
+  deleteAttachmentFile,
+  isStagedAttachmentPath,
+  resolveStoredAttachmentPath,
+} from '@/lib/attachments/storage'
+import { MAX_ATTACHMENTS_PER_FORM, validateAttachmentMetadata } from '@/lib/attachments/policy'
+import { randomUUID } from 'node:crypto'
+import { mkdir, rename, stat } from 'node:fs/promises'
+import { dirname } from 'node:path'
 import { descriptionSchema } from '@/lib/schemas/solution-schemas'
 import {
   prepareInlineDescription,
@@ -33,7 +43,30 @@ const createRequestSchema = z.object({
   title: z.string().min(1, 'Title is required').max(200, 'Title too long'),
   description: descriptionSchema,
   inlineImageSessionId: z.string().uuid(),
+  // Attachments uploaded ahead of submit to the staging endpoint. The
+  // request + these rows commit atomically, so a request can never exist
+  // without its files.
+  stagedAttachments: z
+    .array(
+      z.object({
+        stagedPath: z.string().min(1),
+        fileName: z.string().min(1),
+        fileType: z.string().min(1),
+        fileSize: z.number().int().positive(),
+        description: z.string().max(60).optional(),
+      }),
+    )
+    .max(MAX_ATTACHMENTS_PER_FORM)
+    .default([]),
 })
+
+export interface StagedAttachmentInput {
+  stagedPath: string
+  fileName: string
+  fileType: string
+  fileSize: number
+  description?: string
+}
 
 export interface CreateRequestInput {
   title: string
@@ -41,6 +74,7 @@ export interface CreateRequestInput {
   // Callers add this during the editor-coordinator rollout; validation still
   // requires it before any description save can claim image drafts.
   inlineImageSessionId?: string
+  stagedAttachments?: StagedAttachmentInput[]
 }
 
 /**
@@ -72,45 +106,168 @@ export async function createRequest(input: CreateRequestInput) {
     uploadSessionId: validatedFields.data.inlineImageSessionId,
   })
 
-  // Create request in a transaction with activity log
-  const request = await prisma.$transaction(async (tx) => {
-    const newRequest = await tx.requests.create({
-      data: {
-        title: validatedFields.data.title,
-        description: prepared.html,
-        requesterId: user.id,
-        departmentId: user.departmentId!, // Non-null assertion since we checked above
-        status: 'ImprovementRequest',
-      },
+  // Generate the request id before the transaction so staged files can move
+  // to their final, request-scoped paths before any database row exists.
+  // Moves are restored to staging if the transaction fails so submit can retry.
+  const requestId = randomUUID()
+  const stagedAttachments = validatedFields.data.stagedAttachments
+
+  const verifiedAttachments: Array<{
+    id: string
+    stagedPath: string
+    finalPath: string
+    fileName: string
+    fileType: string
+    fileSize: number
+    description?: string
+  }> = []
+
+  // Validate EVERY staged item before moving any of them. The API validated
+  // once during upload; this second check treats the client payload as
+  // untrusted and verifies the real file size from disk.
+  for (const item of stagedAttachments) {
+    if (!isStagedAttachmentPath(item.stagedPath)) {
+      return { success: false, error: `${item.fileName}: Invalid staged attachment` }
+    }
+    const metadataError = validateAttachmentMetadata({
+      name: item.fileName,
+      type: item.fileType,
+      size: item.fileSize,
+    })
+    if (metadataError) return { success: false, error: metadataError }
+    if (!(await attachmentFileExists(item.stagedPath))) {
+      return { success: false, error: `${item.fileName}: Staged file is missing — please retry the upload` }
+    }
+
+    let info
+    try {
+      info = await stat(resolveStoredAttachmentPath(item.stagedPath))
+    } catch {
+      return { success: false, error: `${item.fileName}: Staged file is missing — please retry the upload` }
+    }
+    if (!info.isFile()) {
+      return { success: false, error: `${item.fileName}: Staged file is missing — please retry the upload` }
+    }
+    if (info.size !== item.fileSize) {
+      return { success: false, error: `${item.fileName}: Staged file size does not match` }
+    }
+
+    const attachmentId = randomUUID()
+    verifiedAttachments.push({
+      id: attachmentId,
+      stagedPath: item.stagedPath,
+      finalPath: createStoredAttachmentPath(requestId, item.fileName, attachmentId),
+      fileName: item.fileName,
+      fileType: item.fileType,
+      fileSize: info.size,
+      description: item.description,
+    })
+  }
+
+  const movedAttachments: typeof verifiedAttachments = []
+  let request: { id: string; title: string }
+  let approvals: Awaited<ReturnType<typeof createApprovalChain>>
+
+  try {
+    // rename() is atomic on the same filesystem. Move all files first; only
+    // after every move succeeds do we start the DB transaction.
+    for (const item of verifiedAttachments) {
+      const finalAbsolutePath = resolveStoredAttachmentPath(item.finalPath)
+      await mkdir(dirname(finalAbsolutePath), { recursive: true })
+      await rename(resolveStoredAttachmentPath(item.stagedPath), finalAbsolutePath)
+      movedAttachments.push(item)
+    }
+
+    const txResult = await prisma.$transaction(async (tx) => {
+      let newRequest = await tx.requests.create({
+        data: {
+          id: requestId,
+          title: validatedFields.data.title,
+          description: prepared.html,
+          requesterId: user.id,
+          departmentId: user.departmentId!, // checked above
+          status: 'ImprovementRequest',
+        },
+      })
+
+      if (verifiedAttachments.length > 0) {
+        await tx.file_attachments.createMany({
+          data: verifiedAttachments.map((item) => ({
+            id: item.id,
+            requestId: newRequest.id,
+            fileName: item.fileName,
+            fileType: item.fileType,
+            fileSize: item.fileSize,
+            filePath: item.finalPath,
+            description: item.description || null,
+            uploadedById: user.id,
+          })),
+        })
+      }
+
+      await reconcileInlineDescriptionImages(tx, {
+        owner: { kind: 'request', id: newRequest.id },
+        imageIds: prepared.imageIds,
+      })
+
+      await tx.request_activities.create({
+        data: {
+          requestId: newRequest.id,
+          action: 'created',
+          toStatus: 'ImprovementRequest',
+          comments: `Request created: ${validatedFields.data.title}`,
+          userId: user.id,
+        },
+      })
+
+      const chain = await createApprovalChain(
+        newRequest.id,
+        user.departmentId!,
+        user.level || 1,
+        user.id,
+        tx,
+      )
+
+      const isTopLevel = chain.length > 0 && chain[0].status === 'approved'
+      if (isTopLevel) {
+        newRequest = await tx.requests.update({
+          where: { id: newRequest.id },
+          data: { status: 'SentToEngineer' },
+        })
+        await tx.request_activities.create({
+          data: {
+            requestId: newRequest.id,
+            userId: user.id,
+            action: 'status_changed',
+            fromStatus: 'ImprovementRequest',
+            toStatus: 'SentToEngineer',
+            comments: 'Auto-approved by top-level user',
+          },
+        })
+      }
+
+      return { request: newRequest, approvals: chain }
     })
 
-    await reconcileInlineDescriptionImages(tx, {
-      owner: { kind: 'request', id: newRequest.id },
-      imageIds: prepared.imageIds,
-    })
-
-    // Log creation in audit trail
-    await tx.request_activities.create({
-      data: {
-        requestId: newRequest.id,
-        action: 'created',
-        toStatus: 'ImprovementRequest',
-        comments: `Request created: ${validatedFields.data.title}`,
-        userId: user.id,
-      },
-    })
-
-    return newRequest
-  })
-
-  // Create approval chain based on user's level
-  const userLevel = user.level || 1
-  const approvals = await createApprovalChain(
-    request.id,
-    user.departmentId,
-    userLevel,
-    user.id
-  )
+    request = txResult.request
+    approvals = txResult.approvals
+  } catch (error) {
+    // Restore moved files to staging so the form can retry after a transient
+    // DB or filesystem failure. Reverse order handles partially moved sets.
+    for (const item of [...movedAttachments].reverse()) {
+      try {
+        await mkdir(dirname(resolveStoredAttachmentPath(item.stagedPath)), { recursive: true })
+        await rename(
+          resolveStoredAttachmentPath(item.finalPath),
+          resolveStoredAttachmentPath(item.stagedPath),
+        )
+      } catch (restoreError) {
+        console.error('Failed to restore staged attachment:', restoreError)
+      }
+    }
+    console.error('Failed to create request atomically:', error)
+    return { success: false, error: 'Failed to create request — please try again' }
+  }
 
   // Notify department approvers if there are pending approvals (not auto-approved)
   const pendingApprovals = approvals.filter(a => a.status === 'pending')
@@ -130,26 +287,6 @@ export async function createRequest(input: CreateRequestInput) {
         requestId: request.id,
       })
     }
-  }
-
-  // If user is top-level (auto-approved), change status immediately
-  const isTopLevel = approvals.length > 0 && approvals[0].status === 'approved'
-  if (isTopLevel) {
-    await prisma.requests.update({
-      where: { id: request.id },
-      data: { status: 'SentToEngineer' },
-    })
-
-    await prisma.request_activities.create({
-      data: {
-        requestId: request.id,
-        userId: user.id,
-        action: 'status_changed',
-        fromStatus: 'ImprovementRequest',
-        toStatus: 'SentToEngineer',
-        comments: 'Auto-approved by top-level user',
-      },
-    })
   }
 
   revalidateRequestViews(request.id)
