@@ -23,6 +23,8 @@ const OTHER_ATTACHMENT_ID = '7c3e1a90-2b44-4d81-9f06-55aa11bb22cc'
 const USER_ID = 'user-1'
 const OTHER_USER_ID = 'user-2'
 const REQUEST_ID = '11111111-2222-4333-8444-555555555555'
+const SOLUTION_REQUEST_ID = '99999999-8888-4777-8666-555555555555'
+const OTHER_SOLUTION_REQUEST_ID = 'aaaaaaa1-2222-4333-8444-555555555555'
 const AUTHED: AuthSession = { user: { id: USER_ID } }
 
 let authSession: AuthSession = AUTHED
@@ -225,6 +227,40 @@ async function postFile(file: File, attachmentId: string, uploadToken?: string):
   form.append('attachmentId', attachmentId)
   if (uploadToken !== undefined) form.append('uploadToken', uploadToken)
   return POST(new Request('http://localhost/api/attachments/stage', { method: 'POST', body: form }))
+}
+
+async function putSolutionAttachment(body: Record<string, unknown>): Promise<Response> {
+  return putAttachment({ scope: 'solution', requestId: SOLUTION_REQUEST_ID, ...body })
+}
+
+async function reserveSolutionFile(file: File, attachmentId = ATTACHMENT_ID, requestId = SOLUTION_REQUEST_ID) {
+  return readJson(await putAttachment({
+    attachmentId,
+    fileName: file.name,
+    fileType: file.type,
+    fileSize: file.size,
+    scope: 'solution',
+    requestId,
+  }))
+}
+
+async function postSolutionFile(
+  file: File,
+  attachmentId: string,
+  uploadToken: string,
+  requestId = SOLUTION_REQUEST_ID,
+): Promise<Response> {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('attachmentId', attachmentId)
+  form.append('uploadToken', uploadToken)
+  form.append('scope', 'solution')
+  form.append('requestId', requestId)
+  return POST(new Request('http://localhost/api/attachments/stage', { method: 'POST', body: form }))
+}
+
+async function deleteSolutionAttachment(attachmentId = ATTACHMENT_ID, requestId = SOLUTION_REQUEST_ID) {
+  return readJson(await deleteAttachment({ attachmentId, scope: 'solution', requestId }))
 }
 
 async function deleteAttachment(body: unknown): Promise<Response> {
@@ -641,5 +677,333 @@ describe('DELETE /api/attachments/stage', () => {
     assert.equal(again.status, 409)
     assert.equal(again.body.error, 'Attachment was cancelled')
     assert.match(String(rows.get(ATTACHMENT_ID)?.filePath), /cancelled/)
+  })
+})
+
+describe('PUT /api/attachments/stage — solution scope', () => {
+  it('reserves a solution-draft row bound to the target request with a stable token', async () => {
+    const file = pdfFile('a b.pdf', 'hello-solution')
+    const first = await reserveSolutionFile(file)
+    assert.equal(first.status, 200)
+    assert.equal(first.body.attachmentId, ATTACHMENT_ID)
+    assert.equal(first.body.alreadyReady, false)
+    assert.match(String(first.body.uploadToken), /^[0-9a-f-]{36}$/i)
+
+    const row = rows.get(ATTACHMENT_ID)
+    assert.ok(row)
+    assert.equal(row.requestId, SOLUTION_REQUEST_ID)
+    assert.equal(row.solutionId, null)
+    assert.equal(row.uploadedById, USER_ID)
+    assert.equal(row.filePath, `solution-drafts/reserved/${ATTACHMENT_ID}/${first.body.uploadToken}/a b.pdf`)
+
+    const second = await reserveSolutionFile(file)
+    assert.equal(second.status, 200)
+    assert.equal(second.body.uploadToken, first.body.uploadToken)
+    assert.equal(second.body.alreadyReady, false)
+  })
+
+  it('returns alreadyReady only for a matching ready solution row', async () => {
+    const file = pdfFile('a.pdf', 'bytes')
+    const first = await reserveSolutionFile(file)
+    const readyPath = (realStorage.toSolutionDraftReadyPath as (path: string) => string)(rows.get(ATTACHMENT_ID)!.filePath)
+    rows.set(ATTACHMENT_ID, { ...rows.get(ATTACHMENT_ID)!, filePath: readyPath })
+    const ready = await reserveSolutionFile(file)
+    assert.equal(ready.status, 200)
+    assert.equal(ready.body.alreadyReady, true)
+    assert.equal(ready.body.uploadToken, first.body.uploadToken)
+    assert.equal(ready.body.fileName, 'a.pdf')
+  })
+
+  it('requires a requestId for solution scope and rejects invalid scope values', async () => {
+    const missing = await readJson(await putSolutionAttachment({
+      attachmentId: ATTACHMENT_ID, fileName: 'a.pdf', fileType: 'application/pdf', fileSize: 3, requestId: undefined,
+    }))
+    assert.equal(missing.status, 400)
+    assert.equal(missing.body.error, 'Invalid requestId')
+
+    const malformed = await readJson(await putSolutionAttachment({
+      attachmentId: ATTACHMENT_ID, fileName: 'a.pdf', fileType: 'application/pdf', fileSize: 3, requestId: 'not-a-uuid',
+    }))
+    assert.equal(malformed.status, 400)
+    assert.equal(malformed.body.error, 'Invalid requestId')
+
+    const badScope = await readJson(await putAttachment({
+      attachmentId: ATTACHMENT_ID, fileName: 'a.pdf', fileType: 'application/pdf', fileSize: 3, scope: 'other',
+    }))
+    assert.equal(badScope.status, 400)
+    assert.equal(badScope.body.error, 'Invalid scope')
+    assert.equal(rows.size, 0)
+  })
+
+  it('solution tombstones block resurrection for the same request only', async () => {
+    seedRow({
+      id: ATTACHMENT_ID,
+      uploadedById: USER_ID,
+      requestId: SOLUTION_REQUEST_ID,
+      filePath: `solution-drafts/cancelled/absent/${ATTACHMENT_ID}`,
+      fileName: 'cancelled',
+      fileType: '',
+      fileSize: 0,
+    })
+    const cancelled = await reserveSolutionFile(pdfFile('a.pdf'))
+    assert.equal(cancelled.status, 409)
+    assert.equal(cancelled.body.error, 'Attachment was cancelled')
+
+    const otherTarget = await readJson(await putAttachment({
+      attachmentId: ATTACHMENT_ID,
+      fileName: 'a.pdf',
+      fileType: 'application/pdf',
+      fileSize: 3,
+      scope: 'solution',
+      requestId: OTHER_SOLUTION_REQUEST_ID,
+    }))
+    assert.equal(otherTarget.status, 404)
+    assert.equal(otherTarget.body.error, 'Attachment not found')
+
+    // A request-scope PUT is never told the solution tombstone cancelled it.
+    const requestScope = await reserveFile(pdfFile('a.pdf'))
+    assert.equal(requestScope.status, 409)
+    assert.equal(requestScope.body.error, 'Attachment is no longer a draft')
+    assert.match(rows.get(ATTACHMENT_ID)!.filePath, /^solution-drafts\/cancelled\//)
+  })
+
+  it('adopted solution rows are untouchable', async () => {
+    seedRow({
+      id: ATTACHMENT_ID,
+      uploadedById: USER_ID,
+      requestId: SOLUTION_REQUEST_ID,
+      solutionId: 'solution-1',
+      filePath: `solution-drafts/ready/${ATTACHMENT_ID}/cccccccc-1111-4111-8111-cccccccccccc/adopted.pdf`,
+      fileName: 'adopted.pdf',
+    })
+    const { status, body } = await reserveSolutionFile(pdfFile('a.pdf'))
+    assert.equal(status, 409)
+    assert.equal(body.error, 'Attachment is no longer a draft')
+    assert.equal(rows.get(ATTACHMENT_ID)?.solutionId, 'solution-1')
+  })
+
+  it('returns 403 for wrong-owner solution rows on every verb', async () => {
+    seedRow({
+      id: ATTACHMENT_ID,
+      uploadedById: OTHER_USER_ID,
+      requestId: SOLUTION_REQUEST_ID,
+      filePath: `solution-drafts/reserved/${ATTACHMENT_ID}/aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa/a.pdf`,
+      fileName: 'a.pdf',
+    })
+    const reserved = await reserveSolutionFile(pdfFile('a.pdf'))
+    assert.equal(reserved.status, 403)
+
+    const posted = await readJson(await postSolutionFile(pdfFile('a.pdf'), ATTACHMENT_ID, 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa'))
+    assert.equal(posted.status, 403)
+
+    const deleted = await deleteSolutionAttachment()
+    assert.equal(deleted.status, 403)
+    assert.equal(rows.get(ATTACHMENT_ID)?.uploadedById, OTHER_USER_ID)
+  })
+})
+
+describe('POST /api/attachments/stage — solution scope', () => {
+  it('CAS-claims a reserved solution row with the same token and finalizes ready', async () => {
+    const file = pdfFile('a b.pdf', 'solution-bytes')
+    const reserved = await reserveSolutionFile(file)
+    const { status, body } = await readJson(await postSolutionFile(file, ATTACHMENT_ID, String(reserved.body.uploadToken)))
+    assert.equal(status, 200)
+    assert.equal(body.attachmentId, ATTACHMENT_ID)
+
+    const row = rows.get(ATTACHMENT_ID)
+    assert.ok(row)
+    assert.equal(row.requestId, SOLUTION_REQUEST_ID)
+    assert.equal(row.solutionId, null)
+    assert.equal(row.filePath, `solution-drafts/ready/${ATTACHMENT_ID}/${reserved.body.uploadToken}/a b.pdf`)
+    assert.equal(await fileExists(row.filePath), true)
+    assert.equal(await fileExists(row.filePath.replace('/ready/', '/uploading/')), false)
+  })
+
+  it('ready same-token retry returns success without rewriting bytes', async () => {
+    const file = pdfFile('a.pdf', 'original')
+    const reserved = await reserveSolutionFile(file)
+    assert.equal((await readJson(await postSolutionFile(file, ATTACHMENT_ID, String(reserved.body.uploadToken)))).status, 200)
+    const readyPath = rows.get(ATTACHMENT_ID)!.filePath
+    const retry = await readJson(await postSolutionFile(file, ATTACHMENT_ID, String(reserved.body.uploadToken)))
+    assert.equal(retry.status, 200)
+    assert.equal(rows.get(ATTACHMENT_ID)?.filePath, readyPath)
+    assert.equal(await readStored(readyPath), 'original')
+  })
+
+  it('wrong requestId and request-scope callers cannot claim a solution draft', async () => {
+    const file = pdfFile('a.pdf', 'bytes')
+    const reserved = await reserveSolutionFile(file)
+    const token = String(reserved.body.uploadToken)
+
+    const wrongTarget = await readJson(await postSolutionFile(file, ATTACHMENT_ID, token, OTHER_SOLUTION_REQUEST_ID))
+    assert.equal(wrongTarget.status, 404)
+    assert.equal(wrongTarget.body.error, 'Attachment not found')
+
+    const requestScope = await readJson(await postFile(file, ATTACHMENT_ID, token))
+    assert.equal(requestScope.status, 409)
+    assert.equal(requestScope.body.error, 'Attachment is no longer a draft')
+
+    assert.match(rows.get(ATTACHMENT_ID)!.filePath, /^solution-drafts\/reserved\//)
+    assert.equal(await fileExists(`solution-drafts/uploading/${ATTACHMENT_ID}/${token}/a.pdf`), false)
+  })
+
+  it('solution callers cannot claim a request-scope draft', async () => {
+    const file = pdfFile('a.pdf', 'request-bytes')
+    const reserved = await reserveFile(file)
+    const token = String(reserved.body.uploadToken)
+    const solutionCall = await readJson(await postSolutionFile(file, ATTACHMENT_ID, token))
+    assert.equal(solutionCall.status, 404)
+    assert.equal(solutionCall.body.error, 'Attachment not found')
+    assert.match(rows.get(ATTACHMENT_ID)!.filePath, /^request-drafts\/reserved\//)
+    assert.equal(await fileExists(`solution-drafts/uploading/${ATTACHMENT_ID}/${token}/a.pdf`), false)
+  })
+
+  it('solution POST rejects adopted rows', async () => {
+    seedRow({
+      id: ATTACHMENT_ID,
+      uploadedById: USER_ID,
+      requestId: SOLUTION_REQUEST_ID,
+      solutionId: 'solution-2',
+      filePath: `solution-drafts/ready/${ATTACHMENT_ID}/dddddddd-1111-4111-8111-dddddddddddd/a.pdf`,
+      fileName: 'a.pdf',
+    })
+    const { status, body } = await readJson(await postSolutionFile(pdfFile('a.pdf'), ATTACHMENT_ID, 'dddddddd-1111-4111-8111-dddddddddddd'))
+    assert.equal(status, 409)
+    assert.equal(body.error, 'Attachment is no longer a draft')
+  })
+
+  it('POST that writes after solution DELETE compensates by unlinking its own bytes', async () => {
+    const file = pdfFile('a.pdf', 'late-solution')
+    const reserved = await reserveSolutionFile(file)
+    const token = String(reserved.body.uploadToken)
+    const uploading = `solution-drafts/uploading/${ATTACHMENT_ID}/${token}/a.pdf`
+    const ready = `solution-drafts/ready/${ATTACHMENT_ID}/${token}/a.pdf`
+    let nested: JsonResult | null = null
+    beforeWrite = async () => {
+      if (nested) return
+      nested = await deleteSolutionAttachment()
+    }
+    const late = await readJson(await postSolutionFile(file, ATTACHMENT_ID, token))
+    const deleted = requireJsonResult(nested, 'DELETE must run after POST CAS to uploading and before write')
+    assert.equal(deleted.status, 200)
+    assert.equal(late.status, 409)
+    assert.equal(late.body.error, 'Attachment was cancelled')
+    assert.match(String(rows.get(ATTACHMENT_ID)?.filePath), /^solution-drafts\/cancelled\//)
+    assert.equal(await fileExists(uploading), false)
+    assert.equal(await fileExists(ready), false)
+  })
+})
+
+describe('DELETE /api/attachments/stage — solution scope', () => {
+  it('creates a solution sentinel bound to the target request so PUT cannot resurrect', async () => {
+    const deleted = await deleteSolutionAttachment()
+    assert.equal(deleted.status, 200)
+    const row = rows.get(ATTACHMENT_ID)
+    assert.ok(row)
+    assert.equal(row.filePath, `solution-drafts/cancelled/absent/${ATTACHMENT_ID}`)
+    assert.equal(row.requestId, SOLUTION_REQUEST_ID)
+    assert.equal(row.solutionId, null)
+
+    const resurrect = await reserveSolutionFile(pdfFile('a.pdf'))
+    assert.equal(resurrect.status, 409)
+    assert.equal(resurrect.body.error, 'Attachment was cancelled')
+  })
+
+  it('concurrent PUT/DELETE: cancelled wins per target and other targets still reserve', async () => {
+    const file = pdfFile('a.pdf', 'bytes')
+    let nested: JsonResult | null = null
+    let started = false
+    afterCreate = async () => {
+      if (started) return
+      started = true
+      nested = await deleteSolutionAttachment()
+    }
+    const reserved = await reserveSolutionFile(file)
+    const deleted = requireJsonResult(nested, 'DELETE must run after PUT create')
+    assert.equal(deleted.status, 200)
+    assert.ok(reserved.status === 200 || reserved.status === 409)
+    const again = await reserveSolutionFile(file)
+    assert.equal(again.status, 409)
+    assert.equal(again.body.error, 'Attachment was cancelled')
+    assert.match(rows.get(ATTACHMENT_ID)!.filePath, /^solution-drafts\/cancelled\//)
+
+    // The race tombstone is scoped to SOLUTION_REQUEST_ID; a different target
+    // request still reserves the same attachmentId without seeing it.
+    const otherTarget = await readJson(await putSolutionAttachment({
+      attachmentId: OTHER_ATTACHMENT_ID,
+      fileName: file.name,
+      fileType: file.type,
+      fileSize: file.size,
+      requestId: OTHER_SOLUTION_REQUEST_ID,
+    }))
+    assert.equal(otherTarget.status, 200)
+    assert.match(rows.get(OTHER_ATTACHMENT_ID)!.filePath, /^solution-drafts\/reserved\//)
+  })
+
+  it('CASes a ready solution row to cancelled, unlinks bytes, and survives retry after failure', async () => {
+    const file = pdfFile('a.pdf', 'solution-file')
+    const reserved = await reserveSolutionFile(file)
+    assert.equal(reserved.status, 200)
+    const posted = await readJson(await postSolutionFile(file, ATTACHMENT_ID, String(reserved.body.uploadToken)))
+    assert.equal(posted.status, 200)
+    const readyPath = rows.get(ATTACHMENT_ID)!.filePath
+    assert.match(readyPath, /^solution-drafts\/ready\//)
+
+    const originalError = console.error
+    console.error = (...args: unknown[]) => {
+      const text = args.map(String).join(' ')
+      if (text.includes('Failed to delete staged attachment')) return
+      originalError.apply(console, args)
+    }
+    try {
+      unlinkFailuresRemaining = 1
+      const failed = await deleteSolutionAttachment()
+      assert.equal(failed.status, 500)
+      assert.match(rows.get(ATTACHMENT_ID)?.filePath ?? '', /^solution-drafts\/cancelled\/ready\//)
+      assert.equal(await fileExists(readyPath), true)
+    } finally {
+      unlinkFailuresRemaining = 0
+      console.error = originalError
+    }
+
+    const retried = await deleteSolutionAttachment()
+    assert.equal(retried.status, 200)
+    assert.ok(rows.has(ATTACHMENT_ID))
+    assert.match(rows.get(ATTACHMENT_ID)?.filePath ?? '', /^solution-drafts\/cancelled\/ready\//)
+    assert.equal(await fileExists(readyPath), false)
+  })
+
+  it('solution DELETE cannot touch request-scope drafts and vice versa', async () => {
+    const file = pdfFile('a.pdf')
+    assert.equal((await reserveFile(file)).status, 200)
+    const solutionDelete = await deleteSolutionAttachment()
+    assert.equal(solutionDelete.status, 404)
+    assert.equal(solutionDelete.body.error, 'Attachment not found')
+    assert.match(rows.get(ATTACHMENT_ID)!.filePath, /^request-drafts\/reserved\//)
+
+    rows.clear()
+    assert.equal((await reserveSolutionFile(pdfFile('b.pdf'))).status, 200)
+    const requestDelete = await readJson(await deleteAttachment({ attachmentId: ATTACHMENT_ID }))
+    assert.equal(requestDelete.status, 409)
+    assert.equal(requestDelete.body.error, 'Attachment is no longer a draft')
+    assert.match(rows.get(ATTACHMENT_ID)!.filePath, /^solution-drafts\/reserved\//)
+  })
+
+  it('solution DELETE rejects adopted rows and keeps the file', async () => {
+    const readyPath = `solution-drafts/ready/${ATTACHMENT_ID}/ffffffff-1111-4111-8111-ffffffffffff/adopted.pdf`
+    seedRow({
+      id: ATTACHMENT_ID,
+      uploadedById: USER_ID,
+      requestId: SOLUTION_REQUEST_ID,
+      solutionId: 'solution-9',
+      filePath: readyPath,
+      fileName: 'adopted.pdf',
+    })
+    await writeStored(readyPath, 'adopted')
+    const { status, body } = await deleteSolutionAttachment()
+    assert.equal(status, 409)
+    assert.equal(body.error, 'Attachment is no longer a draft')
+    assert.equal(rows.get(ATTACHMENT_ID)?.solutionId, 'solution-9')
+    assert.equal(await fileExists(readyPath), true)
   })
 })
