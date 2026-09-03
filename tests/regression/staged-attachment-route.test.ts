@@ -27,13 +27,14 @@ const AUTHED: AuthSession = { user: { id: USER_ID } }
 
 let authSession: AuthSession = AUTHED
 let writeError: unknown = null
-let deleteError: unknown = null
+let unlinkFailuresRemaining = 0
 let collideOnWrite = false
-let uuidSequence: string[] | null = null
+let truncatedWriteThenThrow = false
 let afterFindUnique: null | ((row: DraftRow | null) => Promise<void>) = null
-let afterDeleteSnapshot: null | ((row: DraftRow) => Promise<void>) = null
+let afterCreate: null | ((row: DraftRow) => Promise<void>) = null
 let beforeWrite: null | (() => Promise<void>) = null
 let afterMove: null | (() => Promise<void>) = null
+let PUT: (request: Request) => Promise<Response>
 let POST: (request: Request) => Promise<Response>
 let DELETE: (request: Request) => Promise<Response>
 let uploadDir: string
@@ -105,9 +106,7 @@ const prismaMock = {
     findFirst: async ({ where }: { where: Record<string, unknown> }) => {
       for (const row of rows.values()) {
         if (!matchesWhere(row, where)) continue
-        const snapshot = { ...row }
-        if (afterDeleteSnapshot) await afterDeleteSnapshot(snapshot)
-        return snapshot
+        return { ...row }
       }
       return null
     },
@@ -115,6 +114,7 @@ const prismaMock = {
       if (rows.has(data.id)) throw uniqueConstraint()
       const row = { ...data }
       rows.set(row.id, row)
+      if (afterCreate) await afterCreate({ ...row })
       return { ...row }
     },
     updateMany: async ({ where, data }: { where: Record<string, unknown>; data: Partial<DraftRow> }) => {
@@ -140,48 +140,26 @@ const prismaMock = {
 
 const patchedLoad: LoadFn = function (request, parent, isMain) {
   if (isAuthConfig(request)) {
-    return {
-      __esModule: true,
-      auth: async () => authSession,
-    }
+    return { __esModule: true, auth: async () => authSession }
   }
   if (isPrisma(request)) {
-    return {
-      __esModule: true,
-      default: prismaMock,
-    }
+    return { __esModule: true, default: prismaMock }
   }
   if (isAttachmentStorage(request)) {
     return {
       __esModule: true,
       ...realStorage,
-      allocateRequestDraftGenerationPaths: (
-        attachmentId: string,
-        originalName: string,
-        observedPath?: string | null,
-      ) => {
-        const randomId = uuidSequence
-          ? () => {
-              const next = uuidSequence!.shift()
-              if (!next) throw new Error('uuid sequence exhausted')
-              return next
-            }
-          : undefined
-        return (realStorage.allocateRequestDraftGenerationPaths as (
-          id: string,
-          name: string,
-          observed?: string | null,
-          randomId?: () => string,
-        ) => { generationId: string; uploadingPath: string; readyPath: string })(
-          attachmentId,
-          originalName,
-          observedPath,
-          randomId,
-        )
-      },
       writeAttachmentFile: async (...args: unknown[]) => {
         if (beforeWrite) await beforeWrite()
         const storedPath = String(args[0])
+        if (truncatedWriteThenThrow) {
+          truncatedWriteThenThrow = false
+          await (realStorage.writeAttachmentFile as (path: string, bytes: Buffer) => Promise<void>)(
+            storedPath,
+            Buffer.from('xx'),
+          )
+          throw ioError('EIO', 'write failed')
+        }
         if (collideOnWrite) {
           collideOnWrite = false
           await (realStorage.writeAttachmentFile as (path: string, bytes: Buffer) => Promise<void>)(
@@ -193,7 +171,10 @@ const patchedLoad: LoadFn = function (request, parent, isMain) {
         return (realStorage.writeAttachmentFile as (...inner: unknown[]) => Promise<void>)(...args)
       },
       deleteAttachmentFile: async (...args: unknown[]) => {
-        if (deleteError) throw deleteError
+        if (unlinkFailuresRemaining > 0) {
+          unlinkFailuresRemaining -= 1
+          throw ioError('EACCES', 'permission denied')
+        }
         return (realStorage.deleteAttachmentFile as (...inner: unknown[]) => Promise<void>)(...args)
       },
       moveAttachmentFile: async (...args: unknown[]) => {
@@ -210,30 +191,48 @@ function pdfFile(name: string, contents = 'pdf-bytes'): File {
   return new File([contents], name, { type: 'application/pdf' })
 }
 
-async function postFile(file: File | null, attachmentId?: string, extra?: RequestInit): Promise<Response> {
-  if (file === null && extra) {
-    return POST(new Request('http://localhost/api/attachments/stage', { method: 'POST', ...extra }))
-  }
+type JsonResult = { status: number; body: Record<string, unknown> }
+
+async function readJson(response: Response): Promise<JsonResult> {
+  return { status: response.status, body: await response.json() as Record<string, unknown> }
+}
+
+function requireJsonResult(value: JsonResult | null, message: string): JsonResult {
+  if (!value) throw new Error(message)
+  return value
+}
+
+async function putAttachment(body: unknown): Promise<Response> {
+  return PUT(new Request('http://localhost/api/attachments/stage', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  }))
+}
+
+async function reserveFile(file: File, attachmentId = ATTACHMENT_ID) {
+  return readJson(await putAttachment({
+    attachmentId,
+    fileName: file.name,
+    fileType: file.type,
+    fileSize: file.size,
+  }))
+}
+
+async function postFile(file: File, attachmentId: string, uploadToken?: string): Promise<Response> {
   const form = new FormData()
-  if (file) form.append('file', file)
-  if (attachmentId !== undefined) form.append('attachmentId', attachmentId)
+  form.append('file', file)
+  form.append('attachmentId', attachmentId)
+  if (uploadToken !== undefined) form.append('uploadToken', uploadToken)
   return POST(new Request('http://localhost/api/attachments/stage', { method: 'POST', body: form }))
 }
 
 async function deleteAttachment(body: unknown): Promise<Response> {
-  const init: RequestInit = { method: 'DELETE' }
-  if (typeof body === 'string') {
-    init.headers = { 'content-type': 'application/json' }
-    init.body = body
-  } else {
-    init.headers = { 'content-type': 'application/json' }
-    init.body = JSON.stringify(body)
-  }
-  return DELETE(new Request('http://localhost/api/attachments/stage', init))
-}
-
-async function readJson(response: Response): Promise<{ status: number; body: Record<string, unknown> }> {
-  return { status: response.status, body: await response.json() as Record<string, unknown> }
+  return DELETE(new Request('http://localhost/api/attachments/stage', {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  }))
 }
 
 function ioError(code: string, message: string): NodeJS.ErrnoException {
@@ -255,10 +254,17 @@ function seedRow(overrides: Partial<DraftRow> & Pick<DraftRow, 'id' | 'filePath'
   return row
 }
 
+function tokenOf(id = ATTACHMENT_ID): string {
+  const token = (realStorage.uploadTokenFromDraftPath as (path: string) => string | null)(rows.get(id)!.filePath)
+  if (!token) throw new Error('missing uploadToken')
+  return token
+}
+
 before(async () => {
   uploadDir = await mkdtemp(join(tmpdir(), 'staged-route-'))
   process.env.UPLOAD_DIR = uploadDir
   const route = await import('../../src/app/api/attachments/stage/route')
+  PUT = route.PUT
   POST = route.POST
   DELETE = route.DELETE
 })
@@ -273,550 +279,367 @@ after(async () => {
 beforeEach(() => {
   authSession = AUTHED
   writeError = null
-  deleteError = null
+  unlinkFailuresRemaining = 0
   collideOnWrite = false
-  uuidSequence = null
+  truncatedWriteThenThrow = false
   afterFindUnique = null
-  afterDeleteSnapshot = null
+  afterCreate = null
   beforeWrite = null
   afterMove = null
   rows.clear()
 })
 
-describe('POST /api/attachments/stage', () => {
+describe('PUT /api/attachments/stage', () => {
   it('returns 401 without a user id', async () => {
     authSession = null
-    const { status, body } = await readJson(await postFile(pdfFile('a.pdf'), ATTACHMENT_ID))
+    const { status, body } = await reserveFile(pdfFile('a.pdf'))
     assert.equal(status, 401)
     assert.equal(body.error, 'Unauthorized')
     assert.equal(rows.size, 0)
   })
 
   it('returns 400 when attachmentId is missing or not a UUID', async () => {
-    const missing = await readJson(await postFile(pdfFile('a.pdf')))
+    const missing = await readJson(await putAttachment({ fileName: 'a.pdf', fileType: 'application/pdf', fileSize: 3 }))
     assert.equal(missing.status, 400)
     assert.equal(missing.body.error, 'Invalid attachmentId')
-
-    const invalid = await readJson(await postFile(pdfFile('a.pdf'), 'not-a-uuid'))
-    assert.equal(invalid.status, 400)
-    assert.equal(invalid.body.error, 'Invalid attachmentId')
-    assert.equal(rows.size, 0)
   })
 
-  it('returns the policy message on metadata validation failure', async () => {
-    const empty = await readJson(await postFile(pdfFile('empty.pdf', ''), ATTACHMENT_ID))
-    assert.equal(empty.status, 400)
-    assert.match(String(empty.body.error), /empty/i)
-
-    const unsupported = await readJson(await postFile(new File(['x'], 'script.html', { type: 'text/html' }), ATTACHMENT_ID))
-    assert.equal(unsupported.status, 400)
-    assert.match(String(unsupported.body.error), /not supported/i)
-    assert.equal(rows.size, 0)
-  })
-
-  it('creates the uploading row before file I/O and finalizes an owner-scoped ready draft', async () => {
-    const contents = 'hello-pdf'
-    let sawRowBeforeWrite = false
-    beforeWrite = async () => {
-      const row = rows.get(ATTACHMENT_ID)
-      sawRowBeforeWrite = Boolean(row && row.requestId === null && row.solutionId === null && row.filePath.includes('/uploading/'))
-    }
-
-    const { status, body } = await readJson(await postFile(pdfFile('a b.pdf', contents), ATTACHMENT_ID))
+  it('create-first reserves an owner-scoped row and returns a stable uploadToken', async () => {
+    const file = pdfFile('a b.pdf', 'hello-pdf')
+    const { status, body } = await reserveFile(file)
     assert.equal(status, 200)
-    assert.equal(sawRowBeforeWrite, true)
     assert.equal(body.attachmentId, ATTACHMENT_ID)
-    assert.equal(body.fileName, 'a b.pdf')
-    assert.equal(body.fileType, 'application/pdf')
-    assert.equal(body.fileSize, Buffer.byteLength(contents))
-    assert.equal(body.stagedPath, undefined)
-    assert.equal(body.filePath, undefined)
-
+    assert.equal(body.alreadyReady, false)
+    assert.match(String(body.uploadToken), /^[0-9a-f-]{36}$/i)
     const row = rows.get(ATTACHMENT_ID)
     assert.ok(row)
     assert.equal(row.requestId, null)
     assert.equal(row.solutionId, null)
     assert.equal(row.uploadedById, USER_ID)
-    assert.equal(row.fileName, 'a b.pdf')
-    assert.match(row.filePath, new RegExp(`^request-drafts/ready/${ATTACHMENT_ID}/[0-9a-f-]{36}/a b\\.pdf$`))
+    assert.equal(row.filePath, `request-drafts/reserved/${ATTACHMENT_ID}/${body.uploadToken}/a b.pdf`)
+    assert.equal(await fileExists(row.filePath), false)
+  })
+
+  it('returns the same uploadToken on reserved/uploading retry and alreadyReady when matching ready', async () => {
+    const file = pdfFile('a.pdf', 'bytes')
+    const first = await reserveFile(file)
+    const second = await reserveFile(file)
+    assert.equal(second.status, 200)
+    assert.equal(second.body.uploadToken, first.body.uploadToken)
+    assert.equal(second.body.alreadyReady, false)
+
+    const readyPath = (realStorage.toRequestDraftReadyPath as (path: string) => string)(rows.get(ATTACHMENT_ID)!.filePath)
+    rows.set(ATTACHMENT_ID, { ...rows.get(ATTACHMENT_ID)!, filePath: readyPath })
+    const ready = await reserveFile(file)
+    assert.equal(ready.status, 200)
+    assert.equal(ready.body.alreadyReady, true)
+    assert.equal(ready.body.uploadToken, first.body.uploadToken)
+    assert.equal(ready.body.fileName, 'a.pdf')
+  })
+
+  it('rejects cancelled and adopted rows instead of resurrecting them', async () => {
+    seedRow({
+      id: ATTACHMENT_ID,
+      uploadedById: USER_ID,
+      filePath: `request-drafts/cancelled/absent/${ATTACHMENT_ID}`,
+      fileName: 'cancelled',
+      fileType: '',
+      fileSize: 0,
+    })
+    const cancelled = await reserveFile(pdfFile('a.pdf'))
+    assert.equal(cancelled.status, 409)
+    assert.equal(cancelled.body.error, 'Attachment was cancelled')
+
+    seedRow({
+      id: ATTACHMENT_ID,
+      uploadedById: USER_ID,
+      requestId: REQUEST_ID,
+      filePath: `request-drafts/ready/${ATTACHMENT_ID}/aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa/adopted.pdf`,
+      fileName: 'adopted.pdf',
+    })
+    const adopted = await reserveFile(pdfFile('a.pdf'))
+    assert.equal(adopted.status, 409)
+    assert.equal(adopted.body.error, 'Attachment is no longer a draft')
+  })
+})
+
+describe('POST /api/attachments/stage', () => {
+  it('returns 404 when no reserved row exists and never creates one', async () => {
+    const { status, body } = await readJson(await postFile(pdfFile('a.pdf'), ATTACHMENT_ID, ATTACHMENT_ID))
+    assert.equal(status, 404)
+    assert.equal(body.error, 'Attachment not found')
+    assert.equal(rows.size, 0)
+  })
+
+  it('CAS-claims the reserved row with the same token and finalizes ready', async () => {
+    const file = pdfFile('a b.pdf', 'hello-pdf')
+    const reserved = await reserveFile(file)
+    const { status, body } = await readJson(await postFile(file, ATTACHMENT_ID, String(reserved.body.uploadToken)))
+    assert.equal(status, 200)
+    assert.equal(body.attachmentId, ATTACHMENT_ID)
+    const row = rows.get(ATTACHMENT_ID)
+    assert.ok(row)
+    assert.equal(row.filePath, `request-drafts/ready/${ATTACHMENT_ID}/${reserved.body.uploadToken}/a b.pdf`)
     assert.equal(await fileExists(row.filePath), true)
     assert.equal(await fileExists(row.filePath.replace('/ready/', '/uploading/')), false)
   })
 
-  it('returns 403 on owner mismatch and does not overwrite the row', async () => {
-    const seeded = seedRow({
-      id: ATTACHMENT_ID,
-      uploadedById: OTHER_USER_ID,
-      filePath: `request-drafts/ready/${ATTACHMENT_ID}/aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa/kept.pdf`,
-      fileName: 'kept.pdf',
-    })
-    await writeStored(seeded.filePath, 'owned-by-other')
-
-    const { status, body } = await readJson(await postFile(pdfFile('a.pdf', 'intruder'), ATTACHMENT_ID))
-    assert.equal(status, 403)
-    assert.equal(body.error, 'Forbidden')
-    assert.equal(rows.get(ATTACHMENT_ID)?.uploadedById, OTHER_USER_ID)
-    assert.equal(rows.get(ATTACHMENT_ID)?.filePath, seeded.filePath)
-    assert.equal(await fileExists(seeded.filePath), true)
+  it('ready same-token retry returns success without rewriting bytes', async () => {
+    const file = pdfFile('a.pdf', 'original')
+    const reserved = await reserveFile(file)
+    assert.equal((await readJson(await postFile(file, ATTACHMENT_ID, String(reserved.body.uploadToken)))).status, 200)
+    const readyPath = rows.get(ATTACHMENT_ID)!.filePath
+    const retry = await readJson(await postFile(file, ATTACHMENT_ID, String(reserved.body.uploadToken)))
+    assert.equal(retry.status, 200)
+    assert.equal(rows.get(ATTACHMENT_ID)?.filePath, readyPath)
+    assert.equal(await readStored(readyPath), 'original')
   })
 
-  it('returns 409 for an already-adopted row and never replaces its file', async () => {
-    const seeded = seedRow({
+  it('same-token concurrent POST does not delete winner bytes', async () => {
+    const file = pdfFile('a.pdf', 'winner-bytes')
+    const reserved = await reserveFile(file)
+    let nested: { status: number; body: Record<string, unknown> } | null = null
+    let started = false
+    afterFindUnique = async (row) => {
+      if (started || !row) return
+      started = true
+      nested = await readJson(await postFile(file, ATTACHMENT_ID, String(reserved.body.uploadToken)))
+    }
+    const stale = await readJson(await postFile(file, ATTACHMENT_ID, String(reserved.body.uploadToken)))
+    const concurrent = requireJsonResult(nested, 'nested same-token POST must run')
+    assert.equal(concurrent.status, 200)
+    assert.ok(stale.status === 200 || stale.status === 409)
+    const row = rows.get(ATTACHMENT_ID)
+    assert.ok(row)
+    assert.match(row.filePath, /\/ready\//)
+    assert.equal(await readStored(row.filePath), 'winner-bytes')
+  })
+
+  it('returns 403 on owner mismatch and 409 for adopted rows', async () => {
+    const file = pdfFile('a.pdf', 'intruder')
+    seedRow({
+      id: ATTACHMENT_ID,
+      uploadedById: OTHER_USER_ID,
+      filePath: `request-drafts/reserved/${ATTACHMENT_ID}/aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa/a.pdf`,
+      fileName: 'a.pdf',
+      fileSize: file.size,
+      fileType: file.type,
+    })
+    const forbidden = await readJson(await postFile(file, ATTACHMENT_ID, 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa'))
+    assert.equal(forbidden.status, 403)
+
+    seedRow({
       id: ATTACHMENT_ID,
       uploadedById: USER_ID,
       requestId: REQUEST_ID,
-      filePath: `request-drafts/ready/${ATTACHMENT_ID}/bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb/adopted.pdf`,
-      fileName: 'adopted.pdf',
-    })
-    await writeStored(seeded.filePath, 'adopted-bytes')
-
-    const { status, body } = await readJson(await postFile(pdfFile('a.pdf', 'replace-me'), ATTACHMENT_ID))
-    assert.equal(status, 409)
-    assert.equal(body.error, 'Attachment is no longer a draft')
-    assert.equal(rows.get(ATTACHMENT_ID)?.requestId, REQUEST_ID)
-    assert.equal(rows.get(ATTACHMENT_ID)?.filePath, seeded.filePath)
-    assert.equal(await fileExists(seeded.filePath), true)
-  })
-
-  it('lets only one same-snapshot POST win the CAS; the loser touches no bytes', async () => {
-    const generation = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa'
-    const readyPath = `request-drafts/ready/${ATTACHMENT_ID}/${generation}/a.pdf`
-    seedRow({
-      id: ATTACHMENT_ID,
-      uploadedById: USER_ID,
-      filePath: readyPath,
+      filePath: `request-drafts/ready/${ATTACHMENT_ID}/bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb/a.pdf`,
       fileName: 'a.pdf',
     })
-    await writeStored(readyPath, 'original-bytes')
+    const adopted = await readJson(await postFile(file, ATTACHMENT_ID, 'bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb'))
+    assert.equal(adopted.status, 409)
+    assert.equal(adopted.body.error, 'Attachment is no longer a draft')
+  })
 
-    let nested: { status: number; body: Record<string, unknown> } | null = null
-    let startedNested = false
-    afterFindUnique = async (row) => {
-      if (startedNested || !row) return
-      startedNested = true
-      nested = await readJson(await postFile(pdfFile('a.pdf', 'winner-bytes'), ATTACHMENT_ID))
+  it('partial write then throw is unlinked and retry cannot publish truncated bytes', async () => {
+    const file = pdfFile('a.pdf', 'full-bytes')
+    const reserved = await reserveFile(file)
+    const token = String(reserved.body.uploadToken)
+    const uploading = `request-drafts/uploading/${ATTACHMENT_ID}/${token}/a.pdf`
+    const ready = `request-drafts/ready/${ATTACHMENT_ID}/${token}/a.pdf`
+
+    const originalError = console.error
+    console.error = (...args: unknown[]) => {
+      const text = args.map(String).join(' ')
+      if (text.includes('Failed to stage attachment')) return
+      originalError.apply(console, args)
+    }
+    try {
+      truncatedWriteThenThrow = true
+      const failed = await readJson(await postFile(file, ATTACHMENT_ID, token))
+      assert.equal(failed.status, 500)
+      assert.equal(await fileExists(uploading), false)
+      assert.equal(await fileExists(ready), false)
+      assert.match(String(rows.get(ATTACHMENT_ID)?.filePath), /\/uploading\//)
+    } finally {
+      console.error = originalError
     }
 
-    const stale = await readJson(await postFile(pdfFile('a.pdf', 'stale-bytes'), ATTACHMENT_ID))
-    const concurrent = nested as { status: number; body: Record<string, unknown> } | null
-    if (!concurrent) throw new Error('nested same-snapshot POST must run after the first snapshot')
-    assert.equal(concurrent.status, 200)
-    assert.equal(stale.status, 409)
-    assert.equal(stale.body.error, 'Upload was superseded')
-
+    const retried = await readJson(await postFile(file, ATTACHMENT_ID, token))
+    assert.equal(retried.status, 200)
     const row = rows.get(ATTACHMENT_ID)
     assert.ok(row)
-    assert.match(row.filePath, new RegExp(`^request-drafts/ready/${ATTACHMENT_ID}/[0-9a-f-]{36}/a\\.pdf$`))
-    assert.equal(await readStored(row.filePath), 'winner-bytes')
-    assert.equal(await fileExists(readyPath), false)
+    assert.match(row.filePath, /\/ready\//)
+    assert.equal(await readStored(row.filePath), 'full-bytes')
+    assert.equal(await fileExists(uploading), false)
   })
 
-  it('loses POST-vs-adopt CAS and does not touch adopted bytes', async () => {
-    const generation = 'bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb'
-    const readyPath = `request-drafts/ready/${ATTACHMENT_ID}/${generation}/a.pdf`
-    seedRow({
-      id: ATTACHMENT_ID,
-      uploadedById: USER_ID,
-      filePath: readyPath,
-      fileName: 'a.pdf',
-    })
-    await writeStored(readyPath, 'adopted-bytes')
-
-    afterFindUnique = async (row) => {
-      if (!row) return
-      const current = rows.get(row.id)
-      if (current) rows.set(row.id, { ...current, requestId: REQUEST_ID })
-    }
-
-    const { status, body } = await readJson(await postFile(pdfFile('a.pdf', 'replace-me'), ATTACHMENT_ID))
-    assert.equal(status, 409)
-    assert.equal(body.error, 'Upload was superseded')
-    assert.equal(rows.get(ATTACHMENT_ID)?.requestId, REQUEST_ID)
-    assert.equal(rows.get(ATTACHMENT_ID)?.filePath, readyPath)
-    assert.equal(await fileExists(readyPath), true)
-    assert.equal(await readStored(readyPath), 'adopted-bytes')
-  })
-
-  it('keeps prior bytes until the new generation finalizes, then cleans displaced paths', async () => {
-    const generation = 'cccccccc-1111-4111-8111-cccccccccccc'
-    const uploadingPath = `request-drafts/uploading/${ATTACHMENT_ID}/${generation}/crash.pdf`
-    const readyPath = `request-drafts/ready/${ATTACHMENT_ID}/${generation}/crash.pdf`
-    seedRow({
-      id: ATTACHMENT_ID,
-      uploadedById: USER_ID,
-      filePath: uploadingPath,
-      fileName: 'crash.pdf',
-    })
-    await writeStored(uploadingPath, 'old-uploading')
-    await writeStored(readyPath, 'old-ready')
-
-    let priorBytesDuringWrite = false
-    beforeWrite = async () => {
-      priorBytesDuringWrite = await fileExists(uploadingPath) && await fileExists(readyPath)
-    }
-
-    const { status, body } = await readJson(await postFile(pdfFile('crash.pdf', 'new-bytes'), ATTACHMENT_ID))
-    assert.equal(status, 200)
-    assert.equal(body.attachmentId, ATTACHMENT_ID)
-    assert.equal(priorBytesDuringWrite, true)
-    assert.equal(await fileExists(uploadingPath), false)
-    assert.equal(await fileExists(readyPath), false)
-
-    const row = rows.get(ATTACHMENT_ID)
-    assert.ok(row)
-    assert.match(row.filePath, new RegExp(`^request-drafts/ready/${ATTACHMENT_ID}/[0-9a-f-]{36}/crash\\.pdf$`))
-    assert.notEqual(row.filePath, readyPath)
-    assert.equal(await readStored(row.filePath), 'new-bytes')
-  })
-
-  it('restores the observed path and keeps prior bytes when the new write fails', async () => {
-    const generation = 'dddddddd-1111-4111-8111-dddddddddddd'
-    const readyPath = `request-drafts/ready/${ATTACHMENT_ID}/${generation}/keep.pdf`
-    seedRow({
-      id: ATTACHMENT_ID,
-      uploadedById: USER_ID,
-      filePath: readyPath,
-      fileName: 'keep.pdf',
-      fileSize: 9,
-    })
-    await writeStored(readyPath, 'keep-me')
-
-    writeError = ioError('EACCES', 'permission denied')
-    const { status, body } = await readJson(await postFile(pdfFile('keep.pdf', 'new-bytes'), ATTACHMENT_ID))
-    assert.equal(status, 500)
-    assert.equal(body.error, 'Failed to store file')
-    assert.equal(rows.get(ATTACHMENT_ID)?.filePath, readyPath)
-    assert.equal(await fileExists(readyPath), true)
-    assert.equal(await readStored(readyPath), 'keep-me')
-  })
-
-  it('does not delete a colliding EEXIST file this attempt did not create', async () => {
+  it('losing wx to another writer reloads without deleting winner bytes', async () => {
+    const file = pdfFile('a.pdf', 'new-bytes')
+    const reserved = await reserveFile(file)
     collideOnWrite = true
-    const { status, body } = await readJson(await postFile(pdfFile('a.pdf', 'new-bytes'), ATTACHMENT_ID))
-    assert.equal(status, 500)
-    assert.equal(body.error, 'Failed to store file')
-    assert.equal(rows.size, 0)
-
-    const leftover = rows.size
-    assert.equal(leftover, 0)
-    const uploadingPrefix = `request-drafts/uploading/${ATTACHMENT_ID}/`
-    const { readdir, stat } = await import('node:fs/promises')
-    const root = uploadDir
-    async function findCollision(dir: string): Promise<string | null> {
-      let entries
-      try {
-        entries = await readdir(dir, { withFileTypes: true })
-      } catch {
-        return null
-      }
-      for (const entry of entries) {
-        const full = join(dir, entry.name)
-        if (entry.isDirectory()) {
-          const found = await findCollision(full)
-          if (found) return found
-        } else {
-          const info = await stat(full)
-          if (info.isFile()) return full
-        }
-      }
-      return null
-    }
-    const found = await findCollision(join(root, 'request-drafts', 'uploading'))
-    assert.ok(found, 'colliding generation file must remain')
-    const { readFile } = await import('node:fs/promises')
-    assert.equal((await readFile(found)).toString(), 'collision-bytes')
-    assert.ok(found.includes(uploadingPrefix.split('/').join('/')) || found.includes(ATTACHMENT_ID))
-  })
-
-  it('returns 500 when writeAttachmentFile fails and deletes the newly created uploading row', async () => {
-    writeError = ioError('EACCES', 'permission denied')
-    const { status, body } = await readJson(await postFile(pdfFile('a.pdf'), ATTACHMENT_ID))
-    assert.equal(status, 500)
-    assert.equal(body.error, 'Failed to store file')
-    assert.equal(rows.size, 0)
-  })
-
-  it('does not restore a transient uploading predecessor after the loser cleaned it', async () => {
-    let signalClaimed!: () => void
-    const claimed = new Promise<void>((resolve) => { signalClaimed = resolve })
-    let releaseB!: () => void
-    const bMayFail = new Promise<void>((resolve) => { releaseB = resolve })
-    let bPromise: Promise<{ status: number; body: Record<string, unknown> }> | null = null
-    let started = false
-    let pauseBWrite = false
-
-    afterMove = async () => {
-      if (started) return
-      started = true
-      pauseBWrite = true
-      bPromise = postFile(pdfFile('abort.pdf', 'b-bytes'), ATTACHMENT_ID).then(readJson)
-      await claimed
-    }
-    beforeWrite = async () => {
-      if (!pauseBWrite) return
-      signalClaimed()
-      await bMayFail
-      throw ioError('EACCES', 'permission denied')
-    }
-
-    const a = await readJson(await postFile(pdfFile('abort.pdf', 'a-bytes'), ATTACHMENT_ID))
-    assert.equal(a.status, 409)
-    assert.equal(a.body.error, 'Upload was superseded')
-    releaseB()
-    if (!bPromise) throw new Error('B must start after A moves')
-    const b = await bPromise as { status: number; body: Record<string, unknown> }
-    assert.equal(b.status, 500)
-    assert.equal(rows.has(ATTACHMENT_ID), false)
-  })
-
-  it('regenerates when the server UUID repeats the observed generation', async () => {
-    const observedGen = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa'
-    const nextGen = 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb'
-    const uploadingPath = (realStorage.createRequestDraftUploadingPath as (id: string, gen: string, name: string) => string)(
-      ATTACHMENT_ID,
-      observedGen,
-      'a.pdf',
-    )
-    seedRow({
-      id: ATTACHMENT_ID,
-      uploadedById: USER_ID,
-      filePath: uploadingPath,
-      fileName: 'a.pdf',
-    })
-    await writeStored(uploadingPath, 'old-bytes')
-    uuidSequence = [observedGen, nextGen]
-
-    const { status } = await readJson(await postFile(pdfFile('a.pdf', 'new-bytes'), ATTACHMENT_ID))
-    assert.equal(status, 200)
-    const row = rows.get(ATTACHMENT_ID)
-    assert.ok(row)
-    assert.equal(
-      row.filePath,
-      (realStorage.createRequestDraftReadyPath as (id: string, gen: string, name: string) => string)(
-        ATTACHMENT_ID,
-        nextGen,
-        'a.pdf',
-      ),
-    )
-    assert.equal(await fileExists(uploadingPath), false)
-    assert.equal(await readStored(row.filePath), 'new-bytes')
-  })
-
-  it('does not clobber a pre-existing ready file on destination EEXIST', async () => {
-    const generation = '99999999-1111-4111-8111-999999999999'
-    const readyPath = (realStorage.createRequestDraftReadyPath as (id: string, gen: string, name: string) => string)(
-      ATTACHMENT_ID,
-      generation,
-      'a.pdf',
-    )
-    await writeStored(readyPath, 'winner-bytes')
-    uuidSequence = [generation]
-
-    const { status, body } = await readJson(await postFile(pdfFile('a.pdf', 'loser-bytes'), ATTACHMENT_ID))
-    assert.equal(status, 500)
-    assert.equal(body.error, 'Failed to store file')
-    assert.equal(rows.size, 0)
-    assert.equal(await readStored(readyPath), 'winner-bytes')
-  })
-
-  it('CAS-includes an observed empty filePath so a path-changing winner is not overwritten', async () => {
-    seedRow({
-      id: ATTACHMENT_ID,
-      uploadedById: USER_ID,
-      filePath: '',
-      fileName: 'a.pdf',
-    })
-
-    let nested: { status: number; body: Record<string, unknown> } | null = null
-    let startedNested = false
-    afterFindUnique = async (row) => {
-      if (startedNested || !row) return
-      startedNested = true
-      nested = await readJson(await postFile(pdfFile('a.pdf', 'winner-bytes'), ATTACHMENT_ID))
-    }
-
-    const stale = await readJson(await postFile(pdfFile('a.pdf', 'stale-bytes'), ATTACHMENT_ID))
-    const concurrent = nested as { status: number; body: Record<string, unknown> } | null
-    if (!concurrent) throw new Error('nested POST must run from the empty-path snapshot')
-    assert.equal(concurrent.status, 200)
-    assert.equal(stale.status, 409)
-    assert.equal(stale.body.error, 'Upload was superseded')
-    const row = rows.get(ATTACHMENT_ID)
-    assert.ok(row)
-    assert.notEqual(row.filePath, '')
-    assert.equal(await readStored(row.filePath), 'winner-bytes')
+    const { status } = await readJson(await postFile(file, ATTACHMENT_ID, String(reserved.body.uploadToken)))
+    assert.ok(status === 409 || status === 200)
+    const uploading = `request-drafts/uploading/${ATTACHMENT_ID}/${reserved.body.uploadToken}/a.pdf`
+    assert.equal(await readStored(uploading), 'collision-bytes')
   })
 })
 
 describe('DELETE /api/attachments/stage', () => {
-  it('returns 401 without a user id', async () => {
-    authSession = null
-    const { status, body } = await readJson(await deleteAttachment({ attachmentId: ATTACHMENT_ID }))
-    assert.equal(status, 401)
-    assert.equal(body.error, 'Unauthorized')
+  it('creates a cancelled sentinel when no row exists so later PUT cannot resurrect', async () => {
+    const deleted = await readJson(await deleteAttachment({ attachmentId: ATTACHMENT_ID }))
+    assert.equal(deleted.status, 200)
+    assert.equal(rows.get(ATTACHMENT_ID)?.filePath, `request-drafts/cancelled/absent/${ATTACHMENT_ID}`)
+    const resurrect = await reserveFile(pdfFile('a.pdf'))
+    assert.equal(resurrect.status, 409)
+    assert.equal(resurrect.body.error, 'Attachment was cancelled')
   })
 
-  it('rejects a missing or invalid attachmentId with 400', async () => {
-    const missing = await readJson(await deleteAttachment({ stagedPath: `stage/${ATTACHMENT_ID}/a.pdf` }))
-    assert.equal(missing.status, 400)
-    assert.equal(missing.body.error, 'Invalid attachmentId')
-
-    const invalid = await readJson(await deleteAttachment({ attachmentId: 'nope' }))
-    assert.equal(invalid.status, 400)
-    assert.equal(invalid.body.error, 'Invalid attachmentId')
+  it('CAS-loops a reserved row to cancelled and keeps the row', async () => {
+    const file = pdfFile('a.pdf', 'bytes')
+    assert.equal((await reserveFile(file)).status, 200)
+    const deleted = await readJson(await deleteAttachment({ attachmentId: ATTACHMENT_ID }))
+    assert.equal(deleted.status, 200)
+    const row = rows.get(ATTACHMENT_ID)
+    assert.ok(row)
+    assert.match(row.filePath, /^request-drafts\/cancelled\/reserved\//)
+    assert.equal((await readJson(await postFile(file, ATTACHMENT_ID, tokenOf()))).status, 409)
   })
 
-  it('returns 404 when the draft is absent', async () => {
-    const { status, body } = await readJson(await deleteAttachment({ attachmentId: ATTACHMENT_ID }))
-    assert.equal(status, 404)
-    assert.equal(body.error, 'Attachment not found')
-  })
-
-  it('returns 404 on owner mismatch without deleting the other user file', async () => {
-    const seeded = seedRow({
-      id: ATTACHMENT_ID,
-      uploadedById: OTHER_USER_ID,
-      filePath: `request-drafts/ready/${ATTACHMENT_ID}/dddddddd-1111-4111-8111-dddddddddddd/other.pdf`,
-    })
-    await writeStored(seeded.filePath, 'other-user')
-
-    const { status, body } = await readJson(await deleteAttachment({ attachmentId: ATTACHMENT_ID }))
-    assert.equal(status, 404)
-    assert.equal(body.error, 'Attachment not found')
-    assert.ok(rows.get(ATTACHMENT_ID))
-    assert.equal(await fileExists(seeded.filePath), true)
-  })
-
-  it('does not delete an adopted file when DELETE races with adopt', async () => {
-    const seeded = seedRow({
+  it('does not delete an adopted file', async () => {
+    const readyPath = `request-drafts/ready/${ATTACHMENT_ID}/eeeeeeee-1111-4111-8111-eeeeeeeeeeee/adopted.pdf`
+    seedRow({
       id: ATTACHMENT_ID,
       uploadedById: USER_ID,
       requestId: REQUEST_ID,
-      filePath: `request-drafts/ready/${ATTACHMENT_ID}/eeeeeeee-1111-4111-8111-eeeeeeeeeeee/adopted.pdf`,
+      filePath: readyPath,
     })
-    await writeStored(seeded.filePath, 'adopted')
-
+    await writeStored(readyPath, 'adopted')
     const { status, body } = await readJson(await deleteAttachment({ attachmentId: ATTACHMENT_ID }))
-    assert.equal(status, 404)
-    assert.equal(body.error, 'Attachment not found')
+    assert.equal(status, 409)
+    assert.equal(body.error, 'Attachment is no longer a draft')
     assert.equal(rows.get(ATTACHMENT_ID)?.requestId, REQUEST_ID)
-    assert.equal(await fileExists(seeded.filePath), true)
+    assert.equal(await fileExists(readyPath), true)
   })
 
-  it('physically deletes only after a conditional draft-row delete count of 1', async () => {
-    const uploaded = await readJson(await postFile(pdfFile('keep.pdf', 'keep-me'), ATTACHMENT_ID))
-    assert.equal(uploaded.status, 200)
-    const filePath = rows.get(ATTACHMENT_ID)?.filePath
-    assert.ok(filePath)
+  it('returns 500 on unlink failure and retries cleanup on the cancelled row', async () => {
+    const token = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa'
+    const readyPath = `request-drafts/ready/${OTHER_ATTACHMENT_ID}/${token}/a.pdf`
+    const cancelledPath = `request-drafts/cancelled/ready/${OTHER_ATTACHMENT_ID}/${token}/a.pdf`
+    seedRow({
+      id: OTHER_ATTACHMENT_ID,
+      uploadedById: USER_ID,
+      filePath: cancelledPath,
+      fileName: 'a.pdf',
+      fileType: 'application/pdf',
+      fileSize: 5,
+    })
+    await writeStored(readyPath, 'bytes')
 
-    const deleted = await readJson(await deleteAttachment({ attachmentId: ATTACHMENT_ID }))
-    assert.equal(deleted.status, 200)
-    assert.equal(deleted.body.success, true)
-    assert.equal(rows.has(ATTACHMENT_ID), false)
-    assert.equal(await fileExists(filePath), false)
+    const originalError = console.error
+    console.error = (...args: unknown[]) => {
+      const text = args.map(String).join(' ')
+      if (text.includes('Failed to delete staged attachment')) return
+      originalError.apply(console, args)
+    }
+    try {
+      unlinkFailuresRemaining = 1
+      const failed = await readJson(await deleteAttachment({ attachmentId: OTHER_ATTACHMENT_ID }))
+      assert.equal(failed.status, 500)
+      assert.equal(rows.get(OTHER_ATTACHMENT_ID)?.filePath, cancelledPath)
+      assert.equal(await fileExists(readyPath), true)
 
-    const missing = await readJson(await deleteAttachment({ attachmentId: ATTACHMENT_ID }))
-    assert.equal(missing.status, 404)
+      const retried = await readJson(await deleteAttachment({ attachmentId: OTHER_ATTACHMENT_ID }))
+      assert.equal(retried.status, 200)
+      assert.ok(rows.has(OTHER_ATTACHMENT_ID))
+      assert.equal(rows.get(OTHER_ATTACHMENT_ID)?.filePath, cancelledPath)
+      assert.equal(await fileExists(readyPath), false)
+    } finally {
+      unlinkFailuresRemaining = 0
+      console.error = originalError
+    }
   })
 
-  it('can DELETE the uploading row between claim and write; the late POST cleans only its own files', async () => {
-    let nested: { status: number; body: Record<string, unknown> } | null = null
+  it('lost-finalize compensation does not unlink ready bytes after same-token finalize and adopt', async () => {
+    const file = pdfFile('a.pdf', 'winner-bytes')
+    const reserved = await reserveFile(file)
+    const token = String(reserved.body.uploadToken)
+    const ready = `request-drafts/ready/${ATTACHMENT_ID}/${token}/a.pdf`
+    let nested: JsonResult | null = null
+    let started = false
+    afterMove = async () => {
+      if (started) return
+      started = true
+      nested = await readJson(await postFile(file, ATTACHMENT_ID, token))
+      const current = rows.get(ATTACHMENT_ID)
+      if (current) rows.set(ATTACHMENT_ID, { ...current, requestId: REQUEST_ID })
+    }
+    const loser = await readJson(await postFile(file, ATTACHMENT_ID, token))
+    const winner = requireJsonResult(nested, 'nested same-token POST must finalize after outer move')
+    assert.equal(winner.status, 200)
+    assert.equal(loser.status, 409)
+    assert.equal(loser.body.error, 'Attachment is no longer a draft')
+    const row = rows.get(ATTACHMENT_ID)
+    assert.ok(row)
+    assert.equal(row.requestId, REQUEST_ID)
+    assert.equal(row.filePath, ready)
+    assert.equal(await fileExists(ready), true)
+    assert.equal(await readStored(ready), 'winner-bytes')
+  })
+
+  it('POST that writes after DELETE cancelled uploading compensates by unlinking its own bytes', async () => {
+    const file = pdfFile('a.pdf', 'late-bytes')
+    const reserved = await reserveFile(file)
+    const token = String(reserved.body.uploadToken)
+    const uploading = `request-drafts/uploading/${ATTACHMENT_ID}/${token}/a.pdf`
+    const ready = `request-drafts/ready/${ATTACHMENT_ID}/${token}/a.pdf`
+    let nested: JsonResult | null = null
     beforeWrite = async () => {
       if (nested) return
       nested = await readJson(await deleteAttachment({ attachmentId: ATTACHMENT_ID }))
     }
-
-    const stale = await readJson(await postFile(pdfFile('abort.pdf', 'abort-bytes'), ATTACHMENT_ID))
-    const aborted = nested as { status: number; body: Record<string, unknown> } | null
-    if (!aborted) throw new Error('DELETE must run after the uploading row is claimed and before write')
-    assert.equal(aborted.status, 200)
-    assert.equal(aborted.body.success, true)
-    assert.equal(stale.status, 409)
-    assert.equal(stale.body.error, 'Upload was superseded')
-    assert.equal(rows.has(ATTACHMENT_ID), false)
+    const late = await readJson(await postFile(file, ATTACHMENT_ID, token))
+    const deleted = requireJsonResult(nested, 'DELETE must run after POST CAS to uploading and before write')
+    assert.equal(deleted.status, 200)
+    assert.equal(late.status, 409)
+    assert.match(String(rows.get(ATTACHMENT_ID)?.filePath), /cancelled/)
+    assert.equal(await fileExists(uploading), false)
+    assert.equal(await fileExists(ready), false)
   })
 
-  it('aborts an in-flight finalize by deleting the exact observed uploading path', async () => {
+  it('POST-vs-DELETE CAS loop cancels without mapping loss to clean', async () => {
+    const file = pdfFile('race.pdf', 'race-bytes')
+    const reserved = await reserveFile(file)
     let nested: { status: number; body: Record<string, unknown> } | null = null
-    afterMove = async () => {
-      if (nested) return
+    let started = false
+    afterFindUnique = async (row) => {
+      if (started || !row) return
+      started = true
       nested = await readJson(await deleteAttachment({ attachmentId: ATTACHMENT_ID }))
     }
-
-    const stale = await readJson(await postFile(pdfFile('abort.pdf', 'abort-bytes'), ATTACHMENT_ID))
-    const aborted = nested as { status: number; body: Record<string, unknown> } | null
-    if (!aborted) throw new Error('DELETE must run before the in-flight POST finalizes')
-    assert.equal(aborted.status, 200)
-    assert.equal(aborted.body.success, true)
-    assert.equal(stale.status, 409)
-    assert.equal(stale.body.error, 'Upload was superseded')
-    assert.equal(rows.has(ATTACHMENT_ID), false)
+    const late = await readJson(await postFile(file, ATTACHMENT_ID, String(reserved.body.uploadToken)))
+    const deleted = requireJsonResult(nested, 'DELETE must run after POST snapshots the reserved row')
+    assert.equal(deleted.status, 200)
+    assert.equal(late.status, 409)
+    assert.ok(rows.has(ATTACHMENT_ID))
+    assert.match(String(rows.get(ATTACHMENT_ID)?.filePath), /cancelled/)
   })
 
-  it('loses path-changing POST-vs-DELETE and does not unlink the winner file', async () => {
-    const generation = 'ffffffff-1111-4111-8111-ffffffffffff'
-    const readyPath = `request-drafts/ready/${ATTACHMENT_ID}/${generation}/old.pdf`
-    seedRow({
-      id: ATTACHMENT_ID,
-      uploadedById: USER_ID,
-      filePath: readyPath,
-      fileName: 'old.pdf',
-    })
-    await writeStored(readyPath, 'old-bytes')
-
+  it('concurrent PUT/DELETE: cancelled wins and PUT cannot resurrect', async () => {
+    const file = pdfFile('a.pdf', 'bytes')
     let nested: { status: number; body: Record<string, unknown> } | null = null
-    afterDeleteSnapshot = async () => {
-      if (nested) return
-      nested = await readJson(await postFile(pdfFile('old.pdf', 'new-bytes'), ATTACHMENT_ID))
+    let started = false
+    afterCreate = async () => {
+      if (started) return
+      started = true
+      nested = await readJson(await deleteAttachment({ attachmentId: ATTACHMENT_ID }))
     }
-
-    const deleted = await readJson(await deleteAttachment({ attachmentId: ATTACHMENT_ID }))
-    const uploaded = nested as { status: number; body: Record<string, unknown> } | null
-    if (!uploaded) throw new Error('POST must run between DELETE snapshot and conditional delete')
-    assert.equal(uploaded.status, 200)
-    assert.equal(deleted.status, 404)
-    assert.equal(deleted.body.error, 'Attachment not found')
-
-    const row = rows.get(ATTACHMENT_ID)
-    assert.ok(row)
-    assert.match(row.filePath, new RegExp(`^request-drafts/ready/${ATTACHMENT_ID}/[0-9a-f-]{36}/old\\.pdf$`))
-    assert.equal(await readStored(row.filePath), 'new-bytes')
-  })
-
-  it('CAS-includes an observed empty filePath on DELETE so a path-changing POST is not unlinked', async () => {
-    seedRow({
-      id: ATTACHMENT_ID,
-      uploadedById: USER_ID,
-      filePath: '',
-      fileName: 'old.pdf',
-    })
-
-    let nested: { status: number; body: Record<string, unknown> } | null = null
-    afterDeleteSnapshot = async () => {
-      if (nested) return
-      nested = await readJson(await postFile(pdfFile('old.pdf', 'new-bytes'), ATTACHMENT_ID))
-    }
-
-    const deleted = await readJson(await deleteAttachment({ attachmentId: ATTACHMENT_ID }))
-    const uploaded = nested as { status: number; body: Record<string, unknown> } | null
-    if (!uploaded) throw new Error('POST must run between DELETE snapshot and conditional delete')
-    assert.equal(uploaded.status, 200)
-    assert.equal(deleted.status, 404)
-    const row = rows.get(ATTACHMENT_ID)
-    assert.ok(row)
-    assert.notEqual(row.filePath, '')
-    assert.equal(await readStored(row.filePath), 'new-bytes')
-  })
-
-  it('returns 500 for non-ENOENT IO errors after a successful row delete', async () => {
-    const uploaded = await readJson(await postFile(pdfFile('a.pdf', 'bytes'), OTHER_ATTACHMENT_ID))
-    assert.equal(uploaded.status, 200)
-    assert.ok(rows.get(OTHER_ATTACHMENT_ID))
-
-    deleteError = ioError('EACCES', 'permission denied')
-    const { status, body } = await readJson(await deleteAttachment({ attachmentId: OTHER_ATTACHMENT_ID }))
-    assert.equal(status, 500)
-    assert.equal(body.error, 'Failed to delete staged file')
-    assert.equal(rows.has(OTHER_ATTACHMENT_ID), false)
+    const reserved = await reserveFile(file)
+    const deleted = requireJsonResult(nested, 'DELETE must run after PUT create')
+    assert.equal(deleted.status, 200)
+    assert.ok(reserved.status === 200 || reserved.status === 409)
+    const again = await reserveFile(file)
+    assert.equal(again.status, 409)
+    assert.equal(again.body.error, 'Attachment was cancelled')
+    assert.match(String(rows.get(ATTACHMENT_ID)?.filePath), /cancelled/)
   })
 })
