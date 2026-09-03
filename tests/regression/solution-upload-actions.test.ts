@@ -3,6 +3,10 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { submitSolutionSchema, resubmitSolutionSchema } from '../../src/lib/schemas/solution-schemas'
+import {
+  createSolutionDraftReadyPath,
+  isSolutionDraftReadyPath,
+} from '../../src/lib/attachments/storage'
 
 // Security-sensitive server-action contract tests. These follow the established
 // `private-storage-wiring.test.ts` pattern: read the action module source and
@@ -151,31 +155,122 @@ describe('submitSolutionSchema validates attachment IDs (Task 3 brief)', () => {
   })
 })
 
-describe('submitSolution transfers only owned staged attachments (Task 3 brief)', () => {
+describe('submitSolution adopts only owner-scoped ready solution drafts (Task 2 brief)', () => {
   const solutionsSource = readFileSync('src/server-actions/solutions.ts', 'utf8')
   const submitBody = solutionsSource.slice(
     solutionsSource.indexOf('export async function submitSolution'),
     solutionsSource.indexOf('export async function createCustomApprovalChain')
   )
 
-  it('queries staged attachments scoped to the current user inside the transaction', () => {
-    // The staged-attachment query must intersect ALL of: these ids, this request,
-    // still unlinked (solutionId null), and owned by the submitting user.
-    assert.match(submitBody, /file_attachments\.findMany/)
-    assert.match(submitBody, /id:\s*\{\s*in:\s*validated\.fileIds\s*\}/)
-    assert.match(submitBody, /requestId:\s*validated\.requestId/)
-    assert.match(submitBody, /solutionId:\s*null/)
-    assert.match(submitBody, /uploadedById:\s*user\.id/)
+  it('verifies every id as an owner-scoped ready draft inside the transaction', () => {
+    // The shared verifier intersects ALL of: these ids, the target request,
+    // still unlinked (solutionId null), owned by the submitting user, the
+    // solution-drafts/ready/ prefix, and an existing physical file.
+    assert.match(submitBody, /assertAdoptableSolutionDrafts\(\s*tx,\s*validated\.fileIds,\s*validated\.requestId,\s*user\.id/)
   })
 
   it('compares the found count to the unique id count and throws before linking', () => {
-    assert.match(submitBody, /stagedAttachments\.length !== validated\.fileIds\.length/)
-    assert.match(submitBody, /One or more attachments are invalid or no longer available/)
+    assert.match(solutionsSource, /drafts\.length !== ids\.length/)
+    assert.match(solutionsSource, /One or more attachments are invalid or no longer available/)
   })
 
-  it('verifies the updateMany count before continuing', () => {
+  it('adopts with a ready-path conditional updateMany and re-checks the count', () => {
     assert.match(submitBody, /file_attachments\.updateMany/)
+    assert.match(submitBody, /readySolutionDraftWhere\(validated\.fileIds,\s*validated\.requestId,\s*user\.id\)/)
     assert.match(submitBody, /\.count !== validated\.fileIds\.length/)
+  })
+
+  it('runs verification and adoption inside the transaction so mismatches roll back', () => {
+    const txIdx = submitBody.indexOf('prisma.$transaction')
+    const verifyIdx = submitBody.indexOf('assertAdoptableSolutionDrafts')
+    const adoptIdx = submitBody.indexOf('file_attachments.updateMany')
+    assert.ok(txIdx >= 0, 'submission must run in a transaction')
+    assert.ok(verifyIdx > txIdx, 'ready-draft verification must run inside the transaction')
+    assert.ok(adoptIdx > verifyIdx, 'adoption must happen only after verification passes')
+  })
+
+  it('still notifies only after the transaction commits', () => {
+    const txIdx = submitBody.indexOf('prisma.$transaction')
+    const notifyIdx = submitBody.indexOf("await import('./notifications')")
+    assert.ok(txIdx >= 0)
+    assert.ok(notifyIdx > txIdx, 'createNotification must run after prisma.$transaction')
+  })
+
+  it('never adopts request-scope rows on the solution submit path', () => {
+    // The solution flows must pin the solution ready prefix; the request-scope
+    // prefix (request-drafts/ready/) must not appear anywhere in solutions.ts.
+    assert.doesNotMatch(solutionsSource, /request-drafts\/ready\//)
+    assert.match(solutionsSource, /solution-drafts\/ready\//)
+  })
+})
+
+// The adoption predicate is pinned behaviorally against the shared storage
+// module: the exact five-segment `solution-drafts/ready/` shape is the ONLY
+// path shape that satisfies it, so request-scope rows, mid-flight (reserved/
+// uploading) solution drafts, and legacy `<requestId>/` uploads all fail the
+// tightened submit/resubmit predicates instead of being adopted.
+describe('solution staged-adoption predicates (Task 2 brief)', () => {
+  const solutionsSource = readFileSync('src/server-actions/solutions.ts', 'utf8')
+  // Shared predicates live at module level above submitSolution.
+  const adoptionHead = solutionsSource.slice(0, solutionsSource.indexOf('export async function submitSolution'))
+
+  it('adopts only solution-drafts/ready/ paths via the server-controlled prefix', () => {
+    assert.match(adoptionHead, /SOLUTION_DRAFT_READY_PREFIX = 'solution-drafts\/ready\/'/)
+    assert.match(adoptionHead, /filePath:\s*\{\s*startsWith:\s*SOLUTION_DRAFT_READY_PREFIX\s*\}/)
+  })
+
+  it('scopes the where predicate to target request, unlinked rows, and current owner', () => {
+    assert.match(
+      adoptionHead,
+      /function readySolutionDraftWhere\(ids: string\[\], requestId: string, uploadedById: string\)/,
+    )
+    const whereBody = adoptionHead.slice(
+      adoptionHead.indexOf('function readySolutionDraftWhere'),
+      adoptionHead.indexOf('}', adoptionHead.indexOf('filePath:')),
+    )
+    assert.match(whereBody, /id:\s*\{\s*in:\s*ids\s*\}/)
+    assert.match(whereBody, /requestId,/)
+    assert.match(whereBody, /solutionId:\s*null/)
+    assert.match(whereBody, /uploadedById,/)
+  })
+
+  it('requires the exact five-segment ready path and an existing physical file', () => {
+    assert.match(adoptionHead, /isSolutionDraftReadyPath\(draft\.filePath\)/)
+    assert.match(adoptionHead, /attachmentFileExists\(draft\.filePath\)/)
+    // Wrong-owner/wrong-request rows never reach the path checks: the count
+    // mismatch in the verifier throws first (fail closed).
+    assert.match(adoptionHead, /drafts\.length !== ids\.length/)
+  })
+
+  it('accepts only exact solution ready paths and rejects every cross-scope shape', () => {
+    const attachmentId = randomUUID()
+    const uploadToken = randomUUID()
+    // The exact shape the stage route finalizes to is adoptable.
+    assert.equal(
+      isSolutionDraftReadyPath(createSolutionDraftReadyPath(attachmentId, uploadToken, 'design.pdf')),
+      true,
+    )
+    // A request-scope ready row (what a request-flow client stages) is rejected.
+    assert.equal(
+      isSolutionDraftReadyPath(`request-drafts/ready/${attachmentId}/${uploadToken}/design.pdf`),
+      false,
+    )
+    // Mid-flight solution drafts are rejected: only finalized rows adopt.
+    assert.equal(
+      isSolutionDraftReadyPath(`solution-drafts/reserved/${attachmentId}/${uploadToken}/design.pdf`),
+      false,
+    )
+    assert.equal(
+      isSolutionDraftReadyPath(`solution-drafts/uploading/${attachmentId}/${uploadToken}/design.pdf`),
+      false,
+    )
+    // Legacy `<requestId>/<uuid>-<name>` upload paths are rejected.
+    assert.equal(isSolutionDraftReadyPath(`${attachmentId}/design.pdf`), false)
+    // Solution cancelled markers are rejected.
+    assert.equal(
+      isSolutionDraftReadyPath(`solution-drafts/cancelled/ready/${attachmentId}/${uploadToken}/design.pdf`),
+      false,
+    )
   })
 })
 
@@ -300,16 +395,14 @@ describe('resubmitSolution transfers staged IDs and deletes files after commit (
     assert.match(resubmitBody, /overlap/i)
   })
 
-  it('queries staged attachments scoped to requestId / solutionId:null / uploadedById', () => {
-    assert.match(resubmitBody, /file_attachments\.findMany/)
-    assert.match(resubmitBody, /id:\s*\{\s*in:\s*validated\.newFileIds\s*\}/)
-    assert.match(resubmitBody, /requestId:\s*validated\.requestId/)
-    assert.match(resubmitBody, /solutionId:\s*null/)
-    assert.match(resubmitBody, /uploadedById:\s*user\.id/)
+  it('verifies new ids as owner-scoped ready solution drafts inside the transaction', () => {
+    assert.match(resubmitBody, /assertAdoptableSolutionDrafts\(\s*tx,\s*validated\.newFileIds,\s*validated\.requestId,\s*user\.id/)
   })
 
-  it('requires an exact staged-count match before linking', () => {
-    assert.match(resubmitBody, /stagedAttachments\.length !== validated\.newFileIds\.length/)
+  it('links staged rows through the ready-path predicate with a count re-check', () => {
+    assert.match(resubmitBody, /file_attachments\.updateMany/)
+    assert.match(resubmitBody, /readySolutionDraftWhere\(validated\.newFileIds,\s*validated\.requestId,\s*user\.id\)/)
+    assert.match(resubmitBody, /\.count !== validated\.newFileIds\.length/)
   })
 
   it('queries deletable attachments scoped to the current solution and exact-counts them', () => {
@@ -323,6 +416,22 @@ describe('resubmitSolution transfers staged IDs and deletes files after commit (
 
   it('deletes the selected existing attachment rows inside the transaction', () => {
     assert.match(resubmitBody, /file_attachments\.deleteMany/)
+  })
+
+  it('runs new-file verification inside the transaction so mismatches roll back', () => {
+    const txIdx = resubmitBody.indexOf('runSolutionTransactionWithNotifications')
+    const verifyIdx = resubmitBody.indexOf('assertAdoptableSolutionDrafts')
+    const adoptIdx = resubmitBody.indexOf('file_attachments.updateMany')
+    assert.ok(txIdx >= 0, 'resubmission must run in the post-commit-managed transaction')
+    assert.ok(verifyIdx > txIdx, 'ready-draft verification must run inside the transaction')
+    assert.ok(adoptIdx > verifyIdx, 'adoption must happen only after verification passes')
+  })
+
+  it('still notifies approvers only after the transaction commits', () => {
+    const txIdx = resubmitBody.indexOf('runSolutionTransactionWithNotifications')
+    const notifyIdx = resubmitBody.indexOf("await import('./notifications')")
+    assert.ok(txIdx >= 0)
+    assert.ok(notifyIdx > txIdx, 'createNotification must run after the transaction wrapper')
   })
 
   it('deletes physical files only after the transaction commits via Promise.allSettled', () => {

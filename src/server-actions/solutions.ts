@@ -11,7 +11,11 @@ import {
 import prisma from '@/lib/prisma'
 import { RequestStatus, UserRole, type Prisma } from '@prisma/client'
 import { submitSolutionSchema, SubmitSolutionInput, resubmitSolutionSchema, ResubmitSolutionInput } from '@/lib/schemas/solution-schemas'
-import { deleteAttachmentFile } from '@/lib/attachments/storage'
+import {
+  attachmentFileExists,
+  deleteAttachmentFile,
+  isSolutionDraftReadyPath,
+} from '@/lib/attachments/storage'
 import {
   prepareInlineDescription,
   reconcileInlineDescriptionImages,
@@ -107,6 +111,63 @@ async function runSolutionTransactionWithNotifications<T>(
       )
     },
   })
+}
+
+const SOLUTION_DRAFT_READY_PREFIX = 'solution-drafts/ready/'
+const SUBMIT_ATTACHMENT_ADOPTION_ERROR = 'One or more attachments are invalid or no longer available'
+const RESUBMIT_ATTACHMENT_ADOPTION_ERROR = 'One or more new attachments are invalid or no longer available'
+
+/**
+ * Owner-scoped, ready-only adoption predicate shared by submitSolution and
+ * resubmitSolution. Every candidate id must resolve to a row on the target
+ * request, still unlinked (solutionId null), uploaded by the current user, and
+ * stored under the server-controlled `solution-drafts/ready/` prefix. Rows from
+ * any other scope — request drafts (`request-drafts/...`), legacy uploads
+ * (`<requestId>/...`), and mid-flight reserved/uploading solution drafts — can
+ * never match the prefix, so they fail closed.
+ */
+function readySolutionDraftWhere(ids: string[], requestId: string, uploadedById: string) {
+  return {
+    id: { in: ids },
+    requestId,
+    solutionId: null,
+    uploadedById,
+    filePath: { startsWith: SOLUTION_DRAFT_READY_PREFIX },
+  }
+}
+
+/**
+ * Fail-closed verification that every candidate id is an adoptable solution
+ * draft: the owner/request/unlinked/ready-prefix row exists (exact count), the
+ * stored path is an exact five-segment `solution-drafts/ready/` path, and the
+ * physical file is present. Throws `attachmentError` inside the caller's
+ * transaction when any id fails, rolling the workflow back; a missing file
+ * reports the draft's file name so the submitter knows which upload to retry.
+ */
+async function assertAdoptableSolutionDrafts(
+  tx: Prisma.TransactionClient,
+  ids: string[],
+  requestId: string,
+  uploadedById: string,
+  attachmentError: string,
+): Promise<void> {
+  const drafts = await tx.file_attachments.findMany({
+    where: readySolutionDraftWhere(ids, requestId, uploadedById),
+    select: { id: true, filePath: true, fileName: true },
+  })
+
+  if (drafts.length !== ids.length) {
+    throw new Error(attachmentError)
+  }
+
+  for (const draft of drafts) {
+    if (!isSolutionDraftReadyPath(draft.filePath)) {
+      throw new Error(attachmentError)
+    }
+    if (!(await attachmentFileExists(draft.filePath))) {
+      throw new Error(`${draft.fileName}: Staged file is missing — please retry the upload`)
+    }
+  }
 }
 
 /**
@@ -222,35 +283,29 @@ export async function submitSolution(input: SubmitSolutionActionInput) {
       imageIds: prepared.imageIds,
     })
 
-    // Link only attachments the current user owns and staged on this request,
-    // still unlinked (solutionId null). The candidate IDs were already validated
-    // as <= MAX_ATTACHMENTS_PER_FORM unique UUIDs by submitSolutionSchema; here
-    // we re-scope them to rows the submitting user actually owns before any
-    // write. The transfer is all-or-nothing: an exact count match is required
-    // up front and the updateMany result is verified, so nothing is linked
-    // unless every ID resolves to a valid, owned, staged row.
+    // Link only attachments the current user owns, staged on this request, and
+    // finalized as solution drafts: `solutionId` still null, uploaded by the
+    // submitting user, exact `solution-drafts/ready/` five-segment path, and a
+    // physically present file. The candidate IDs were already validated as
+    // <= MAX_ATTACHMENTS_PER_FORM unique UUIDs by submitSolutionSchema. The
+    // ready-path prefix keeps request-scope rows and mid-flight (reserved/
+    // uploading) solution drafts out of the candidate set, and verification
+    // throws inside this transaction so nothing is linked unless every ID
+    // resolves. The transfer stays all-or-nothing: the same tightened predicate
+    // is repeated on the updateMany and its count re-checked, so a concurrent
+    // cancel/delete between verify and adopt rolls back the whole submission
+    // instead of linking a partial set.
     if (validated.fileIds.length > 0) {
-      const stagedAttachments = await tx.file_attachments.findMany({
-        where: {
-          id: { in: validated.fileIds },
-          requestId: validated.requestId,
-          solutionId: null,
-          uploadedById: user.id,
-        },
-        select: { id: true },
-      })
-
-      if (stagedAttachments.length !== validated.fileIds.length) {
-        throw new Error('One or more attachments are invalid or no longer available')
-      }
+      await assertAdoptableSolutionDrafts(
+        tx,
+        validated.fileIds,
+        validated.requestId,
+        user.id,
+        SUBMIT_ATTACHMENT_ADOPTION_ERROR,
+      )
 
       const linked = await tx.file_attachments.updateMany({
-        where: {
-          id: { in: validated.fileIds },
-          requestId: validated.requestId,
-          solutionId: null,
-          uploadedById: user.id,
-        },
+        where: readySolutionDraftWhere(validated.fileIds, validated.requestId, user.id),
         data: {
           solutionId: solution.id,
           requestId: null,
@@ -258,7 +313,7 @@ export async function submitSolution(input: SubmitSolutionActionInput) {
       })
 
       if (linked.count !== validated.fileIds.length) {
-        throw new Error('One or more attachments are invalid or no longer available')
+        throw new Error(SUBMIT_ATTACHMENT_ADOPTION_ERROR)
       }
     }
 
@@ -1922,12 +1977,13 @@ export async function rejectFinalApproval(requestId: string, comments: string, e
  * Resubmit an engineering solution after rejection
  * Updates the existing solution with new details and resets the approval chain.
  *
- * Attachments are handled purely via IDs: `newFileIds` reference staged rows
- * (uploaded through the authorized draft upload action) that get linked to the
- * solution, and `deletedFileIds` reference existing solution attachments to
- * remove. Raw File objects never cross this boundary. Physical file deletion
- * for removed attachments runs ONLY after the DB transaction commits, so a
- * cleanup failure can never roll back a successful resubmission.
+ * Attachments are handled purely via IDs: `newFileIds` reference ready
+ * solution-draft rows (staged through the XHR protocol under
+ * `solution-drafts/ready/`) that get linked to the solution, and
+ * `deletedFileIds` reference existing solution attachments to remove. Raw File
+ * objects never cross this boundary. Physical file deletion for removed
+ * attachments runs ONLY after the DB transaction commits, so a cleanup failure
+ * can never roll back a successful resubmission.
  */
 export async function resubmitSolution(input: ResubmitSolutionActionInput) {
   const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
@@ -2038,22 +2094,17 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
       }
     }
 
-    // Query staged rows owned by the current user on this request that are
-    // still unlinked (solutionId null). An exact count match means every
-    // newFileId resolved to one valid, owned, staged row before any write.
-    const stagedAttachments = await tx.file_attachments.findMany({
-      where: {
-        id: { in: validated.newFileIds },
-        requestId: validated.requestId,
-        solutionId: null,
-        uploadedById: user.id,
-      },
-      select: { id: true },
-    })
-
-    if (stagedAttachments.length !== validated.newFileIds.length) {
-      throw new Error('One or more new attachments are invalid or no longer available')
-    }
+    // Verify every new id resolves to an owner-scoped, ready-path solution
+    // draft on this request with a physically present file. Request-scope rows
+    // (request-drafts/...) and reserved/uploading solution drafts fail closed
+    // here, and the throw rolls the whole resubmission back before any write.
+    await assertAdoptableSolutionDrafts(
+      tx,
+      validated.newFileIds,
+      validated.requestId,
+      user.id,
+      RESUBMIT_ATTACHMENT_ADOPTION_ERROR,
+    )
 
     // Query deletable rows scoped to the current solution. An exact count match
     // means every deletedFileId resolved to one attachment actually owned by
@@ -2071,17 +2122,13 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
       throw new Error('One or more deleted attachments are invalid or no longer available')
     }
 
-    // Link staged rows to the solution (solutionId set, requestId cleared) with
-    // an updateMany count re-check that guards against concurrent mutation
-    // between the read above and this write (TOCTOU under READ COMMITTED).
+    // Link staged rows to the solution (solutionId set, requestId cleared) by
+    // re-applying the same owner-scoped ready-path predicate with an updateMany
+    // count re-check that guards against concurrent mutation between the read
+    // above and this write (TOCTOU under READ COMMITTED).
     if (validated.newFileIds.length > 0) {
       const linked = await tx.file_attachments.updateMany({
-        where: {
-          id: { in: validated.newFileIds },
-          requestId: validated.requestId,
-          solutionId: null,
-          uploadedById: user.id,
-        },
+        where: readySolutionDraftWhere(validated.newFileIds, validated.requestId, user.id),
         data: {
           solutionId: solution.id,
           requestId: null,
@@ -2089,7 +2136,7 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
       })
 
       if (linked.count !== validated.newFileIds.length) {
-        throw new Error('One or more new attachments are invalid or no longer available')
+        throw new Error(RESUBMIT_ATTACHMENT_ADOPTION_ERROR)
       }
     }
 
