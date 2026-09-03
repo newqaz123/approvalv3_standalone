@@ -350,6 +350,10 @@ export function createStagedRequestAttachmentsController(
   const maxAttachments = options.maxAttachments ?? MAX_ATTACHMENTS_PER_FORM
   const itemsRef: ItemsRef = { current: [] }
   const attempts = new Map<string, UploadAttempt>()
+  const cleanupPromises = new Map<
+    string,
+    Promise<Awaited<ReturnType<typeof deleteOrKeepStagedItem>>>
+  >()
   const listeners = new Set<() => void>()
   let skipCleanup = false
 
@@ -368,6 +372,23 @@ export function createStagedRequestAttachmentsController(
 
   function isCurrentAttempt(id: string, attempt: UploadAttempt) {
     return !attempt.cancelled && attempts.get(id) === attempt
+  }
+
+  function cleanupItem(item: StagedItem) {
+    const existing = cleanupPromises.get(item.id)
+    if (existing) return existing
+
+    const cleanup = deleteOrKeepStagedItem(item, transports.remove)
+    cleanupPromises.set(item.id, cleanup)
+    void cleanup.then(
+      () => {
+        if (cleanupPromises.get(item.id) === cleanup) cleanupPromises.delete(item.id)
+      },
+      () => {
+        if (cleanupPromises.get(item.id) === cleanup) cleanupPromises.delete(item.id)
+      },
+    )
+    return cleanup
   }
 
   async function applyCleanupResult(
@@ -425,10 +446,10 @@ export function createStagedRequestAttachmentsController(
         const cancelled = isCancelledReservationError(error)
         if (cancelled || latest?.cleanupRequested) {
           const target = latest ?? { id, file, status: 'error' as const, progress: 0, cleanupRequested: true }
-          await applyCleanupResult(id, await deleteOrKeepStagedItem({
+          await applyCleanupResult(id, await cleanupItem({
             ...target,
             cleanupRequested: true,
-          }, transports.remove))
+          }))
           return
         }
         if (attempt.cancelled) return
@@ -443,7 +464,7 @@ export function createStagedRequestAttachmentsController(
       const afterReserve = itemsRef.current.find((item) => item.id === id)
       if (!isCurrentAttempt(id, attempt) || afterReserve?.cleanupRequested) {
         const target = afterReserve ?? { id, file, status: 'error' as const, progress: 0, cleanupRequested: true }
-        await applyCleanupResult(id, await deleteOrKeepStagedItem(target, transports.remove))
+        await applyCleanupResult(id, await cleanupItem(target))
         return
       }
 
@@ -473,9 +494,17 @@ export function createStagedRequestAttachmentsController(
         if (skipCleanup) return
         const latest = itemsRef.current.find((item) => item.id === id)
         if (!isCurrentAttempt(id, attempt) || latest?.cleanupRequested) {
-          void transports.remove(result.attachmentId).catch((cleanupError) => {
-            console.error('Stale staged upload cleanup failed:', cleanupError)
-          })
+          void cleanupItem({
+            id: result.attachmentId,
+            file,
+            status: 'success',
+            progress: 100,
+            attachmentId: result.attachmentId,
+            fileName: result.fileName,
+            fileType: result.fileType,
+            fileSize: result.fileSize,
+            cleanupRequested: true,
+          }).then((cleanupResult) => applyCleanupResult(id, cleanupResult))
           return
         }
         attempts.delete(id)
@@ -514,7 +543,7 @@ export function createStagedRequestAttachmentsController(
     const current = itemsRef.current.find((item) => item.id === id)
     if (!current) return
     if (current.cleanupRequested) {
-      void deleteOrKeepStagedItem(current, transports.remove).then((result) => applyCleanupResult(id, result))
+      void cleanupItem(current).then((result) => applyCleanupResult(id, result))
       return
     }
     if (current.status !== 'error') return
@@ -532,7 +561,7 @@ export function createStagedRequestAttachmentsController(
     const marked: StagedItem = { ...current, cleanupRequested: true, error: undefined }
     setItems(itemsRef.current.map((item) => (item.id === id ? marked : item)))
     if (attempt?.reservePending) return
-    void deleteOrKeepStagedItem(marked, transports.remove).then((result) => applyCleanupResult(id, result))
+    void cleanupItem(marked).then((result) => applyCleanupResult(id, result))
   }
 
   function abortAllAttempts() {
@@ -556,7 +585,7 @@ export function createStagedRequestAttachmentsController(
     const snapshot = itemsRef.current
     const results = await Promise.all(
       snapshot.map(async (item) => ({
-        result: await deleteOrKeepStagedItem(item, transports.remove),
+        result: await cleanupItem(item),
       })),
     )
     const kept: StagedItem[] = []
@@ -583,11 +612,13 @@ export function createStagedRequestAttachmentsController(
   function unmount() {
     if (skipCleanup) return
     abortAllAttempts()
-    const attachmentIds = itemsRef.current.map((item) => item.id)
+    const items = itemsRef.current
     itemsRef.current = []
-    for (const attachmentId of attachmentIds) {
-      void transports.remove(attachmentId).catch((error) => {
-        console.error('useStagedRequestAttachments unmount cleanup failed:', error)
+    for (const item of items) {
+      void cleanupItem(item).then((result) => {
+        if (!result.drop) {
+          console.error('useStagedRequestAttachments unmount cleanup failed:', result.item.error)
+        }
       })
     }
   }

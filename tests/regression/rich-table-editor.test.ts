@@ -122,7 +122,7 @@ describe('RichTableKit vertical align schema', () => {
       'src/components/rich-text/rich-table-extensions.ts',
       'utf8',
     )
-    assert.match(source, /Table\.configure\(\{ resizable: true \}\)/)
+    assert.match(source, /Table\.configure\(\{ resizable: true, cellMinWidth: 120 \}\)/)
   })
 
   it('normalizes only the curated vertical align tokens', () => {

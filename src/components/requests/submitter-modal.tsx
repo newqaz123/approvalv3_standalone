@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { format } from "date-fns";
 import {
 	X,
@@ -65,6 +65,14 @@ import {
 	inlineImageBlockingMessage,
 	useInlineDescriptionImages,
 } from "@/hooks/use-inline-description-images";
+import { isDraftFieldDirty, requestDiscardDraft } from "@/lib/discard-draft";
+import {
+	createSubmitterSolutionDraftBaseline,
+	discardSubmitterSolutionDraft,
+	removeSubmitterExistingFile,
+	restoreSubmitterSolutionDraft,
+} from "@/lib/submitter-solution-draft";
+import { DiscardDraftDialog } from "@/components/ui/discard-draft-dialog";
 import { ApproverSearchField } from "@/components/approvals/approver-search-field";
 import { filterApproversByQuery } from "@/lib/approver-search";
 
@@ -358,27 +366,40 @@ export function SubmitterModal({
 	onSubmitSolution,
 	onResubmit,
 }: SubmitterModalProps) {
+	const initialSolutionDraft = useMemo(
+		() =>
+			createSubmitterSolutionDraftBaseline({
+				mode,
+				requestTitle: initialData?.requestTitle,
+				solution: initialData?.solution,
+				existingFiles: initialData?.existingFiles,
+			}),
+		[
+				mode,
+				initialData?.requestTitle,
+				initialData?.solution?.title,
+				initialData?.solution?.description,
+				initialData?.solution?.cost,
+				initialData?.solution?.currency,
+				initialData?.solution?.timeline,
+				initialData?.existingFiles,
+			],
+	);
+
 	// Form states
 	const [title, setTitle] = useState(initialData?.title || "");
 	const [description, setDescription] = useState(
 		initialData?.description || "",
 	);
 	const [solutionTitle, setSolutionTitle] = useState(
-		initialData?.solution?.title ||
-			(mode === "solution" ? initialData?.requestTitle || "" : ""),
+		initialSolutionDraft.solutionTitle,
 	);
 	const [solutionDescription, setSolutionDescription] = useState(
-		initialData?.solution?.description || "",
+		initialSolutionDraft.solutionDescription,
 	);
-	const [cost, setCost] = useState(
-		initialData?.solution?.cost?.toString() || "",
-	);
-	const [currency, setCurrency] = useState(
-		initialData?.solution?.currency || "THB",
-	);
-	const [timeline, setTimeline] = useState(
-		initialData?.solution?.timeline || "",
-	);
+	const [cost, setCost] = useState(initialSolutionDraft.cost);
+	const [currency, setCurrency] = useState(initialSolutionDraft.currency);
+	const [timeline, setTimeline] = useState(initialSolutionDraft.timeline);
 
 	// Template selection state (for request mode)
 	const [selectedTemplate, setSelectedTemplate] = useState(
@@ -447,7 +468,7 @@ export function SubmitterModal({
 
 	// Existing files state (for resubmit mode)
 	const [existingFiles, setExistingFiles] = useState<FileAttachment[]>(
-		initialData?.existingFiles || [],
+		initialSolutionDraft.existingFiles,
 	);
 	const [deletedFileIds, setDeletedFileIds] = useState<string[]>([]);
 	const [fileUploadError, setFileUploadError] = useState<string | null>(null);
@@ -488,36 +509,54 @@ export function SubmitterModal({
 	// Count-based, honest upload feedback for solution/resubmit batches.
 	const uploadProgress = describeUploadProgress(attachmentItems);
 	const [submitError, setSubmitError] = useState<string | null>(null);
+	const [discardOpen, setDiscardOpen] = useState(false);
+	const solutionCommitInFlightRef = useRef(false);
 
 	const isSolutionMode = mode === "solution" || mode === "resubmit";
+	const restoreSolutionDraft = useCallback(() => {
+		const restored = restoreSubmitterSolutionDraft(initialSolutionDraft);
+		setSolutionTitle(restored.solutionTitle);
+		setSolutionDescription(restored.solutionDescription);
+		setCost(restored.cost);
+		setCurrency(restored.currency);
+		setTimeline(restored.timeline);
+		setExistingFiles(restored.existingFiles);
+		setDeletedFileIds(restored.deletedFileIds);
+		setUseCustomHierarchy(restored.useCustomHierarchy);
+		setCustomApprovers(restored.customApprovers);
+		setFileUploadError(restored.fileUploadError);
+		setSubmitError(restored.submitError);
+		setDiscardOpen(restored.discardOpen);
+	}, [initialSolutionDraft]);
 
-	// Update solution data when initialData changes (for resubmit mode)
+	// Restore the canonical solution/resubmit baseline once per open. Request
+	// mode deliberately keeps its existing open/reset behavior below.
+	const solutionOpenModeRef = useRef<"solution" | "resubmit" | null>(null);
 	useEffect(() => {
-		if (mode === "resubmit" && initialData?.solution) {
-			setSolutionTitle(initialData.solution.title || "");
-			setSolutionDescription(initialData.solution.description || "");
-			setCost(initialData.solution.cost?.toString() || "");
-			setCurrency(initialData.solution.currency || "THB");
-			setTimeline(initialData.solution.timeline || "");
+		if (!open) {
+			solutionOpenModeRef.current = null;
+			return;
 		}
-	}, [mode, initialData?.solution, initialData?.existingFiles]);
-
-	useEffect(() => {
-		if (mode === "solution" && open) {
-			setSolutionTitle(initialData?.requestTitle || "");
-			setCurrency(initialData?.solution?.currency || "THB");
-		}
-	}, [mode, open, initialData?.requestTitle, initialData?.solution?.currency]);
+		if (mode === "request" || solutionOpenModeRef.current === mode) return;
+		solutionOpenModeRef.current = mode;
+		restoreSolutionDraft();
+	}, [mode, open, restoreSolutionDraft]);
 
 	// Handle file upload
 	const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-		// Request add is locked for the whole submit/close lifecycle so a stale
-		// file-input change cannot enqueue a draft that success clear() would drop.
+		// File additions are locked for the whole submit/close lifecycle so a
+		// stale file-input change cannot enqueue a draft that success clear() would
+		// drop.
 		if (
 			mode === "request" &&
-			(isBusy ||
-				requestCommitInFlightRef.current ||
-				closeInFlightRef.current)
+			(isBusy || requestCommitInFlightRef.current || closeInFlightRef.current)
+		) {
+			e.target.value = "";
+			return;
+		}
+		if (
+			mode !== "request" &&
+			(isBusy || solutionCommitInFlightRef.current || closeInFlightRef.current)
 		) {
 			e.target.value = "";
 			return;
@@ -552,6 +591,9 @@ export function SubmitterModal({
 	};
 
 	const handleRemoveAttachment = async (id: string) => {
+		if (isBusy || solutionCommitInFlightRef.current || closeInFlightRef.current) {
+			return;
+		}
 		try {
 			await removeItem(id);
 		} catch (error) {
@@ -566,6 +608,8 @@ export function SubmitterModal({
 	// isolation — never invoking the metadata submit.
 	const handleRetryAttachment = async () => {
 		if (isBusy) return;
+		if (solutionCommitInFlightRef.current || closeInFlightRef.current) return;
+		solutionCommitInFlightRef.current = true;
 		setIsBusy(true);
 		setSubmitError(null);
 		try {
@@ -585,17 +629,39 @@ export function SubmitterModal({
 				error instanceof Error ? error.message : "An error occurred",
 			);
 		} finally {
+			solutionCommitInFlightRef.current = false;
 			setIsBusy(false);
 		}
 	};
 
 	const removeExistingFile = (fileId: string) => {
-		setExistingFiles((prev) => prev.filter((f) => f.id !== fileId));
-		setDeletedFileIds((prev) => [...prev, fileId]);
+		if (
+			isBusy ||
+			solutionCommitInFlightRef.current ||
+			closeInFlightRef.current
+		) {
+			return;
+		}
+		const next = removeSubmitterExistingFile(
+			{ existingFiles, deletedFileIds },
+			fileId,
+		);
+		setExistingFiles(next.existingFiles);
+		setDeletedFileIds(next.deletedFileIds);
 	};
 
 	// Handle submission
 	const handleSubmit = async () => {
+		// Refs provide a synchronous fence for same-tick double-submit and close
+		// events before React has rendered the isBusy state update.
+		if (
+			isBusy ||
+			requestCommitInFlightRef.current ||
+			solutionCommitInFlightRef.current ||
+			closeInFlightRef.current
+		) {
+			return;
+		}
 		if (inlineImages.hasBlockingOperations) {
 			setSubmitError(inlineImageBlockingMessage(inlineImages.blockingReason));
 			return;
@@ -640,6 +706,8 @@ export function SubmitterModal({
 		}
 
 		if (isSolutionMode) {
+			const deletedFileIdsSnapshot = [...deletedFileIds];
+			solutionCommitInFlightRef.current = true;
 			setIsBusy(true);
 			try {
 				// ensureUploaded() is authoritative: uploads pending/errored items,
@@ -666,6 +734,7 @@ export function SubmitterModal({
 						// Drafts are now linked — clear without invoking cleanup.
 						inlineImages.clear();
 						clear();
+						setDiscardOpen(false);
 						onOpenChange(false);
 					} else {
 						setSubmitError(res.error || "Failed to submit solution");
@@ -678,7 +747,7 @@ export function SubmitterModal({
 						currency,
 						timeline,
 						fileIds: result.attachmentIds,
-						deletedFileIds,
+						deletedFileIds: deletedFileIdsSnapshot,
 						useCustomHierarchy,
 						customApprovers,
 						inlineImageSessionId: inlineImages.uploadSessionId,
@@ -686,6 +755,7 @@ export function SubmitterModal({
 					if (res.success) {
 						inlineImages.clear();
 						clear();
+						setDiscardOpen(false);
 						onOpenChange(false);
 					} else {
 						setSubmitError(res.error || "Failed to resubmit solution");
@@ -696,6 +766,9 @@ export function SubmitterModal({
 					error instanceof Error ? error.message : "An error occurred",
 				);
 			} finally {
+				// Keep the ref set through onOpenChange(false) so a synchronous dialog
+				// close event cannot start a second cleanup; the modal is now closed.
+				solutionCommitInFlightRef.current = false;
 				setIsBusy(false);
 			}
 		}
@@ -705,20 +778,71 @@ export function SubmitterModal({
 	// via reset, plus the inline image coordinator) before closing. Cleanup
 	// errors are surfaced and the modal stays open.
 	const requestClose = () => {
+		// A commit or cleanup owns the draft lifecycle; ignore stale dialog close
+		// events and file-input paths until it settles. This covers backdrop,
+		// Escape, header, footer, and drag-generated close attempts.
 		if (
 			mode === "request" &&
 			(closeInFlightRef.current || requestCommitInFlightRef.current)
 		) {
 			return;
 		}
-		void handleCloseWithCleanup();
+		if (
+			mode !== "request" &&
+			(closeInFlightRef.current || solutionCommitInFlightRef.current)
+		) {
+			return;
+		}
+
+		const initialRequestTitle = initialData?.title || "";
+		const initialRequestDescription = initialData?.description || "";
+		const initialSolutionTitle =
+			initialData?.solution?.title ||
+			(mode === "solution" ? initialData?.requestTitle || "" : "");
+		const initialSolutionDescription = initialData?.solution?.description || "";
+		const initialSolutionCurrency = initialData?.solution?.currency || "THB";
+		const formIsDirty =
+			mode === "request"
+				? title.trim() !== initialRequestTitle.trim() ||
+					isDraftFieldDirty(description, initialRequestDescription) ||
+					selectedTemplate !== (initialData?.templateId || "")
+				: solutionTitle.trim() !== initialSolutionTitle.trim() ||
+					isDraftFieldDirty(solutionDescription, initialSolutionDescription) ||
+					cost !== (initialData?.solution?.cost?.toString() || "") ||
+					currency !== initialSolutionCurrency ||
+					timeline !== (initialData?.solution?.timeline || "") ||
+					useCustomHierarchy ||
+					customApprovers.length > 0 ||
+					deletedFileIds.length > 0;
+		requestDiscardDraft(
+			{
+				formIsDirty,
+				// Request drafts are staged separately; solution/resubmit drafts use
+				// the shared attachment hook.
+				hasFiles:
+					stagedRequestItems.length > 0 || attachmentItems.length > 0,
+				hasInlineImageDrafts: inlineImages.getState().length > 0,
+			},
+			() => setDiscardOpen(true),
+			() => {
+				void handleCloseWithCleanup();
+			},
+		);
 	};
 
 	const handleCloseWithCleanup = async () => {
 		if (mode === "request" && requestCommitInFlightRef.current) {
 			return;
 		}
+		if (mode !== "request" && solutionCommitInFlightRef.current) {
+			return;
+		}
 		if (mode === "request") {
+			if (closeInFlightRef.current) {
+				return;
+			}
+			closeInFlightRef.current = true;
+		} else {
 			if (closeInFlightRef.current) {
 				return;
 			}
@@ -727,10 +851,21 @@ export function SubmitterModal({
 		setIsBusy(true);
 		setSubmitError(null);
 		try {
-			await resetStagedRequestAttachments();
-			await reset();
-			await inlineImages.reset();
-			onOpenChange(false);
+			if (isSolutionMode) {
+				await discardSubmitterSolutionDraft({
+					cleanupStagedRequestAttachments: resetStagedRequestAttachments,
+					cleanupSolutionAttachments: reset,
+					cleanupInlineImages: inlineImages.reset,
+					restore: restoreSolutionDraft,
+					close: () => onOpenChange(false),
+				});
+			} else {
+				await resetStagedRequestAttachments();
+				await reset();
+				await inlineImages.reset();
+				setDiscardOpen(false);
+				onOpenChange(false);
+			}
 		} catch (error) {
 			setSubmitError(
 				error instanceof Error
@@ -740,6 +875,8 @@ export function SubmitterModal({
 		} finally {
 			if (mode === "request") {
 				closeInFlightRef.current = false;
+			} else {
+				closeInFlightRef.current = false;
 			}
 			setIsBusy(false);
 		}
@@ -747,9 +884,9 @@ export function SubmitterModal({
 
 	const requestCloseControlsLocked =
 		mode === "request" &&
-		(isBusy ||
-			requestCommitInFlightRef.current ||
-			closeInFlightRef.current);
+		(isBusy || requestCommitInFlightRef.current || closeInFlightRef.current) ||
+		(isSolutionMode &&
+			(isBusy || solutionCommitInFlightRef.current || closeInFlightRef.current));
 
 	const isSubmitDisabled = () => {
 		if (inlineImages.hasBlockingOperations) {
@@ -1085,7 +1222,8 @@ export function SubmitterModal({
 												</div>
 												<button
 													onClick={() => removeExistingFile(file.id)}
-													className="p-1 text-slate-400 hover:text-red-500 transition-colors"
+													disabled={requestCloseControlsLocked}
+													className="p-1 text-slate-400 hover:text-red-500 transition-colors disabled:pointer-events-none disabled:opacity-30"
 													title="Remove file"
 												>
 													<Trash2 className="w-4 h-4" />
@@ -1332,6 +1470,14 @@ export function SubmitterModal({
 					</Button>
 				</div>
 			</DialogContent>
+			<DiscardDraftDialog
+				open={discardOpen}
+				onOpenChange={setDiscardOpen}
+				onConfirm={() => {
+					void handleCloseWithCleanup();
+				}}
+				confirmDisabled={isBusy}
+			/>
 		</Dialog>
 	);
 }

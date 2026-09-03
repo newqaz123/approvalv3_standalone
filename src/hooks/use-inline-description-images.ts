@@ -130,6 +130,7 @@ export type InlineImageCoordinator = {
   hasActiveImageEdits: boolean
   hasBlockingOperations: boolean
   blockingReason: InlineImageBlockingReason
+  getState(): InlineImageRecord[]
   reset(): Promise<void>
   clear(): void
 }

@@ -36,6 +36,8 @@ import {
   inlineImageBlockingMessage,
   useInlineDescriptionImages,
 } from '@/hooks/use-inline-description-images'
+import { isDraftFieldDirty, requestDiscardDraft } from '@/lib/discard-draft'
+import { DiscardDraftDialog } from '@/components/ui/discard-draft-dialog'
 
 const requestFormSchema = z.object({
   title: z.string().min(1, 'Title is required').max(200, 'Title must be less than 200 characters'),
@@ -75,6 +77,7 @@ export function RequestForm({ templates = [], defaultTemplateId, onSuccess }: Re
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selectedFiles, setSelectedFiles] = useState<SelectedFile[]>([])
+  const [discardOpen, setDiscardOpen] = useState(false)
   // One inline image coordinator per mounted form; the editor uploads through
   // it and the save/cancel lifecycle below claims or cleans its draft session.
   const inlineImages = useInlineDescriptionImages()
@@ -273,6 +276,8 @@ export function RequestForm({ templates = [], defaultTemplateId, onSuccess }: Re
     }
   }
 
+  const { isDirty } = form.formState
+
   const handleCancel = async () => {
     // Await draft cleanup before navigating away. A cleanup failure keeps the
     // form mounted with a visible error so the user can retry or remove.
@@ -285,6 +290,22 @@ export function RequestForm({ templates = [], defaultTemplateId, onSuccess }: Re
     router.back()
   }
 
+  const handleCancelClick = () => {
+    requestDiscardDraft(
+      {
+        formIsDirty:
+          isDirty ||
+          isDraftFieldDirty(form.getValues('description'), defaultTemplate?.description || ''),
+        hasFiles: selectedFiles.length > 0,
+        hasInlineImageDrafts: inlineImages.getState().length > 0,
+      },
+      () => setDiscardOpen(true),
+      () => {
+        void handleCancel()
+      },
+    )
+  }
+
   const formatFileSize = (bytes: number) => {
     if (bytes < 1024) return bytes + ' B'
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
@@ -292,6 +313,7 @@ export function RequestForm({ templates = [], defaultTemplateId, onSuccess }: Re
   }
 
   return (
+    <>
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 md:space-y-6">
         {error && (
@@ -504,7 +526,7 @@ export function RequestForm({ templates = [], defaultTemplateId, onSuccess }: Re
           <Button
             type="button"
             variant="outline"
-            onClick={handleCancel}
+            onClick={handleCancelClick}
             disabled={isSubmitting}
             className="w-full md:w-auto min-h-11"
           >
@@ -520,5 +542,14 @@ export function RequestForm({ templates = [], defaultTemplateId, onSuccess }: Re
         </div>
       </form>
     </Form>
+    <DiscardDraftDialog
+      open={discardOpen}
+      onOpenChange={setDiscardOpen}
+      onConfirm={() => {
+        void handleCancel()
+      }}
+      confirmDisabled={isSubmitting}
+    />
+    </>
   )
 }

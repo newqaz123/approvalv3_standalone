@@ -527,6 +527,33 @@ describe('staged request attachment controller lifecycle', () => {
     assert.equal(harness.controller.snapshot().items.length, 0)
   })
 
+  it('reset reuses an in-flight remove cleanup and sends one DELETE', async () => {
+    const harness = createHarness()
+    harness.controller.addFiles([file()])
+    const id = harness.controller.snapshot().items[0]?.id
+    assert.ok(id)
+    await harness.releaseReserve(id)
+    await harness.releaseUpload(id)
+
+    const deleteGate = deferred<void>()
+    harness.setDeleteImpl(async (attachmentId) => {
+      harness.deletes.push(attachmentId)
+      await deleteGate.promise
+    })
+
+    harness.controller.removeItem(id)
+    await flush()
+    assert.deepEqual(harness.deletes, [id])
+
+    const resetPromise = harness.controller.reset()
+    await flush()
+    assert.deepEqual(harness.deletes, [id])
+
+    deleteGate.resolve()
+    await resetPromise
+    assert.equal(harness.controller.snapshot().items.length, 0)
+  })
+
   it('reset keeps a failed cleanup item and retry DELETE drops it without re-upload', async () => {
     const harness = createHarness()
     harness.controller.addFiles([file('a.pdf'), file('b.pdf')])
