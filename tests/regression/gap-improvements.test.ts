@@ -64,19 +64,14 @@ describe("Gapforimprove regressions", () => {
 
 	it("solution submission starts from the request title and THB currency", () => {
 		const submitterModal = read("src/components/requests/submitter-modal.tsx");
+		const solutionDraft = read("src/lib/submitter-solution-draft.ts");
 
 		assert.match(
-			submitterModal,
-			/mode === ['"]solution['"] \? initialData\?\.requestTitle \|\| ['"]{2} : ['"]{2}/,
+			solutionDraft,
+			/mode === ['"]solution['"] \? requestTitle \|\| ['"]{2} : solution\?\.title \|\| ['"]{2}/,
 		);
-		assert.match(
-			submitterModal,
-			/useState\(\s*initialData\?\.solution\?\.currency \|\| ['"]THB['"],?\s*\)/,
-		);
-		assert.match(
-			submitterModal,
-			/setCurrency\(initialData\.solution\.currency \|\| ['"]THB['"]\)/,
-		);
+		assert.match(solutionDraft, /currency: solution\?\.currency \|\| ['"]THB['"]/);
+		assert.match(submitterModal, /initialSolutionDraft\.currency/);
 	});
 
 	it("engineering users see engineering dashboard navigation instead of dashboard", () => {

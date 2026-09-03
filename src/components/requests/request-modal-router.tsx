@@ -674,20 +674,6 @@ function RequestModalRouterContent({
 	let modalContent: React.ReactNode = null;
 
 	switch (modalConfig.modalType) {
-		case "submitter":
-			modalContent = (
-				<SubmitterModal
-					mode={modalConfig.mode as "request" | "solution" | "resubmit"}
-					open={open}
-					onOpenChange={onOpenChange}
-					initialData={{
-						title: requestData.title,
-						description: requestData.description,
-					}}
-				/>
-			);
-			break;
-
 		case "approver":
 			modalContent = (
 				<ApproverModal

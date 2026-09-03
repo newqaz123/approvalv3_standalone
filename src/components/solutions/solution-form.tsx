@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -83,6 +83,8 @@ export function SolutionForm({
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [showPreview, setShowPreview] = useState(false)
   const [discardOpen, setDiscardOpen] = useState(false)
+  const commitInFlightRef = useRef(false)
+  const closeInFlightRef = useRef(false)
   // One coordinator for the whole form lifetime, shared by the editor and the
   // final confirm so preview/edit transitions keep the same upload session.
   const inlineImages = useInlineDescriptionImages()
@@ -90,6 +92,20 @@ export function SolutionForm({
   const { items, addFiles, removeItem, ensureUploaded, clear, reset } = useSolutionAttachments({
     requestId,
   })
+  const isSubmittingRef = useRef(isSubmitting)
+  isSubmittingRef.current = isSubmitting
+  const handleAddFiles = useCallback((files: File[]) => {
+    // Keep this callback safe even when SolutionFileUpload invokes a handler
+    // captured before the latest disabled prop rendered.
+    if (
+      isSubmittingRef.current ||
+      commitInFlightRef.current ||
+      closeInFlightRef.current
+    ) {
+      return
+    }
+    addFiles(files)
+  }, [addFiles])
 
   const form = useForm<SolutionFormValues>({
     resolver: zodResolver(solutionFormSchema),
@@ -109,6 +125,8 @@ export function SolutionForm({
   const useCustomApprovals = form.watch('useCustomApprovals')
 
   const handleRemoveItem = async (id: string) => {
+    if (isSubmitting) return
+    if (commitInFlightRef.current || closeInFlightRef.current) return
     try {
       await removeItem(id)
     } catch (error) {
@@ -122,6 +140,8 @@ export function SolutionForm({
   // or touching metadata. The metadata submit happens only via Confirm.
   const handleRetryItem = async () => {
     if (isSubmitting) return
+    if (commitInFlightRef.current || closeInFlightRef.current) return
+    commitInFlightRef.current = true
     setIsSubmitting(true)
     try {
       const result = await ensureUploaded()
@@ -138,6 +158,7 @@ export function SolutionForm({
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'An error occurred')
     } finally {
+      commitInFlightRef.current = false
       setIsSubmitting(false)
     }
   }
@@ -145,6 +166,10 @@ export function SolutionForm({
   const { isDirty } = form.formState
 
   const handleCancel = async () => {
+    if (isSubmitting) return
+    if (commitInFlightRef.current || closeInFlightRef.current) return
+    closeInFlightRef.current = true
+    setIsSubmitting(true)
     // Await hook reset() (cleanup unlinked drafts + clear local state) and the
     // inline image coordinator reset before navigating away. Surface cleanup
     // failure and do NOT navigate on error — the user can retry. After reset
@@ -153,14 +178,19 @@ export function SolutionForm({
     try {
       await reset()
       await inlineImages.reset()
+      setDiscardOpen(false)
+      router.back()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to clean up draft files')
-      return
+    } finally {
+      closeInFlightRef.current = false
+      setIsSubmitting(false)
     }
-    router.back()
   }
 
   const handleCancelClick = () => {
+    if (isSubmitting) return
+    if (commitInFlightRef.current || closeInFlightRef.current) return
     requestDiscardDraft(
       {
         formIsDirty:
@@ -177,6 +207,9 @@ export function SolutionForm({
   }
 
   const handleSubmit = async (values: SolutionFormValues, isConfirmed: boolean = false) => {
+    // Refs fence same-tick confirmation, cancellation, and duplicate submits
+    // before React has rendered the isSubmitting state update.
+    if (isSubmitting || commitInFlightRef.current || closeInFlightRef.current) return
     if (inlineImages.hasBlockingOperations) {
       toast.error(inlineImageBlockingMessage(inlineImages.blockingReason))
       return
@@ -188,6 +221,7 @@ export function SolutionForm({
       return
     }
 
+    commitInFlightRef.current = true
     setIsSubmitting(true)
 
     try {
@@ -201,6 +235,7 @@ export function SolutionForm({
         // Retry action (SolutionFileUpload). The user retries in isolation,
         // then returns to preview + Confirm for the single metadata submit.
         setShowPreview(false)
+        commitInFlightRef.current = false
         setIsSubmitting(false)
         return
       }
@@ -223,6 +258,7 @@ export function SolutionForm({
         // Metadata submission failed — retain the successfully uploaded items
         // so the user can retry without re-uploading.
         toast.error(submitResult.error || 'Failed to submit solution')
+        commitInFlightRef.current = false
         setIsSubmitting(false)
         return
       }
@@ -236,6 +272,8 @@ export function SolutionForm({
       // solutionId-scoped rows).
       inlineImages.clear()
       clear()
+      setDiscardOpen(false)
+      commitInFlightRef.current = false
 
       // Redirect to engineering dashboard
       router.push('/engineering')
@@ -243,6 +281,7 @@ export function SolutionForm({
     } catch (error) {
       console.error('Submit solution error:', error)
       toast.error(error instanceof Error ? error.message : 'An error occurred')
+      commitInFlightRef.current = false
       setIsSubmitting(false)
     }
   }
@@ -283,7 +322,6 @@ export function SolutionForm({
         file: item.file,
         id: item.id,
         status: item.status,
-        progress: item.status === 'success' ? 100 : 0,
         error: item.error,
       })),
   }
@@ -473,7 +511,7 @@ export function SolutionForm({
           {/* File Attachments */}
           <SolutionFileUpload
             items={items}
-            onAddFiles={addFiles}
+            onAddFiles={handleAddFiles}
             onRemoveItem={handleRemoveItem}
             onRetryItem={handleRetryItem}
             disabled={isSubmitting}

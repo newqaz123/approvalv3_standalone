@@ -621,16 +621,31 @@ describe('inline image form wiring contracts', () => {
     it('types the request callback as an async success result with the upload session', () => {
       assert.match(
         source,
-        /onSubmitRequest\?: \(data: \{[\s\S]*?inlineImageSessionId: string;[\s\S]*?\}\) => Promise<\{ success: boolean; error\?: string \}>/,
+        /onSubmitRequest\?: \(\s*data: \{[\s\S]*?stagedAttachmentIds: string\[];[\s\S]*?inlineImageSessionId: string;[\s\S]*?\},\s*\) => Promise<\{ success: boolean; error\?: string \}>/,
       )
       assert.match(source, /inlineImageSessionId: string;/)
+      assert.doesNotMatch(source, /onUploadProgress\?: \(progress: RequestUploadProgress\)/)
     })
 
     it('awaits the request callback and only clears after confirmed success', () => {
-      assert.match(source, /const result = await onSubmitRequest\(\{[\s\S]*?inlineImageSessionId: inlineImages\.uploadSessionId,[\s\S]*?\}\)/)
+      assert.match(source, /const result = await onSubmitRequest\(\{[\s\S]*?stagedAttachmentIds: readyAttachmentIds,[\s\S]*?inlineImageSessionId: inlineImages\.uploadSessionId,[\s\S]*?\}\);/)
       assert.match(source, /if \(!result\.success\) \{[\s\S]*?setSubmitError\(result\.error \|\| "Failed to submit"\)[\s\S]*?return;[\s\S]*?\}/)
       const requestBranch = source.split('if (mode === "request" && onSubmitRequest)')[1]?.split('if (isSolutionMode)')[0] ?? ''
       assert.match(requestBranch, /inlineImages\.clear\(\)/)
+      assert.match(requestBranch, /clearStagedRequestAttachments\(\)/)
+      // Ordering: staged clear() must come AFTER the awaited callback and its
+      // failure branch, and BEFORE close, so adopted drafts are not DELETEd.
+      const awaitIdx = requestBranch.indexOf('await onSubmitRequest(')
+      const failIdx = requestBranch.indexOf('if (!result.success)')
+      const stagedClearIdx = requestBranch.indexOf('clearStagedRequestAttachments()')
+      const clearIdx = requestBranch.indexOf('inlineImages.clear()')
+      const closeIdx = requestBranch.indexOf('onOpenChange(false)')
+      assert.ok(awaitIdx !== -1, 'awaited callback present in request branch')
+      assert.ok(failIdx !== -1, 'failure branch present in request branch')
+      assert.ok(stagedClearIdx !== -1, 'staged clear() present in request branch')
+      assert.ok(clearIdx !== -1, 'clear() present in request branch')
+      assert.ok(awaitIdx < failIdx && failIdx < stagedClearIdx, 'staged clear() must run after the awaited callback and its failure branch')
+      assert.ok(stagedClearIdx < closeIdx, 'staged clear() must run before close/unmount')
     })
 
     it('passes the upload session through solution and resubmit callback data', () => {

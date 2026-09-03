@@ -9,7 +9,6 @@ import { SubmitterModal } from '@/components/requests/submitter-modal'
 import { createRequest, exportRequestsXlsx } from '@/server-actions/requests'
 import type { GetRequestsFilters } from '@/server-actions/requests'
 import { DEFAULT_WR_FILTER } from '@/components/requests/request-filters'
-import { uploadFileAction } from '@/server-actions/files'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 
@@ -36,7 +35,7 @@ export function RequestsListClient({
     title: string
     description: string
     templateId?: string
-    files: File[]
+    stagedAttachmentIds: string[]
     inlineImageSessionId: string
   }): Promise<{ success: boolean; error?: string }> => {
     try {
@@ -44,25 +43,11 @@ export function RequestsListClient({
         title: data.title,
         description: data.description,
         inlineImageSessionId: data.inlineImageSessionId,
+        stagedAttachmentIds: data.stagedAttachmentIds,
       })
 
-      if (result.success && result.requestId) {
-        // Upload files if any
-        if (data.files && data.files.length > 0) {
-          for (const file of data.files) {
-            const formData = new FormData()
-            formData.append('file', file)
-            formData.append('requestId', result.requestId)
-
-            const uploadResult = await uploadFileAction(null, formData)
-            if (!uploadResult.success) {
-              toast.error(`Failed to upload ${file.name}: ${uploadResult.error}`)
-            }
-          }
-        }
-
+      if (result.success) {
         toast.success('Request created successfully')
-        setShowNewRequestModal(false)
         setRequestListRefreshSignal((signal) => signal + 1)
         router.refresh()
         return { success: true }

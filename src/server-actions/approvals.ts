@@ -9,6 +9,7 @@ import {
   validateApprovalLevel,
 } from '@/lib/approval-levels'
 import prisma from '@/lib/prisma'
+import type { Prisma } from '@prisma/client'
 import { revalidateRequestViews } from './request-view-invalidation'
 import {
   approveRequestApproval,
@@ -28,9 +29,12 @@ function isStaleData(currentUpdatedAt: Date, expectedUpdatedAt?: string | Date):
 /**
  * Get max level in a department (considers both internal users and external DepartmentApprovers)
  */
-async function getMaxLevelInDepartment(departmentId: string): Promise<number> {
+async function getMaxLevelInDepartment(
+  departmentId: string,
+  db: Prisma.TransactionClient | typeof prisma = prisma,
+): Promise<number> {
   const [maxUser, maxExternal] = await Promise.all([
-    prisma.user.findFirst({
+    db.user.findFirst({
       where: {
         departmentId,
         isActive: true,
@@ -39,7 +43,7 @@ async function getMaxLevelInDepartment(departmentId: string): Promise<number> {
       orderBy: { level: 'desc' },
       select: { level: true },
     }),
-    prisma.department_approvers.findFirst({
+    db.department_approvers.findFirst({
       where: {
         departmentId,
         approverLevel: { gte: MIN_APPROVAL_LEVEL, lte: MAX_APPROVAL_LEVEL },
@@ -66,9 +70,10 @@ export async function createApprovalChain(
   requestId: string,
   departmentId: string,
   submitterLevel: number,
-  submitterId?: string
+  submitterId?: string,
+  db: Prisma.TransactionClient | typeof prisma = prisma,
 ) {
-  const maxLevel = validateApprovalLevel(await getMaxLevelInDepartment(departmentId))
+  const maxLevel = validateApprovalLevel(await getMaxLevelInDepartment(departmentId, db))
   const normalizedSubmitter =
     normalizePersistedApprovalLevel(submitterLevel) ?? MIN_APPROVAL_LEVEL
 
@@ -95,7 +100,7 @@ export async function createApprovalChain(
       // Check if there are active approvers at this level (internal or external)
       // Also get one internal user ID to use as requiredApprover for display purposes
       const [internalUser, externalApprovers] = await Promise.all([
-        prisma.user.findFirst({
+        db.user.findFirst({
           where: {
             departmentId,
             level: requiredLevel,
@@ -103,7 +108,7 @@ export async function createApprovalChain(
           },
           select: { id: true },
         }),
-        prisma.department_approvers.findMany({
+        db.department_approvers.findMany({
           where: { departmentId, approverLevel: requiredLevel },
           select: { id: true, approverId: true },
         }),
@@ -140,7 +145,7 @@ export async function createApprovalChain(
   }
 
   if (approvals.length > 0) {
-    await prisma.request_approvals.createMany({ data: approvals })
+    await db.request_approvals.createMany({ data: approvals })
   }
 
   return approvals

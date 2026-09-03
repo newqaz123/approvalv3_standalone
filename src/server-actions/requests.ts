@@ -8,7 +8,12 @@ import { z } from 'zod'
 import { createApprovalChain, getApproversAtLevel } from './approvals'
 import { requireAdmin } from '@/lib/auth'
 import { getCurrentUser, getUserById } from '@/lib/cache/user-cache'
-import { deleteAttachmentFile } from '@/lib/attachments/storage'
+import {
+  attachmentFileExists,
+  deleteAttachmentFile,
+  isRequestDraftReadyPath,
+} from '@/lib/attachments/storage'
+import { MAX_ATTACHMENTS_PER_FORM } from '@/lib/attachments/policy'
 import { descriptionSchema } from '@/lib/schemas/solution-schemas'
 import {
   prepareInlineDescription,
@@ -28,11 +33,31 @@ import {
 import type { Prisma } from '@prisma/client'
 import * as XLSX from 'xlsx'
 
+const REQUEST_DRAFT_READY_PREFIX = 'request-drafts/ready/'
+const ATTACHMENT_ADOPTION_ERROR = 'One or more attachments are invalid or no longer available'
+
+function readyRequestDraftWhere(ids: string[], uploadedById: string) {
+  return {
+    id: { in: ids },
+    uploadedById,
+    requestId: null,
+    solutionId: null,
+    filePath: { startsWith: REQUEST_DRAFT_READY_PREFIX },
+  }
+}
+
 // Zod schema for request validation
 const createRequestSchema = z.object({
   title: z.string().min(1, 'Title is required').max(200, 'Title too long'),
   description: descriptionSchema,
   inlineImageSessionId: z.string().uuid(),
+  // Ready draft row IDs from the XHR stage route. createRequest adopts them
+  // in the same transaction as the request so a request cannot exist without
+  // its attachment rows.
+  stagedAttachmentIds: z.array(z.string().uuid()).max(MAX_ATTACHMENTS_PER_FORM).refine(
+    (ids) => new Set(ids).size === ids.length,
+    'Attachment IDs must be unique',
+  ).default([]),
 })
 
 export interface CreateRequestInput {
@@ -41,6 +66,7 @@ export interface CreateRequestInput {
   // Callers add this during the editor-coordinator rollout; validation still
   // requires it before any description save can claim image drafts.
   inlineImageSessionId?: string
+  stagedAttachmentIds?: string[]
 }
 
 /**
@@ -72,45 +98,110 @@ export async function createRequest(input: CreateRequestInput) {
     uploadSessionId: validatedFields.data.inlineImageSessionId,
   })
 
-  // Create request in a transaction with activity log
-  const request = await prisma.$transaction(async (tx) => {
-    const newRequest = await tx.requests.create({
-      data: {
-        title: validatedFields.data.title,
-        description: prepared.html,
-        requesterId: user.id,
-        departmentId: user.departmentId!, // Non-null assertion since we checked above
-        status: 'ImprovementRequest',
-      },
+  const stagedAttachmentIds = validatedFields.data.stagedAttachmentIds
+
+  // Precheck owner-scoped ready drafts and their physical files. The same
+  // predicates are repeated on the transactional updateMany so DELETE/adopt
+  // races still fail closed under READ COMMITTED.
+  if (stagedAttachmentIds.length > 0) {
+    const drafts = await prisma.file_attachments.findMany({
+      where: readyRequestDraftWhere(stagedAttachmentIds, user.id),
+      select: { id: true, filePath: true, fileName: true },
+    })
+    if (drafts.length !== stagedAttachmentIds.length) {
+      return { success: false, error: ATTACHMENT_ADOPTION_ERROR }
+    }
+    for (const draft of drafts) {
+      if (!isRequestDraftReadyPath(draft.filePath)) {
+        return { success: false, error: ATTACHMENT_ADOPTION_ERROR }
+      }
+      if (!(await attachmentFileExists(draft.filePath))) {
+        return {
+          success: false,
+          error: `${draft.fileName}: Staged file is missing — please retry the upload`,
+        }
+      }
+    }
+  }
+
+  let request: { id: string; title: string }
+  let approvals: Awaited<ReturnType<typeof createApprovalChain>>
+
+  try {
+    const txResult = await prisma.$transaction(async (tx) => {
+      let newRequest = await tx.requests.create({
+        data: {
+          title: validatedFields.data.title,
+          description: prepared.html,
+          requesterId: user.id,
+          departmentId: user.departmentId!, // checked above
+          status: 'ImprovementRequest',
+        },
+      })
+
+      if (stagedAttachmentIds.length > 0) {
+        const adopted = await tx.file_attachments.updateMany({
+          where: readyRequestDraftWhere(stagedAttachmentIds, user.id),
+          data: { requestId: newRequest.id },
+        })
+        if (adopted.count !== stagedAttachmentIds.length) {
+          throw new Error(ATTACHMENT_ADOPTION_ERROR)
+        }
+      }
+
+      await reconcileInlineDescriptionImages(tx, {
+        owner: { kind: 'request', id: newRequest.id },
+        imageIds: prepared.imageIds,
+      })
+
+      await tx.request_activities.create({
+        data: {
+          requestId: newRequest.id,
+          action: 'created',
+          toStatus: 'ImprovementRequest',
+          comments: `Request created: ${validatedFields.data.title}`,
+          userId: user.id,
+        },
+      })
+
+      const chain = await createApprovalChain(
+        newRequest.id,
+        user.departmentId!,
+        user.level || 1,
+        user.id,
+        tx,
+      )
+
+      const isTopLevel = chain.length > 0 && chain[0].status === 'approved'
+      if (isTopLevel) {
+        newRequest = await tx.requests.update({
+          where: { id: newRequest.id },
+          data: { status: 'SentToEngineer' },
+        })
+        await tx.request_activities.create({
+          data: {
+            requestId: newRequest.id,
+            userId: user.id,
+            action: 'status_changed',
+            fromStatus: 'ImprovementRequest',
+            toStatus: 'SentToEngineer',
+            comments: 'Auto-approved by top-level user',
+          },
+        })
+      }
+
+      return { request: newRequest, approvals: chain }
     })
 
-    await reconcileInlineDescriptionImages(tx, {
-      owner: { kind: 'request', id: newRequest.id },
-      imageIds: prepared.imageIds,
-    })
-
-    // Log creation in audit trail
-    await tx.request_activities.create({
-      data: {
-        requestId: newRequest.id,
-        action: 'created',
-        toStatus: 'ImprovementRequest',
-        comments: `Request created: ${validatedFields.data.title}`,
-        userId: user.id,
-      },
-    })
-
-    return newRequest
-  })
-
-  // Create approval chain based on user's level
-  const userLevel = user.level || 1
-  const approvals = await createApprovalChain(
-    request.id,
-    user.departmentId,
-    userLevel,
-    user.id
-  )
+    request = txResult.request
+    approvals = txResult.approvals
+  } catch (error) {
+    console.error('Failed to create request atomically:', error)
+    if (error instanceof Error && error.message === ATTACHMENT_ADOPTION_ERROR) {
+      return { success: false, error: ATTACHMENT_ADOPTION_ERROR }
+    }
+    return { success: false, error: 'Failed to create request — please try again' }
+  }
 
   // Notify department approvers if there are pending approvals (not auto-approved)
   const pendingApprovals = approvals.filter(a => a.status === 'pending')
@@ -130,26 +221,6 @@ export async function createRequest(input: CreateRequestInput) {
         requestId: request.id,
       })
     }
-  }
-
-  // If user is top-level (auto-approved), change status immediately
-  const isTopLevel = approvals.length > 0 && approvals[0].status === 'approved'
-  if (isTopLevel) {
-    await prisma.requests.update({
-      where: { id: request.id },
-      data: { status: 'SentToEngineer' },
-    })
-
-    await prisma.request_activities.create({
-      data: {
-        requestId: request.id,
-        userId: user.id,
-        action: 'status_changed',
-        fromStatus: 'ImprovementRequest',
-        toStatus: 'SentToEngineer',
-        comments: 'Auto-approved by top-level user',
-      },
-    })
   }
 
   revalidateRequestViews(request.id)

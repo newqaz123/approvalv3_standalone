@@ -19,7 +19,6 @@ import {
 	type FollowUpRow,
 } from "@/lib/follow-up-dashboard";
 import { createRequest } from "@/server-actions/requests";
-import { uploadFileAction } from "@/server-actions/files";
 
 type DrawerKey =
 	| "active"
@@ -57,7 +56,7 @@ export function FollowUpDashboard({ data }: { data: FollowUpDashboardData }) {
 		title: string;
 		description: string;
 		templateId?: string;
-		files: File[];
+		stagedAttachmentIds: string[];
 		inlineImageSessionId: string;
 	}): Promise<{ success: boolean; error?: string }> => {
 		try {
@@ -65,24 +64,11 @@ export function FollowUpDashboard({ data }: { data: FollowUpDashboardData }) {
 				title: form.title,
 				description: form.description,
 				inlineImageSessionId: form.inlineImageSessionId,
+				stagedAttachmentIds: form.stagedAttachmentIds,
 			});
 
-			if (result.success && result.requestId) {
-				if (form.files.length > 0) {
-					for (const file of form.files) {
-						const formData = new FormData();
-						formData.append("file", file);
-						formData.append("requestId", result.requestId);
-						const uploadResult = await uploadFileAction(null, formData);
-						if (!uploadResult.success) {
-							toast.error(
-								`Failed to upload ${file.name}: ${uploadResult.error}`,
-							);
-						}
-					}
-				}
+			if (result.success) {
 				toast.success("Request created successfully");
-				setShowNewRequestModal(false);
 				router.refresh();
 				return { success: true };
 			} else {

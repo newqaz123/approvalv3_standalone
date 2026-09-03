@@ -6,6 +6,13 @@ import {
   requestDiscardDraft,
   shouldConfirmDiscardDraft,
 } from '@/lib/discard-draft'
+import {
+  createSubmitterSolutionDraftBaseline,
+  discardSubmitterSolutionDraft,
+  removeSubmitterExistingFile,
+  restoreSubmitterSolutionDraft,
+  type RestoredSubmitterSolutionDraft,
+} from '@/lib/submitter-solution-draft'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
@@ -115,17 +122,223 @@ describe('draft form cancel wiring', () => {
     assert.match(leave, /router\.back\(\)/)
   })
 
+  it('submitter modal treats a currency-only solution change as dirty', () => {
+    const source = read('src/components/requests/submitter-modal.tsx')
+    assert.match(source, /const initialSolutionCurrency = initialData\?\.solution\?\.currency \|\| "THB"/)
+    assert.match(source, /currency !== initialSolutionCurrency/)
+  })
+
   it('submitter modal confirms before discarding a dirty draft', () => {
     const source = read('src/components/requests/submitter-modal.tsx')
     assert.match(source, /from ['"]@\/lib\/discard-draft['"]/)
     assert.match(source, /from ['"]@\/components\/ui\/discard-draft-dialog['"]/)
     assert.match(source, /requestDiscardDraft\(/)
     assert.match(source, /isDraftFieldDirty\(/)
-    assert.match(source, /hasFiles:\s*files\.length > 0 \|\| attachmentItems\.length > 0/)
+    assert.match(source, /hasFiles:\s*stagedRequestItems\.length > 0 \|\| attachmentItems\.length > 0/)
     assert.match(source, /hasInlineImageDrafts:\s*inlineImages\.getState\(\)\.length > 0/)
     assert.match(source, /<DiscardDraftDialog/)
     assert.match(source, /const handleCloseWithCleanup = async/)
     assert.match(source, /await inlineImages\.reset\(\)/)
+  })
+
+  it('submitter solution and resubmit commits synchronously fence close and stale discard state', () => {
+    const source = read('src/components/requests/submitter-modal.tsx')
+    assert.match(source, /const solutionCommitInFlightRef = useRef\(false\)/)
+    assert.match(source, /solutionCommitInFlightRef\.current = true/)
+    assert.match(source, /solutionCommitInFlightRef\.current = false/)
+    assert.match(source, /requestCommitInFlightRef\.current \|\|\s*solutionCommitInFlightRef\.current/)
+    assert.match(source, /setDiscardOpen\(false\)/)
+  })
+
+  it('dedicated solution form fences commit/cancel races and clears stale discard state', () => {
+    const source = read('src/components/solutions/solution-form.tsx')
+    assert.match(source, /const commitInFlightRef = useRef\(false\)/)
+    assert.match(source, /const closeInFlightRef = useRef\(false\)/)
+    assert.match(source, /if \(isSubmitting \|\| commitInFlightRef\.current \|\| closeInFlightRef\.current\) return/)
+    assert.match(source, /setDiscardOpen\(false\)/)
+  })
+
+  it('resubmit existing-file removal is locked and submits a synchronous ID snapshot', () => {
+    const source = read('src/components/requests/submitter-modal.tsx')
+    const removeExisting = source.split('const removeExistingFile')[1]?.split('// Handle submission')[0] ?? ''
+    assert.match(removeExisting, /isBusy/)
+    assert.match(removeExisting, /solutionCommitInFlightRef\.current/)
+    assert.match(removeExisting, /closeInFlightRef\.current/)
+    assert.match(source, /disabled=\{requestCloseControlsLocked\}[\s\S]*?title="Remove file"/)
+    assert.match(source, /const deletedFileIdsSnapshot = \[\.\.\.deletedFileIds\]/)
+    assert.match(source, /deletedFileIds: deletedFileIdsSnapshot/)
+  })
+
+  it('resubmit discard lifecycle restores persistent state and prevents stale deletion on reopen', async () => {
+    const source = read('src/components/requests/submitter-modal.tsx')
+    assert.match(source, /discardSubmitterSolutionDraft\(/)
+    assert.match(source, /removeSubmitterExistingFile\(/)
+    const initialFiles = [{ id: 'file-1', fileName: 'brief.pdf', fileType: 'pdf' }]
+    const baseline = createSubmitterSolutionDraftBaseline({
+      mode: 'resubmit',
+      solution: {
+        title: 'Original solution',
+        description: 'Original description',
+        cost: 1250,
+        timeline: '14 days',
+      },
+      existingFiles: initialFiles,
+    })
+    let state: RestoredSubmitterSolutionDraft = restoreSubmitterSolutionDraft(baseline)
+    const events: string[] = []
+    const harness = {
+      open() {
+        state = restoreSubmitterSolutionDraft(
+          createSubmitterSolutionDraftBaseline({
+            mode: 'resubmit',
+            solution: {
+              title: 'Original solution',
+              description: 'Original description',
+              cost: 1250,
+              timeline: '14 days',
+            },
+            existingFiles: initialFiles,
+          }),
+        )
+      },
+      edit() {
+        state = {
+          ...state,
+          solutionTitle: 'Edited solution',
+          solutionDescription: 'Edited description',
+          cost: '9000',
+          currency: 'USD',
+          timeline: '3 days',
+          useCustomHierarchy: true,
+          customApprovers: ['approver-1'],
+          fileUploadError: 'upload failed',
+          submitError: 'submit failed',
+          discardOpen: true,
+        }
+      },
+      removeExistingFile(fileId: string) {
+        const next = removeSubmitterExistingFile(state, fileId)
+        state = { ...state, ...next }
+      },
+      discard(cleanups: {
+        cleanupStagedRequestAttachments: () => Promise<void>
+        cleanupSolutionAttachments: () => Promise<void>
+        cleanupInlineImages: () => Promise<void>
+      }) {
+        return discardSubmitterSolutionDraft({
+          ...cleanups,
+          restore: () => {
+            events.push('restore')
+            state = restoreSubmitterSolutionDraft(baseline)
+          },
+          close: () => events.push('close'),
+        })
+      },
+    }
+
+    harness.open()
+    harness.edit()
+    harness.removeExistingFile('file-1')
+    assert.deepEqual(state.deletedFileIds, ['file-1'])
+    assert.deepEqual(state.existingFiles, [])
+
+    let releaseStaged!: () => void
+    let releaseSolution!: () => void
+    let releaseInline!: () => void
+    const deferred = (name: string, release: (resolve: () => void) => void) =>
+      new Promise<void>((resolve) => {
+        events.push(name)
+        release(resolve)
+      })
+    const discardPromise = harness.discard({
+      cleanupStagedRequestAttachments: () => deferred('staged', (resolve) => { releaseStaged = resolve }),
+      cleanupSolutionAttachments: () => deferred('solution', (resolve) => { releaseSolution = resolve }),
+      cleanupInlineImages: () => deferred('inline', (resolve) => { releaseInline = resolve }),
+    })
+    await Promise.resolve()
+    assert.deepEqual(events, ['staged'])
+    assert.deepEqual(state.deletedFileIds, ['file-1'])
+    releaseStaged()
+    await Promise.resolve()
+    assert.deepEqual(events, ['staged', 'solution'])
+    releaseSolution()
+    await Promise.resolve()
+    assert.deepEqual(events, ['staged', 'solution', 'inline'])
+    releaseInline()
+    await discardPromise
+    assert.deepEqual(events, ['staged', 'solution', 'inline', 'restore', 'close'])
+    assert.equal(state.deletedFileIds.length, 0)
+    assert.deepEqual(state.existingFiles, initialFiles)
+    assert.equal(state.solutionTitle, 'Original solution')
+    assert.equal(state.solutionDescription, 'Original description')
+    assert.equal(state.cost, '1250')
+    assert.equal(state.currency, 'THB')
+    assert.equal(state.timeline, '14 days')
+    assert.equal(state.useCustomHierarchy, false)
+    assert.deepEqual(state.customApprovers, [])
+
+    // Reopen the same persistent harness, then build the deletion payload used
+    // by resubmit. The restored existing file remains visible and deletions are empty.
+    harness.open()
+    const deletionSnapshot = [...state.deletedFileIds]
+    assert.deepEqual(deletionSnapshot, [])
+    assert.deepEqual(state.existingFiles, initialFiles)
+    assert.equal(state.solutionTitle, 'Original solution')
+    assert.equal(state.currency, 'THB')
+  })
+
+  it('rejected discard cleanup keeps edited and deleted state open for retry', async () => {
+    const initialFiles = [{ id: 'file-1', fileName: 'brief.pdf', fileType: 'pdf' }]
+    const baseline = createSubmitterSolutionDraftBaseline({ mode: 'resubmit', existingFiles: initialFiles })
+    let state: RestoredSubmitterSolutionDraft = restoreSubmitterSolutionDraft(baseline)
+    state = {
+      ...state,
+      solutionDescription: 'Edited description',
+      currency: 'USD',
+      useCustomHierarchy: true,
+      customApprovers: ['approver-1'],
+      ...removeSubmitterExistingFile(state, 'file-1'),
+    }
+    const before = { ...state, existingFiles: [...state.existingFiles], deletedFileIds: [...state.deletedFileIds] }
+    const events: string[] = []
+    await assert.rejects(
+      discardSubmitterSolutionDraft({
+        cleanupStagedRequestAttachments: async () => { events.push('staged') },
+        cleanupSolutionAttachments: async () => { events.push('solution'); throw new Error('cleanup failed') },
+        cleanupInlineImages: async () => { events.push('inline') },
+        restore: () => { events.push('restore'); state = restoreSubmitterSolutionDraft(baseline) },
+        close: () => events.push('close'),
+      }),
+    )
+    assert.deepEqual(events, ['staged', 'solution'])
+    assert.deepEqual(state, before)
+  })
+
+  it('a stale SolutionFileUpload add callback cannot bypass operation locks', () => {
+    const source = read('src/components/solutions/solution-form.tsx')
+    assert.match(source, /const handleAddFiles = useCallback\(/)
+    assert.match(source, /onAddFiles=\{handleAddFiles\}/)
+    assert.doesNotMatch(source, /onAddFiles=\{addFiles\}/)
+
+    const state = { isSubmitting: false, commitInFlight: false, closeInFlight: false }
+    const added: File[][] = []
+    const capturedBeforeLock = (files: File[]) => {
+      if (state.isSubmitting || state.commitInFlight || state.closeInFlight) return
+      added.push(files)
+    }
+    const selected = [new File(['pdf'], 'a.pdf', { type: 'application/pdf' })]
+    state.commitInFlight = true
+    capturedBeforeLock(selected)
+    state.commitInFlight = false
+    state.closeInFlight = true
+    capturedBeforeLock(selected)
+    state.closeInFlight = false
+    state.isSubmitting = true
+    capturedBeforeLock(selected)
+    assert.equal(added.length, 0)
+    state.isSubmitting = false
+    capturedBeforeLock(selected)
+    assert.equal(added.length, 1)
   })
 
   it('solution form confirms before discarding a dirty draft', () => {
