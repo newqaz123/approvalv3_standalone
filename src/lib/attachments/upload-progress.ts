@@ -1,26 +1,5 @@
 import type { AttachmentUploadItem } from "./upload-batch";
 
-/**
- * Progress snapshot for the request-mode submit flow. The caller owns the
- * create→upload→finalize sequence (uploads need the requestId returned by
- * createRequest), so the modal learns about phases through this shape.
- */
-export interface RequestUploadProgress {
-	phase: "creating" | "uploading" | "finalizing";
-	/** Files finished (uploaded, whether the server accepted them or not). */
-	uploaded: number;
-	/** Total files planned for upload. */
-	total: number;
-	/** File currently uploading. */
-	fileName?: string;
-	/**
-	 * Indices of files whose upload failed. The count in `uploaded` includes
-	 * them (the loop continues past failures), so consumers must render these
-	 * as errors, never as successes.
-	 */
-	failedIndices?: number[];
-}
-
 export interface UploadProgressSummary {
 	/** True when at least one item is currently uploading. */
 	active: boolean;
@@ -70,26 +49,4 @@ export function describeUploadProgress(
 		currentName,
 		label: `Uploading ${currentIndex}/${total} — ${currentName}`,
 	};
-}
-
-/**
- * Human label for the request-mode submit phases. Mirrors the count-based
- * honesty of describeUploadProgress.
- */
-export function requestPhaseLabel(
-	progress: RequestUploadProgress | null,
-): string | null {
-	if (!progress) return null;
-
-	switch (progress.phase) {
-		case "creating":
-			return "Creating request...";
-		case "uploading":
-			if (progress.total === 0) return "Uploading files...";
-			return `Uploading ${Math.min(progress.uploaded + 1, progress.total)}/${progress.total}${
-				progress.fileName ? ` — ${progress.fileName}` : ""
-			}`;
-		case "finalizing":
-			return "Finalizing...";
-	}
 }

@@ -9,8 +9,6 @@ import { SubmitterModal } from '@/components/requests/submitter-modal'
 import { createRequest, exportRequestsXlsx } from '@/server-actions/requests'
 import type { GetRequestsFilters } from '@/server-actions/requests'
 import { DEFAULT_WR_FILTER } from '@/components/requests/request-filters'
-import { uploadFileAction } from '@/server-actions/files'
-import type { RequestUploadProgress } from '@/lib/attachments/upload-progress'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 
@@ -37,39 +35,19 @@ export function RequestsListClient({
     title: string
     description: string
     templateId?: string
-    files: File[]
+    stagedAttachmentIds: string[]
     inlineImageSessionId: string
-  }, onUploadProgress?: (p: RequestUploadProgress) => void): Promise<{ success: boolean; error?: string }> => {
+  }): Promise<{ success: boolean; error?: string }> => {
     try {
-      onUploadProgress?.({ phase: 'creating', uploaded: 0, total: data.files.length })
       const result = await createRequest({
         title: data.title,
         description: data.description,
         inlineImageSessionId: data.inlineImageSessionId,
+        stagedAttachmentIds: data.stagedAttachmentIds,
       })
 
-      if (result.success && result.requestId) {
-        // Upload files if any. Failures are collected (the loop continues) so
-        // the modal can render them as errors instead of green checks.
-        const failedIndices: number[] = []
-        if (data.files && data.files.length > 0) {
-          for (const [i, file] of data.files.entries()) {
-            onUploadProgress?.({ phase: 'uploading', uploaded: i, total: data.files.length, fileName: file.name, failedIndices: [...failedIndices] })
-            const formData = new FormData()
-            formData.append('file', file)
-            formData.append('requestId', result.requestId)
-
-            const uploadResult = await uploadFileAction(null, formData)
-            if (!uploadResult.success) {
-              failedIndices.push(i)
-              toast.error(`Failed to upload ${file.name}: ${uploadResult.error}`)
-            }
-          }
-        }
-        onUploadProgress?.({ phase: 'finalizing', uploaded: data.files.length, total: data.files.length, failedIndices: [...failedIndices] })
-
+      if (result.success) {
         toast.success('Request created successfully')
-        setShowNewRequestModal(false)
         setRequestListRefreshSignal((signal) => signal + 1)
         router.refresh()
         return { success: true }

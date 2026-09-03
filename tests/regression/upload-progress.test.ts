@@ -1,11 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { AttachmentUploadItem } from "../../src/lib/attachments/upload-batch";
-import {
-	describeUploadProgress,
-	requestPhaseLabel,
-	type RequestUploadProgress,
-} from "../../src/lib/attachments/upload-progress";
+import { describeUploadProgress } from "../../src/lib/attachments/upload-progress";
 
 function item(
 	id: string,
@@ -55,33 +51,4 @@ test("describeUploadProgress: all terminal is idle", () => {
 	]);
 	assert.equal(s.active, false);
 	assert.equal(s.label, null);
-});
-
-test("requestPhaseLabel: null progress is null", () => {
-	assert.equal(requestPhaseLabel(null), null);
-});
-
-test("requestPhaseLabel: creating", () => {
-	const p: RequestUploadProgress = { phase: "creating", uploaded: 0, total: 3 };
-	assert.equal(requestPhaseLabel(p), "Creating request...");
-});
-
-test("requestPhaseLabel: uploading names current file", () => {
-	const p: RequestUploadProgress = {
-		phase: "uploading",
-		uploaded: 1,
-		total: 3,
-		fileName: "b.pdf",
-	};
-	assert.equal(requestPhaseLabel(p), "Uploading 2/3 — b.pdf");
-});
-
-test("requestPhaseLabel: finalizing", () => {
-	const p: RequestUploadProgress = { phase: "finalizing", uploaded: 3, total: 3 };
-	assert.equal(requestPhaseLabel(p), "Finalizing...");
-});
-
-test("requestPhaseLabel: uploading with zero total files", () => {
-	const p: RequestUploadProgress = { phase: "uploading", uploaded: 0, total: 0 };
-	assert.equal(requestPhaseLabel(p), "Uploading files...");
 });

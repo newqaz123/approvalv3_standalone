@@ -19,8 +19,6 @@ import {
 	type FollowUpRow,
 } from "@/lib/follow-up-dashboard";
 import { createRequest } from "@/server-actions/requests";
-import { uploadFileAction } from "@/server-actions/files";
-import type { RequestUploadProgress } from "@/lib/attachments/upload-progress";
 
 type DrawerKey =
 	| "active"
@@ -54,61 +52,23 @@ export function FollowUpDashboard({ data }: { data: FollowUpDashboardData }) {
 	// clicks meant for the visible rows — requests stopped opening entirely.
 	const isFinePointer = useMediaQuery("(pointer: fine)");
 
-	const handleSubmitRequest = async (
-		form: {
-			title: string;
-			description: string;
-			templateId?: string;
-			files: File[];
-			inlineImageSessionId: string;
-		},
-		onUploadProgress?: (p: RequestUploadProgress) => void,
-	): Promise<{ success: boolean; error?: string }> => {
+	const handleSubmitRequest = async (form: {
+		title: string;
+		description: string;
+		templateId?: string;
+		stagedAttachmentIds: string[];
+		inlineImageSessionId: string;
+	}): Promise<{ success: boolean; error?: string }> => {
 		try {
-			onUploadProgress?.({
-				phase: "creating",
-				uploaded: 0,
-				total: form.files.length,
-			});
 			const result = await createRequest({
 				title: form.title,
 				description: form.description,
 				inlineImageSessionId: form.inlineImageSessionId,
+				stagedAttachmentIds: form.stagedAttachmentIds,
 			});
 
-			if (result.success && result.requestId) {
-				// Failures are collected (the loop continues) so the modal can
-				// render them as errors instead of green checks.
-				const failedIndices: number[] = [];
-				if (form.files.length > 0) {
-					for (const [i, file] of form.files.entries()) {
-						onUploadProgress?.({
-							phase: "uploading",
-							uploaded: i,
-							total: form.files.length,
-							fileName: file.name,
-							failedIndices: [...failedIndices],
-						});
-						const formData = new FormData();
-						formData.append("file", file);
-						formData.append("requestId", result.requestId);
-						const uploadResult = await uploadFileAction(null, formData);
-						if (!uploadResult.success) {
-							failedIndices.push(i);
-							toast.error(
-								`Failed to upload ${file.name}: ${uploadResult.error}`,
-							);
-						}
-					}
-				}
-				onUploadProgress?.({
-					phase: "finalizing",
-					uploaded: form.files.length,
-					total: form.files.length,
-					failedIndices: [...failedIndices],
-				});
+			if (result.success) {
 				toast.success("Request created successfully");
-				setShowNewRequestModal(false);
 				router.refresh();
 				return { success: true };
 			} else {

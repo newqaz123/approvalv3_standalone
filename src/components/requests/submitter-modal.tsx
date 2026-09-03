@@ -35,6 +35,7 @@ import {
 	DialogDescription,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { RichTextEditor } from "@/components/rich-text/rich-text-editor-lazy";
 import { Input } from "@/components/ui/input";
@@ -56,10 +57,10 @@ import {
 } from "@/lib/attachments/policy";
 import { useSolutionAttachments } from "@/hooks/use-solution-attachments";
 import {
-	describeUploadProgress,
-	requestPhaseLabel,
-	type RequestUploadProgress,
-} from "@/lib/attachments/upload-progress";
+	canRetryStagedUpload,
+	useStagedRequestAttachments,
+} from "@/hooks/use-staged-request-attachments";
+import { describeUploadProgress } from "@/lib/attachments/upload-progress";
 import {
 	inlineImageBlockingMessage,
 	useInlineDescriptionImages,
@@ -114,10 +115,9 @@ interface SubmitterModalProps {
 			title: string;
 			description: string;
 			templateId?: string;
-			files: File[];
+			stagedAttachmentIds: string[];
 			inlineImageSessionId: string;
 		},
-		onUploadProgress?: (progress: RequestUploadProgress) => void,
 	) => Promise<{ success: boolean; error?: string }>;
 	onSubmitSolution?: (data: {
 		title: string;
@@ -379,10 +379,6 @@ export function SubmitterModal({
 	const [timeline, setTimeline] = useState(
 		initialData?.solution?.timeline || "",
 	);
-	const [files, setFiles] = useState<File[]>([]);
-	const [fileDescriptions, setFileDescriptions] = useState<
-		Record<string, string>
-	>({});
 
 	// Template selection state (for request mode)
 	const [selectedTemplate, setSelectedTemplate] = useState(
@@ -427,20 +423,21 @@ export function SubmitterModal({
 
 	// Reset every New Request field whenever request mode opens, so stale state
 	// from a previous open never leaks into a fresh request. Solution/resubmit
-	// fields are intentionally untouched here.
+	// fields are intentionally untouched here. Staged drafts are owned by the
+	// hook: cancel DELETEs via reset(), success drops them via clear(). Opening
+	// must not DELETE or drop leftover items without that cleanup.
+	const requestCommitInFlightRef = useRef(false);
+	const closeInFlightRef = useRef(false);
 	const resetRequestDraft = useCallback(() => {
+		requestCommitInFlightRef.current = false;
+		closeInFlightRef.current = false;
 		setTitle("");
 		setDescription("");
 		setSelectedTemplate("");
-		setFiles([]);
-		setFileDescriptions({});
 		setFileUploadError(null);
 		setUseCustomHierarchy(false);
 		setCustomApprovers([]);
 		setDeletedFileIds([]);
-		// Stale submit progress would mark freshly selected files as uploaded
-		// (index < uploaded renders a green check) on the next open.
-		setRequestProgress(null);
 	}, []);
 
 	useEffect(() => {
@@ -457,9 +454,8 @@ export function SubmitterModal({
 	const [useCustomHierarchy, setUseCustomHierarchy] = useState(false);
 	const [customApprovers, setCustomApprovers] = useState<string[]>([]);
 
-	// Shared upload hook for solution/resubmit modes (request mode keeps its own
-	// post-request file flow unchanged). The hook owns draft attachment state;
-	// ensureUploaded() is the authoritative upload gate before metadata submit.
+	// Shared upload hook for solution/resubmit modes. Request mode stages via
+	// useStagedRequestAttachments before createRequest adopts ready IDs.
 	const requestId = initialData?.requestId || "";
 	const {
 		items: attachmentItems,
@@ -469,6 +465,19 @@ export function SubmitterModal({
 		reset,
 		clear,
 	} = useSolutionAttachments({ requestId });
+	const {
+		items: stagedRequestItems,
+		addFiles: addStagedRequestFiles,
+		retryItem: retryStagedRequestItem,
+		removeItem: removeStagedRequestItem,
+		reset: resetStagedRequestAttachments,
+		clear: clearStagedRequestAttachments,
+		hasBlockingOperations: stagedRequestBlocking,
+		readyAttachmentIds,
+	} = useStagedRequestAttachments();
+	const requestAttachmentsBlocking =
+		stagedRequestBlocking ||
+		stagedRequestItems.length !== readyAttachmentIds.length;
 	// One inline image coordinator for both description editors (request and
 	// solution/resubmit modes); every save path claims or cleans its session.
 	const inlineImages = useInlineDescriptionImages();
@@ -476,9 +485,6 @@ export function SubmitterModal({
 		inlineImages.blockingReason,
 	);
 	const [isBusy, setIsBusy] = useState(false);
-	// Request-mode phase/file progress, reported by the caller during submit.
-	const [requestProgress, setRequestProgress] =
-		useState<RequestUploadProgress | null>(null);
 	// Count-based, honest upload feedback for solution/resubmit batches.
 	const uploadProgress = describeUploadProgress(attachmentItems);
 	const [submitError, setSubmitError] = useState<string | null>(null);
@@ -505,6 +511,17 @@ export function SubmitterModal({
 
 	// Handle file upload
 	const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+		// Request add is locked for the whole submit/close lifecycle so a stale
+		// file-input change cannot enqueue a draft that success clear() would drop.
+		if (
+			mode === "request" &&
+			(isBusy ||
+				requestCommitInFlightRef.current ||
+				closeInFlightRef.current)
+		) {
+			e.target.value = "";
+			return;
+		}
 		if (e.target.files) {
 			const selectedFiles = Array.from(e.target.files);
 			const firstValidationError = selectedFiles
@@ -525,19 +542,13 @@ export function SubmitterModal({
 
 			setFileUploadError(null);
 			// Solution/resubmit modes route through the shared upload hook; request
-			// mode keeps its own post-request file flow unchanged.
+			// mode stages immediately with real XHR progress.
 			if (isSolutionMode) {
 				addFiles(selectedFiles);
 			} else {
-				setFiles((prev: File[]) => [...prev, ...selectedFiles]);
+				addStagedRequestFiles(selectedFiles);
 			}
 		}
-	};
-
-	const removeFile = (index: number) => {
-		setFiles((prev: File[]) =>
-			prev.filter((_: File, i: number) => i !== index),
-		);
 	};
 
 	const handleRemoveAttachment = async (id: string) => {
@@ -583,13 +594,6 @@ export function SubmitterModal({
 		setDeletedFileIds((prev) => [...prev, fileId]);
 	};
 
-	const updateFileDescription = (fileName: string, description: string) => {
-		setFileDescriptions((prev: Record<string, string>) => ({
-			...prev,
-			[fileName]: description,
-		}));
-	};
-
 	// Handle submission
 	const handleSubmit = async () => {
 		if (inlineImages.hasBlockingOperations) {
@@ -599,30 +603,31 @@ export function SubmitterModal({
 		setSubmitError(null);
 
 		if (mode === "request" && onSubmitRequest) {
+			if (requestAttachmentsBlocking) {
+				return;
+			}
+			requestCommitInFlightRef.current = true;
 			setIsBusy(true);
-			setRequestProgress(null);
 			try {
 				// Await the caller's server action; only a confirmed success may
-				// clear the draft session and close the modal. The optional
-				// progress callback lets the caller stream create/upload phases
-				// back into the modal while the user waits.
-				const result = await onSubmitRequest(
-					{
-						title,
-						description,
-						templateId: selectedTemplate || undefined,
-						files,
-						inlineImageSessionId: inlineImages.uploadSessionId,
-					},
-					setRequestProgress,
-				);
+				// clear staged drafts (without DELETE) and close the modal.
+				const result = await onSubmitRequest({
+					title,
+					description,
+					templateId: selectedTemplate || undefined,
+					stagedAttachmentIds: readyAttachmentIds,
+					inlineImageSessionId: inlineImages.uploadSessionId,
+				});
 				if (!result.success) {
+					requestCommitInFlightRef.current = false;
 					setSubmitError(result.error || "Failed to submit");
 					return;
 				}
+				clearStagedRequestAttachments();
 				inlineImages.clear();
 				onOpenChange(false);
 			} catch (error) {
+				requestCommitInFlightRef.current = false;
 				setSubmitError(
 					error instanceof Error
 						? error.message
@@ -700,13 +705,29 @@ export function SubmitterModal({
 	// via reset, plus the inline image coordinator) before closing. Cleanup
 	// errors are surfaced and the modal stays open.
 	const requestClose = () => {
+		if (
+			mode === "request" &&
+			(closeInFlightRef.current || requestCommitInFlightRef.current)
+		) {
+			return;
+		}
 		void handleCloseWithCleanup();
 	};
 
 	const handleCloseWithCleanup = async () => {
+		if (mode === "request" && requestCommitInFlightRef.current) {
+			return;
+		}
+		if (mode === "request") {
+			if (closeInFlightRef.current) {
+				return;
+			}
+			closeInFlightRef.current = true;
+		}
 		setIsBusy(true);
 		setSubmitError(null);
 		try {
+			await resetStagedRequestAttachments();
 			await reset();
 			await inlineImages.reset();
 			onOpenChange(false);
@@ -717,16 +738,29 @@ export function SubmitterModal({
 					: "Failed to clean up draft files",
 			);
 		} finally {
+			if (mode === "request") {
+				closeInFlightRef.current = false;
+			}
 			setIsBusy(false);
 		}
 	};
+
+	const requestCloseControlsLocked =
+		mode === "request" &&
+		(isBusy ||
+			requestCommitInFlightRef.current ||
+			closeInFlightRef.current);
 
 	const isSubmitDisabled = () => {
 		if (inlineImages.hasBlockingOperations) {
 			return true;
 		}
 		if (mode === "request") {
-			return !title.trim() || !description.trim();
+			return (
+				!title.trim() ||
+				!description.trim() ||
+				requestAttachmentsBlocking
+			);
 		}
 		return (
 			!solutionTitle.trim() ||
@@ -771,8 +805,10 @@ export function SubmitterModal({
 							{mode === "resubmit" && "Update and resubmit your solution"}
 						</DialogDescription>
 						<button
+							type="button"
 							onClick={requestClose}
-							className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors text-slate-400 hover:text-slate-600"
+							disabled={requestCloseControlsLocked}
+							className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors text-slate-400 hover:text-slate-600 disabled:pointer-events-none disabled:opacity-30"
 						>
 							<X className="w-5 h-5" />
 						</button>
@@ -1066,7 +1102,13 @@ export function SubmitterModal({
 
 						{/* Upload Button */}
 						<div className="mb-4">
-							<label className="flex items-center justify-center gap-2 px-4 py-3 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+							<label
+								className={cn(
+									"flex items-center justify-center gap-2 px-4 py-3 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors",
+									requestCloseControlsLocked &&
+										"pointer-events-none cursor-not-allowed opacity-60",
+								)}
+							>
 								<FileUp className="w-5 h-5 text-slate-400" />
 								<span className="text-sm font-medium text-slate-600 dark:text-slate-400">
 									Click to upload files
@@ -1075,6 +1117,7 @@ export function SubmitterModal({
 									type="file"
 									multiple
 									onChange={handleFileChange}
+									disabled={requestCloseControlsLocked}
 									accept={ATTACHMENT_EXTENSIONS.map((ext) => `.${ext}`).join(
 										",",
 									)}
@@ -1145,72 +1188,84 @@ export function SubmitterModal({
 								))}
 							</div>
 						)}
-						{!isSolutionMode && files.length > 0 && (
+						{!isSolutionMode && stagedRequestItems.length > 0 && (
 							<div className="space-y-2">
-								{isBusy && requestPhaseLabel(requestProgress) && (
-									<p className="flex items-center gap-1.5 text-xs text-blue-600">
-										<Loader2 className="h-3 w-3 animate-spin" />
-										{requestPhaseLabel(requestProgress)}
-									</p>
-								)}
-								{files.map((file: File, index: number) => {
-									// Caller-reported upload status, by file order.
-									// `uploaded` includes failures (the caller
-									// continues past them), so check failedIndices
-									// before treating a file as successful.
-									const isFailed =
-										requestProgress?.failedIndices?.includes(
-											index,
-										) ?? false;
-									const isUploaded =
-										!isFailed &&
-										requestProgress !== null &&
-										index < requestProgress.uploaded;
-									const isUploadingNow =
-										!isFailed &&
-										requestProgress !== null &&
-										requestProgress.phase === "uploading" &&
-										index === requestProgress.uploaded;
+								<p className="text-xs text-slate-500">
+									{readyAttachmentIds.length}/{stagedRequestItems.length} files ready
+								</p>
+								{stagedRequestItems.map((item) => {
+									const showCleanupError =
+										item.cleanupRequested === true && Boolean(item.error);
+									const showRetry =
+										canRetryStagedUpload(item) || showCleanupError;
 									return (
 										<div
-											key={`new-${file.name}-${index}-${file.lastModified || Date.now()}`}
+											key={item.id}
 											className="flex items-start gap-3 p-3 border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900"
 										>
-											{isFailed ? (
+											{showCleanupError || item.status === "error" ? (
 												<AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0" />
-											) : isUploaded ? (
+											) : item.status === "success" &&
+											  !item.cleanupRequested ? (
 												<CheckCircle2 className="w-5 h-5 text-green-600 flex-shrink-0" />
-											) : isUploadingNow ? (
+											) : item.status === "uploading" ||
+											  item.status === "pending" ||
+											  item.cleanupRequested ? (
 												<Loader2 className="w-5 h-5 text-blue-600 animate-spin flex-shrink-0" />
 											) : (
 												getFileIcon(
-													file.name.split(".").pop()?.toLowerCase() || "",
+													item.file.name.split(".").pop()?.toLowerCase() ||
+														"",
 												)
 											)}
-											<div className="flex-1 min-w-0 space-y-2">
+											<div className="flex-1 min-w-0">
 												<div className="flex items-center justify-between">
 													<p className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">
-														{file.name}
+														{item.file.name}
 													</p>
-													{!isBusy && (
-														<button
-															onClick={() => removeFile(index)}
-															className="p-1 text-slate-400 hover:text-red-500 transition-colors"
-														>
-															<Trash2 className="w-4 h-4" />
-														</button>
-													)}
+													<button
+														onClick={() => removeStagedRequestItem(item.id)}
+														disabled={isBusy}
+														className="p-1 text-slate-400 hover:text-red-500 transition-colors disabled:opacity-30"
+													>
+														<Trash2 className="w-4 h-4" />
+													</button>
 												</div>
-												<input
-													type="text"
-													value={fileDescriptions[file.name] || ""}
-													onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-														updateFileDescription(file.name, e.target.value)
-													}
-													placeholder="Add a description for this file..."
-													className="w-full text-xs px-2 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded"
-												/>
+												{item.cleanupRequested ? (
+													item.error ? (
+														<p className="text-xs text-red-600 mt-1">
+															{item.error}
+														</p>
+													) : (
+														<p className="text-xs text-slate-500 mt-1">Removing...</p>
+													)
+												) : item.status === "pending" ? (
+													<p className="text-xs text-slate-500 mt-1">Pending</p>
+												) : item.status === "uploading" ? (
+													<div className="mt-1 space-y-1">
+														<Progress value={item.progress} className="h-2" />
+														<p className="text-xs text-slate-500">
+															{item.progress}%
+														</p>
+													</div>
+												) : item.status === "success" ? (
+													<p className="text-xs text-green-600 mt-1">Uploaded</p>
+												) : item.status === "error" && item.error ? (
+													<p className="text-xs text-red-600 mt-1">
+														{item.error}
+													</p>
+												) : null}
 											</div>
+											{showRetry && (
+												<button
+													onClick={() => retryStagedRequestItem(item.id)}
+													disabled={isBusy}
+													className="p-1 text-blue-600 hover:text-blue-700 transition-colors disabled:opacity-30 flex items-center gap-1 text-xs"
+												>
+													<RotateCcw className="w-4 h-4" />
+													Retry
+												</button>
+											)}
 										</div>
 									);
 								})}
@@ -1232,7 +1287,7 @@ export function SubmitterModal({
 					<Button
 						variant="outline"
 						onClick={requestClose}
-						disabled={isBusy}
+						disabled={isBusy || requestCloseControlsLocked}
 						className={submitError ? "" : "ml-auto"}
 					>
 						{isBusy ? "Cleaning up..." : "Cancel"}
