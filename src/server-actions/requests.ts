@@ -10,15 +10,10 @@ import { requireAdmin } from '@/lib/auth'
 import { getCurrentUser, getUserById } from '@/lib/cache/user-cache'
 import {
   attachmentFileExists,
-  createStoredAttachmentPath,
   deleteAttachmentFile,
-  isStagedAttachmentPath,
-  resolveStoredAttachmentPath,
+  isRequestDraftReadyPath,
 } from '@/lib/attachments/storage'
-import { MAX_ATTACHMENTS_PER_FORM, validateAttachmentMetadata } from '@/lib/attachments/policy'
-import { randomUUID } from 'node:crypto'
-import { mkdir, rename, stat } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { MAX_ATTACHMENTS_PER_FORM } from '@/lib/attachments/policy'
 import { descriptionSchema } from '@/lib/schemas/solution-schemas'
 import {
   prepareInlineDescription,
@@ -38,35 +33,32 @@ import {
 import type { Prisma } from '@prisma/client'
 import * as XLSX from 'xlsx'
 
+const REQUEST_DRAFT_READY_PREFIX = 'request-drafts/ready/'
+const ATTACHMENT_ADOPTION_ERROR = 'One or more attachments are invalid or no longer available'
+
+function readyRequestDraftWhere(ids: string[], uploadedById: string) {
+  return {
+    id: { in: ids },
+    uploadedById,
+    requestId: null,
+    solutionId: null,
+    filePath: { startsWith: REQUEST_DRAFT_READY_PREFIX },
+  }
+}
+
 // Zod schema for request validation
 const createRequestSchema = z.object({
   title: z.string().min(1, 'Title is required').max(200, 'Title too long'),
   description: descriptionSchema,
   inlineImageSessionId: z.string().uuid(),
-  // Attachments uploaded ahead of submit to the staging endpoint. The
-  // request + these rows commit atomically, so a request can never exist
-  // without its files.
-  stagedAttachments: z
-    .array(
-      z.object({
-        stagedPath: z.string().min(1),
-        fileName: z.string().min(1),
-        fileType: z.string().min(1),
-        fileSize: z.number().int().positive(),
-        description: z.string().max(60).optional(),
-      }),
-    )
-    .max(MAX_ATTACHMENTS_PER_FORM)
-    .default([]),
+  // Ready draft row IDs from the XHR stage route. createRequest adopts them
+  // in the same transaction as the request so a request cannot exist without
+  // its attachment rows.
+  stagedAttachmentIds: z.array(z.string().uuid()).max(MAX_ATTACHMENTS_PER_FORM).refine(
+    (ids) => new Set(ids).size === ids.length,
+    'Attachment IDs must be unique',
+  ).default([]),
 })
-
-export interface StagedAttachmentInput {
-  stagedPath: string
-  fileName: string
-  fileType: string
-  fileSize: number
-  description?: string
-}
 
 export interface CreateRequestInput {
   title: string
@@ -74,7 +66,7 @@ export interface CreateRequestInput {
   // Callers add this during the editor-coordinator rollout; validation still
   // requires it before any description save can claim image drafts.
   inlineImageSessionId?: string
-  stagedAttachments?: StagedAttachmentInput[]
+  stagedAttachmentIds?: string[]
 }
 
 /**
@@ -106,82 +98,39 @@ export async function createRequest(input: CreateRequestInput) {
     uploadSessionId: validatedFields.data.inlineImageSessionId,
   })
 
-  // Generate the request id before the transaction so staged files can move
-  // to their final, request-scoped paths before any database row exists.
-  // Moves are restored to staging if the transaction fails so submit can retry.
-  const requestId = randomUUID()
-  const stagedAttachments = validatedFields.data.stagedAttachments
+  const stagedAttachmentIds = validatedFields.data.stagedAttachmentIds
 
-  const verifiedAttachments: Array<{
-    id: string
-    stagedPath: string
-    finalPath: string
-    fileName: string
-    fileType: string
-    fileSize: number
-    description?: string
-  }> = []
-
-  // Validate EVERY staged item before moving any of them. The API validated
-  // once during upload; this second check treats the client payload as
-  // untrusted and verifies the real file size from disk.
-  for (const item of stagedAttachments) {
-    if (!isStagedAttachmentPath(item.stagedPath)) {
-      return { success: false, error: `${item.fileName}: Invalid staged attachment` }
-    }
-    const metadataError = validateAttachmentMetadata({
-      name: item.fileName,
-      type: item.fileType,
-      size: item.fileSize,
+  // Precheck owner-scoped ready drafts and their physical files. The same
+  // predicates are repeated on the transactional updateMany so DELETE/adopt
+  // races still fail closed under READ COMMITTED.
+  if (stagedAttachmentIds.length > 0) {
+    const drafts = await prisma.file_attachments.findMany({
+      where: readyRequestDraftWhere(stagedAttachmentIds, user.id),
+      select: { id: true, filePath: true, fileName: true },
     })
-    if (metadataError) return { success: false, error: metadataError }
-    if (!(await attachmentFileExists(item.stagedPath))) {
-      return { success: false, error: `${item.fileName}: Staged file is missing — please retry the upload` }
+    if (drafts.length !== stagedAttachmentIds.length) {
+      return { success: false, error: ATTACHMENT_ADOPTION_ERROR }
     }
-
-    let info
-    try {
-      info = await stat(resolveStoredAttachmentPath(item.stagedPath))
-    } catch {
-      return { success: false, error: `${item.fileName}: Staged file is missing — please retry the upload` }
+    for (const draft of drafts) {
+      if (!isRequestDraftReadyPath(draft.filePath)) {
+        return { success: false, error: ATTACHMENT_ADOPTION_ERROR }
+      }
+      if (!(await attachmentFileExists(draft.filePath))) {
+        return {
+          success: false,
+          error: `${draft.fileName}: Staged file is missing — please retry the upload`,
+        }
+      }
     }
-    if (!info.isFile()) {
-      return { success: false, error: `${item.fileName}: Staged file is missing — please retry the upload` }
-    }
-    if (info.size !== item.fileSize) {
-      return { success: false, error: `${item.fileName}: Staged file size does not match` }
-    }
-
-    const attachmentId = randomUUID()
-    verifiedAttachments.push({
-      id: attachmentId,
-      stagedPath: item.stagedPath,
-      finalPath: createStoredAttachmentPath(requestId, item.fileName, attachmentId),
-      fileName: item.fileName,
-      fileType: item.fileType,
-      fileSize: info.size,
-      description: item.description,
-    })
   }
 
-  const movedAttachments: typeof verifiedAttachments = []
   let request: { id: string; title: string }
   let approvals: Awaited<ReturnType<typeof createApprovalChain>>
 
   try {
-    // rename() is atomic on the same filesystem. Move all files first; only
-    // after every move succeeds do we start the DB transaction.
-    for (const item of verifiedAttachments) {
-      const finalAbsolutePath = resolveStoredAttachmentPath(item.finalPath)
-      await mkdir(dirname(finalAbsolutePath), { recursive: true })
-      await rename(resolveStoredAttachmentPath(item.stagedPath), finalAbsolutePath)
-      movedAttachments.push(item)
-    }
-
     const txResult = await prisma.$transaction(async (tx) => {
       let newRequest = await tx.requests.create({
         data: {
-          id: requestId,
           title: validatedFields.data.title,
           description: prepared.html,
           requesterId: user.id,
@@ -190,19 +139,14 @@ export async function createRequest(input: CreateRequestInput) {
         },
       })
 
-      if (verifiedAttachments.length > 0) {
-        await tx.file_attachments.createMany({
-          data: verifiedAttachments.map((item) => ({
-            id: item.id,
-            requestId: newRequest.id,
-            fileName: item.fileName,
-            fileType: item.fileType,
-            fileSize: item.fileSize,
-            filePath: item.finalPath,
-            description: item.description || null,
-            uploadedById: user.id,
-          })),
+      if (stagedAttachmentIds.length > 0) {
+        const adopted = await tx.file_attachments.updateMany({
+          where: readyRequestDraftWhere(stagedAttachmentIds, user.id),
+          data: { requestId: newRequest.id },
         })
+        if (adopted.count !== stagedAttachmentIds.length) {
+          throw new Error(ATTACHMENT_ADOPTION_ERROR)
+        }
       }
 
       await reconcileInlineDescriptionImages(tx, {
@@ -252,20 +196,10 @@ export async function createRequest(input: CreateRequestInput) {
     request = txResult.request
     approvals = txResult.approvals
   } catch (error) {
-    // Restore moved files to staging so the form can retry after a transient
-    // DB or filesystem failure. Reverse order handles partially moved sets.
-    for (const item of [...movedAttachments].reverse()) {
-      try {
-        await mkdir(dirname(resolveStoredAttachmentPath(item.stagedPath)), { recursive: true })
-        await rename(
-          resolveStoredAttachmentPath(item.finalPath),
-          resolveStoredAttachmentPath(item.stagedPath),
-        )
-      } catch (restoreError) {
-        console.error('Failed to restore staged attachment:', restoreError)
-      }
-    }
     console.error('Failed to create request atomically:', error)
+    if (error instanceof Error && error.message === ATTACHMENT_ADOPTION_ERROR) {
+      return { success: false, error: ATTACHMENT_ADOPTION_ERROR }
+    }
     return { success: false, error: 'Failed to create request — please try again' }
   }
 

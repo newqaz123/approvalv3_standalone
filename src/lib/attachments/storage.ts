@@ -63,39 +63,6 @@ export async function moveAttachmentFile(fromStoredPath: string, toStoredPath: s
   }
 }
 
-/**
- * Staged (not yet submitted) attachment path. Staged files live under
- * `stage/<uuid>/<normalized-name>` so the cleanup endpoint can only ever
- * touch files that were never adopted by a request.
- */
-export function createStagedAttachmentPath(stagedId: string, originalName: string): string {
-  if (!ATTACHMENT_ID_RE.test(stagedId)) {
-    throw new Error('Invalid staged attachment id')
-  }
-  return `stage/${stagedId}/${sanitizeAttachmentFileName(originalName)}`
-}
-
-/**
- * True only for the unprefixed generated shape `stage/<uuid>/<filename>`.
- * Does not strip `uploads/` or `public/` prefixes — those raw forms are
- * rejected, as are surrounding whitespace, leading `/`, backslashes, extra
- * segments, invalid UUIDs, and names the shared sanitizer would rewrite.
- * Path traversal is rejected by exact segment count plus sanitizer equality
- * (`.` / `..` become `attachment`); a `..` substring inside a real filename
- * such as `drawing..pdf` is allowed because `createStagedAttachmentPath` can
- * emit it.
- */
-export function isStagedAttachmentPath(storedPath: string): boolean {
-  if (storedPath !== storedPath.trim()) return false
-  if (!storedPath || storedPath.startsWith('/') || storedPath.includes('\\')) return false
-  if (storedPath.startsWith('uploads/') || storedPath.startsWith('public/')) return false
-  const parts = storedPath.split('/')
-  if (parts.length !== 3) return false
-  const [prefix, stagedId, fileName] = parts
-  if (prefix !== 'stage' || !ATTACHMENT_ID_RE.test(stagedId) || fileName.length === 0) return false
-  return fileName === sanitizeAttachmentFileName(fileName)
-}
-
 function assertAttachmentId(id: string, label: string): void {
   if (!ATTACHMENT_ID_RE.test(id)) {
     throw new Error(`Invalid ${label}`)
