@@ -55,12 +55,11 @@ import {
 	ATTACHMENT_EXTENSIONS,
 	validateAttachmentMetadata,
 } from "@/lib/attachments/policy";
-import { useSolutionAttachments } from "@/hooks/use-solution-attachments";
+import { useStagedSolutionAttachments } from "@/hooks/use-staged-solution-attachments";
 import {
 	canRetryStagedUpload,
 	useStagedRequestAttachments,
 } from "@/hooks/use-staged-request-attachments";
-import { describeUploadProgress } from "@/lib/attachments/upload-progress";
 import {
 	inlineImageBlockingMessage,
 	useInlineDescriptionImages,
@@ -475,17 +474,27 @@ export function SubmitterModal({
 	const [useCustomHierarchy, setUseCustomHierarchy] = useState(false);
 	const [customApprovers, setCustomApprovers] = useState<string[]>([]);
 
-	// Shared upload hook for solution/resubmit modes. Request mode stages via
-	// useStagedRequestAttachments before createRequest adopts ready IDs.
+	// Shared staged-upload hooks. Request mode stages request drafts before
+	// createRequest adopts ready IDs; solution/resubmit stages solution drafts
+	// (bound to the target request) the same eager way before the solution
+	// action adopts them. Both hooks share the reviewed controller lifecycle.
 	const requestId = initialData?.requestId || "";
 	const {
 		items: attachmentItems,
 		addFiles,
-		removeItem,
-		ensureUploaded,
-		reset,
-		clear,
-	} = useSolutionAttachments({ requestId });
+		retryItem: retryStagedSolutionItem,
+		removeItem: removeStagedSolutionItem,
+		reset: resetSolutionAttachments,
+		clear: clearSolutionAttachments,
+		hasBlockingOperations: stagedSolutionBlocking,
+		readyAttachmentIds: solutionReadyAttachmentIds,
+	} = useStagedSolutionAttachments({ requestId });
+	// Mirrors the request-mode blocking predicate for the solution scope:
+	// reserve/upload/cleanup in flight, any errored/not-ready item, or a failed
+	// cleanup blocks the solution/resubmit submit.
+	const solutionAttachmentsBlocking =
+		stagedSolutionBlocking ||
+		attachmentItems.length !== solutionReadyAttachmentIds.length;
 	const {
 		items: stagedRequestItems,
 		addFiles: addStagedRequestFiles,
@@ -506,8 +515,6 @@ export function SubmitterModal({
 		inlineImages.blockingReason,
 	);
 	const [isBusy, setIsBusy] = useState(false);
-	// Count-based, honest upload feedback for solution/resubmit batches.
-	const uploadProgress = describeUploadProgress(attachmentItems);
 	const [submitError, setSubmitError] = useState<string | null>(null);
 	const [discardOpen, setDiscardOpen] = useState(false);
 	const solutionCommitInFlightRef = useRef(false);
@@ -580,8 +587,8 @@ export function SubmitterModal({
 			}
 
 			setFileUploadError(null);
-			// Solution/resubmit modes route through the shared upload hook; request
-			// mode stages immediately with real XHR progress.
+			// Both modes stage eagerly through their staged-attachments hook with
+			// real XHR progress; adoption happens only on the metadata submit.
 			if (isSolutionMode) {
 				addFiles(selectedFiles);
 			} else {
@@ -590,48 +597,24 @@ export function SubmitterModal({
 		}
 	};
 
-	const handleRemoveAttachment = async (id: string) => {
+	// Removal is synchronous: the staged hook aborts any in-flight XHR, marks
+	// the item cleanupRequested, and DELETEs the draft server-side. A failed
+	// DELETE stays on the item (error + Retry) instead of a modal-level error.
+	const handleRemoveAttachment = (id: string) => {
 		if (isBusy || solutionCommitInFlightRef.current || closeInFlightRef.current) {
 			return;
 		}
-		try {
-			await removeItem(id);
-		} catch (error) {
-			setSubmitError(
-				error instanceof Error ? error.message : "Failed to remove file",
-			);
-		}
+		removeStagedSolutionItem(id);
 	};
 
-	// Retry is upload-only: it re-runs the coordinator for the remaining
-	// non-success items (reusing prior successes) so a failed file is retried in
-	// isolation — never invoking the metadata submit.
-	const handleRetryAttachment = async () => {
+	// Retry is per-item and upload-only: it re-runs reserve+XHR for the errored
+	// item (or retries a failed cleanup for a removing item) under the same
+	// stable attachmentId — never invoking the metadata submit.
+	const handleRetryAttachment = (id: string) => {
 		if (isBusy) return;
 		if (solutionCommitInFlightRef.current || closeInFlightRef.current) return;
-		solutionCommitInFlightRef.current = true;
-		setIsBusy(true);
 		setSubmitError(null);
-		try {
-			const result = await ensureUploaded();
-			if (!result.success) {
-				const remaining = result.items.filter(
-					(entry) => entry.status === "error",
-				);
-				setSubmitError(
-					remaining.length === 1
-						? "1 file still failed to upload"
-						: `${remaining.length} files still failed to upload`,
-				);
-			}
-		} catch (error) {
-			setSubmitError(
-				error instanceof Error ? error.message : "An error occurred",
-			);
-		} finally {
-			solutionCommitInFlightRef.current = false;
-			setIsBusy(false);
-		}
+		retryStagedSolutionItem(id);
 	};
 
 	const removeExistingFile = (fileId: string) => {
@@ -706,18 +689,16 @@ export function SubmitterModal({
 		}
 
 		if (isSolutionMode) {
+			// Staged solution drafts must all be ready (no reserve/upload/cleanup
+			// in flight, no errored item, no failed cleanup) before the metadata
+			// submit; adoption itself runs inside the server transaction.
+			if (solutionAttachmentsBlocking) {
+				return;
+			}
 			const deletedFileIdsSnapshot = [...deletedFileIds];
 			solutionCommitInFlightRef.current = true;
 			setIsBusy(true);
 			try {
-				// ensureUploaded() is authoritative: uploads pending/errored items,
-				// reuses prior successes, and returns the final batch result.
-				const result = await ensureUploaded();
-				if (!result.success) {
-					setSubmitError("Some files failed to upload");
-					return;
-				}
-
 				if (mode === "solution" && onSubmitSolution) {
 					const res = await onSubmitSolution({
 						title: solutionTitle,
@@ -725,15 +706,16 @@ export function SubmitterModal({
 						cost: parseFloat(cost) || 0,
 						currency,
 						timeline,
-						fileIds: result.attachmentIds,
+						fileIds: solutionReadyAttachmentIds,
 						useCustomHierarchy,
 						customApprovers,
 						inlineImageSessionId: inlineImages.uploadSessionId,
 					});
 					if (res.success) {
-						// Drafts are now linked — clear without invoking cleanup.
+						// Drafts are now linked — clear without invoking cleanup
+						// (deleting adopted rows would unlink committed files).
 						inlineImages.clear();
-						clear();
+						clearSolutionAttachments();
 						setDiscardOpen(false);
 						onOpenChange(false);
 					} else {
@@ -746,7 +728,7 @@ export function SubmitterModal({
 						cost: parseFloat(cost) || 0,
 						currency,
 						timeline,
-						fileIds: result.attachmentIds,
+						fileIds: solutionReadyAttachmentIds,
 						deletedFileIds: deletedFileIdsSnapshot,
 						useCustomHierarchy,
 						customApprovers,
@@ -754,7 +736,7 @@ export function SubmitterModal({
 					});
 					if (res.success) {
 						inlineImages.clear();
-						clear();
+						clearSolutionAttachments();
 						setDiscardOpen(false);
 						onOpenChange(false);
 					} else {
@@ -854,14 +836,14 @@ export function SubmitterModal({
 			if (isSolutionMode) {
 				await discardSubmitterSolutionDraft({
 					cleanupStagedRequestAttachments: resetStagedRequestAttachments,
-					cleanupSolutionAttachments: reset,
+					cleanupSolutionAttachments: resetSolutionAttachments,
 					cleanupInlineImages: inlineImages.reset,
 					restore: restoreSolutionDraft,
 					close: () => onOpenChange(false),
 				});
 			} else {
 				await resetStagedRequestAttachments();
-				await reset();
+				await resetSolutionAttachments();
 				await inlineImages.reset();
 				setDiscardOpen(false);
 				onOpenChange(false);
@@ -903,7 +885,8 @@ export function SubmitterModal({
 			!solutionTitle.trim() ||
 			!solutionDescription.trim() ||
 			!cost ||
-			!timeline.trim()
+			!timeline.trim() ||
+			solutionAttachmentsBlocking
 		);
 	};
 
@@ -1271,59 +1254,91 @@ export function SubmitterModal({
 							)}
 						</div>
 
-						{/* File List */}
+						{/* File List — solution/resubmit mirror the request-mode staged
+						    labels (count, Pending, real %, Uploaded, Removing..., Retry). */}
 						{isSolutionMode && attachmentItems.length > 0 && (
 							<div className="space-y-2">
-								{attachmentItems.map((item) => (
-									<div
-										key={item.id}
-										className="flex items-start gap-3 p-3 border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900"
-									>
-										{getFileIcon(
-											item.file.name.split(".").pop()?.toLowerCase() || "",
-										)}
-										<div className="flex-1 min-w-0">
-											<div className="flex items-center justify-between">
-												<p className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">
-													{item.file.name}
-												</p>
-												<button
-													onClick={() => handleRemoveAttachment(item.id)}
-													disabled={isBusy || item.status === "uploading"}
-													className="p-1 text-slate-400 hover:text-red-500 transition-colors disabled:opacity-30"
-												>
-													<Trash2 className="w-4 h-4" />
-												</button>
+								<p className="text-xs text-slate-500">
+									{solutionReadyAttachmentIds.length}/{attachmentItems.length} files ready
+								</p>
+								{attachmentItems.map((item) => {
+									const showCleanupError =
+										item.cleanupRequested === true && Boolean(item.error);
+									const showRetry =
+										canRetryStagedUpload(item) || showCleanupError;
+									return (
+										<div
+											key={item.id}
+											className="flex items-start gap-3 p-3 border border-slate-200 dark:border-slate-800 rounded-lg bg-white dark:bg-slate-900"
+										>
+											{showCleanupError || item.status === "error" ? (
+												<AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0" />
+											) : item.status === "success" &&
+											  !item.cleanupRequested ? (
+												<CheckCircle2 className="w-5 h-5 text-green-600 flex-shrink-0" />
+											) : item.status === "uploading" ||
+											  item.status === "pending" ||
+											  item.cleanupRequested ? (
+												<Loader2 className="w-5 h-5 text-blue-600 animate-spin flex-shrink-0" />
+											) : (
+												getFileIcon(
+													item.file.name.split(".").pop()?.toLowerCase() ||
+														"",
+												)
+											)}
+											<div className="flex-1 min-w-0">
+												<div className="flex items-center justify-between">
+													<p className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">
+														{item.file.name}
+													</p>
+													<button
+														onClick={() => handleRemoveAttachment(item.id)}
+														disabled={isBusy || item.cleanupRequested === true}
+														className="p-1 text-slate-400 hover:text-red-500 transition-colors disabled:opacity-30"
+													>
+														<Trash2 className="w-4 h-4" />
+													</button>
+												</div>
+												{item.cleanupRequested ? (
+													item.error ? (
+														<p className="text-xs text-red-600 mt-1">
+															{item.error}
+														</p>
+													) : (
+														<p className="text-xs text-slate-500 mt-1">Removing...</p>
+													)
+												) : item.status === "pending" ? (
+													<p className="text-xs text-slate-500 mt-1">Pending</p>
+												) : item.status === "uploading" ? (
+													<div className="mt-1 space-y-1">
+														<Progress value={item.progress} className="h-2" />
+														<p className="text-xs text-slate-500">
+															{item.progress}%
+														</p>
+													</div>
+												) : item.status === "success" ? (
+													<p className="text-xs text-green-600 mt-1">Uploaded</p>
+												) : item.status === "error" && item.error ? (
+													<p className="text-xs text-red-600 mt-1">
+														{item.error}
+													</p>
+												) : null}
 											</div>
-											{item.status === "uploading" && (
-												<p className="flex items-center gap-1.5 text-xs text-slate-500 mt-1">
-													<Loader2 className="h-3 w-3 animate-spin" />
-													{uploadProgress.label ?? "Uploading..."}
-												</p>
-											)}
-											{item.status === "success" && (
-												<p className="text-xs text-green-600 mt-1">Uploaded</p>
-											)}
-											{item.status === "error" && item.error && (
-												<p className="text-xs text-red-600 mt-1">
-													{item.error}
-												</p>
+											{/* Retry action beside errored/cleanup-failed items: re-run
+											    the staged upload or DELETE without touching metadata. */}
+											{showRetry && (
+												<button
+													onClick={() => handleRetryAttachment(item.id)}
+													disabled={isBusy}
+													className="p-1 text-blue-600 hover:text-blue-700 transition-colors disabled:opacity-30 flex items-center gap-1 text-xs"
+												>
+													<RotateCcw className="w-4 h-4" />
+													Retry
+												</button>
 											)}
 										</div>
-										{/* Retry action beside errored items: re-upload via the
-                        coordinator without touching metadata. */}
-										{item.status === "error" && (
-											<button
-												onClick={handleRetryAttachment}
-												disabled={isBusy}
-												className="p-1 text-blue-600 hover:text-blue-700 transition-colors disabled:opacity-30 flex items-center gap-1 text-xs"
-											>
-												<RotateCcw className="w-4 h-4" />
-												Retry
-											</button>
-										)}
-									</div>
-								))}
+									);
+								})}
 							</div>
 						)}
 						{!isSolutionMode && stagedRequestItems.length > 0 && (
