@@ -1,13 +1,16 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import { Upload, File, FileImage, FileText, X, RotateCcw, Loader2 } from 'lucide-react'
+import { Upload, File, FileImage, FileText, X, RotateCcw, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
-import type { AttachmentUploadItem } from '@/lib/attachments/upload-batch'
-import { describeUploadProgress } from '@/lib/attachments/upload-progress'
+import {
+  canRetryStagedUpload,
+  isReadyAttachment,
+  type StagedItem,
+} from '@/hooks/use-staged-request-attachments'
 import {
   MAX_ATTACHMENT_BYTES,
   MAX_ATTACHMENTS_PER_FORM,
@@ -16,13 +19,15 @@ import {
 } from '@/lib/attachments/policy'
 
 /**
- * Items-first solution attachment uploader. The sole caller
- * (SolutionForm) drives this through the `useSolutionAttachments` hook,
- * passing `items` + add/remove/retry callbacks. The legacy parallel
- * File[]-based API was removed in Task 6 after the caller migration.
+ * Items-first solution attachment uploader for the eager staging protocol.
+ * The sole caller (SolutionForm) drives this through the
+ * `useStagedSolutionAttachments` hook, passing staged `items` +
+ * add/remove/retry callbacks. Each item renders its real XHR byte progress
+ * and the request-mode state labels (Pending / % / Uploaded / Removing...),
+ * so a draft is visibly staged before the solution metadata is submitted.
  */
 interface SolutionFileUploadProps {
-  items: AttachmentUploadItem[]
+  items: StagedItem[]
   onAddFiles?: (files: File[]) => void
   onRemoveItem?: (id: string) => void
   onRetryItem?: (id: string) => void
@@ -45,7 +50,7 @@ export function SolutionFileUpload({
   existingFiles = [],
   onRemoveExistingFile,
 }: SolutionFileUploadProps) {
-  const uploadProgress = describeUploadProgress(items)
+  const readyCount = items.filter(isReadyAttachment).length
   const [dragActive, setDragActive] = useState(false)
   const [errors, setErrors] = useState<string[]>([])
 
@@ -288,51 +293,62 @@ export function SolutionFileUpload({
         {/* Selected files list */}
         {items.length > 0 && (
           <div className="space-y-3">
+            <p className="text-xs text-gray-500">
+              {readyCount}/{items.length} files ready
+            </p>
             {items.map((item) => {
               const file = item.file
-              const showProgress = item.status === 'uploading'
-              const isSuccess = item.status === 'success'
-              const isError = item.status === 'error'
-              const storedSize = item.storedSize ?? file.size
-              const isOptimized = isSuccess && storedSize < file.size
+              const showCleanupError =
+                item.cleanupRequested === true && Boolean(item.error)
+              const showRetry =
+                canRetryStagedUpload(item) || showCleanupError
+              const isRemoving = item.cleanupRequested === true
 
               return (
                 <div
                   key={item.id}
                   className="flex items-center gap-3 p-3 border rounded-lg bg-white"
                 >
-                  {getFileIcon(file)}
+                  {showCleanupError || item.status === 'error' ? (
+                    <AlertTriangle className="h-5 w-5 text-red-600 flex-shrink-0" />
+                  ) : item.status === 'success' && !item.cleanupRequested ? (
+                    <CheckCircle2 className="h-5 w-5 text-green-600 flex-shrink-0" />
+                  ) : item.status === 'uploading' ||
+                    item.status === 'pending' ||
+                    item.cleanupRequested ? (
+                    <Loader2 className="h-5 w-5 text-blue-500 animate-spin flex-shrink-0" />
+                  ) : (
+                    getFileIcon(file)
+                  )}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between">
                       <p className="text-sm font-medium truncate">{file.name}</p>
                       <span className="text-xs text-gray-500">
-                        {isOptimized
-                          ? `${formatFileSize(file.size)} → ${formatFileSize(storedSize)} · optimized`
-                          : formatFileSize(storedSize)}
+                        {formatFileSize(file.size)}
                       </span>
                     </div>
-                    {showProgress && (
-                      <>
-                        <p className="flex items-center gap-1.5 text-xs text-gray-500 mt-1">
-                          <Loader2 className="h-3 w-3 animate-spin" />
-                          {uploadProgress.label ?? 'Uploading...'}
-                        </p>
-                        <Progress
-                          value={(uploadProgress.doneCount / Math.max(uploadProgress.totalCount, 1)) * 100}
-                          className="h-1.5 mt-2"
-                        />
-                      </>
-                    )}
-                    {isError && item.error && (
-                      <p className="text-xs text-red-600 mt-1">{item.error}</p>
-                    )}
-                    {isSuccess && (
+                    {isRemoving ? (
+                      item.error ? (
+                        <p className="text-xs text-red-600 mt-1">{item.error}</p>
+                      ) : (
+                        <p className="text-xs text-gray-500 mt-1">Removing...</p>
+                      )
+                    ) : item.status === 'pending' ? (
+                      <p className="text-xs text-gray-500 mt-1">Pending</p>
+                    ) : item.status === 'uploading' ? (
+                      <div className="mt-1 space-y-1">
+                        <Progress value={item.progress} className="h-1.5" />
+                        <p className="text-xs text-gray-500">{item.progress}%</p>
+                      </div>
+                    ) : item.status === 'success' ? (
                       <p className="text-xs text-green-600 mt-1">Uploaded</p>
-                    )}
+                    ) : item.status === 'error' && item.error ? (
+                      <p className="text-xs text-red-600 mt-1">{item.error}</p>
+                    ) : null}
                   </div>
-                  {/* Retry action: error items stay in the list and remain
-                      retryable via the items-first API. */}
-                  {isError && onRetryItem && (
+                  {/* Retry action: errored items stay in the list and remain
+                      retryable; a failed cleanup retries the DELETE. */}
+                  {showRetry && onRetryItem && (
                     <Button
                       type="button"
                       variant="ghost"
@@ -345,7 +361,7 @@ export function SolutionFileUpload({
                       <span className="text-xs ml-1">Retry</span>
                     </Button>
                   )}
-                  {!showProgress && !isSuccess && (
+                  {!isRemoving && (
                     <Button
                       type="button"
                       variant="ghost"

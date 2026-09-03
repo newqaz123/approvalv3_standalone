@@ -8,20 +8,33 @@ import {
   attachmentFileHasSize,
   createRequestDraftCancelledSentinelPath,
   createRequestDraftReservedPath,
+  createSolutionDraftCancelledSentinelPath,
+  createSolutionDraftReservedPath,
   deleteAttachmentFile,
   isRequestDraftCancelledPath,
   isRequestDraftClaimablePath,
   isRequestDraftReadyPath,
   isRequestDraftReservedPath,
   isRequestDraftUploadingPath,
+  isSolutionDraftCancelledPath,
+  isSolutionDraftClaimablePath,
+  isSolutionDraftReadyPath,
+  isSolutionDraftReservedPath,
+  isSolutionDraftUploadingPath,
   moveAttachmentFile,
   parseRequestDraftPath,
+  parseSolutionDraftPath,
   physicalPathsFromCancelledPath,
+  physicalPathsFromSolutionCancelledPath,
   toRequestDraftCancelledPath,
   toRequestDraftReadyPath,
   toRequestDraftUploadingPath,
+  toSolutionDraftCancelledPath,
+  toSolutionDraftReadyPath,
+  toSolutionDraftUploadingPath,
   uploadTokenFromDraftPath,
   writeAttachmentFile,
+  type ParsedRequestDraftPath,
 } from '@/lib/attachments/storage'
 import { sanitizeAttachmentFileName, validateAttachmentMetadata } from '@/lib/attachments/policy'
 
@@ -36,6 +49,42 @@ type DraftRow = {
   fileSize: number
   filePath: string
   uploadedById: string
+}
+
+type StageScope =
+  | { kind: 'request' }
+  | { kind: 'solution'; requestId: string }
+
+type ParsedStageScope = { scope: StageScope } | { error: string }
+
+type ParsedDraftPath = ParsedRequestDraftPath
+
+/**
+ * Per-scope staging protocol surface. The request and solution scopes run the
+ * identical CAS/finalize/compensation flow; only path roots, row-shape
+ * predicates, and conflict verdicts differ.
+ */
+type DraftContext = {
+  createReservedPath(attachmentId: string, uploadToken: string, fileName: string): string
+  createCancelledSentinelPath(attachmentId: string): string
+  isCancelledPath(storedPath: string): boolean
+  isReadyPath(storedPath: string): boolean
+  isReservedPath(storedPath: string): boolean
+  isUploadingPath(storedPath: string): boolean
+  isClaimablePath(storedPath: string): boolean
+  toUploadingPath(storedPath: string): string
+  toReadyPath(storedPath: string): string
+  toCancelledPath(storedPath: string): string
+  physicalPathsFromCancelledPath(storedPath: string): string[]
+  parsePath(storedPath: string): ParsedDraftPath | null
+  /** CAS predicate for an owner-scoped, unadopted draft row in this scope. */
+  ownerScopedDraftWhere(attachmentId: string, userId: string, filePath?: string): Record<string, unknown>
+  /** 403/404/409 when the row is unusable in this scope; null otherwise. */
+  conflictForExisting(existing: DraftRow, userId: string): NextResponse | null
+  /** Same gate for DELETE, where an already-cancelled row is a success case. */
+  conflictForDelete(existing: DraftRow, userId: string): NextResponse | null
+  /** Row is an unadopted draft inside this scope (token-lineage eligibility). */
+  isUnadoptedScopeDraftRow(row: DraftRow): boolean
 }
 
 function isEnoent(error: unknown): boolean {
@@ -69,6 +118,142 @@ function ownerScopedUnownedWhere(attachmentId: string, userId: string, filePath?
   }
 }
 
+function conflictForRequestRow(existing: DraftRow, userId: string): NextResponse | null {
+  if (existing.uploadedById !== userId) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+  if (existing.requestId !== null || existing.solutionId !== null) {
+    return NextResponse.json({ error: 'Attachment is no longer a draft' }, { status: 409 })
+  }
+  if (isRequestDraftCancelledPath(existing.filePath)) {
+    return NextResponse.json({ error: 'Attachment was cancelled' }, { status: 409 })
+  }
+  return null
+}
+
+/**
+ * Solution-scope visibility: the row must be an unadopted solution draft bound
+ * to the exact target request. Wrong request and non-solution paths are
+ * invisible (404); adopted rows are untouchable (409).
+ */
+function conflictForSolutionRow(
+  existing: DraftRow,
+  userId: string,
+  requestId: string,
+  forDelete: boolean,
+): NextResponse | null {
+  if (existing.uploadedById !== userId) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+  if (existing.requestId !== requestId) {
+    return NextResponse.json({ error: 'Attachment not found' }, { status: 404 })
+  }
+  if (existing.solutionId !== null) {
+    return NextResponse.json({ error: 'Attachment is no longer a draft' }, { status: 409 })
+  }
+  const claimable = isSolutionDraftClaimablePath(existing.filePath)
+  if (!claimable && !isSolutionDraftCancelledPath(existing.filePath)) {
+    return NextResponse.json({ error: 'Attachment not found' }, { status: 404 })
+  }
+  if (!claimable) {
+    return forDelete
+      ? null
+      : NextResponse.json({ error: 'Attachment was cancelled' }, { status: 409 })
+  }
+  return null
+}
+
+function solutionDraftContext(requestId: string): DraftContext {
+  return {
+    createReservedPath: createSolutionDraftReservedPath,
+    createCancelledSentinelPath: createSolutionDraftCancelledSentinelPath,
+    isCancelledPath: isSolutionDraftCancelledPath,
+    isReadyPath: isSolutionDraftReadyPath,
+    isReservedPath: isSolutionDraftReservedPath,
+    isUploadingPath: isSolutionDraftUploadingPath,
+    isClaimablePath: isSolutionDraftClaimablePath,
+    toUploadingPath: toSolutionDraftUploadingPath,
+    toReadyPath: toSolutionDraftReadyPath,
+    toCancelledPath: toSolutionDraftCancelledPath,
+    physicalPathsFromCancelledPath: physicalPathsFromSolutionCancelledPath,
+    parsePath: parseSolutionDraftPath,
+    ownerScopedDraftWhere(attachmentId, userId, filePath?) {
+      return {
+        id: attachmentId,
+        uploadedById: userId,
+        requestId,
+        solutionId: null,
+        ...(filePath !== undefined ? { filePath } : {}),
+      }
+    },
+    conflictForExisting: (existing, userId) => conflictForSolutionRow(existing, userId, requestId, false),
+    conflictForDelete: (existing, userId) => conflictForSolutionRow(existing, userId, requestId, true),
+    isUnadoptedScopeDraftRow: (row) => row.requestId === requestId && row.solutionId === null,
+  }
+}
+
+const REQUEST_DRAFT_CONTEXT: DraftContext = {
+  createReservedPath: createRequestDraftReservedPath,
+  createCancelledSentinelPath: createRequestDraftCancelledSentinelPath,
+  isCancelledPath: isRequestDraftCancelledPath,
+  isReadyPath: isRequestDraftReadyPath,
+  isReservedPath: isRequestDraftReservedPath,
+  isUploadingPath: isRequestDraftUploadingPath,
+  isClaimablePath: isRequestDraftClaimablePath,
+  toUploadingPath: toRequestDraftUploadingPath,
+  toReadyPath: toRequestDraftReadyPath,
+  toCancelledPath: toRequestDraftCancelledPath,
+  physicalPathsFromCancelledPath,
+  parsePath: parseRequestDraftPath,
+  ownerScopedDraftWhere: ownerScopedUnownedWhere,
+  conflictForExisting: conflictForRequestRow,
+  conflictForDelete: (existing, userId) => {
+    if (existing.uploadedById !== userId) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+    if (existing.requestId !== null || existing.solutionId !== null) {
+      return NextResponse.json({ error: 'Attachment is no longer a draft' }, { status: 409 })
+    }
+    return null
+  },
+  isUnadoptedScopeDraftRow: (row) => row.requestId === null && row.solutionId === null,
+}
+
+function draftContextFor(scope: StageScope): DraftContext {
+  return scope.kind === 'solution' ? solutionDraftContext(scope.requestId) : REQUEST_DRAFT_CONTEXT
+}
+
+function scopeRowTarget(scope: StageScope): string | null {
+  return scope.kind === 'solution' ? scope.requestId : null
+}
+
+/**
+ * `scope` is optional and defaults to 'request' so existing request-scope
+ * clients stay byte-for-byte compatible. `requestId` is required (and must be
+ * a UUID) when scope is 'solution': solution drafts are owner-scoped rows with
+ * requestId set to the target request.
+ */
+function parseScopeFields(scope: string, requestId: unknown): ParsedStageScope {
+  if (scope === 'request') return { scope: { kind: 'request' } }
+  if (scope !== 'solution') return { error: 'Invalid scope' }
+  const target = typeof requestId === 'string' ? requestId : ''
+  if (!ATTACHMENT_ID_RE.test(target)) return { error: 'Invalid requestId' }
+  return { scope: { kind: 'solution', requestId: target } }
+}
+
+function parseScopeFromBody(body: { scope?: unknown; requestId?: unknown }): ParsedStageScope {
+  if (body.scope === undefined) return parseScopeFields('request', body.requestId)
+  if (typeof body.scope !== 'string') return { error: 'Invalid scope' }
+  return parseScopeFields(body.scope, body.requestId)
+}
+
+function parseScopeFromFormData(formData: FormData): ParsedStageScope {
+  const scope = formData.get('scope')
+  if (scope === null) return parseScopeFields('request', formData.get('requestId'))
+  if (typeof scope !== 'string') return { error: 'Invalid scope' }
+  return parseScopeFields(scope, formData.get('requestId'))
+}
+
 function reservationMetadata(body: {
   fileName?: unknown
   fileType?: unknown
@@ -90,26 +275,13 @@ function metadataMatches(
     && row.fileSize === metadata.fileSize
 }
 
-function fileBoundToRow(row: DraftRow, file: File, uploadToken: string): boolean {
-  const parsed = parseRequestDraftPath(row.filePath)
+function fileBoundToRow(row: DraftRow, file: File, uploadToken: string, draft: DraftContext): boolean {
+  const parsed = draft.parsePath(row.filePath)
   if (!parsed || parsed.kind === 'cancelled' || parsed.uploadToken !== uploadToken) return false
   return parsed.fileName === sanitizeAttachmentFileName(file.name)
     && row.fileName === file.name
     && row.fileType === file.type
     && row.fileSize === file.size
-}
-
-function conflictForExisting(existing: DraftRow, userId: string): NextResponse | null {
-  if (existing.uploadedById !== userId) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
-  if (existing.requestId !== null || existing.solutionId !== null) {
-    return NextResponse.json({ error: 'Attachment is no longer a draft' }, { status: 409 })
-  }
-  if (isRequestDraftCancelledPath(existing.filePath)) {
-    return NextResponse.json({ error: 'Attachment was cancelled' }, { status: 409 })
-  }
-  return null
 }
 
 function reservationSuccess(row: DraftRow, alreadyReady: boolean) {
@@ -131,13 +303,14 @@ function interpretExistingReservation(
   existing: DraftRow,
   userId: string,
   metadata: { fileName: string; fileType: string; fileSize: number },
+  draft: DraftContext,
 ): NextResponse {
-  const conflict = conflictForExisting(existing, userId)
+  const conflict = draft.conflictForExisting(existing, userId)
   if (conflict) return conflict
-  if (isRequestDraftReadyPath(existing.filePath) && metadataMatches(existing, metadata)) {
+  if (draft.isReadyPath(existing.filePath) && metadataMatches(existing, metadata)) {
     return reservationSuccess(existing, true)
   }
-  if (isRequestDraftReservedPath(existing.filePath) || isRequestDraftUploadingPath(existing.filePath)) {
+  if (draft.isReservedPath(existing.filePath) || draft.isUploadingPath(existing.filePath)) {
     return reservationSuccess(existing, false)
   }
   return NextResponse.json({ error: 'Upload was superseded' }, { status: 409 })
@@ -145,9 +318,11 @@ function interpretExistingReservation(
 
 /**
  * PUT /api/attachments/stage — create-first reservation. JSON
- * `{ attachmentId, fileName, fileType, fileSize }`. The uploadToken is generated
- * once and encoded in the reserved path. Reloads after P2002; cancelled is
- * terminal; ready+matching metadata returns alreadyReady.
+ * `{ attachmentId, fileName, fileType, fileSize, scope?, requestId? }`. The
+ * uploadToken is generated once and encoded in the reserved path. Reloads
+ * after P2002; cancelled is terminal; ready+matching metadata returns
+ * alreadyReady. Solution scope reserves owner-scoped rows with
+ * `requestId:<target>`, `solutionId:null`.
  */
 export async function PUT(request: Request) {
   const { user } = (await auth()) ?? {}
@@ -155,12 +330,25 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  let body: { attachmentId?: unknown; fileName?: unknown; fileType?: unknown; fileSize?: unknown }
+  let body: {
+    attachmentId?: unknown
+    fileName?: unknown
+    fileType?: unknown
+    fileSize?: unknown
+    scope?: unknown
+    requestId?: unknown
+  }
   try {
     body = await request.json()
   } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
   }
+
+  const scopeResult = parseScopeFromBody(body)
+  if ('error' in scopeResult) {
+    return NextResponse.json({ error: scopeResult.error }, { status: 400 })
+  }
+  const draft = draftContextFor(scopeResult.scope)
 
   const attachmentId = typeof body.attachmentId === 'string' ? body.attachmentId : ''
   if (!ATTACHMENT_ID_RE.test(attachmentId)) {
@@ -181,10 +369,10 @@ export async function PUT(request: Request) {
   }
 
   const uploadToken = randomUUID()
-  const reservedPath = createRequestDraftReservedPath(attachmentId, uploadToken, metadata.fileName)
+  const reservedPath = draft.createReservedPath(attachmentId, uploadToken, metadata.fileName)
   const created: DraftRow = {
     id: attachmentId,
-    requestId: null,
+    requestId: scopeRowTarget(scopeResult.scope),
     solutionId: null,
     fileName: metadata.fileName,
     fileType: metadata.fileType,
@@ -200,13 +388,11 @@ export async function PUT(request: Request) {
     if (!isUniqueConstraint(error)) throw error
   }
 
-  const existing = await prisma.file_attachments.findUnique({
-    where: { id: attachmentId },
-  }) as DraftRow | null
+  const existing = await loadDraft(attachmentId)
   if (!existing) {
     return NextResponse.json({ error: 'Attachment not found' }, { status: 500 })
   }
-  return interpretExistingReservation(existing, user.id, metadata)
+  return interpretExistingReservation(existing, user.id, metadata, draft)
 }
 
 async function loadDraft(attachmentId: string): Promise<DraftRow | null> {
@@ -237,14 +423,15 @@ async function ignoreMissingDelete(storedPath: string): Promise<void> {
 function cancelledLineageMatchesAttempt(
   row: DraftRow | null,
   params: { userId: string; attachmentId: string; uploadingPath: string; readyPath: string },
+  draft: DraftContext,
 ): boolean {
   if (!row) return false
   if (row.id !== params.attachmentId) return false
   if (row.uploadedById !== params.userId) return false
-  if (row.requestId !== null || row.solutionId !== null) return false
-  if (!isRequestDraftCancelledPath(row.filePath)) return false
-  const cancelled = parseRequestDraftPath(row.filePath)
-  const attempt = parseRequestDraftPath(params.uploadingPath) ?? parseRequestDraftPath(params.readyPath)
+  if (!draft.isUnadoptedScopeDraftRow(row)) return false
+  if (!draft.isCancelledPath(row.filePath)) return false
+  const cancelled = draft.parsePath(row.filePath)
+  const attempt = draft.parsePath(params.uploadingPath) ?? draft.parsePath(params.readyPath)
   if (!cancelled || cancelled.kind !== 'cancelled') return false
   if (!attempt?.uploadToken || !attempt.fileName) return false
   if (!cancelled.uploadToken || !cancelled.fileName) return false
@@ -253,13 +440,13 @@ function cancelledLineageMatchesAttempt(
     && cancelled.fileName === attempt.fileName
 }
 
-async function reloadPostOutcome(attachmentId: string, userId: string): Promise<NextResponse> {
+async function reloadPostOutcome(attachmentId: string, userId: string, draft: DraftContext): Promise<NextResponse> {
   const row = await loadDraft(attachmentId)
   if (!row) return NextResponse.json({ error: 'Attachment not found' }, { status: 404 })
-  const conflict = conflictForExisting(row, userId)
+  const conflict = draft.conflictForExisting(row, userId)
   if (conflict) return conflict
-  if (isRequestDraftReadyPath(row.filePath)) return readySuccess(row)
-  if (isRequestDraftUploadingPath(row.filePath)) {
+  if (draft.isReadyPath(row.filePath)) return readySuccess(row)
+  if (draft.isUploadingPath(row.filePath)) {
     return NextResponse.json({ error: 'Upload in progress' }, { status: 409 })
   }
   return NextResponse.json({ error: 'Upload was superseded' }, { status: 409 })
@@ -272,17 +459,17 @@ async function reloadAfterLostFinalize(params: {
   readyPath: string
   wroteUploading: boolean
   movedReady: boolean
-}): Promise<NextResponse> {
+}, draft: DraftContext): Promise<NextResponse> {
   const row = await loadDraft(params.attachmentId)
-  if (cancelledLineageMatchesAttempt(row, params)) {
+  if (cancelledLineageMatchesAttempt(row, params, draft)) {
     if (params.movedReady) await ignoreMissingDelete(params.readyPath)
     if (params.wroteUploading) await ignoreMissingDelete(params.uploadingPath)
   }
   if (!row) return NextResponse.json({ error: 'Attachment not found' }, { status: 404 })
-  const conflict = conflictForExisting(row, params.userId)
+  const conflict = draft.conflictForExisting(row, params.userId)
   if (conflict) return conflict
-  if (isRequestDraftReadyPath(row.filePath)) return readySuccess(row)
-  if (isRequestDraftUploadingPath(row.filePath)) {
+  if (draft.isReadyPath(row.filePath)) return readySuccess(row)
+  if (draft.isUploadingPath(row.filePath)) {
     return NextResponse.json({ error: 'Upload in progress' }, { status: 409 })
   }
   return NextResponse.json({ error: 'Upload was superseded' }, { status: 409 })
@@ -293,11 +480,11 @@ async function resumeSameTokenUpload(params: {
   userId: string
   file: File
   bytes: Buffer
-}): Promise<NextResponse> {
-  const uploadingPath = isRequestDraftUploadingPath(params.row.filePath)
+}, draft: DraftContext): Promise<NextResponse> {
+  const uploadingPath = draft.isUploadingPath(params.row.filePath)
     ? params.row.filePath
-    : toRequestDraftUploadingPath(params.row.filePath)
-  const readyPath = toRequestDraftReadyPath(uploadingPath)
+    : draft.toUploadingPath(params.row.filePath)
+  const readyPath = draft.toReadyPath(uploadingPath)
   const expectedSize = params.bytes.length
   let wroteUploading = false
   let movedReady = false
@@ -315,7 +502,7 @@ async function resumeSameTokenUpload(params: {
         wroteUploading = true
       } catch (error) {
         if (isEexist(error)) {
-          return reloadPostOutcome(params.row.id, params.userId)
+          return reloadPostOutcome(params.row.id, params.userId, draft)
         }
         await ignoreMissingDelete(uploadingPath)
         throw error
@@ -339,14 +526,14 @@ async function resumeSameTokenUpload(params: {
             readyPath,
             wroteUploading,
             movedReady: false,
-          })
+          }, draft)
         }
         throw error
       }
     }
 
     const finalized = await prisma.file_attachments.updateMany({
-      where: ownerScopedUnownedWhere(params.row.id, params.userId, uploadingPath),
+      where: draft.ownerScopedDraftWhere(params.row.id, params.userId, uploadingPath),
       data: {
         filePath: readyPath,
         fileName: params.file.name,
@@ -362,7 +549,7 @@ async function resumeSameTokenUpload(params: {
         readyPath,
         wroteUploading,
         movedReady,
-      })
+      }, draft)
     }
     return NextResponse.json({
       attachmentId: params.row.id,
@@ -379,9 +566,11 @@ async function resumeSameTokenUpload(params: {
 /**
  * POST /api/attachments/stage — upload ONE reserved/uploading draft bound to
  * the reservation uploadToken. Same-token retry is idempotent. No new token
- * replaces another, so there is no predecessor lineage to clean.
+ * replaces another, so there is no predecessor lineage to clean. FormData
+ * carries `scope` (+ `requestId` for solution scope) so the CAS predicates are
+ * bound to the caller's scope; cross-scope rows stay invisible.
  *
- * FormData: file, attachmentId, uploadToken
+ * FormData: file, attachmentId, uploadToken, scope?, requestId?
  */
 export async function POST(request: Request) {
   const { user } = (await auth()) ?? {}
@@ -395,6 +584,12 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: 'Invalid form data' }, { status: 400 })
   }
+
+  const scopeResult = parseScopeFromFormData(formData)
+  if ('error' in scopeResult) {
+    return NextResponse.json({ error: scopeResult.error }, { status: 400 })
+  }
+  const draft = draftContextFor(scopeResult.scope)
 
   const file = formData.get('file')
   if (!(file instanceof File)) {
@@ -429,18 +624,18 @@ export async function POST(request: Request) {
     if (!existing) {
       return NextResponse.json({ error: 'Attachment not found' }, { status: 404 })
     }
-    const conflict = conflictForExisting(existing, user.id)
+    const conflict = draft.conflictForExisting(existing, user.id)
     if (conflict) return conflict
-    if (!isRequestDraftClaimablePath(existing.filePath) || !fileBoundToRow(existing, file, uploadToken)) {
+    if (!draft.isClaimablePath(existing.filePath) || !fileBoundToRow(existing, file, uploadToken, draft)) {
       return NextResponse.json({ error: 'Upload was superseded' }, { status: 409 })
     }
-    if (isRequestDraftReadyPath(existing.filePath)) {
+    if (draft.isReadyPath(existing.filePath)) {
       return readySuccess(existing)
     }
-    if (isRequestDraftReservedPath(existing.filePath)) {
-      const uploadingPath = toRequestDraftUploadingPath(existing.filePath)
+    if (draft.isReservedPath(existing.filePath)) {
+      const uploadingPath = draft.toUploadingPath(existing.filePath)
       const claimed = await prisma.file_attachments.updateMany({
-        where: ownerScopedUnownedWhere(attachmentId, user.id, existing.filePath),
+        where: draft.ownerScopedDraftWhere(attachmentId, user.id, existing.filePath),
         data: { filePath: uploadingPath },
       })
       if (claimed.count !== 1) continue
@@ -449,21 +644,21 @@ export async function POST(request: Request) {
         userId: user.id,
         file,
         bytes,
-      })
+      }, draft)
     }
     return resumeSameTokenUpload({
       row: existing,
       userId: user.id,
       file,
       bytes,
-    })
+    }, draft)
   }
 
   return NextResponse.json({ error: 'Upload was superseded' }, { status: 409 })
 }
 
-async function unlinkCancelledFiles(cancelledPath: string): Promise<NextResponse | null> {
-  for (const storedPath of physicalPathsFromCancelledPath(cancelledPath)) {
+async function unlinkCancelledFiles(cancelledPath: string, draft: DraftContext): Promise<NextResponse | null> {
+  for (const storedPath of draft.physicalPathsFromCancelledPath(cancelledPath)) {
     try {
       await deleteAttachmentFile(storedPath)
     } catch (error) {
@@ -477,10 +672,13 @@ async function unlinkCancelledFiles(cancelledPath: string): Promise<NextResponse
 
 /**
  * DELETE /api/attachments/stage — never deletes the draft row. CAS-loop the
- * latest owner-scoped unowned state to a terminal cancelled marker. If no row
- * exists, create a cancelled sentinel so later PUT cannot resurrect. Physical
- * cleanup failure leaves the cancelled row (500) so retry can finish. Adopted
- * rows return 409 and are untouched.
+ * latest owner-scoped unadopted state to a terminal cancelled marker. If no
+ * row exists, create a cancelled sentinel (request scope: unowned; solution
+ * scope: bound to the target requestId) so later PUT cannot resurrect within
+ * that scope. Physical cleanup failure leaves the cancelled row (500) so retry
+ * can finish. Adopted rows return 409 and are untouched.
+ *
+ * JSON: { attachmentId, scope?, requestId? }
  */
 export async function DELETE(request: Request) {
   const { user } = (await auth()) ?? {}
@@ -488,12 +686,18 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  let body: { attachmentId?: unknown }
+  let body: { attachmentId?: unknown; scope?: unknown; requestId?: unknown }
   try {
     body = await request.json()
   } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
   }
+
+  const scopeResult = parseScopeFromBody(body)
+  if ('error' in scopeResult) {
+    return NextResponse.json({ error: scopeResult.error }, { status: 400 })
+  }
+  const draft = draftContextFor(scopeResult.scope)
 
   const attachmentId = typeof body.attachmentId === 'string' ? body.attachmentId : ''
   if (!ATTACHMENT_ID_RE.test(attachmentId)) {
@@ -510,12 +714,12 @@ export async function DELETE(request: Request) {
         await prisma.file_attachments.create({
           data: {
             id: attachmentId,
-            requestId: null,
+            requestId: scopeRowTarget(scopeResult.scope),
             solutionId: null,
             fileName: 'cancelled',
             fileType: '',
             fileSize: 0,
-            filePath: createRequestDraftCancelledSentinelPath(attachmentId),
+            filePath: draft.createCancelledSentinelPath(attachmentId),
             uploadedById: user.id,
           },
         })
@@ -526,31 +730,27 @@ export async function DELETE(request: Request) {
       }
     }
 
-    if (existing.uploadedById !== user.id) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    }
-    if (existing.requestId !== null || existing.solutionId !== null) {
-      return NextResponse.json({ error: 'Attachment is no longer a draft' }, { status: 409 })
-    }
+    const conflict = draft.conflictForDelete(existing, user.id)
+    if (conflict) return conflict
 
-    if (isRequestDraftCancelledPath(existing.filePath)) {
-      const unlinkError = await unlinkCancelledFiles(existing.filePath)
+    if (draft.isCancelledPath(existing.filePath)) {
+      const unlinkError = await unlinkCancelledFiles(existing.filePath, draft)
       if (unlinkError) return unlinkError
       return NextResponse.json({ success: true })
     }
 
-    if (!isRequestDraftClaimablePath(existing.filePath)) {
+    if (!draft.isClaimablePath(existing.filePath)) {
       return NextResponse.json({ error: 'Upload was superseded' }, { status: 409 })
     }
 
-    const cancelledPath = toRequestDraftCancelledPath(existing.filePath)
+    const cancelledPath = draft.toCancelledPath(existing.filePath)
     const claimed = await prisma.file_attachments.updateMany({
-      where: ownerScopedUnownedWhere(attachmentId, user.id, existing.filePath),
+      where: draft.ownerScopedDraftWhere(attachmentId, user.id, existing.filePath),
       data: { filePath: cancelledPath },
     })
     if (claimed.count !== 1) continue
 
-    const unlinkError = await unlinkCancelledFiles(cancelledPath)
+    const unlinkError = await unlinkCancelledFiles(cancelledPath, draft)
     if (unlinkError) return unlinkError
     return NextResponse.json({ success: true })
   }

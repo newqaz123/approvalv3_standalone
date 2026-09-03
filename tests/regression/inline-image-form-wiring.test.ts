@@ -34,8 +34,6 @@ installFormHarness({
     '@/server-actions/files': {
       uploadFileAction: undefined,
       deleteFileAttachment: undefined,
-      uploadSolutionDraftAttachmentAction: undefined,
-      cleanupSolutionDraftAttachments: undefined,
     },
     '@/server-actions/solutions': { submitSolution: undefined },
     '@/server-actions/templates': { createTemplate: undefined, updateTemplate: undefined },
@@ -552,8 +550,8 @@ describe('inline image form wiring contracts', () => {
     })
 
     it('keeps solution attachments independent from inline images', () => {
-      assert.match(source, /useSolutionAttachments\(\{/)
-      assert.doesNotMatch(source, /inlineImages\.[a-z]+\(\).*ensureUploaded/)
+      assert.match(source, /useStagedSolutionAttachments\(\{/)
+      assert.doesNotMatch(source, /ensureUploaded/)
     })
   })
 

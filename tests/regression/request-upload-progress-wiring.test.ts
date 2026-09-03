@@ -7,7 +7,8 @@ import { join, dirname } from "node:path";
 /**
  * Task 4 contract: request-mode SubmitterModal stages via
  * useStagedRequestAttachments, then callers createRequest once with ready IDs.
- * Solution/resubmit upload progress (describeUploadProgress) is unchanged.
+ * Solution/resubmit modes stage the same eager way via useStagedSolutionAttachments
+ * and submit readyAttachmentIds — no submit-time upload on either surface.
  */
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -146,7 +147,7 @@ test("request list renders counts, real percent, pending/uploading/success/error
 test("cancel/close awaits owner-scoped staged DELETE reset; in-flight commit does not DELETE", () => {
 	assert.match(closeHandler, /requestCommitInFlightRef\.current/);
 	assert.match(closeHandler, /await resetStagedRequestAttachments\(\)/);
-	assert.match(closeHandler, /await reset\(\)/);
+	assert.match(closeHandler, /await resetSolutionAttachments\(\)/);
 	assert.match(closeHandler, /Failed to clean up draft files/);
 	assert.match(resetDraft, /requestCommitInFlightRef\.current = false/);
 	assert.match(resetDraft, /closeInFlightRef\.current = false/);
@@ -270,4 +271,63 @@ test("request-dead upload-progress helpers are gone; solution describeUploadProg
 	assert.doesNotMatch(uploadProgress, /requestPhaseLabel/);
 	assert.doesNotMatch(uploadProgress, /Creating request\.\.\./);
 	assert.match(uploadProgress, /export function describeUploadProgress/);
+});
+
+// Task 4: solution/resubmit mirror the request-mode staging UX — eager add,
+// per-file pending/uploading/success/error with real byte percent, retry
+// (including cleanup-failure retry), and submit gated on readiness.
+test("solution/resubmit stages eagerly via the solution-scope hook with request-mode labels", () => {
+	assert.match(modal, /useStagedSolutionAttachments\(\{ requestId \}\)/);
+	assert.doesNotMatch(modal, /useSolutionAttachments/);
+	assert.doesNotMatch(modal, /ensureUploaded/);
+	assert.doesNotMatch(modal, /describeUploadProgress/);
+
+	const solutionList =
+		modal.split("{isSolutionMode && attachmentItems.length > 0 && (")[1]?.split(
+			"{!isSolutionMode",
+		)[0] ?? "";
+	assert.ok(solutionList.length > 0, "solution attachment list found");
+	assert.match(
+		solutionList,
+		/\{solutionReadyAttachmentIds\.length\}\/\{attachmentItems\.length\} files ready/,
+	);
+	assert.match(solutionList, />Pending</);
+	assert.match(solutionList, /item\.status === "uploading"/);
+	assert.match(solutionList, /value=\{item\.progress\}/);
+	assert.match(solutionList, /\{item\.progress\}%/);
+	assert.match(solutionList, />Uploaded</);
+	assert.match(solutionList, /item\.cleanupRequested/);
+	assert.match(solutionList, />Removing\.\.\.</);
+	assert.match(solutionList, /\{item\.error\}/);
+	assert.match(solutionList, /Retry/);
+	assert.match(solutionList, /handleRetryAttachment\(item\.id\)/);
+	assert.match(solutionList, /handleRemoveAttachment\(item\.id\)/);
+	assert.match(solutionList, /canRetryStagedUpload\(item\)/);
+	assert.doesNotMatch(solutionList, /value=\{100\}/);
+	assert.doesNotMatch(solutionList, /progress:\s*100/);
+});
+
+test("solution/resubmit submit passes ready solution IDs and success clears without DELETE", () => {
+	const solutionBranch =
+		modal.split("if (isSolutionMode)")[2]?.split("} catch (error)")[0] ?? "";
+	assert.ok(solutionBranch.length > 0, "solution submit branch found");
+	assert.match(solutionBranch, /if \(solutionAttachmentsBlocking\) \{\s*return;/);
+	assert.equal(
+		(solutionBranch.match(/fileIds: solutionReadyAttachmentIds,/g) ?? []).length,
+		2,
+		"solution and resubmit payloads each pass the staged ready IDs once",
+	);
+	assert.equal(
+		(solutionBranch.match(/clearSolutionAttachments\(\)/g) ?? []).length,
+		2,
+		"each success path clears the staged hook locally (no DELETE)",
+	);
+	assert.doesNotMatch(solutionBranch, /resetSolutionAttachments/);
+});
+
+test("solution discard routes through the shared helper with the staged solution reset", () => {
+	assert.match(
+		closeHandler,
+		/await discardSubmitterSolutionDraft\(\{[\s\S]*?cleanupStagedRequestAttachments: resetStagedRequestAttachments,[\s\S]*?cleanupSolutionAttachments: resetSolutionAttachments,[\s\S]*?\}\);/,
+	);
 });

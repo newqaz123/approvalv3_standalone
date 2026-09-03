@@ -13,9 +13,12 @@ describe('image optimization size display', () => {
     assert.match(requestSource, /file\.file\.size/)
   })
 
-  it('solution uploader renders the item stored size and optimization label', () => {
-    assert.match(solutionSource, /item\.storedSize/)
-    assert.match(solutionSource, /optimized/)
+  it('solution uploader no longer renders optimizer output (staged protocol)', () => {
+    // Solution drafts stage as-is through /api/attachments/stage; the
+    // optimizer-backed storedSize/optimized display was removed with the old
+    // submit-time draft upload.
+    assert.doesNotMatch(solutionSource, /storedSize/)
+    assert.doesNotMatch(solutionSource, /optimized/)
     assert.match(solutionSource, /file\.size/)
   })
 

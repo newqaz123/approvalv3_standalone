@@ -7,13 +7,23 @@ import { PDFDocument } from 'pdf-lib'
 /**
  * Logged-in solution attachment upload E2E — release gate.
  *
- * Covers the deterministic upload-reliability matrix from the
- * solution-upload-reliability plan:
- *  - accepted-size uploads: 512 KB, 2.1 MB, 9.5 MB boundary, plus a
- *    Thai-named PDF;
- *  - oversized (10 MB + 1 byte) client-side rejection with NO upload request;
- *  - partial-upload-failure resilience (second upload returns 500) and retry;
- *  - a single real final solution submission;
+ * Covers the eager-staged upload choreography (staged XHR solution
+ * attachments) for the solution-upload-reliability matrix:
+ *  - oversized (10 MB + 1 byte) client-side rejection with NO stage request;
+ *  - eager staging on selection: per file a PUT reserve plus a real
+ *    `xhr.upload.onprogress` POST to /api/attachments/stage, rendering the
+ *    live byte percent, the per-file `Uploaded` state and the N/M
+ *    `files ready` counter while uploads are still in flight;
+ *  - Review & Submit / Confirm & Submit enabled only when every staged item
+ *    is ready (never while a reserve/upload is in flight or an item errored);
+ *  - remove of a staged file issues the scoped draft DELETE;
+ *  - a forced /api/attachments/stage upload failure surfaces the item error
+ *    with its Retry action, and Retry re-stages only that item (one reserve +
+ *    one upload) without ever submitting metadata;
+ *  - a single real final submission whose metadata submit carries exactly the
+ *    staged ready attachment IDs (fileIds) — no submit-time batch upload and
+ *    no cleanup traffic on the confirm path (the legacy submit-time
+ *    ensureUploaded batch no longer exists on this surface);
  *  - Thai filename `Content-Disposition` carrying `filename*=UTF-8''`
  *    (RFC 5987) for both inline preview and attachment download;
  *  - attachment access control: signed-out request → 401, and an unrelated
@@ -28,10 +38,10 @@ import { PDFDocument } from 'pdf-lib'
  * variables are required up front; a missing variable throws a clear setup
  * error so the gate fails loudly instead of passing vacuously.
  *
- * Implementation note (no live run during build): no disposable dataset or
- * external TEST_BASE_URL was supplied, so the live gate is exercised only via
- * `playwright test --list`, `tsc --noEmit`, and `npm run check` here. The live
- * gate remains PENDING a disposable target.
+ * Implementation note (no live run during this rework): the live gate is
+ * exercised during Task 5 browser verification against the isolated worktree
+ * server; here the spec is validated via `playwright test --list`,
+ * `tsc --noEmit`, and `npm run check`.
  */
 
 const REQUIRED_ENV = [
@@ -130,30 +140,46 @@ test.describe('Logged-in solution attachment upload (release gate)', () => {
 
     // The form requires title + description to reach the preview step.
     await page.locator('input[name="title"]').fill('E2E reliability matrix solution')
-    await page
-      .locator('textarea[name="description"]')
-      .fill('Deterministic solution attachment upload reliability verification.')
+    // The description is the TipTap rich-text editor surface; this mirrors the
+    // `.rich-text[role="textbox"]` convention of inline-description-images.spec.ts.
+    const descriptionEditor = page.locator('.rich-text[role="textbox"]').first()
+    await expect(descriptionEditor).toBeVisible({ timeout: 20_000 })
+    await descriptionEditor.click()
+    await descriptionEditor.type('Deterministic solution attachment upload reliability verification.')
 
     const fileInput = page.locator('input#solution-file-upload')
 
     // ── Route instrumentation ──────────────────────────────────────────
-    // Server Actions POST to the current page URL. Uploads carry a File, so
-    // Next serializes them as multipart/form-data; the metadata submit
-    // (submitSolution) passes only JSON-serializable args (string IDs/fields)
-    // and is serialized as text/plain — it never carries a File. This
-    // content-type discriminator targets uploads precisely and never the
-    // metadata submit, exactly as the brief requires.
-    type UploadOutcome = { kind: 'pass' | 'forced-500'; status: number }
-    const uploadOutcomes: UploadOutcome[] = []
-    // Metadata submits (submitSolution) are POSTs whose body is JSON-serializable
-    // (no File) → serialized as text/plain, never multipart. Counting them lets
-    // the spec assert that Retry never submits metadata and that exactly one
-    // real submission happens on the final Confirm.
-    let metadataPostCount = 0
+    // Staged uploads go to /api/attachments/stage: PUT (JSON reservation) →
+    // XHR POST (multipart, real upload.onprogress) → DELETE (scoped draft
+    // cleanup). The only other POST on this surface is the submitSolution
+    // Server Action metadata submit, which passes only JSON-serializable args
+    // (string IDs/fields, no File) and is serialized as text/plain to the
+    // page URL. That split lets the spec observe staging precisely and pin
+    // exactly one metadata submit — carrying the staged ready IDs — on the
+    // final Confirm.
+    type StageUploadOutcome = { kind: 'pass' | 'forced-500'; status: number }
+    const stageUploadOutcomes: StageUploadOutcome[] = []
+    // postData() bodies of metadata submits (submitSolution). Counting them
+    // lets the spec assert that staging, removal and Retry never submit
+    // metadata and that exactly one real submission happens on the final
+    // Confirm, carrying the staged ready attachment IDs.
+    const metadataSubmits: string[] = []
+    // attachmentId → fileName for every draft reserved via PUT and not yet
+    // DELETEd. At confirm time this is exactly the ready staged set.
+    const stagedDraftById = new Map<string, string>()
+    const removedDraftIds = new Set<string>()
     const routeState = {
-      uploadSeq: 0,
-      failSecondUpload: false,
+      reserveSeq: 0,
+      stageUploadSeq: 0,
+      stageDeleteSeq: 0,
+      /** Holds each staged upload response so in-flight states are observable. */
+      stageUploadDelayMs: 0,
+      /** Fulfills the next staged upload POST with a 500 (forced failure). */
+      failNextStageUpload: false,
     }
+
+    const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
     await page.route(`**/engineering/solutions/${requestId}`, async (route) => {
       const request = route.request()
@@ -161,38 +187,85 @@ test.describe('Logged-in solution attachment upload (release gate)', () => {
         await route.continue()
         return
       }
-      const contentType = request.headers()['content-type'] ?? ''
-      if (!contentType.includes('multipart/form-data')) {
-        // Metadata submit (submitSolution).
-        metadataPostCount += 1
+      // Metadata submit (submitSolution) — staging uploads never hit this URL.
+      metadataSubmits.push(request.postData() ?? '')
+      await route.continue()
+    })
+
+    await page.route('**/api/attachments/stage', async (route) => {
+      const request = route.request()
+      const method = request.method()
+      if (method === 'PUT') {
+        routeState.reserveSeq += 1
+        const response = await route.fetch()
+        try {
+          const body = JSON.parse(await response.text()) as { attachmentId?: string }
+          const requestFile = JSON.parse(request.postData() ?? '{}') as { fileName?: string }
+          if (body.attachmentId) {
+            stagedDraftById.set(body.attachmentId, requestFile.fileName ?? 'unknown')
+          }
+        } catch {
+          // Bookkeeping must never break the pass-through.
+        }
+        await route.fulfill({ response })
+        return
+      }
+      if (method === 'DELETE') {
+        routeState.stageDeleteSeq += 1
+        try {
+          const body = JSON.parse(request.postData() ?? '{}') as { attachmentId?: string }
+          if (body.attachmentId) {
+            removedDraftIds.add(body.attachmentId)
+            stagedDraftById.delete(body.attachmentId)
+          }
+        } catch {
+          // Bookkeeping must never break the pass-through.
+        }
+        const response = await route.fetch()
+        await route.fulfill({ response })
+        return
+      }
+      if (method !== 'POST') {
         await route.continue()
         return
       }
-      // Upload Server Action (carries a File).
-      routeState.uploadSeq += 1
-      if (routeState.failSecondUpload && routeState.uploadSeq === 2) {
-        uploadOutcomes.push({ kind: 'forced-500', status: 500 })
+      // XHR staged upload.
+      routeState.stageUploadSeq += 1
+      if (routeState.failNextStageUpload) {
+        routeState.failNextStageUpload = false
+        stageUploadOutcomes.push({ kind: 'forced-500', status: 500 })
         await route.fulfill({
           status: 500,
-          contentType: 'text/plain',
-          body: 'Simulated upload failure (E2E partial-failure scenario)',
+          contentType: 'application/json',
+          body: JSON.stringify({
+            error: 'Simulated staged upload failure (E2E partial-failure scenario)',
+          }),
         })
         return
       }
+      if (routeState.stageUploadDelayMs > 0) await sleep(routeState.stageUploadDelayMs)
       const response = await route.fetch()
-      uploadOutcomes.push({ kind: 'pass', status: response.status() })
+      stageUploadOutcomes.push({ kind: 'pass', status: response.status() })
       await route.fulfill({ response })
     })
 
-    // ── PHASE 1: oversized fixture is rejected client-side, no upload ──
+    // ── PHASE 1: oversized fixture is rejected client-side, no request ──
     await fileInput.setInputFiles(join(FIXTURE_DIR, FIXTURES.oversized.name))
     await expect(page.getByText(/exceeds 10MB/i)).toBeVisible()
     expect(
-      uploadOutcomes,
-      'oversized fixture must not trigger an upload request'
+      routeState.reserveSeq + routeState.stageUploadSeq,
+      'oversized fixture must not trigger a stage request'
+    ).toBe(0)
+    expect(
+      metadataSubmits,
+      'oversized fixture must not trigger a metadata submit'
     ).toHaveLength(0)
 
-    // ── PHASE 2: select every accepted fixture ─────────────────────────
+    // ── PHASE 2: select every accepted fixture — eager staged XHR uploads ─
+    // Hold each staged upload response for a moment so the in-flight states
+    // (real byte percent, readiness counter, submit gating) are observable
+    // instead of racy on a fast local connection.
+    routeState.stageUploadDelayMs = 6_000
     await fileInput.setInputFiles([
       join(FIXTURE_DIR, FIXTURES.small.name),
       join(FIXTURE_DIR, FIXTURES.medium.name),
@@ -201,80 +274,131 @@ test.describe('Logged-in solution attachment upload (release gate)', () => {
     ])
     await expect(page.getByText(FIXTURES.small.name)).toBeVisible()
 
-    // ── PHASE 3: partial failure — second upload (medium) returns 500 ──
-    routeState.uploadSeq = 0
-    routeState.failSecondUpload = true
-    await page.getByRole('button', { name: 'Review & Submit' }).click()
-    await expect(page.getByRole('button', { name: 'Confirm & Submit' })).toBeVisible()
-    // Snapshot the upload count before the confirm so we can assert the batch
-    // continued past the forced 500 (later items still uploaded).
-    const uploadCountBeforeConfirm = uploadOutcomes.length
-    await page.getByRole('button', { name: 'Confirm & Submit' }).click()
-    // The batch catches the forced 500: the failed item reaches a terminal
-    // `error` state (never stuck `uploading`), the later items still upload, and
-    // the batch returns { success:false }. No metadata submit is attempted.
-    expect(metadataPostCount, 'no metadata submit on upload failure').toBe(0)
-    // The form returns to the edit view so the failed item is visibly errored
-    // with its Retry action. The failed filename stays in the list.
-    await expect(page.getByText(FIXTURES.medium.name)).toBeVisible()
-    // The errored item exposes a Retry action (distinct from Confirm).
-    await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible()
-    expect(
-      uploadOutcomes.some((outcome) => outcome.kind === 'forced-500'),
-      'the second upload request was answered with a 500'
-    ).toBeTruthy()
-    // The batch continued past the failure: all four uploads were attempted
-    // during the confirm (3 passed + 1 forced-500), not aborted at item two.
-    expect(
-      uploadOutcomes.length - uploadCountBeforeConfirm,
-      'the batch attempted all four uploads despite the mid-batch 500'
-    ).toBe(4)
+    const reviewButton = page.getByRole('button', { name: 'Review & Submit' })
+    // Eager staging means uploads are already in flight right after selection:
+    // the live byte percent renders, the counter shows 0 of 4 ready, and
+    // Review & Submit is blocked until every staged item is ready.
+    await expect(reviewButton).toBeDisabled()
+    await expect(page.getByText('0/4 files ready')).toBeVisible()
+    await expect(page.getByText(/\d+%$/).first()).toBeVisible({ timeout: 5_000 })
+    expect(metadataSubmits, 'no metadata submit while staging').toHaveLength(0)
 
-    // ── PHASE 4: retry the failed item — only it is re-uploaded, no commit ─
-    // Retry calls ensureUploaded(), which reuses the three prior successes and
-    // re-uploads ONLY the errored item — exactly one upload POST, no metadata.
-    routeState.failSecondUpload = false
-    const uploadCountBeforeRetry = uploadOutcomes.length
-    await page.getByRole('button', { name: 'Retry' }).click()
-    await expect.poll(
-      () => uploadOutcomes.length,
-      { timeout: 30_000, message: 'only the failed item was re-uploaded by Retry' }
-    ).toBe(uploadCountBeforeRetry + 1)
-    expect(metadataPostCount, 'no metadata submit during retry').toBe(0)
-
-    // ── PHASE 5: return to preview — all items Ready, still no commit ──
-    await expect(page.getByRole('button', { name: 'Review & Submit' })).toBeEnabled()
-    await page.getByRole('button', { name: 'Review & Submit' }).click()
-    await expect(page.getByRole('button', { name: 'Confirm & Submit' })).toBeVisible()
-    // All four accepted fixtures now show the Ready badge on the preview.
-    await expect(page.getByText('Ready', { exact: true })).toHaveCount(4, {
+    // Every item reaches the Uploaded state and the counter settles at 4/4.
+    await expect(page.getByText('Uploaded', { exact: true })).toHaveCount(4, {
       timeout: 30_000,
     })
-    expect(metadataPostCount, 'no metadata submit before the final confirm').toBe(0)
+    await expect(page.getByText('4/4 files ready')).toBeVisible()
+    await expect(reviewButton).toBeEnabled()
 
-    // ── PHASE 6: final real submission — exactly one metadata submit ──
-    await page.getByRole('button', { name: 'Confirm & Submit' }).click()
+    // ── PHASE 3: remove one staged file — scoped draft DELETE, no submit ──
+    const mediumRow = page
+      .locator('div.flex.items-center.gap-3.p-3.border.rounded-lg.bg-white')
+      .filter({ hasText: FIXTURES.medium.name })
+    await mediumRow.getByRole('button').last().click()
+    await expect(page.getByText(FIXTURES.medium.name)).toBeHidden({ timeout: 15_000 })
+    await expect(page.getByText('3/3 files ready')).toBeVisible()
+    expect(metadataSubmits, 'removal never submits metadata').toHaveLength(0)
+
+    // ── PHASE 4: forced staged-upload failure → item error + Retry ─────
+    // Re-add the removed file with its upload POST forced to 500. Only that
+    // item errors: the three untouched items stay Uploaded, the counter shows
+    // 3 of 4 ready, Review & Submit stays blocked, and no metadata is sent.
+    routeState.failNextStageUpload = true
+    await fileInput.setInputFiles(join(FIXTURE_DIR, FIXTURES.medium.name))
+    await expect(page.getByText(/Simulated staged upload failure/)).toBeVisible({
+      timeout: 15_000,
+    })
+    await expect(page.getByText('Uploaded', { exact: true })).toHaveCount(3)
+    await expect(page.getByText('3/4 files ready')).toBeVisible()
+    await expect(reviewButton).toBeDisabled()
+    const retryButton = page.getByRole('button', { name: 'Retry' })
+    await expect(retryButton).toBeVisible()
+    expect(
+      stageUploadOutcomes.filter((outcome) => outcome.kind === 'forced-500'),
+      'the staged upload request was answered with a 500'
+    ).toHaveLength(1)
+    expect(metadataSubmits, 'no metadata submit on staged-upload failure').toHaveLength(0)
+
+    // ── PHASE 5: retry re-stages only the failed item, no commit ───────
+    // Retry re-runs the reserve + upload XHR for the errored item under the
+    // same stable attachmentId — exactly one PUT and one POST, no metadata.
+    routeState.failNextStageUpload = false
+    const reserveSeqBeforeRetry = routeState.reserveSeq
+    const stageUploadSeqBeforeRetry = routeState.stageUploadSeq
+    await retryButton.click()
+    await expect.poll(
+      () => routeState.stageUploadSeq,
+      { timeout: 30_000, message: 'only the failed item was re-staged by Retry' }
+    ).toBe(stageUploadSeqBeforeRetry + 1)
+    expect(routeState.reserveSeq, 'Retry re-reserves the same item').toBe(
+      reserveSeqBeforeRetry + 1
+    )
+    await expect(page.getByText('Uploaded', { exact: true })).toHaveCount(4, {
+      timeout: 30_000,
+    })
+    await expect(page.getByText('4/4 files ready')).toBeVisible()
+    await expect(reviewButton).toBeEnabled()
+
+    // ── PHASE 6: preview — all items Ready, still zero metadata submits ──
+    expect(
+      stagedDraftById.size,
+      'exactly the four ready staged drafts are reserved'
+    ).toBe(4)
+    await reviewButton.click()
+    const confirmButton = page.getByRole('button', { name: 'Confirm & Submit' })
+    await expect(confirmButton).toBeVisible()
+    await expect(confirmButton).toBeEnabled()
+    // All four accepted fixtures now show the Ready badge on the preview.
+    await expect(page.getByText('Ready', { exact: true })).toHaveCount(4)
+    expect(metadataSubmits, 'no metadata submit before the final confirm').toHaveLength(0)
+    const stageCountsBeforeConfirm = {
+      reserve: routeState.reserveSeq,
+      upload: routeState.stageUploadSeq,
+      remove: routeState.stageDeleteSeq,
+    }
+
+    // ── PHASE 7: final real submission — one submit carrying staged IDs ──
+    await confirmButton.click()
     await expect(page).toHaveURL((url) => url.pathname === '/engineering', {
       timeout: 60_000,
     })
-    expect(metadataPostCount, 'exactly one metadata submit on the final confirm').toBe(1)
+    expect(metadataSubmits, 'exactly one metadata submit on the final confirm').toHaveLength(1)
+    // Submit-time staging is gone: the confirm triggers no reserve, upload or
+    // cleanup traffic — it only adopts the already-staged drafts.
+    expect(routeState.reserveSeq).toBe(stageCountsBeforeConfirm.reserve)
+    expect(routeState.stageUploadSeq).toBe(stageCountsBeforeConfirm.upload)
+    expect(routeState.stageDeleteSeq).toBe(stageCountsBeforeConfirm.remove)
+    // The single metadata submit carries exactly the staged ready attachment
+    // IDs (fileIds) and none of the removed draft IDs.
+    const submitBody = metadataSubmits[0]
+    expect(submitBody, 'submit passes the fileIds argument').toContain('fileIds')
+    for (const [attachmentId, fileName] of stagedDraftById) {
+      expect(submitBody, `staged id for ${fileName} passed to submitSolution`).toContain(
+        attachmentId
+      )
+    }
+    for (const removedId of removedDraftIds) {
+      expect(submitBody, 'removed draft id is not submitted').not.toContain(removedId)
+    }
 
-    // Global upload assertions: no 413, and the only 500 was the intentional
-    // partial-failure one (no passing upload returned a server error).
+    // Global staged-upload assertions: no 413 (the oversized fixture was
+    // rejected client-side before any request), and the only 5xx was the
+    // intentional forced stage failure (no passing upload returned a server
+    // error).
     expect(
-      uploadOutcomes.some((outcome) => outcome.status === 413),
-      'no upload returned 413'
+      stageUploadOutcomes.some((outcome) => outcome.status === 413),
+      'no staged upload returned 413'
     ).toBeFalsy()
     expect(
-      uploadOutcomes.filter((outcome) => outcome.kind === 'pass' && outcome.status >= 500),
-      'no passing upload returned 500'
+      stageUploadOutcomes.filter((outcome) => outcome.kind === 'pass' && outcome.status >= 500),
+      'no passing staged upload returned a server error'
     ).toHaveLength(0)
     expect(
-      uploadOutcomes.filter((outcome) => outcome.kind === 'forced-500'),
-      'exactly one intentional partial-failure 500'
+      stageUploadOutcomes.filter((outcome) => outcome.kind === 'forced-500'),
+      'exactly one intentional staged-upload failure'
     ).toHaveLength(1)
 
-    // ── PHASE 7: capture the Thai attachment id from the request detail ──
+    // ── PHASE 8: capture the Thai attachment id from the request detail ──
     await page.goto(`/requests/${requestId}`)
     await expect(page.getByText('Solution Attachments')).toBeVisible()
     const thaiFilename = FIXTURES.thai.name
@@ -297,7 +421,7 @@ test.describe('Logged-in solution attachment upload (release gate)', () => {
     const previewUrl = `/api/files/download?id=${encodeURIComponent(attachmentId)}&disposition=inline`
     const downloadUrl = `/api/files/download?id=${encodeURIComponent(attachmentId)}&disposition=attachment`
 
-    // ── PHASE 8: Thai filename Content-Disposition (preview + download) ──
+    // ── PHASE 9: Thai filename Content-Disposition (preview + download) ──
     const previewResponse = await page.request.get(previewUrl)
     expect(previewResponse.status()).toBe(200)
     expect(
@@ -310,12 +434,12 @@ test.describe('Logged-in solution attachment upload (release gate)', () => {
       (downloadResponse.headers()['content-disposition'] ?? '').toLowerCase()
     ).toContain("filename*=utf-8''")
 
-    // ── PHASE 9: signed-out denial (401) ──────────────────────────────
+    // ── PHASE 10: signed-out denial (401) ─────────────────────────────
     await page.context().clearCookies()
     const deniedResponse = await page.request.get(downloadUrl)
     expect(deniedResponse.status()).toBe(401)
 
-    // ── PHASE 10: unrelated general-department user denial (403) ─────
+    // ── PHASE 11: unrelated general-department user denial (403) ─────
     await login(page, unrelatedEmail, unrelatedPassword)
     const forbiddenResponse = await page.request.get(downloadUrl)
     expect(forbiddenResponse.status()).toBe(403)

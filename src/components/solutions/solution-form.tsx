@@ -32,7 +32,7 @@ import { CustomApprovalPicker } from './custom-approval-picker'
 import { SolutionFileUpload } from './solution-file-upload'
 import { SolutionPreview } from './solution-preview'
 import { submitSolution } from '@/server-actions/solutions'
-import { useSolutionAttachments } from '@/hooks/use-solution-attachments'
+import { useStagedSolutionAttachments } from '@/hooks/use-staged-solution-attachments'
 import {
   inlineImageBlockingMessage,
   useInlineDescriptionImages,
@@ -89,9 +89,22 @@ export function SolutionForm({
   // final confirm so preview/edit transitions keep the same upload session.
   const inlineImages = useInlineDescriptionImages()
   const inlineImageBlockingGuidance = inlineImageBlockingMessage(inlineImages.blockingReason)
-  const { items, addFiles, removeItem, ensureUploaded, clear, reset } = useSolutionAttachments({
-    requestId,
-  })
+  // Solution drafts stage eagerly through the solution-scope staging protocol
+  // (PUT reserve → XHR POST with real byte progress). Submit adopts only
+  // readyAttachmentIds; there is no submit-time upload on this surface.
+  const {
+    items,
+    addFiles,
+    retryItem,
+    removeItem,
+    reset,
+    clear,
+    hasBlockingOperations: stagedBlocking,
+    readyAttachmentIds,
+  } = useStagedSolutionAttachments({ requestId })
+  // Mirrors the request-mode blocking predicate: reserve/upload/cleanup in
+  // flight, any errored/not-ready item, or a failed cleanup blocks submission.
+  const attachmentsBlocking = stagedBlocking || items.length !== readyAttachmentIds.length
   const isSubmittingRef = useRef(isSubmitting)
   isSubmittingRef.current = isSubmitting
   const handleAddFiles = useCallback((files: File[]) => {
@@ -124,43 +137,22 @@ export function SolutionForm({
 
   const useCustomApprovals = form.watch('useCustomApprovals')
 
-  const handleRemoveItem = async (id: string) => {
+  // Removal is synchronous: the staged hook aborts any in-flight XHR, marks
+  // the item cleanupRequested, and DELETEs the draft server-side. A failed
+  // DELETE stays on the item (error + Retry) instead of a transient toast.
+  const handleRemoveItem = (id: string) => {
     if (isSubmitting) return
     if (commitInFlightRef.current || closeInFlightRef.current) return
-    try {
-      await removeItem(id)
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to remove file')
-    }
+    removeItem(id)
   }
 
-  // Retry is upload-only: it re-runs the authoritative coordinator for the
-  // remaining non-success (errored/pending) items and reuses prior successes,
-  // so a failed file can be retried in isolation without re-uploading the rest
-  // or touching metadata. The metadata submit happens only via Confirm.
-  const handleRetryItem = async () => {
+  // Retry is per-item and upload-only: it re-runs reserve+XHR for the errored
+  // item (or retries a failed cleanup for a removing item) under the same
+  // stable attachmentId. The metadata submit happens only via Confirm.
+  const handleRetryItem = (id: string) => {
     if (isSubmitting) return
     if (commitInFlightRef.current || closeInFlightRef.current) return
-    commitInFlightRef.current = true
-    setIsSubmitting(true)
-    try {
-      const result = await ensureUploaded()
-      if (!result.success) {
-        const remaining = result.items.filter((entry) => entry.status === 'error')
-        toast.error(
-          remaining.length === 1
-            ? '1 file still failed to upload'
-            : `${remaining.length} files still failed to upload`
-        )
-        return
-      }
-      toast.success('All files uploaded successfully')
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'An error occurred')
-    } finally {
-      commitInFlightRef.current = false
-      setIsSubmitting(false)
-    }
+    retryItem(id)
   }
 
   const { isDirty } = form.formState
@@ -215,6 +207,10 @@ export function SolutionForm({
       return
     }
 
+    // Staged drafts must all be ready (no reserve/upload/cleanup in flight,
+    // no errored item, no failed cleanup) before any submit phase runs.
+    if (attachmentsBlocking) return
+
     // If not yet previewing, show preview
     if (!isConfirmed) {
       setShowPreview(true)
@@ -225,21 +221,6 @@ export function SolutionForm({
     setIsSubmitting(true)
 
     try {
-      // ensureUploaded() is authoritative: it uploads pending/errored items,
-      // reuses prior successes, and returns the final batch result. Branch on
-      // its result — never on pre-call UI state.
-      const result = await ensureUploaded()
-      if (!result.success) {
-        toast.error('Some files failed to upload')
-        // Surface the file list so the failed item is visibly errored with its
-        // Retry action (SolutionFileUpload). The user retries in isolation,
-        // then returns to preview + Confirm for the single metadata submit.
-        setShowPreview(false)
-        commitInFlightRef.current = false
-        setIsSubmitting(false)
-        return
-      }
-
       const submitResult = await submitSolution({
         requestId,
         title: values.title,
@@ -251,12 +232,12 @@ export function SolutionForm({
         conceptDesign: values.conceptDesign || undefined,
         useCustomApprovals: values.useCustomApprovals,
         customApproverIds: values.customApproverIds,
-        fileIds: result.attachmentIds,
+        fileIds: readyAttachmentIds,
       }) as { success: boolean; solutionId?: string; error?: string }
 
       if (!submitResult.success) {
-        // Metadata submission failed — retain the successfully uploaded items
-        // so the user can retry without re-uploading.
+        // Metadata submission failed — retain the staged drafts so the user can
+        // retry without re-uploading.
         toast.error(submitResult.error || 'Failed to submit solution')
         commitInFlightRef.current = false
         setIsSubmitting(false)
@@ -267,9 +248,8 @@ export function SolutionForm({
 
       // The description images are committed solution assets now, so clear the
       // inline draft session without deleting anything. The drafts are now
-      // linked to the committed solution. Clear local references WITHOUT
-      // invoking cleanup (reset/cleanupDrafts would fail on the now
-      // solutionId-scoped rows).
+      // linked to the committed solution: clear() drops the local staged state
+      // WITHOUT DELETE (deleting adopted rows would unlink committed files).
       inlineImages.clear()
       clear()
       setDiscardOpen(false)
@@ -297,6 +277,7 @@ export function SolutionForm({
       toast.error(inlineImageBlockingMessage(inlineImages.blockingReason))
       return
     }
+    if (attachmentsBlocking) return
     const values = form.getValues()
     await handleSubmit(values, true)
   }
@@ -317,7 +298,7 @@ export function SolutionForm({
     useCustomApprovals: form.watch('useCustomApprovals'),
     customApprovers,
     files: items
-      .filter((item) => item.status !== 'error')
+      .filter((item) => item.status !== 'error' && !item.cleanupRequested)
       .map((item) => ({
         file: item.file,
         id: item.id,
@@ -339,7 +320,11 @@ export function SolutionForm({
           requestTitle={requestTitle}
           onEdit={handleBackToEdit}
           onConfirm={handleConfirmSubmit}
-          isSubmitting={isSubmitting || inlineImages.hasBlockingOperations}
+          isSubmitting={
+            isSubmitting ||
+            inlineImages.hasBlockingOperations ||
+            attachmentsBlocking
+          }
         />
       </div>
     )
@@ -581,7 +566,14 @@ export function SolutionForm({
               >
                 Cancel
               </Button>
-              <Button type="submit" disabled={isSubmitting || inlineImages.hasBlockingOperations}>
+              <Button
+                type="submit"
+                disabled={
+                  isSubmitting ||
+                  inlineImages.hasBlockingOperations ||
+                  attachmentsBlocking
+                }
+              >
                 Review &amp; Submit
               </Button>
             </div>

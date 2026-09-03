@@ -10,16 +10,31 @@ import {
   createRequestDraftReadyPath,
   createRequestDraftReservedPath,
   createRequestDraftUploadingPath,
+  createSolutionDraftCancelledSentinelPath,
+  createSolutionDraftReadyPath,
+  createSolutionDraftReservedPath,
+  createSolutionDraftUploadingPath,
   isRequestDraftCancelledPath,
   isRequestDraftCancelledSentinelPath,
   isRequestDraftClaimablePath,
   isRequestDraftReadyPath,
   isRequestDraftReservedPath,
   isRequestDraftUploadingPath,
+  isSolutionDraftCancelledPath,
+  isSolutionDraftCancelledSentinelPath,
+  isSolutionDraftClaimablePath,
+  isSolutionDraftReadyPath,
+  isSolutionDraftReservedPath,
+  isSolutionDraftUploadingPath,
   moveAttachmentFile,
+  parseSolutionDraftPath,
   physicalPathsFromCancelledPath,
+  physicalPathsFromSolutionCancelledPath,
   readAttachmentFile,
   resolveStoredAttachmentPath,
+  toSolutionDraftCancelledPath,
+  toSolutionDraftReadyPath,
+  toSolutionDraftUploadingPath,
   toRequestDraftCancelledPath,
   toRequestDraftReadyPath,
   toRequestDraftUploadingPath,
@@ -247,5 +262,106 @@ describe('moveAttachmentFile', () => {
     } finally {
       await chmod(sourceDir, 0o755)
     }
+  })
+})
+
+describe('createSolutionDraftUploadingPath / createSolutionDraftReadyPath', () => {
+  it('returns server-controlled solution-drafts prefixes with attachment and upload-token UUIDs', () => {
+    const uploading = createSolutionDraftUploadingPath(UUID, TOKEN, 'a b.pdf')
+    const ready = createSolutionDraftReadyPath(UUID, TOKEN, 'a b.pdf')
+    assert.equal(uploading, `solution-drafts/uploading/${UUID}/${TOKEN}/a b.pdf`)
+    assert.equal(ready, `solution-drafts/ready/${UUID}/${TOKEN}/a b.pdf`)
+    assert.ok(!uploading.startsWith('/'))
+    assert.ok(!ready.startsWith('/'))
+    assert.equal(uploading.split('/').length, 5)
+    assert.equal(ready.split('/').length, 5)
+  })
+
+  it('sanitizes traversal names into a single file segment', () => {
+    const uploading = createSolutionDraftUploadingPath(UUID, TOKEN, '../../etc/passwd.pdf')
+    assert.equal(uploading, `solution-drafts/uploading/${UUID}/${TOKEN}/passwd.pdf`)
+    assert.ok(!uploading.includes('..'))
+  })
+
+  it('rejects invalid attachment or upload token ids', () => {
+    assert.throws(() => createSolutionDraftUploadingPath('not-a-uuid', TOKEN, 'a.pdf'), /Invalid solution draft attachment id/)
+    assert.throws(() => createSolutionDraftReadyPath(UUID, '../evil', 'a.pdf'), /Invalid solution draft upload token/)
+    assert.throws(() => createSolutionDraftReservedPath('', TOKEN, 'a.pdf'), /Invalid solution draft attachment id/)
+  })
+})
+
+describe('solution-draft scope isolation', () => {
+  it('never matches request-draft paths or vice versa', () => {
+    const solutionReady = createSolutionDraftReadyPath(UUID, TOKEN, 'a.pdf')
+    const requestReady = createRequestDraftReadyPath(UUID, TOKEN, 'a.pdf')
+    assert.equal(isSolutionDraftReadyPath(solutionReady), true)
+    assert.equal(isSolutionDraftReadyPath(requestReady), false)
+    assert.equal(isRequestDraftReadyPath(solutionReady), false)
+    assert.equal(isSolutionDraftReservedPath(createSolutionDraftReservedPath(UUID, TOKEN, 'a.pdf')), true)
+    assert.equal(isSolutionDraftReservedPath(createRequestDraftReservedPath(UUID, TOKEN, 'a.pdf')), false)
+    assert.equal(isRequestDraftReservedPath(createSolutionDraftReservedPath(UUID, TOKEN, 'a.pdf')), false)
+    assert.equal(isSolutionDraftUploadingPath(createRequestDraftUploadingPath(UUID, TOKEN, 'a.pdf')), false)
+    assert.equal(isSolutionDraftClaimablePath(requestReady), false)
+    assert.equal(isRequestDraftClaimablePath(solutionReady), false)
+    assert.equal(isSolutionDraftUploadingPath(`stage/${UUID}/a.pdf`), false)
+    assert.equal(isSolutionDraftUploadingPath(''), false)
+  })
+
+  it('uploadTokenFromDraftPath reads both disjoint roots', () => {
+    assert.equal(uploadTokenFromDraftPath(createSolutionDraftReservedPath(UUID, TOKEN, 'a.pdf')), TOKEN)
+    assert.equal(uploadTokenFromDraftPath(createRequestDraftReservedPath(UUID, TOKEN, 'a.pdf')), TOKEN)
+  })
+})
+
+describe('solution-draft cancelled markers', () => {
+  it('encodes lineage into solution cancelled markers that derive physical paths', () => {
+    const uploading = createSolutionDraftUploadingPath(UUID, TOKEN, 'a b.pdf')
+    const ready = createSolutionDraftReadyPath(UUID, TOKEN, 'a b.pdf')
+    const reserved = createSolutionDraftReservedPath(UUID, TOKEN, 'a b.pdf')
+    const sentinel = createSolutionDraftCancelledSentinelPath(UUID)
+
+    assert.equal(toSolutionDraftCancelledPath(uploading), `solution-drafts/cancelled/uploading/${UUID}/${TOKEN}/a b.pdf`)
+    assert.equal(toSolutionDraftCancelledPath(ready), `solution-drafts/cancelled/ready/${UUID}/${TOKEN}/a b.pdf`)
+    assert.equal(toSolutionDraftCancelledPath(reserved), `solution-drafts/cancelled/reserved/${UUID}/${TOKEN}/a b.pdf`)
+    assert.equal(sentinel, `solution-drafts/cancelled/absent/${UUID}`)
+    assert.equal(isSolutionDraftCancelledPath(toSolutionDraftCancelledPath(uploading)), true)
+    assert.equal(isSolutionDraftCancelledPath(toSolutionDraftCancelledPath(ready)), true)
+    assert.equal(isSolutionDraftCancelledSentinelPath(sentinel), true)
+    assert.equal(isSolutionDraftReadyPath(toSolutionDraftCancelledPath(ready)), false)
+    assert.equal(isSolutionDraftClaimablePath(toSolutionDraftCancelledPath(ready)), false)
+    assert.equal(isRequestDraftCancelledPath(sentinel), false)
+    assert.equal(isRequestDraftCancelledSentinelPath(sentinel), false)
+    assert.deepEqual(physicalPathsFromSolutionCancelledPath(toSolutionDraftCancelledPath(uploading)), [uploading, ready])
+    assert.deepEqual(physicalPathsFromSolutionCancelledPath(toSolutionDraftCancelledPath(ready)), [ready])
+    assert.deepEqual(physicalPathsFromSolutionCancelledPath(toSolutionDraftCancelledPath(reserved)), [])
+    assert.deepEqual(physicalPathsFromSolutionCancelledPath(sentinel), [])
+    assert.equal(toSolutionDraftUploadingPath(reserved), uploading)
+    assert.equal(toSolutionDraftReadyPath(uploading), ready)
+  })
+
+  it('rejects request-draft and unrelated paths in solution transitions', () => {
+    assert.throws(
+      () => toSolutionDraftCancelledPath(createRequestDraftReadyPath(UUID, TOKEN, 'a.pdf')),
+      /Not a solution-draft path/,
+    )
+    assert.throws(() => toSolutionDraftReadyPath(`stage/${UUID}/a.pdf`), /Not a solution-draft/)
+    assert.throws(
+      () => physicalPathsFromSolutionCancelledPath(createRequestDraftReadyPath(UUID, TOKEN, 'a.pdf')),
+      /Not a solution-draft cancelled path/,
+    )
+    // The request physical-path helper must never resolve a solution marker.
+    assert.throws(
+      () => physicalPathsFromCancelledPath(createSolutionDraftReadyPath(UUID, TOKEN, 'a.pdf')),
+      /Not a request-draft cancelled path/,
+    )
+  })
+
+  it('parses solution paths including the absent sentinel but never request paths', () => {
+    const parsed = parseSolutionDraftPath(createSolutionDraftReservedPath(UUID, TOKEN, 'a b.pdf'))
+    assert.deepEqual(parsed, { kind: 'reserved', attachmentId: UUID, uploadToken: TOKEN, fileName: 'a b.pdf' })
+    const sentinelParsed = parseSolutionDraftPath(createSolutionDraftCancelledSentinelPath(UUID))
+    assert.deepEqual(sentinelParsed, { kind: 'cancelled', priorKind: 'absent', attachmentId: UUID })
+    assert.equal(parseSolutionDraftPath(createRequestDraftReservedPath(UUID, TOKEN, 'a.pdf')), null)
+    assert.equal(parseSolutionDraftPath(`solution-drafts/cancelled/absent/${UUID}/extra`), null)
   })
 })

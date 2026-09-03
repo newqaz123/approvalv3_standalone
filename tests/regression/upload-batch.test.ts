@@ -251,124 +251,47 @@ describe('uploadAttachmentBatch', () => {
 //    source-regex is the verification channel — same approach as the Task 2/3/4
 //    server-action contract tests. ──
 
-const hookSource = readFileSync('src/hooks/use-solution-attachments.ts', 'utf8')
+// The legacy useSolutionAttachments hook (submit-time draft upload via
+// uploadSolutionDraftAttachmentAction) was removed with the Task 4 staged-XHR
+// swap; its contract tests were retired with it. The staged lifecycle is
+// behavior-tested in use-staged-request-attachments.test.ts and
+// use-staged-solution-attachments.test.ts; the uploader card contract below is
+// updated to the staged item shape.
 const componentSource = readFileSync('src/components/solutions/solution-file-upload.tsx', 'utf8')
 
-describe('useSolutionAttachments hook contract', () => {
-  it('exports the hook with the items-first return interface', () => {
-    assert.match(hookSource, /export function useSolutionAttachments/)
-    assert.match(hookSource, /items: AttachmentUploadItem\[\]/)
-    assert.match(hookSource, /addFiles/)
-    assert.match(hookSource, /removeItem/)
-    assert.match(hookSource, /ensureUploaded/)
-    assert.match(hookSource, /cleanupDrafts/)
-    assert.match(hookSource, /reset/)
-    assert.match(hookSource, /clear/)
-  })
-
-  it('uses a ref to avoid stale closures in async callbacks', () => {
-    assert.match(hookSource, /itemsRef/)
-    assert.match(hookSource, /itemsRef\.current/)
-  })
-
-  it('ensureUploaded returns the coordinator result directly', () => {
-    assert.match(hookSource, /const result = await uploadAttachmentBatch/)
-    assert.match(hookSource, /setItems\(result\.items\)/)
-    assert.match(hookSource, /return result/)
-  })
-
-  it('uploadOne builds FormData with file and requestId for the draft action', () => {
-    assert.match(hookSource, /formData\.append\('file'/)
-    assert.match(hookSource, /formData\.append\('requestId'/)
-    assert.match(hookSource, /uploadSolutionDraftAttachmentAction/)
-  })
-
-  it('propagates the stored size from the successful draft action', () => {
-    assert.match(hookSource, /storedSize:\s*actionResult\.fileAttachment\.fileSize/)
-  })
-
-  it('removeItem cleans server-side before removing and never swallows failures', () => {
-    assert.match(hookSource, /cleanupSolutionDraftAttachments/)
-    // removeItem checks for staged attachmentId before cleanup
-    assert.match(hookSource, /current\?\.status === 'success' && current\.attachmentId/)
-    // Propagates the cleanup failure — never silently swallowed
-    assert.match(hookSource, /if \(!result\.success\)\s*\{[\s\S]*?throw new Error\(result\.error\)/m)
-  })
-
-  it('cleanupDrafts batches all successful staged ids', () => {
-    // The batching: filter all success+attachmentId items into one cleanup call
-    assert.match(hookSource, /stagedIds/)
-    assert.match(hookSource, /entry\.status === 'success' && entry\.attachmentId/)
-    assert.match(hookSource, /attachmentIds: stagedIds/)
-  })
-
-  it('reset clears local state only after cleanup returns', () => {
-    // reset calls cleanup before setItems([])
-    const resetSlice = hookSource.slice(hookSource.indexOf('const reset ='))
-    assert.match(resetSlice, /cleanupSolutionDraftAttachments/)
-    assert.match(resetSlice, /setItems\(\[\]\)/)
-    // The cleanup await must precede the clear
-    assert.ok(resetSlice.indexOf('await') < resetSlice.indexOf("setItems([])"))
-  })
-
-  it('reset nulls the ref synchronously to avoid double-cleanup on unmount', () => {
-    // reset must null itemsRef.current before setItems([]) so the unmount
-    // safety net (which reads itemsRef.current) does not double-clean drafts
-    // that reset already deleted via the deterministic Cancel button.
-    const resetSlice = hookSource.slice(hookSource.indexOf('const reset ='))
-    assert.match(resetSlice, /itemsRef\.current = \[\]/)
-    assert.ok(
-      resetSlice.indexOf('itemsRef.current = []') <
-        resetSlice.indexOf('setItems([])')
-    )
-  })
-
-  it('clear drops local state without server cleanup and nulls the ref first', () => {
-    // clear is for the post-success path: linked drafts must not be sent to
-    // cleanupSolutionDraftAttachments (which scopes to solutionId:null).
-    const clearSlice = hookSource.slice(hookSource.indexOf('const clear ='))
-    assert.match(clearSlice, /setItems\(\[\]\)/)
-    // The ref is nulled synchronously before the state update so same-tick
-    // callbacks cannot observe the now-linked IDs.
-    assert.match(clearSlice, /itemsRef\.current = \[\]/)
-    assert.ok(
-      clearSlice.indexOf('itemsRef.current = []') <
-        clearSlice.indexOf('setItems([])')
-    )
-    // clear must never invoke server cleanup
-    assert.doesNotMatch(clearSlice, /cleanupSolutionDraftAttachments/)
-  })
-
-  it('fires best-effort cleanup on unmount for staged drafts (safety net)', () => {
-    // A useEffect cleanup snapshots itemsRef.current on unmount and fires
-    // owner-scoped cleanup for any remaining staged (unlinked) drafts. After a
-    // successful submit, clear() has already nulled itemsRef.current, so this
-    // is a no-op — cleanup never runs on linked attachments.
-    assert.match(hookSource, /useEffect/)
-    // Fire-and-forget (void) distinguishes the unmount safety net from the
-    // awaited cleanup in reset/cleanupDrafts/removeItem.
-    assert.match(hookSource, /void cleanupSolutionDraftAttachments/)
-  })
-})
-
 describe('SolutionFileUpload items-first API', () => {
-  it('accepts items: AttachmentUploadItem[] with add/remove/retry callbacks', () => {
-    assert.match(componentSource, /items: AttachmentUploadItem\[\]/)
+  it('accepts staged items with add/remove/retry callbacks', () => {
+    assert.match(componentSource, /items: StagedItem\[\]/)
     assert.match(componentSource, /onAddFiles/)
     assert.match(componentSource, /onRemoveItem/)
     assert.match(componentSource, /onRetryItem/)
   })
 
   it('renders items-first as the sole API (no legacy dual-normalization)', () => {
-    assert.match(componentSource, /items: AttachmentUploadItem\[\]/)
-    // No deprecated parallel API remains after the Task 6 caller migration.
+    assert.match(componentSource, /items: StagedItem\[\]/)
+    // No deprecated parallel API remains after the caller migration.
     assert.doesNotMatch(componentSource, /usingItemsApi/)
     assert.doesNotMatch(componentSource, /items !== undefined/)
   })
 
-  it('shows per-item server error text beside failed files', () => {
+  it('renders real per-file byte progress and the staged state labels', () => {
+    // Eager staging: the real xhr.upload.onprogress percent per item plus the
+    // request-mode labels; never a fabricated 100%.
+    assert.match(componentSource, /value=\{item\.progress\}/)
+    assert.match(componentSource, /\{item\.progress\}%/)
+    assert.match(componentSource, />Pending</)
+    assert.match(componentSource, />Uploaded</)
+    assert.match(componentSource, />Removing\.\.\.</)
+    assert.match(componentSource, /files ready/)
+    assert.doesNotMatch(componentSource, /value=\{100\}/)
+    assert.doesNotMatch(componentSource, /describeUploadProgress/)
+  })
+
+  it('shows per-item server error text beside failed files (including cleanup failures)', () => {
     assert.match(componentSource, /item\.error/)
     assert.match(componentSource, /text-red-600/)
+    assert.match(componentSource, /canRetryStagedUpload\(item\)/)
+    assert.match(componentSource, /showCleanupError/)
   })
 
   it('keeps failed items retryable with a retry action', () => {
@@ -376,7 +299,11 @@ describe('SolutionFileUpload items-first API', () => {
     assert.match(componentSource, /RotateCcw/)
   })
 
-  it('removed the legacy deprecated props after the Task 6 caller migration', () => {
+  it('removed the optimization display and deprecated props with the staged swap', () => {
+    // The staged protocol stores the file bytes as-is; there is no server
+    // optimizer result (storedSize) to render on this surface anymore.
+    assert.doesNotMatch(componentSource, /storedSize/)
+    assert.doesNotMatch(componentSource, /optimized/)
     assert.doesNotMatch(componentSource, /files\?: File\[\]/)
     assert.doesNotMatch(componentSource, /filesWithProgress/)
     assert.doesNotMatch(componentSource, /onFilesChange/)
