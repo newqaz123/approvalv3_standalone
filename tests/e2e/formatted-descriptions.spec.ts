@@ -68,6 +68,14 @@ function countOccurrences(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1
 }
 
+/** Opens the canonical request-detail modal through the query-string deep link. */
+async function openRequestDetail(page: Page, requestId: string) {
+  await page.goto(`/requests?requestId=${encodeURIComponent(requestId)}`)
+  const dialog = page.getByRole('dialog').last()
+  await expect(dialog).toBeVisible({ timeout: 20_000 })
+  return dialog
+}
+
 test.describe('Formatted description browser flow (release gate)', () => {
   test('requester bolds, resubmits, and sees safe rendered description', async ({ page }) => {
     test.setTimeout(120_000)
@@ -156,19 +164,9 @@ test.describe('Formatted description browser flow (release gate)', () => {
       timeout: 30_000,
     })
 
-    // ── Reopen real request detail page and assert safe render ─────────
-    await page.goto(`/requests/${encodeURIComponent(requestId)}`)
-    await page.waitForURL(new RegExp(`/requests/${requestId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`), {
-      timeout: 20_000,
-    })
-
-    const requestDescription = page
-      .locator('div')
-      .filter({ has: page.getByRole('heading', { name: 'Description', exact: true }) })
-      .first()
-      .locator('p')
-      .first()
-
+    // ── Reopen canonical request detail modal and assert safe render ─────
+    const detailDialog = await openRequestDetail(page, requestId)
+    const requestDescription = detailDialog.locator('span.rich-text').first()
     await expect(requestDescription).toBeVisible({ timeout: 20_000 })
 
     // Visible bold text rendered through <strong>
