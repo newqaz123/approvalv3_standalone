@@ -107,21 +107,6 @@ describe('description table width', () => {
 })
 
 describe('draft form cancel wiring', () => {
-  it('request form confirms before discarding a dirty draft', () => {
-    const source = read('src/components/requests/request-form.tsx')
-    assert.match(source, /from ['"]@\/lib\/discard-draft['"]/)
-    assert.match(source, /from ['"]@\/components\/ui\/discard-draft-dialog['"]/)
-    assert.match(source, /requestDiscardDraft\(/)
-    assert.match(source, /formIsDirty:\s*isDirty/)
-    assert.match(source, /hasFiles:\s*selectedFiles\.length > 0/)
-    assert.match(source, /hasInlineImageDrafts:\s*inlineImages\.getState\(\)\.length > 0/)
-    assert.match(source, /<DiscardDraftDialog/)
-    assert.match(source, /onClick=\{handleCancelClick\}/)
-    const leave = source.split('const handleCancel = async')[1]?.split('const formatFileSize')[0] ?? ''
-    assert.match(leave, /await inlineImages\.reset\(\)/)
-    assert.match(leave, /router\.back\(\)/)
-  })
-
   it('submitter modal treats a currency-only solution change as dirty', () => {
     const source = read('src/components/requests/submitter-modal.tsx')
     assert.match(source, /const initialSolutionCurrency = initialData\?\.solution\?\.currency \|\| "THB"/)

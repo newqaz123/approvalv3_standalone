@@ -42,3 +42,34 @@ describe('canonical request detail flow', () => {
     assert.doesNotMatch(runtime, /revalidateRequestViews\([^)]/)
   })
 })
+
+describe('canonical New Request flow', () => {
+  const retiredFiles = [
+    'src/app/(dashboard)/requests/new/page.tsx',
+    'src/components/requests/request-form.tsx',
+    'src/components/mobile/mobile-file-upload.tsx',
+  ]
+
+  it('removes the standalone route and its private component tree', () => {
+    for (const path of retiredFiles) assert.equal(exists(path), false, path)
+    const runtime = sourceText('src')
+    assert.doesNotMatch(runtime, /components\/requests\/request-form/)
+    assert.doesNotMatch(runtime, /components\/mobile\/mobile-file-upload/)
+  })
+
+  it('keeps both visible New Request callers on SubmitterModal request mode', () => {
+    for (const path of [
+      'src/components/requests/requests-list-client.tsx',
+      'src/components/dashboard/follow-up-dashboard.tsx',
+    ]) {
+      const source = read(path)
+      assert.match(source, /<SubmitterModal/)
+      assert.match(source, /mode=["']request["']/)
+      assert.match(source, /onSubmitRequest=/)
+    }
+  })
+
+  it('does not invalidate the retired New Request page', () => {
+    assert.doesNotMatch(sourceText('src'), /revalidatePath\(['"]\/requests\/new['"]\)/)
+  })
+})

@@ -224,7 +224,6 @@ export async function createRequest(input: CreateRequestInput) {
   }
 
   revalidateRequestViews()
-  revalidatePath('/requests/new')
 
   return { success: true, requestId: request.id }
 }
