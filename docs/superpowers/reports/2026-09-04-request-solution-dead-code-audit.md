@@ -11,11 +11,15 @@ The standalone New Request, request-detail, and Submit Solution routes; their pr
 
 | Candidate | Runtime evidence | Why deferred |
 | --- | --- | --- |
-| `src/components/requests/request-detail-modal.tsx` | No runtime importer; references come from source-contract tests and comments. It still contains links to the retired solution route. | Large independent legacy detail implementation with its own action/export dependencies. |
+| `src/components/requests/request-detail-modal.tsx` | No runtime importer; references come from source-contract tests and comments. It still contains links to the retired solution route at lines 844, 856, 1370, and 1382. | Large independent legacy detail implementation with its own action/export dependencies. |
 | `src/components/requests/request-detail-desktop.tsx` | Runtime-imported only by the unused example component. | Belongs to the separate legacy detail-view cluster. |
 | `src/components/requests/request-detail-desktop-v2.tsx` | No runtime importer found. | Separate presentation experiment, unrelated to authoring-flow removal. |
 | `src/components/requests/request-detail-desktop-example.tsx` | No runtime importer found; imports `request-detail-desktop.tsx`. | Explicit example/prototype file. |
 | `src/components/solutions/solution-detail.tsx` | No runtime importer found; current references are regression source reads. | Read-only solution presentation needs a separate coverage review before deletion. |
+
+### Remaining Retired-Route References
+
+The final retired-route reference scan (`rg -n '/engineering/solutions/' src tests`) reports only the four `request-detail-modal.tsx` links above plus one remaining non-runtime match: `tests/regression/canonical-request-solution-forms.test.ts:79`, the retirement suite's own `retiredFiles` absence assertion that keeps the deleted `/engineering/solutions/[requestId]` page from returning. The removed-file reference scan over runtime source (`src`) is clean; the only other textual matches are the same suite's `retiredFiles` absence-assertion strings (lines 49-50 and 80-84), which are the negative contract enforcing the removals documented in this report.
 
 ## Kept as Active
 
