@@ -10,12 +10,8 @@ const REQUEST_VIEW_PATHS = [
   '/admin/deleted-requests',
 ]
 
-export function revalidateRequestViews(requestId?: string) {
+export function revalidateRequestViews() {
   for (const path of REQUEST_VIEW_PATHS) {
     revalidatePath(path)
-  }
-
-  if (requestId) {
-    revalidatePath(`/requests/${requestId}`)
   }
 }

@@ -110,7 +110,6 @@ export async function deleteFileAttachment({ fileId }: { fileId: string }) {
 
   // Revalidate to refresh UI
   revalidatePath('/requests')
-  revalidatePath(`/requests/${request.id}`)
   revalidatePath('/engineering')
 
   return { success: true }
@@ -230,7 +229,6 @@ export async function uploadFileAction(
   })
 
   revalidatePath('/requests')
-  revalidatePath(`/requests/${requestId}`)
 
   return { success: true, fileAttachment }
 }

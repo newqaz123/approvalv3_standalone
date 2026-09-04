@@ -122,7 +122,6 @@ describe("authenticated shell and navigation", () => {
 				"src/app/(dashboard)/engineering/solutions/[requestId]/page.tsx",
 				"max-w-4xl",
 			],
-			["src/app/(dashboard)/requests/[requestId]/page.tsx", "max-w-5xl"],
 			["src/app/admin/templates/new/page.tsx", "max-w-2xl"],
 			["src/app/admin/templates/[id]/page.tsx", "max-w-2xl"],
 		]);

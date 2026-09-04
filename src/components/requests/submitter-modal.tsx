@@ -1063,7 +1063,7 @@ export function SubmitterModal({
 							{mode === "solution" && initialData?.requestId && (
 								<div className="bg-blue-50 dark:bg-blue-900/10 rounded-lg p-3 border border-blue-200 dark:border-blue-800/30">
 									<a
-										href={`/requests/${initialData.requestId}`}
+										href={`/requests?requestId=${encodeURIComponent(initialData.requestId)}`}
 										target="_blank"
 										rel="noopener noreferrer"
 										className="flex items-center gap-2 text-sm text-blue-700 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 transition-colors"

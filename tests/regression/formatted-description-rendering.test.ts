@@ -4,7 +4,6 @@ import { readFileSync } from 'node:fs'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 const displayFiles = [
-  'src/app/(dashboard)/requests/[requestId]/page.tsx',
   'src/components/requests/request-detail-modal.tsx',
   'src/components/requests/approver-modal.tsx',
   'src/components/requests/solution-modal.tsx',
