@@ -13,6 +13,16 @@ The important files are:
 - `src/lib/modal-data-adapters.ts`
 - `src/components/requests/*-modal.tsx`
 
+## Canonical Entry Points
+
+Request creation, request details, and solution submission are modal-only flows:
+
+- New Request: the `/requests` or dashboard “New Request” action opens `SubmitterModal` with `mode="request"`.
+- Request deep link: `/requests?requestId=<id>` opens `RequestDeepLinkModal`, then `RequestModalRouter`.
+- Submit Solution: the engineering request action opens `RequestModalRouter`, then `SubmitterModal` with `mode="solution"`.
+
+The old standalone routes `/requests/new`, `/requests/<request-id>`, and `/engineering/solutions/<request-id>` were intentionally removed and return 404. Do not add new links to them or create a second authoring form.
+
 ## High-Level Flow
 
 ```mermaid
@@ -162,6 +172,7 @@ When a modal or preview does not work:
 6. Confirm the modal receives the needed callback props.
 7. For file preview, confirm both request and solution attachment props are wired if the modal shows both attachment groups.
 8. Rebuild the Docker app if testing on `localhost:3000`, because that port serves the production container.
+9. Verify deep links use the query-string route `/requests?requestId=<id>`; the standalone `/requests/<id>` page was removed and returns 404.
 
 ## Regression Coverage
 
