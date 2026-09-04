@@ -53,20 +53,6 @@ describe("approver data sources", () => {
 		}
 	});
 
-	it("provides department names to the server-rendered solution picker", () => {
-		const pageSource = read(
-			"src/app/(dashboard)/engineering/solutions/[requestId]/page.tsx",
-		);
-		const formSource = read("src/components/solutions/solution-form.tsx");
-
-		assert.match(
-			pageSource,
-			/department:\s*{[\s\S]*?select:\s*{[\s\S]*?name:\s*true/,
-		);
-		assert.match(pageSource, /departmentName:/);
-		assert.match(formSource, /departmentName:\s*string/);
-	});
-
 	it("provides department names to standalone modal preview fixtures", () => {
 		const source = read("src/app/sequential-stages-preview/page.tsx");
 		const fixture =

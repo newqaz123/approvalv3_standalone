@@ -54,7 +54,6 @@ installFormHarness({
 type LooseComponent = ComponentType<Record<string, unknown>>
 
 type FormModules = {
-  SolutionForm: LooseComponent
   TemplateForm: LooseComponent
   ResubmitRequestDialog: LooseComponent
   RequestResubmitModal: LooseComponent
@@ -65,16 +64,14 @@ let loadedForms: Promise<FormModules> | null = null
 
 function loadForms(): Promise<FormModules> {
   loadedForms ??= (async () => {
-    const [solutionForm, templateForm, resubmitDialog, resubmitModal, submitterModal] =
+    const [templateForm, resubmitDialog, resubmitModal, submitterModal] =
       await Promise.all([
-        import('../../src/components/solutions/solution-form'),
         import('../../src/components/admin/template-form'),
         import('../../src/components/requests/resubmit-request-dialog'),
         import('../../src/components/requests/request-resubmit-modal'),
         import('../../src/components/requests/submitter-modal'),
       ])
     return {
-      SolutionForm: solutionForm.SolutionForm as unknown as LooseComponent,
       TemplateForm: templateForm.TemplateForm as unknown as LooseComponent,
       ResubmitRequestDialog: resubmitDialog.ResubmitRequestDialog as unknown as LooseComponent,
       RequestResubmitModal: resubmitModal.RequestResubmitModal as unknown as LooseComponent,
@@ -111,71 +108,6 @@ function assertDisabledButton(html: string, label: string): void {
 }
 
 describe('inline image form blocking behavior', () => {
-  describe('solution form', () => {
-    const surface = async () => {
-      const { SolutionForm } = await loadForms()
-      return (reason: 'upload' | 'image-edit' | null) =>
-        renderSurface(createElement(SolutionForm, {
-          requestId: 'probe-request',
-          requestTitle: 'Probe request',
-          currentUserId: 'probe-user',
-          allUsers: [],
-        }), reason)
-    }
-
-    it('disables submit and renders the upload guidance while uploads block', async () => {
-      const render = await surface()
-      const out = await render('upload')
-      assert.ok(out.html.includes(UPLOAD_GUIDANCE))
-      assert.ok(!out.html.includes(EDIT_GUIDANCE))
-      assert.equal(findButton(out.buttons, 'Review & Submit').disabled, true)
-      assertDisabledButton(out.html, 'Review & Submit')
-    })
-
-    it('disables submit and renders the image-edit guidance during an active edit', async () => {
-      const render = await surface()
-      const out = await render('image-edit')
-      assert.ok(out.html.includes(EDIT_GUIDANCE))
-      assert.ok(!out.html.includes(UPLOAD_GUIDANCE))
-      assert.equal(findButton(out.buttons, 'Review & Submit').disabled, true)
-    })
-
-    it('keeps submit enabled with no guidance when nothing blocks', async () => {
-      const render = await surface()
-      const out = await render(null)
-      assert.ok(!out.html.includes(UPLOAD_GUIDANCE))
-      assert.ok(!out.html.includes(EDIT_GUIDANCE))
-      assert.equal(findButton(out.buttons, 'Review & Submit').disabled, false)
-    })
-
-    it('blocks the wired submit handler with the exact reason guidance for each reason', async () => {
-      const render = await surface()
-      for (const reason of ['upload', 'image-edit'] as const) {
-        const out = await render(reason)
-        fillFormValues(out.nativeForm, { title: 'Probe title', description: 'Probe description' })
-        await submitNativeForm(out.nativeForm)
-        assert.deepEqual(out.actionCalls, [], `submitSolution must not run while ${reason} blocks`)
-        const expected = reason === 'upload' ? UPLOAD_GUIDANCE : EDIT_GUIDANCE
-        assert.deepEqual(
-          out.toasts.filter((toast) => toast.kind === 'error'),
-          [{ kind: 'error', message: expected }],
-        )
-      }
-    })
-
-    it('raises no blocking toast through the same wired handler once unblocked', async () => {
-      const render = await surface()
-      const out = await render(null)
-      fillFormValues(out.nativeForm, { title: 'Probe title', description: 'Probe description' })
-      await submitNativeForm(out.nativeForm)
-      assert.deepEqual(out.toasts.filter((toast) => toast.kind === 'error'), [])
-      // The unblocked submit stops at the preview stage; solution submission
-      // itself happens on the preview confirm, which single-pass static
-      // rendering cannot reach.
-      assert.deepEqual(out.actionCalls, [])
-    })
-  })
-
   describe('template form', () => {
     const surface = async () => {
       const { TemplateForm } = await loadForms()
@@ -430,40 +362,6 @@ describe('inline image form blocking behavior', () => {
  * blocking behavior itself is covered behaviorally above.
  */
 describe('inline image form wiring contracts', () => {
-  describe('solution form', () => {
-    const source = read('src/components/solutions/solution-form.tsx')
-
-    it('creates one coordinator shared across edit and preview', () => {
-      assert.equal((source.match(/useInlineDescriptionImages\(\)/g) ?? []).length, 1)
-      assert.match(source, /inlineImages=\{inlineImages\}/)
-      const previewBranch = source.split('if (showPreview)')[1]?.split('return (')[0] ?? ''
-      assert.doesNotMatch(previewBranch, /useInlineDescriptionImages/)
-    })
-
-    it('sends the same upload session with the final confirm payload', () => {
-      assert.match(source, /inlineImageSessionId: inlineImages\.uploadSessionId/)
-    })
-
-    it('clears inline drafts only after the solution save succeeds', () => {
-      assert.match(source, /if \(!submitResult\.success\) \{[\s\S]*?return/)
-      const successBranch = source.split("toast.success('Solution submitted successfully')")[1]?.split('router.push')[0] ?? ''
-      assert.match(successBranch, /inlineImages\.clear\(\)/)
-    })
-
-    it('awaits coordinator reset on cancel and stays open on cleanup failure', () => {
-      const cancel = source.split('const handleCancel = async')[1]?.split('const handleSubmit')[0] ?? ''
-      assert.match(cancel, /await inlineImages\.reset\(\)/)
-      assert.match(cancel, /return/)
-      assert.match(cancel, /router\.back\(\)/)
-      assert.match(source, /onClick=\{handleCancelClick\}/)
-    })
-
-    it('keeps solution attachments independent from inline images', () => {
-      assert.match(source, /useStagedSolutionAttachments\(\{/)
-      assert.doesNotMatch(source, /ensureUploaded/)
-    })
-  })
-
   describe('template form', () => {
     const source = read('src/components/admin/template-form.tsx')
 

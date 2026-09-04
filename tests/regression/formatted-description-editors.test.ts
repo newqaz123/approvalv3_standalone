@@ -18,11 +18,7 @@ describe('formatted description editors', () => {
   })
 
   it("uses the rich text editor for solution submission and resubmission", () => {
-    const source = read('src/components/solutions/solution-form.tsx')
     const modal = read('src/components/requests/submitter-modal.tsx')
-    assert.match(source, /RichTextEditor/)
-    assert.doesNotMatch(source, /<FormattedTextarea/)
-    assert.match(source, /name="description"/)
     assert.match(modal, /RichTextEditor/)
     assert.doesNotMatch(modal, /FormattedTextarea/)
     assert.match(modal, /solutionDescription/)
@@ -42,7 +38,6 @@ describe('formatted description editors', () => {
 
   it('passes one inline image coordinator into every authoring editor surface', () => {
     for (const path of [
-      'src/components/solutions/solution-form.tsx',
       'src/components/admin/template-form.tsx',
       'src/components/requests/resubmit-request-dialog.tsx',
       'src/components/requests/request-resubmit-modal.tsx',

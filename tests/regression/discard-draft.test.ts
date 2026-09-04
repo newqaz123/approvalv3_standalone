@@ -135,14 +135,6 @@ describe('draft form cancel wiring', () => {
     assert.match(source, /setDiscardOpen\(false\)/)
   })
 
-  it('dedicated solution form fences commit/cancel races and clears stale discard state', () => {
-    const source = read('src/components/solutions/solution-form.tsx')
-    assert.match(source, /const commitInFlightRef = useRef\(false\)/)
-    assert.match(source, /const closeInFlightRef = useRef\(false\)/)
-    assert.match(source, /if \(isSubmitting \|\| commitInFlightRef\.current \|\| closeInFlightRef\.current\) return/)
-    assert.match(source, /setDiscardOpen\(false\)/)
-  })
-
   it('resubmit existing-file removal is locked and submits a synchronous ID snapshot', () => {
     const source = read('src/components/requests/submitter-modal.tsx')
     const removeExisting = source.split('const removeExistingFile')[1]?.split('// Handle submission')[0] ?? ''
@@ -297,48 +289,5 @@ describe('draft form cancel wiring', () => {
     )
     assert.deepEqual(events, ['staged', 'solution'])
     assert.deepEqual(state, before)
-  })
-
-  it('a stale SolutionFileUpload add callback cannot bypass operation locks', () => {
-    const source = read('src/components/solutions/solution-form.tsx')
-    assert.match(source, /const handleAddFiles = useCallback\(/)
-    assert.match(source, /onAddFiles=\{handleAddFiles\}/)
-    assert.doesNotMatch(source, /onAddFiles=\{addFiles\}/)
-
-    const state = { isSubmitting: false, commitInFlight: false, closeInFlight: false }
-    const added: File[][] = []
-    const capturedBeforeLock = (files: File[]) => {
-      if (state.isSubmitting || state.commitInFlight || state.closeInFlight) return
-      added.push(files)
-    }
-    const selected = [new File(['pdf'], 'a.pdf', { type: 'application/pdf' })]
-    state.commitInFlight = true
-    capturedBeforeLock(selected)
-    state.commitInFlight = false
-    state.closeInFlight = true
-    capturedBeforeLock(selected)
-    state.closeInFlight = false
-    state.isSubmitting = true
-    capturedBeforeLock(selected)
-    assert.equal(added.length, 0)
-    state.isSubmitting = false
-    capturedBeforeLock(selected)
-    assert.equal(added.length, 1)
-  })
-
-  it('solution form confirms before discarding a dirty draft', () => {
-    const source = read('src/components/solutions/solution-form.tsx')
-    assert.match(source, /from ['"]@\/lib\/discard-draft['"]/)
-    assert.match(source, /from ['"]@\/components\/ui\/discard-draft-dialog['"]/)
-    assert.match(source, /requestDiscardDraft\(/)
-    assert.match(source, /formIsDirty:\s*isDirty/)
-    assert.match(source, /hasFiles:\s*items\.length > 0/)
-    assert.match(source, /hasInlineImageDrafts:\s*inlineImages\.getState\(\)\.length > 0/)
-    assert.match(source, /<DiscardDraftDialog/)
-    assert.match(source, /onClick=\{handleCancelClick\}/)
-    const leave = source.split('const handleCancel = async')[1]?.split('const handleSubmit')[0] ?? ''
-    assert.match(leave, /await reset\(\)/)
-    assert.match(leave, /await inlineImages\.reset\(\)/)
-    assert.match(leave, /router\.back\(\)/)
   })
 })

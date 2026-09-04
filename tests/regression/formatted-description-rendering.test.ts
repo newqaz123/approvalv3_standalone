@@ -15,7 +15,6 @@ const displayFiles = [
   'src/components/requests/completed-final-modal.tsx',
   'src/components/requests/completed-request-modal.tsx',
   'src/components/solutions/solution-detail.tsx',
-  'src/components/solutions/solution-preview.tsx',
 ]
 
 describe('formatted description rendering', () => {
@@ -32,32 +31,5 @@ describe('formatted description rendering', () => {
     assert.match(source, /import \{ FormattedText \} from ['"]@\/components\/ui\/formatted-text['"]/)
     assert.match(source, /<FormattedText\s+source=\{data\.requestDescription\}\s*\/>/)
     assert.doesNotMatch(source, /<p>\s*\{data\.requestDescription\}\s*<\/p>/)
-  })
-
-  it('solution preview uses visible formatted truncation instead of raw source slice', () => {
-    const source = read('src/components/solutions/solution-preview.tsx')
-    assert.match(source, /import \{ FormattedText \} from ['"]@\/components\/ui\/formatted-text['"]/)
-    assert.match(source, /visibleFormattedText/)
-    assert.match(source, /FormattedText/)
-    assert.match(source, /maxVisibleCharacters/)
-    assert.doesNotMatch(source, /\.slice\(\s*0\s*,\s*300\s*\)/)
-    assert.doesNotMatch(source, /data\.description\.length/)
-    assert.match(
-      source,
-      /visibleFormattedText\(data\.description\)/,
-    )
-  })
-
-  it('solution preview truncates only when too long, so short image-rich descriptions render fully', () => {
-    // Invariant: the collapsed 300-character branch must be gated on
-    // descriptionTooLong. Otherwise a short image-rich description would be
-    // degraded to alt placeholders with no "Show more" control to reveal the
-    // real images (descriptionTooLong is also the only gate for that button).
-    const source = read('src/components/solutions/solution-preview.tsx')
-    assert.match(
-      source,
-      /maxVisibleCharacters=\{\s*descriptionTooLong && !showFullDescription \? 300 : undefined\s*\}/,
-    )
-    assert.match(source, /\{descriptionTooLong && \(/)
   })
 })

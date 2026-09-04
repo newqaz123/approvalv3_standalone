@@ -73,3 +73,34 @@ describe('canonical New Request flow', () => {
     assert.doesNotMatch(sourceText('src'), /revalidatePath\(['"]\/requests\/new['"]\)/)
   })
 })
+
+describe('canonical Submit Solution flow', () => {
+  const retiredFiles = [
+    'src/app/(dashboard)/engineering/solutions/[requestId]/page.tsx',
+    'src/components/solutions/solution-form.tsx',
+    'src/components/solutions/solution-file-upload.tsx',
+    'src/components/solutions/solution-preview.tsx',
+    'src/lib/attachments/upload-progress.ts',
+    'src/lib/attachments/upload-batch.ts',
+  ]
+
+  it('removes the standalone solution tree and transitively orphaned helpers', () => {
+    for (const path of retiredFiles) assert.equal(exists(path), false, path)
+    const runtime = sourceText('src')
+    assert.doesNotMatch(runtime, /components\/solutions\/solution-form/)
+    assert.doesNotMatch(runtime, /components\/solutions\/solution-file-upload/)
+    assert.doesNotMatch(runtime, /components\/solutions\/solution-preview/)
+    assert.doesNotMatch(runtime, /attachments\/upload-progress/)
+    assert.doesNotMatch(runtime, /attachments\/upload-batch/)
+  })
+
+  it('keeps solution submission in SubmitterModal and RequestModalRouter', () => {
+    const modal = read('src/components/requests/submitter-modal.tsx')
+    const router = read('src/components/requests/request-modal-router.tsx')
+    assert.match(modal, /mode === "solution"/)
+    assert.match(modal, /useStagedSolutionAttachments\(\{ requestId \}\)/)
+    assert.match(modal, /fileIds: solutionReadyAttachmentIds/)
+    assert.match(router, /\bsubmitSolution\b/)
+    assert.match(router, /await submitSolution\(\{/)
+  })
+})
