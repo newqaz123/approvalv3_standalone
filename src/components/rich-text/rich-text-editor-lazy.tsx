@@ -4,13 +4,14 @@ import { Component, type ReactNode } from 'react'
 import dynamic from 'next/dynamic'
 import { FormattedTextarea } from '@/components/ui/formatted-textarea'
 import type { RichTextEditorProps } from '@/components/rich-text/rich-text-editor'
+import { RichTextEditorSkeleton } from '@/components/rich-text/rich-text-editor-skeleton'
 import { sanitizeRichText } from '@/lib/rich-text-sanitizer'
 
 const RichTextEditorInner = dynamic<RichTextEditorProps>(
   () => import('@/components/rich-text/rich-text-editor'),
   {
     ssr: false,
-    loading: () => <FormattedTextarea rows={5} disabled />,
+    loading: () => <RichTextEditorSkeleton />,
   },
 )
 
@@ -28,8 +29,9 @@ class ChunkErrorBoundary extends Component<
 }
 
 /**
- * Controlled rich-text field. Degrades to FormattedTextarea while the
- * TipTap chunk loads and permanently if chunk loading hard-fails.
+ * Controlled rich-text field. Shows a toolbar-shaped skeleton while the
+ * TipTap chunk loads, and degrades to FormattedTextarea if chunk loading
+ * hard-fails.
  */
 export function RichTextEditor(props: RichTextEditorProps) {
   return (

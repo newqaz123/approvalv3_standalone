@@ -444,13 +444,14 @@ export function SubmitterModal({
 		}
 	}, [selectedTemplate, templates]);
 
-	// Reset every New Request field whenever request mode opens, so stale state
-	// from a previous open never leaks into a fresh request. Solution/resubmit
-	// fields are intentionally untouched here. Staged drafts are owned by the
-	// hook: cancel DELETEs via reset(), success drops them via clear(). Opening
-	// must not DELETE or drop leftover items without that cleanup.
+	// Reset every New Request field when request mode closes, so the next open
+	// never paints stale title/description/template from a previous draft.
+	// Reset-on-open in useEffect flashed those values for a frame. Solution/
+	// resubmit fields are intentionally untouched here. Staged drafts are owned
+	// by the hook: cancel DELETEs via reset(), success drops them via clear().
 	const requestCommitInFlightRef = useRef(false);
 	const closeInFlightRef = useRef(false);
+	const requestModeWasOpenRef = useRef(false);
 	const resetRequestDraft = useCallback(() => {
 		requestCommitInFlightRef.current = false;
 		closeInFlightRef.current = false;
@@ -463,11 +464,6 @@ export function SubmitterModal({
 		setDeletedFileIds([]);
 	}, []);
 
-	useEffect(() => {
-		if (mode !== "request" || !open) return;
-		resetRequestDraft();
-	}, [mode, open, resetRequestDraft]);
-
 	// Existing files state (for resubmit mode)
 	const [existingFiles, setExistingFiles] = useState<FileAttachment[]>(
 		initialSolutionDraft.existingFiles,
@@ -476,6 +472,15 @@ export function SubmitterModal({
 	const [fileUploadError, setFileUploadError] = useState<string | null>(null);
 	const [useCustomHierarchy, setUseCustomHierarchy] = useState(false);
 	const [customApprovers, setCustomApprovers] = useState<string[]>([]);
+
+	if (mode === "request") {
+		if (open) {
+			requestModeWasOpenRef.current = true;
+		} else if (requestModeWasOpenRef.current) {
+			requestModeWasOpenRef.current = false;
+			resetRequestDraft();
+		}
+	}
 
 	// Shared staged-upload hooks. Request mode stages request drafts before
 	// createRequest adopts ready IDs; solution/resubmit stages solution drafts

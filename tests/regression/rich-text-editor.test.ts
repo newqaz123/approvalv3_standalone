@@ -89,6 +89,11 @@ describe('RichTextEditor implementation', () => {
     assert.match(source, /aria-pressed=/)
     assert.match(source, /focus-visible/)
   })
+
+  it('keeps a toolbar-shaped skeleton while the editor instance is null', () => {
+    assert.match(source, /if \(!editor\) return <RichTextEditorSkeleton/)
+    assert.doesNotMatch(source, /if \(!editor\) return null/)
+  })
 })
 
 describe('RichTextEditor palette schema integration', () => {
@@ -125,7 +130,10 @@ describe('RichTextEditor lazy wrapper', () => {
     assert.match(lazy, /ssr:\s*false/)
   })
 
-  it('falls back to FormattedTextarea while loading', () => {
+  it('shows a toolbar-shaped skeleton while the TipTap chunk loads, not the old Bold textarea', () => {
+    assert.match(lazy, /RichTextEditorSkeleton/)
+    assert.match(lazy, /loading:\s*\(\)\s*=>\s*<RichTextEditorSkeleton/)
+    assert.doesNotMatch(lazy, /loading:\s*\(\)\s*=>\s*<FormattedTextarea/)
     assert.match(lazy, /FormattedTextarea/)
   })
 

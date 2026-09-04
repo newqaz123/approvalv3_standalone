@@ -53,6 +53,7 @@ import {
 } from "@/components/rich-text/rich-text-color-extensions";
 import { INLINE_IMAGE_MIMES, MAX_INLINE_ALT_LENGTH } from "@/lib/inline-images/policy";
 import { sanitizeRichText } from "@/lib/rich-text-sanitizer";
+import { RichTextEditorSkeleton } from "@/components/rich-text/rich-text-editor-skeleton";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 
 export interface RichTextEditorProps {
@@ -400,7 +401,7 @@ export default function RichTextEditor({
 		if (editor) editor.setEditable(!disabled && !cropCommandsDisabled);
 	}, [disabled, cropCommandsDisabled, editor]);
 
-	if (!editor) return null;
+	if (!editor) return <RichTextEditorSkeleton minHeight={minHeight} />;
 
 	const canInsertImages = Boolean(inlineImages) && !commandsDisabled;
 
