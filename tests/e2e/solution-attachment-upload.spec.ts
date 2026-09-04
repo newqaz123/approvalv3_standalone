@@ -399,23 +399,30 @@ test.describe('Logged-in solution attachment upload (release gate)', () => {
     ).toHaveLength(1)
 
     // ── PHASE 8: capture the Thai attachment id from the request detail ──
-    await page.goto(`/requests/${requestId}`)
-    await expect(page.getByText('Solution Attachments')).toBeVisible()
+    // The standalone /requests/<id> page was retired (intentional 404); the
+    // canonical deep link opens the request detail modal, which for the
+    // engineering user renders the solution attachments. The modal rows use
+    // action buttons (no anchors), so the committed download URL is captured
+    // from the Thai row's inline PDF preview iframe.
+    await page.goto(`/requests?requestId=${encodeURIComponent(requestId)}`)
+    const detailDialog = page.getByRole('dialog').last()
+    await expect(detailDialog).toBeVisible({ timeout: 20_000 })
+    await expect(detailDialog.getByText('Solution Attachments')).toBeVisible()
     const thaiFilename = FIXTURES.thai.name
-    const capturedId = await page.evaluate((filename: string) => {
-      const links = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[download]'))
-      const match = links.find((link) => {
-        if (link.getAttribute('download') !== filename) return false
-        return (link.getAttribute('href') ?? '').includes('/api/files/download')
-      })
-      if (!match) return null
-      const href = match.getAttribute('href') ?? ''
-      try {
-        return new URL(href, window.location.origin).searchParams.get('id')
-      } catch {
-        return null
-      }
-    }, thaiFilename)
+    const thaiRow = detailDialog.locator(
+      `xpath=//button[normalize-space()="${thaiFilename}"]/ancestor::div[button[@title="Preview"]][1]`,
+    )
+    await expect(thaiRow).toBeVisible()
+    await thaiRow.getByRole('button', { name: 'Preview' }).click()
+    const previewFrame = page.locator('iframe[title="PDF preview"]')
+    await expect(previewFrame).toBeVisible({ timeout: 20_000 })
+    const previewSrc = await previewFrame.getAttribute('src')
+    expect(previewSrc, 'preview iframe exposes the committed download URL').toBeTruthy()
+    const capturedId = previewSrc
+      ? new URL(previewSrc, page.url()).searchParams.get('id')
+      : null
+    await page.keyboard.press('Escape')
+    await expect(previewFrame).toBeHidden()
     expect(capturedId, 'captured the Thai attachment id from the request detail').toBeTruthy()
     const attachmentId = capturedId as string
     const previewUrl = `/api/files/download?id=${encodeURIComponent(attachmentId)}&disposition=inline`
