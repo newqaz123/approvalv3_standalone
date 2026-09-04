@@ -99,6 +99,8 @@ export function SolutionForm({
     removeItem,
     reset,
     clear,
+    beginCommit,
+    abortCommit,
     hasBlockingOperations: stagedBlocking,
     readyAttachmentIds,
   } = useStagedSolutionAttachments({ requestId })
@@ -219,6 +221,11 @@ export function SolutionForm({
 
     commitInFlightRef.current = true
     setIsSubmitting(true)
+    // Arm skip-cleanup before the server action: submitSolution adopts drafts
+    // (solutionId set, requestId cleared) then revalidates this page, which
+    // 404s once the request leaves SentToEngineer. That unmount can run
+    // before clear() and would DELETE adopted rows ("Attachment not found").
+    beginCommit()
 
     try {
       const submitResult = await submitSolution({
@@ -237,7 +244,8 @@ export function SolutionForm({
 
       if (!submitResult.success) {
         // Metadata submission failed — retain the staged drafts so the user can
-        // retry without re-uploading.
+        // retry without re-uploading. Re-arm unmount DELETE for cancel/close.
+        abortCommit()
         toast.error(submitResult.error || 'Failed to submit solution')
         commitInFlightRef.current = false
         setIsSubmitting(false)
@@ -259,6 +267,7 @@ export function SolutionForm({
       router.push('/engineering')
       router.refresh()
     } catch (error) {
+      abortCommit()
       console.error('Submit solution error:', error)
       toast.error(error instanceof Error ? error.message : 'An error occurred')
       commitInFlightRef.current = false

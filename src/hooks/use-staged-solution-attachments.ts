@@ -201,6 +201,8 @@ export function useStagedSolutionAttachments(
     removeItem: controller.removeItem,
     reset: controller.reset,
     clear: controller.clear,
+    beginCommit: controller.beginCommit,
+    abortCommit: controller.abortCommit,
     hasBlockingOperations: snapshot.hasBlockingOperations,
     readyAttachmentIds: snapshot.readyAttachmentIds,
   }

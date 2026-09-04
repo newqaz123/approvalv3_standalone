@@ -39,6 +39,14 @@ export interface UseStagedRequestAttachmentsResult {
    * would race the commit and could unlink adopted files.
    */
   clear: () => void
+  /**
+   * Call immediately before a commit server action. Keeps items so a failed
+   * submit can retry, but unmount must not DELETE: revalidation can unmount
+   * the form after drafts are adopted and before `clear()` runs.
+   */
+  beginCommit: () => void
+  /** Re-arm unmount DELETE after a failed commit so cancel still cleans up. */
+  abortCommit: () => void
   hasBlockingOperations: boolean
   readyAttachmentIds: string[]
 }
@@ -89,6 +97,8 @@ export type StagedRequestAttachmentsController = {
   removeItem: (id: string) => void
   reset: () => Promise<void>
   clear: () => void
+  beginCommit: () => void
+  abortCommit: () => void
   unmount: () => void
 }
 
@@ -609,6 +619,14 @@ export function createStagedRequestAttachmentsController(
     setItems([])
   }
 
+  function beginCommit() {
+    skipCleanup = true
+  }
+
+  function abortCommit() {
+    skipCleanup = false
+  }
+
   function unmount() {
     if (skipCleanup) return
     abortAllAttempts()
@@ -636,6 +654,8 @@ export function createStagedRequestAttachmentsController(
     removeItem,
     reset,
     clear,
+    beginCommit,
+    abortCommit,
     unmount,
   }
 }
@@ -643,8 +663,9 @@ export function createStagedRequestAttachmentsController(
 /**
  * Owns request-mode draft uploads. Progress is exclusively
  * `xhr.upload.onprogress` (`loaded / total`). `reset()` is the cancel/close
- * DELETE path; `clear()` is the post-commit local drop that must not DELETE
- * adopted files or race unmount cleanup.
+ * DELETE path; `beginCommit()` arms skip-cleanup before the server action so
+ * a revalidation-driven unmount cannot DELETE adopted drafts; `clear()` is
+ * the post-commit local drop that must not DELETE adopted files.
  */
 export function useStagedRequestAttachments(): UseStagedRequestAttachmentsResult {
   const controllerRef = useRef<StagedRequestAttachmentsController | null>(null)
@@ -664,6 +685,8 @@ export function useStagedRequestAttachments(): UseStagedRequestAttachmentsResult
     removeItem: controller.removeItem,
     reset: controller.reset,
     clear: controller.clear,
+    beginCommit: controller.beginCommit,
+    abortCommit: controller.abortCommit,
     hasBlockingOperations: snapshot.hasBlockingOperations,
     readyAttachmentIds: snapshot.readyAttachmentIds,
   }

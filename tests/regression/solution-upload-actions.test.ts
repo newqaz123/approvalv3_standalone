@@ -442,6 +442,27 @@ describe('Task 4 source-wiring: staged hook integration and ID-only server bound
     assert.match(disabled, /solutionAttachmentsBlocking/)
   })
 
+  it('begins commit before await so revalidation unmount cannot DELETE adopted drafts', () => {
+    const formSubmit = solutionForm.split('const handleSubmit = async')[1]?.split('const handleBackToEdit')[0] ?? ''
+    const beforeAwait = formSubmit.split('await submitSolution')[0]
+    assert.match(beforeAwait, /beginCommit\(\)/)
+    const formFail = formSubmit.split('if (!submitResult.success)')[1]?.split('toast.success')[0] ?? ''
+    assert.match(formFail, /abortCommit\(\)/)
+    assert.doesNotMatch(formFail, /clear\(\)/)
+    const formCatch = formSubmit.split('} catch (error)')[1] ?? ''
+    assert.match(formCatch, /abortCommit\(\)/)
+
+    const modalSubmit = submitterModal.split('if (isSolutionMode)')[2]?.split('} catch (error)')[0] ?? ''
+    assert.match(modalSubmit.split('await onSubmitSolution')[0] ?? '', /beginSolutionCommit\(\)/)
+    assert.match(modalSubmit.split('await onResubmit')[0] ?? '', /beginSolutionCommit\(\)/)
+    const modalSolution = modalSubmit.split('if (mode === "solution" && onSubmitSolution)')[1]?.split('} else if (mode === "resubmit"')[0] ?? ''
+    assert.match(modalSolution, /abortSolutionCommit\(\)/)
+    const modalResubmit = modalSubmit.split('} else if (mode === "resubmit" && onResubmit)')[1] ?? ''
+    assert.match(modalResubmit, /abortSolutionCommit\(\)/)
+    const modalCatch = submitterModal.split('if (isSolutionMode)')[2]?.split('} catch (error)')[1]?.split('} finally')[0] ?? ''
+    assert.match(modalCatch, /abortSolutionCommit\(\)/)
+  })
+
   it('success clears staged drafts without DELETE before close; failure retains them', () => {
     // SolutionForm: clear() precedes navigation; the failure branch returns
     // before any clear.

@@ -53,7 +53,7 @@ test("request mode uses the staged attachments hook, not post-create uploads", (
 	assert.match(modal, /useStagedRequestAttachments/);
 	assert.match(
 		modal,
-		/const \{\s*items: stagedRequestItems,\s*addFiles: addStagedRequestFiles,\s*retryItem: retryStagedRequestItem,\s*removeItem: removeStagedRequestItem,\s*reset: resetStagedRequestAttachments,\s*clear: clearStagedRequestAttachments,\s*hasBlockingOperations: stagedRequestBlocking,\s*readyAttachmentIds,/,
+		/const \{\s*items: stagedRequestItems,\s*addFiles: addStagedRequestFiles,\s*retryItem: retryStagedRequestItem,\s*removeItem: removeStagedRequestItem,\s*reset: resetStagedRequestAttachments,\s*clear: clearStagedRequestAttachments,\s*beginCommit: beginRequestCommit,\s*abortCommit: abortRequestCommit,\s*hasBlockingOperations: stagedRequestBlocking,\s*readyAttachmentIds,/,
 	);
 	assert.match(modal, /addStagedRequestFiles\(selectedFiles\)/);
 	assert.doesNotMatch(modal, /uploadFileAction/);
@@ -96,13 +96,22 @@ test("create payload is readyAttachmentIds exactly once; failure keeps drafts", 
 	);
 	assert.match(
 		requestBranch,
-		/if \(!result\.success\) \{\s*requestCommitInFlightRef\.current = false;\s*setSubmitError\(result\.error \|\| "Failed to submit"\);\s*return;/,
+		/if \(!result\.success\) \{\s*abortRequestCommit\(\);\s*requestCommitInFlightRef\.current = false;\s*setSubmitError\(result\.error \|\| "Failed to submit"\);\s*return;/,
 	);
 	assert.doesNotMatch(
 		requestBranch.split("if (!result.success)")[1]?.split("clearStagedRequestAttachments")[0] ?? "",
 		/clearStagedRequestAttachments/,
 	);
 	assert.doesNotMatch(requestBranch, /onOpenChange\(false\)[\s\S]*clearStagedRequestAttachments/);
+});
+
+test("begins commit before await so revalidation unmount cannot DELETE adopted drafts", () => {
+	const beforeAwait = requestBranch.split("await onSubmitRequest")[0] ?? "";
+	assert.match(beforeAwait, /beginRequestCommit\(\)/);
+	const fail = requestBranch.split("if (!result.success)")[1]?.split("clearStagedRequestAttachments")[0] ?? "";
+	assert.match(fail, /abortRequestCommit\(\)/);
+	const catchBlock = requestBranch.split("} catch (error)")[1] ?? "";
+	assert.match(catchBlock, /abortRequestCommit\(\)/);
 });
 
 test("success calls hook clear() before close/unmount", () => {

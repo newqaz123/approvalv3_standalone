@@ -59,6 +59,8 @@ describe('useStagedSolutionAttachments source contract', () => {
       /createStagedRequestAttachmentsController\(\s*createSolutionStagedAttachmentTransports\(requestId\)/,
     )
     assert.match(hookSource, /readyAttachmentIds: snapshot\.readyAttachmentIds/)
+    assert.match(hookSource, /beginCommit: controller\.beginCommit/)
+    assert.match(hookSource, /abortCommit: controller\.abortCommit/)
   })
 
   it('sends scope solution plus the target requestId on PUT, POST FormData, and DELETE', () => {

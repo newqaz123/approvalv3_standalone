@@ -486,6 +486,8 @@ export function SubmitterModal({
 		removeItem: removeStagedSolutionItem,
 		reset: resetSolutionAttachments,
 		clear: clearSolutionAttachments,
+		beginCommit: beginSolutionCommit,
+		abortCommit: abortSolutionCommit,
 		hasBlockingOperations: stagedSolutionBlocking,
 		readyAttachmentIds: solutionReadyAttachmentIds,
 	} = useStagedSolutionAttachments({ requestId });
@@ -502,6 +504,8 @@ export function SubmitterModal({
 		removeItem: removeStagedRequestItem,
 		reset: resetStagedRequestAttachments,
 		clear: clearStagedRequestAttachments,
+		beginCommit: beginRequestCommit,
+		abortCommit: abortRequestCommit,
 		hasBlockingOperations: stagedRequestBlocking,
 		readyAttachmentIds,
 	} = useStagedRequestAttachments();
@@ -657,6 +661,7 @@ export function SubmitterModal({
 			}
 			requestCommitInFlightRef.current = true;
 			setIsBusy(true);
+			beginRequestCommit();
 			try {
 				// Await the caller's server action; only a confirmed success may
 				// clear staged drafts (without DELETE) and close the modal.
@@ -668,6 +673,7 @@ export function SubmitterModal({
 					inlineImageSessionId: inlineImages.uploadSessionId,
 				});
 				if (!result.success) {
+					abortRequestCommit();
 					requestCommitInFlightRef.current = false;
 					setSubmitError(result.error || "Failed to submit");
 					return;
@@ -676,6 +682,7 @@ export function SubmitterModal({
 				inlineImages.clear();
 				onOpenChange(false);
 			} catch (error) {
+				abortRequestCommit();
 				requestCommitInFlightRef.current = false;
 				setSubmitError(
 					error instanceof Error
@@ -698,6 +705,7 @@ export function SubmitterModal({
 			const deletedFileIdsSnapshot = [...deletedFileIds];
 			solutionCommitInFlightRef.current = true;
 			setIsBusy(true);
+			beginSolutionCommit();
 			try {
 				if (mode === "solution" && onSubmitSolution) {
 					const res = await onSubmitSolution({
@@ -719,6 +727,7 @@ export function SubmitterModal({
 						setDiscardOpen(false);
 						onOpenChange(false);
 					} else {
+						abortSolutionCommit();
 						setSubmitError(res.error || "Failed to submit solution");
 					}
 				} else if (mode === "resubmit" && onResubmit) {
@@ -740,10 +749,12 @@ export function SubmitterModal({
 						setDiscardOpen(false);
 						onOpenChange(false);
 					} else {
+						abortSolutionCommit();
 						setSubmitError(res.error || "Failed to resubmit solution");
 					}
 				}
 			} catch (error) {
+				abortSolutionCommit();
 				setSubmitError(
 					error instanceof Error ? error.message : "An error occurred",
 				);

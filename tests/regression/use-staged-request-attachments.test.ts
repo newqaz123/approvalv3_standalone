@@ -54,6 +54,8 @@ describe('useStagedRequestAttachments source contract', () => {
     assert.match(hookSource, /readyAttachmentIds: string\[\]/)
     assert.match(hookSource, /StagedItemStatus = 'pending' \| 'uploading' \| 'success' \| 'error'/)
     assert.match(hookSource, /MAX_ATTACHMENTS_PER_FORM/)
+    assert.match(hookSource, /beginCommit: \(\) => void/)
+    assert.match(hookSource, /abortCommit: \(\) => void/)
   })
 
   it('does not import createRequest staged metadata types', () => {
@@ -623,6 +625,32 @@ describe('staged request attachment controller lifecycle', () => {
     await hanging.releaseUpload(hangingId)
     hanging.controller.unmount()
     assert.deepEqual(hanging.deletes, [hangingId])
+  })
+
+  it('beginCommit keeps items and skips unmount DELETE; abortCommit restores DELETE', async () => {
+    const held = createHarness()
+    held.controller.addFiles([file()])
+    const heldId = held.controller.snapshot().items[0]?.id
+    assert.ok(heldId)
+    await held.releaseReserve(heldId)
+    await held.releaseUpload(heldId)
+    held.controller.beginCommit()
+    assert.equal(held.controller.snapshot().items.length, 1)
+    assert.deepEqual(held.controller.snapshot().readyAttachmentIds, [heldId])
+    const deletesAfterHold = held.deletes.length
+    held.controller.unmount()
+    assert.equal(held.deletes.length, deletesAfterHold)
+
+    const aborted = createHarness()
+    aborted.controller.addFiles([file()])
+    const abortedId = aborted.controller.snapshot().items[0]?.id
+    assert.ok(abortedId)
+    await aborted.releaseReserve(abortedId)
+    await aborted.releaseUpload(abortedId)
+    aborted.controller.beginCommit()
+    aborted.controller.abortCommit()
+    aborted.controller.unmount()
+    assert.deepEqual(aborted.deletes, [abortedId])
   })
 
   it('repeated retry reuses the same attachmentId and does not re-upload cleanup-requested items', async () => {
