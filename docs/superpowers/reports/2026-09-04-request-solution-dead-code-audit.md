@@ -26,7 +26,7 @@ The final retired-route reference scan (`rg -n '/engineering/solutions/' src tes
 - `submitSolution` and `resubmitSolution`: called by `RequestModalRouter`.
 - `createRequest`: called by the active New Request modal callers.
 - `CustomApprovalPicker`: used by `final-approval-actions.tsx` and a test harness.
-- `uploadFileAction`: used by `request/file-upload-zone.tsx` in request resubmission.
+- `uploadFileAction`: used by `src/components/requests/file-upload-zone.tsx` in request resubmission.
 - Both staged-attachment hooks and inline-image coordination: used by `SubmitterModal`.
 
 ## Limitations
