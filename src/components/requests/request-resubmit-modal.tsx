@@ -16,6 +16,7 @@ import {
 	Trash2,
 	Send,
 	FileUp,
+	Eye,
 } from "lucide-react";
 import {
 	Dialog,
@@ -34,6 +35,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { CancelRequestDialog } from "./cancel-request-dialog";
+import { FilePreviewDialog } from "@/components/requests/file-preview-dialog";
+import { useAttachmentPreview } from "@/hooks/use-attachment-preview";
 
 const ACCEPTED_UPLOAD_EXTENSIONS =
 	".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.gif";
@@ -114,6 +117,15 @@ export function RequestResubmitModal({
 	const [fileDescriptions, setFileDescriptions] = useState<
 		Record<string, string>
 	>({});
+	const {
+		previewFile,
+		previewUrl,
+		previewOpen,
+		onPreviewOpenChange,
+		previewLocalFile,
+		previewSavedFile,
+		onDownloadPreview,
+	} = useAttachmentPreview();
 
 	const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
 		if (e.target.files) {
@@ -298,15 +310,27 @@ export function RequestResubmitModal({
 									>
 										{getFileIcon(file.fileType)}
 										<div className="flex-1 min-w-0">
-											<p className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">
+											<button
+												type="button"
+												onClick={() => previewSavedFile(file)}
+												className="block max-w-full truncate text-left text-sm font-bold text-slate-900 dark:text-slate-100 underline-offset-4 hover:text-indigo-600 hover:underline focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 rounded-sm"
+											>
 												{file.fileName}
-											</p>
+											</button>
 											{file.description && (
 												<p className="text-xs text-slate-500 truncate">
 													{file.description}
 												</p>
 											)}
 										</div>
+										<button
+											type="button"
+											onClick={() => previewSavedFile(file)}
+											className="p-1 text-slate-400 hover:text-indigo-600 transition-colors"
+											title="Preview"
+										>
+											<Eye className="w-4 h-4" />
+										</button>
 										{canResubmit ? (
 											<button
 												onClick={() => removeExistingFile(file.id)}
@@ -365,16 +389,30 @@ export function RequestResubmitModal({
 												file.name.split(".").pop()?.toLowerCase() || "",
 											)}
 											<div className="flex-1 min-w-0 space-y-2">
-												<div className="flex items-center justify-between">
-													<p className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">
-														{file.name}
-													</p>
+												<div className="flex items-center justify-between gap-2">
 													<button
-														onClick={() => removeFile(index)}
-														className="p-1 text-slate-400 hover:text-red-500 transition-colors"
+														type="button"
+														onClick={() => previewLocalFile(file)}
+														className="block min-w-0 flex-1 truncate text-left text-sm font-bold text-slate-900 dark:text-slate-100 underline-offset-4 hover:text-indigo-600 hover:underline focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 rounded-sm"
 													>
-														<Trash2 className="w-4 h-4" />
+														{file.name}
 													</button>
+													<div className="flex items-center shrink-0">
+														<button
+															type="button"
+															onClick={() => previewLocalFile(file)}
+															className="p-1 text-slate-400 hover:text-indigo-600 transition-colors"
+															title="Preview"
+														>
+															<Eye className="w-4 h-4" />
+														</button>
+														<button
+															onClick={() => removeFile(index)}
+															className="p-1 text-slate-400 hover:text-red-500 transition-colors"
+														>
+															<Trash2 className="w-4 h-4" />
+														</button>
+													</div>
 												</div>
 												<input
 													type="text"
@@ -439,6 +477,13 @@ export function RequestResubmitModal({
 					)}
 				</div>
 			</DialogContent>
+			<FilePreviewDialog
+				file={previewFile}
+				url={previewUrl}
+				open={previewOpen}
+				onOpenChange={onPreviewOpenChange}
+				onDownload={onDownloadPreview}
+			/>
 		</Dialog>
 	);
 }

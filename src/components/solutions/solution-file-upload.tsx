@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import { Upload, File, FileImage, FileText, X, RotateCcw, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react'
+import { Upload, File, FileImage, FileText, X, RotateCcw, Loader2, CheckCircle2, AlertTriangle, Eye } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -11,6 +11,8 @@ import {
   isReadyAttachment,
   type StagedItem,
 } from '@/hooks/use-staged-request-attachments'
+import { FilePreviewDialog } from '@/components/requests/file-preview-dialog'
+import { useAttachmentPreview } from '@/hooks/use-attachment-preview'
 import {
   MAX_ATTACHMENT_BYTES,
   MAX_ATTACHMENTS_PER_FORM,
@@ -53,6 +55,15 @@ export function SolutionFileUpload({
   const readyCount = items.filter(isReadyAttachment).length
   const [dragActive, setDragActive] = useState(false)
   const [errors, setErrors] = useState<string[]>([])
+  const {
+    previewFile,
+    previewUrl,
+    previewOpen,
+    onPreviewOpenChange,
+    previewLocalFile,
+    previewSavedFile,
+    onDownloadPreview,
+  } = useAttachmentPreview()
 
   const currentCount = items.length
   const totalFileCount = existingFiles.length + currentCount
@@ -184,7 +195,8 @@ export function SolutionFileUpload({
   }
 
   return (
-    <Card>
+    <>
+      <Card>
       <CardHeader>
         <CardTitle>File Attachments (Optional)</CardTitle>
         <CardDescription>
@@ -218,9 +230,25 @@ export function SolutionFileUpload({
                 >
                   {getFileIconByName(file.fileName, file.fileType)}
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{file.fileName}</p>
+                    <button
+                      type="button"
+                      onClick={() => previewSavedFile(file)}
+                      className="block max-w-full truncate text-left text-sm font-medium underline-offset-4 hover:text-indigo-600 hover:underline focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 rounded-sm"
+                    >
+                      {file.fileName}
+                    </button>
                     <p className="text-xs text-gray-500">{formatFileSize(file.fileSize)}</p>
                   </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => previewSavedFile(file)}
+                    className="h-8 w-8 p-0 text-slate-400 hover:text-indigo-600"
+                    title="Preview"
+                  >
+                    <Eye className="h-4 w-4" />
+                  </Button>
                   {onRemoveExistingFile && (
                     <Button
                       type="button"
@@ -321,8 +349,14 @@ export function SolutionFileUpload({
                     getFileIcon(file)
                   )}
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm font-medium truncate">{file.name}</p>
+                    <div className="flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={() => previewLocalFile(file)}
+                        className="block min-w-0 flex-1 truncate text-left text-sm font-medium underline-offset-4 hover:text-indigo-600 hover:underline focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 rounded-sm"
+                      >
+                        {file.name}
+                      </button>
                       <span className="text-xs text-gray-500">
                         {formatFileSize(file.size)}
                       </span>
@@ -346,6 +380,16 @@ export function SolutionFileUpload({
                       <p className="text-xs text-red-600 mt-1">{item.error}</p>
                     ) : null}
                   </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => previewLocalFile(file)}
+                    className="h-8 w-8 p-0 text-slate-400 hover:text-indigo-600"
+                    title="Preview"
+                  >
+                    <Eye className="h-4 w-4" />
+                  </Button>
                   {/* Retry action: errored items stay in the list and remain
                       retryable; a failed cleanup retries the DELETE. */}
                   {showRetry && onRetryItem && (
@@ -379,6 +423,14 @@ export function SolutionFileUpload({
           </div>
         )}
       </CardContent>
-    </Card>
+      </Card>
+      <FilePreviewDialog
+        file={previewFile}
+        url={previewUrl}
+        open={previewOpen}
+        onOpenChange={onPreviewOpenChange}
+        onDownload={onDownloadPreview}
+      />
+    </>
   )
 }

@@ -26,6 +26,7 @@ import {
 	Clock,
 	FileUp,
 	Loader2,
+	Eye,
 } from "lucide-react";
 import {
 	Dialog,
@@ -72,6 +73,8 @@ import {
 	restoreSubmitterSolutionDraft,
 } from "@/lib/submitter-solution-draft";
 import { DiscardDraftDialog } from "@/components/ui/discard-draft-dialog";
+import { FilePreviewDialog } from "@/components/requests/file-preview-dialog";
+import { useAttachmentPreview } from "@/hooks/use-attachment-preview";
 import { ApproverSearchField } from "@/components/approvals/approver-search-field";
 import { filterApproversByQuery } from "@/lib/approver-search";
 
@@ -521,6 +524,15 @@ export function SubmitterModal({
 	const [isBusy, setIsBusy] = useState(false);
 	const [submitError, setSubmitError] = useState<string | null>(null);
 	const [discardOpen, setDiscardOpen] = useState(false);
+	const {
+		previewFile,
+		previewUrl,
+		previewOpen,
+		onPreviewOpenChange,
+		previewLocalFile,
+		previewSavedFile,
+		onDownloadPreview,
+	} = useAttachmentPreview();
 	const solutionCommitInFlightRef = useRef(false);
 
 	const isSolutionMode = mode === "solution" || mode === "resubmit";
@@ -1205,15 +1217,27 @@ export function SubmitterModal({
 											>
 												{getFileIcon(file.fileType)}
 												<div className="flex-1 min-w-0">
-													<p className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">
+													<button
+														type="button"
+														onClick={() => previewSavedFile(file)}
+														className="block max-w-full truncate text-left text-sm font-bold text-slate-900 dark:text-slate-100 underline-offset-4 hover:text-indigo-600 hover:underline focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 rounded-sm"
+													>
 														{file.fileName}
-													</p>
+													</button>
 													{file.description && (
 														<p className="text-xs text-slate-500 truncate">
 															{file.description}
 														</p>
 													)}
 												</div>
+												<button
+													type="button"
+													onClick={() => previewSavedFile(file)}
+													className="p-1 text-slate-400 hover:text-indigo-600 transition-colors"
+													title="Preview"
+												>
+													<Eye className="w-4 h-4" />
+												</button>
 												<button
 													onClick={() => removeExistingFile(file.id)}
 													disabled={requestCloseControlsLocked}
@@ -1298,17 +1322,31 @@ export function SubmitterModal({
 												)
 											)}
 											<div className="flex-1 min-w-0">
-												<div className="flex items-center justify-between">
-													<p className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">
-														{item.file.name}
-													</p>
+												<div className="flex items-center justify-between gap-2">
 													<button
-														onClick={() => handleRemoveAttachment(item.id)}
-														disabled={isBusy || item.cleanupRequested === true}
-														className="p-1 text-slate-400 hover:text-red-500 transition-colors disabled:opacity-30"
+														type="button"
+														onClick={() => previewLocalFile(item.file)}
+														className="block min-w-0 flex-1 truncate text-left text-sm font-bold text-slate-900 dark:text-slate-100 underline-offset-4 hover:text-indigo-600 hover:underline focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 rounded-sm"
 													>
-														<Trash2 className="w-4 h-4" />
+														{item.file.name}
 													</button>
+													<div className="flex items-center shrink-0">
+														<button
+															type="button"
+															onClick={() => previewLocalFile(item.file)}
+															className="p-1 text-slate-400 hover:text-indigo-600 transition-colors"
+															title="Preview"
+														>
+															<Eye className="w-4 h-4" />
+														</button>
+														<button
+															onClick={() => handleRemoveAttachment(item.id)}
+															disabled={isBusy || item.cleanupRequested === true}
+															className="p-1 text-slate-400 hover:text-red-500 transition-colors disabled:opacity-30"
+														>
+															<Trash2 className="w-4 h-4" />
+														</button>
+													</div>
 												</div>
 												{item.cleanupRequested ? (
 													item.error ? (
@@ -1383,17 +1421,31 @@ export function SubmitterModal({
 												)
 											)}
 											<div className="flex-1 min-w-0">
-												<div className="flex items-center justify-between">
-													<p className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">
-														{item.file.name}
-													</p>
+												<div className="flex items-center justify-between gap-2">
 													<button
-														onClick={() => removeStagedRequestItem(item.id)}
-														disabled={isBusy}
-														className="p-1 text-slate-400 hover:text-red-500 transition-colors disabled:opacity-30"
+														type="button"
+														onClick={() => previewLocalFile(item.file)}
+														className="block min-w-0 flex-1 truncate text-left text-sm font-bold text-slate-900 dark:text-slate-100 underline-offset-4 hover:text-indigo-600 hover:underline focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 rounded-sm"
 													>
-														<Trash2 className="w-4 h-4" />
+														{item.file.name}
 													</button>
+													<div className="flex items-center shrink-0">
+														<button
+															type="button"
+															onClick={() => previewLocalFile(item.file)}
+															className="p-1 text-slate-400 hover:text-indigo-600 transition-colors"
+															title="Preview"
+														>
+															<Eye className="w-4 h-4" />
+														</button>
+														<button
+															onClick={() => removeStagedRequestItem(item.id)}
+															disabled={isBusy}
+															className="p-1 text-slate-400 hover:text-red-500 transition-colors disabled:opacity-30"
+														>
+															<Trash2 className="w-4 h-4" />
+														</button>
+													</div>
 												</div>
 												{item.cleanupRequested ? (
 													item.error ? (
@@ -1503,6 +1555,13 @@ export function SubmitterModal({
 					void handleCloseWithCleanup();
 				}}
 				confirmDisabled={isBusy}
+			/>
+			<FilePreviewDialog
+				file={previewFile}
+				url={previewUrl}
+				open={previewOpen}
+				onOpenChange={onPreviewOpenChange}
+				onDownload={onDownloadPreview}
 			/>
 		</Dialog>
 	);
