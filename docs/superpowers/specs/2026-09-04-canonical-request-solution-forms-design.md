@@ -107,8 +107,10 @@ Remove the obsolete standalone solution-form tree:
 - `src/components/solutions/solution-form.tsx`
 - `src/components/solutions/solution-file-upload.tsx`
 - `src/components/solutions/solution-preview.tsx`
+- `src/lib/attachments/upload-progress.ts`
+- `src/lib/attachments/upload-batch.ts`
 
-`solution-file-upload.tsx` and `solution-preview.tsx` have no runtime importer outside the obsolete solution form.
+`solution-file-upload.tsx` and `solution-preview.tsx` have no runtime importer outside the obsolete solution form. `upload-progress.ts` is used in production only by `solution-preview.tsx`, and `upload-batch.ts` is then used in production only as the type/utility source for `upload-progress.ts`; both become transitively orphaned with the standalone solution tree and will be removed with their obsolete-only tests.
 
 ## Code That Must Remain
 
@@ -149,7 +151,7 @@ Implementation follows test-driven development.
 First add a regression test that fails against the current repository and asserts:
 
 - All three obsolete page files are absent.
-- All five obsolete private component files are absent.
+- All five obsolete private component files and both transitively orphaned attachment helper files are absent.
 - Runtime source does not import those files.
 - `SubmitterModal` links “View Original Request” through `/requests?requestId=` and keeps new-tab protections.
 - `RequestModalRouter` still calls the active `submitSolution` action.
@@ -238,7 +240,7 @@ No production migration will be run.
 The change is complete when:
 
 - The three legacy URLs have no page implementation and return 404.
-- The eight obsolete page/component files are deleted.
+- The ten obsolete page/component/helper files are deleted.
 - All visible New Request and Submit Solution actions use `SubmitterModal`.
 - “View Original Request” opens the canonical request modal deep link in a new tab.
 - Active request and solution submission server actions remain wired.
