@@ -147,13 +147,13 @@ test.describe('Modal System - Solution Submission Workflow', () => {
       .getByRole('dialog')
       .filter({ hasText: 'Submit Engineering Solution' })
     await expect(solutionDialog).toBeVisible({ timeout: 5_000 })
-    
+
     // Step 6: Fill solution modal form
     await solutionDialog.locator('#solutionTitle').fill('Test Solution')
     await solutionDialog.locator('.rich-text[role="textbox"]').fill('This is a test solution')
     await solutionDialog.locator('#cost').fill('50000')
     await solutionDialog.locator('#timeline').fill('2 weeks')
-    
+
     // Step 7: Submit solution from the modal
     await solutionDialog.getByRole('button', { name: 'Submit Solution' }).click()
     
