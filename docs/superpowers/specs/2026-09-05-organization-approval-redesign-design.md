@@ -1,7 +1,7 @@
 # Organization, approval routes, and visibility redesign
 
 Date: 2026-09-05
-Status: Draft for user review; no implementation authorized by this document.
+Status: Approved for implementation planning; implementation is not authorized by this document.
 
 ## Objective
 
@@ -13,6 +13,7 @@ Separate organizational reporting, configurable approval workflows, and document
 - Existing departments represent future sections. Migration must use reviewed mappings, not assume names determine organizational type.
 - Factory contains divisions, divisions contain departments, departments contain sections. Reporting/management scope is distinct from system permissions.
 - A parent-unit manager covers descendant units without repeated main/additional section assignments. Factory Manager is assigned to the factory, not a fabricated section.
+- A manager’s own request belongs to their managed organizational unit (confirmed after parent plan review). A parent-only manager does not select or belong to a section merely to submit. Preserve that request origin across solution/final phases.
 - Normal approval routes travel upward within the submitter's reporting branch.
 - Admins configure explicit approval positions and a maximum position level per organizational route. Not every intermediate level must approve.
 - Vacant positions are skipped, not submission blockers. This supersedes the earlier mandatory-vacancy-block proposal.
@@ -69,15 +70,25 @@ Publishing creates a new route version. Warnings identify unoccupied positions a
 
 Normal submission resolves the applicable route, excludes positions at/below the submitter, applies its ceiling, resolves the upward candidate groups, skips vacant positions and persists the resulting steps. If the submitter is at/above the ceiling, preserve the phase's auto-approval transition.
 
-If vacancy skipping leaves no approval steps, complete the approval phase with an auditable no-eligible-steps reason rather than leave a pending document with no approver. This edge-case behavior is proposed for explicit user review.
+If vacancy skipping leaves no approval steps, complete the approval phase with the auditable `NO_ELIGIBLE_APPROVAL_STEPS` reason rather than leave a pending document with no approver. For NEW request, solution and final instances, this records the completion reason and preserves the phase's existing status transition; it is an approved requirement, not an implementation-time product choice.
 
-New instances should capture route version, organizational context, required positions, candidate IDs and skip reasons. Organization/route edits do not silently rewrite pending candidates. Deactivated users must not gain action authority merely because they were captured earlier; controlled reassignment, if needed, must be explicit and audited rather than hidden live rerouting.
+New instances should capture route version, organizational context, required positions, candidate IDs and skip reasons. For NEW instances, candidate groups are fully snapshotted at instance creation: membership is immutable, organization/route edits do not silently rewrite pending candidates, and pending-step recipient lookup reads only the captured group. A captured candidate must still be an active user to act; inactivity fails closed and must not automatically activate a replacement or approve the remaining step. Candidate reassignment UI is outside this approved scope. Deactivated users must not gain action authority merely because they were captured earlier; any future controlled reassignment must be explicit and audited rather than hidden live rerouting.
 
 Reuse existing request/solution instance storage and lifecycle transactions where feasible. Keep final-approval phase identity explicit. Approval execution must atomically verify actor eligibility, pending/current step and document state, record the actual actor, and advance once. Competing approvals at the same any-one step cannot produce duplicate transitions.
 
 Custom chains retain ordered specific-person steps and existing validation (including self exclusion and duplicates). They bypass normal route restrictions and auto-approval, not authentication, action permissions or document-state checks. Preserve current custom entry points; adding a custom picker to initial request creation is not implicitly included.
 
 Resubmission is distinct from an organization edit: preserve the existing regeneration concept, use current published routing for the new attempt, and retain prior attempt history rather than confusing it with the current approval instance.
+
+## Approved compatibility-first notification policy
+
+Notifications are compatibility-first and are not a new delivery system:
+
+- Preserve every existing notification event (`approval_needed`, `approval_granted`, `approval_rejected`, `status_changed`, `request_assigned`, `solution_ready` and `final_approval_needed`), its current in-app/email channel behavior, custom solution notify-all-at-submit behavior and custom final first-step-only notification behavior, and section-wide status broadcasts.
+- Existing department audiences map to their future sections. A notification audience must not expand to descendants or ancestor managers merely because those users can view the request; visibility is not a notification subscription.
+- For NEW normal approval instances, pending-step `approval_needed`/`final_approval_needed` recipients come only from the immutable current-step candidate group, filtered to active users at dispatch. Organization changes do not cause live replacement lookup.
+- Pre-cutover in-flight rows retain legacy recipient lookup and legacy action semantics. Custom chains retain ordered person IDs and existing phase-specific timing: notify-all for custom solution submission/resubmission, first-step-only for custom final initiation.
+- Deduplicate identities inside each recipient group, keep post-commit dispatch boundaries and race-safe advancement, and do not add cancellation/resubmission events, new email parity, subscriptions or retry behavior.
 
 ## Visibility design
 
@@ -137,6 +148,10 @@ Use a role/scope/status matrix for reads and actions, including PD1 versus PD2 s
 
 Add regression tests for every preserved action capability and status transition before replacing routing. Run `npm run check` after code changes and relevant targeted tests through Portly. Update graphify after implementation changes.
 
+## Parent-unit document implementation interpretation
+
+Existing section-owned requests retain section-sharing, direct-section final-initiation permissions and section-wide informational broadcasts. For new parent-unit-owned requests, the plan generalizes that same direct-membership concept to the stored origin unit: direct members, not every descendant viewer, are the same-unit action/audience set. Existing ownership, role and status checks still apply. This explicit implementation interpretation must be visible at execution handoff; it does not broaden Engineering or ancestor-viewer mutation rights. Never use a dummy section or an arbitrary legacy department when origin-unit context is missing.
+
 ## Review boundary
 
-The user should review this written specification before implementation planning. In particular, confirm the proposed empty-resolved-route completion behavior and fully snapshotted new candidate groups; these details go beyond the legacy persistence semantics. No implementation has been performed.
+The empty-resolved-route completion with `NO_ELIGIBLE_APPROVAL_STEPS`, fully snapshotted NEW candidate groups with fail-closed inactivity, and compatibility-first notification policy above are approved requirements for implementation planning. They do not authorize implementation, production migration, or a candidate reassignment UI. The implementation plan must preserve this boundary, use reviewed external mapping inputs, and leave any genuinely missing organizational mapping as a rollout gate rather than inventing a value. No implementation has been performed.
