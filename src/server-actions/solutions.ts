@@ -960,7 +960,7 @@ export async function approveSolution(solutionId: string, comments?: string, exp
         })
 
         // Queue requester-department notification for post-commit dispatch.
-        notifications.department(request.departmentId, {
+        notifications.department(request.departmentId!, {
           type: 'solution_ready',
           title: 'Solution Ready for Review',
           message: `📤 Ready for Review: "${request.title}" has been completed and awaits your department's final review.`,
@@ -1327,7 +1327,7 @@ export async function initiateFinalApproval(
 
   // Get max level in department for top-level check
   const maxLevel = validateApprovalLevel(
-    await getMaxValidLevelInDepartment(prisma, request.departmentId),
+    await getMaxValidLevelInDepartment(prisma, request.departmentId!),
   )
   const initiatorLevel = normalizeSubmitterLevel(user.level)
   const isTopLevelInitiator = initiatorLevel >= maxLevel
@@ -1404,7 +1404,7 @@ export async function initiateFinalApproval(
       })
     } else {
       // Use department hierarchy
-      await createHierarchyFinalApprovalChain(tx, requestId, request.departmentId, userId)
+      await createHierarchyFinalApprovalChain(tx, requestId, request.departmentId!, userId)
       // Update request status to FinalApproval via the shared expected-status
       // guard (see updateRequestStatusExpecting).
       await updateRequestStatusExpecting(tx, {
@@ -1808,7 +1808,7 @@ export async function approveFinalApproval(requestId: string, comments?: string,
       // Queue requester-department completion notification for post-commit
       // dispatch, excluding engineering users.
       notifications.department(
-        request.departmentId,
+        request.departmentId!,
         {
           type: 'approval_granted',
           title: 'Request Completed',
@@ -2288,7 +2288,7 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
       })
 
       // Queue requester-department notification for post-commit dispatch.
-      notifications.department(request.department.id, {
+      notifications.department(request.department!.id, {
         type: 'solution_ready',
         title: 'Solution Ready for Review',
         message: `📤 Ready for Review: "${request.title}" solution has been updated and is ready for your department's final review.`,

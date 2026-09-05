@@ -115,7 +115,7 @@ async function DeletedRequestsList() {
                   <h3 className="font-medium text-sm truncate">{request.title}</h3>
                   <div className="text-sm text-muted-foreground mt-1 space-y-1">
                     <p>Requester: {request.requester.name} ({request.requester.email})</p>
-                    <p>Department: {request.department.name}</p>
+                    <p>Department: {request.department?.name}</p>
                     <p>Status: {request.status}</p>
                     <p>Deleted by: {request.deletedByUser?.name || 'Unknown'}</p>
                     <p>Deleted at: {request.deletedAt ? new Date(request.deletedAt).toLocaleString() : 'N/A'}</p>

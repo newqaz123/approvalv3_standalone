@@ -232,7 +232,8 @@ export async function canUserApprove(
   // Also check if user is a cross-department approver (DepartmentApprover)
   if (!effectiveLevel) {
     const deptApprover = await prisma.department_approvers.findFirst({
-      where: { departmentId: request.departmentId, approverId: userId },
+      // Legacy rows always carry a department; keep this authorization filter exact.
+      where: { departmentId: request.departmentId!, approverId: userId },
       select: { approverLevel: true },
     })
     if (deptApprover) {
@@ -501,8 +502,8 @@ async function notifyNextApprover(requestId: string) {
 
   // Get users at this level
   const approvers = await getApproversAtLevel(
-    nextApproval.request.departmentId,
-    nextApproval.requiredLevel
+    nextApproval.request.departmentId!,
+    nextApproval.requiredLevel!
   )
 
   // Create notifications for all approvers at this level
@@ -565,8 +566,8 @@ export async function getRequestApprovals(requestId: string) {
       if (approval.status === 'pending') {
         // Get both internal and external approvers at this level
         const allApprovers = await getApproversAtLevel(
-          request.departmentId,
-          approval.requiredLevel
+          request.departmentId!,
+          approval.requiredLevel!
         )
         // Filter out users with null level and limit to first 3
         eligibleApprovers = allApprovers

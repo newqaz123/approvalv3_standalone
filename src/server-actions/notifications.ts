@@ -161,7 +161,7 @@ async function getNotificationRequestDetails(
 		createdAt: request.createdAt,
 		requesterName: request.requester.name,
 		requesterEmail: request.requester.email,
-		departmentName: request.department.name,
+		departmentName: request.department?.name ?? "",
 		projectEstimateCost:
 			request.projectEstimateCost === null
 				? null

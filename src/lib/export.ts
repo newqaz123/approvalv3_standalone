@@ -14,7 +14,7 @@ export type AuditActivityRecord = RequestActivity & {
   request: {
     id: string
     title: string
-    departmentId: string
+    departmentId: string | null
     status: string
   } | null
 }
@@ -44,7 +44,7 @@ export interface AuditCSVRow {
 export interface AuditExportJSON {
   requestId: string
   requestTitle: string
-  departmentId: string
+  departmentId: string | null
   departmentName: string | null
   createdAt: string
   status: string

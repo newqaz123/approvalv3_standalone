@@ -121,7 +121,9 @@ describe('solution workflow transaction notification boundaries', () => {
     assert.match(approveSolution, /runSolutionTransactionWithNotifications/)
     assert.match(
       approveSolution,
-      /notifications\.department\(request\.departmentId,[\s\S]*?type:\s*'solution_ready'/,
+      // request.departmentId carries a compile-safe non-null assertion (legacy
+      // rows always have a department); the notification contract is unchanged.
+      /notifications\.department\(request\.departmentId!?,[\s\S]*?type:\s*'solution_ready'/,
     )
     assert.match(approveSolution, /queueNextSolutionApproverNotifications/)
 
@@ -191,7 +193,9 @@ describe('solution workflow transaction notification boundaries', () => {
 
     assert.match(
       autoApprovedBranch,
-      /notifications\.department\(request\.department\.id,[\s\S]*?type:\s*'solution_ready'/,
+      // request.department carries a compile-safe non-null assertion (legacy
+      // rows always have a department); the notification contract is unchanged.
+      /notifications\.department\(request\.department!?\.id,[\s\S]*?type:\s*'solution_ready'/,
       'auto-approved resubmission must queue its requester-department notification inside the isAutoApproved branch',
     )
 

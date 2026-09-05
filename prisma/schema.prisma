@@ -34,6 +34,7 @@ model departments {
   hierarchyChangeLogs   hierarchy_change_logs[]
   requests              requests[]
   users                 User[]
+  organizationUnit      organization_units?     @relation("organization_units_legacyDepartment")
 }
 
 model file_attachments {
@@ -154,27 +155,35 @@ model request_activities {
 }
 
 model request_approvals {
-  id                                                String         @id @default(uuid())
+  id                                                String                       @id @default(uuid())
   requestId                                         String
   approverId                                        String?
-  requiredLevel                                     Int
+  requiredLevel                                     Int?
   order                                             Int
-  status                                            ApprovalStatus @default(pending)
+  status                                            ApprovalStatus               @default(pending)
   comments                                          String?
   approvedAt                                        DateTime?
-  createdAt                                         DateTime       @default(now())
-  isCustomChain                                     Boolean        @default(false)
-  isFinalApproval                                   Boolean        @default(false)
+  createdAt                                         DateTime                     @default(now())
+  isCustomChain                                     Boolean                      @default(false)
+  isFinalApproval                                   Boolean                      @default(false)
   requiredApproverId                                String?
-  approver                                          User?         @relation("request_approvals_approverIdTousers", fields: [approverId], references: [id])
-  request                                           requests       @relation(fields: [requestId], references: [id], onDelete: Cascade)
-  requiredApprover                                  User?         @relation("request_approvals_requiredApproverIdTousers", fields: [requiredApproverId], references: [id])
+  instanceId                                        String?
+  requiredPosition                                  OrganizationPositionCode?
+  candidateGroupId                                  String?
+  routingMode                                       ApprovalRoutingMode          @default(LEGACY_LEVEL)
+  approver                                          User?                        @relation("request_approvals_approverIdTousers", fields: [approverId], references: [id])
+  request                                           requests                     @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  requiredApprover                                  User?                        @relation("request_approvals_requiredApproverIdTousers", fields: [requiredApproverId], references: [id])
+  instance                                          approval_instances?          @relation("request_approval_instance", fields: [instanceId], references: [id], onDelete: Restrict)
+  candidateGroup                                    approval_candidate_groups?   @relation("request_approval_candidate_group", fields: [candidateGroupId], references: [id], onDelete: Restrict)
 
   @@index([approverId])
   @@index([requestId])
   @@index([requiredApproverId])
   @@index([requiredLevel])
   @@index([status])
+  @@index([instanceId])
+  @@index([candidateGroupId])
 }
 
 model request_engineer_assignments {
@@ -279,7 +288,8 @@ model requests {
   description                       String
   status                            RequestStatus                  @default(ImprovementRequest)
   requesterId                       String
-  departmentId                      String
+  departmentId                      String?
+  organizationUnitId                String?
   createdAt                         DateTime                       @default(now())
   updatedAt                         DateTime                       @updatedAt
   engineeringCostEstimate           Decimal?                       @db.Decimal(15, 2)
@@ -302,15 +312,18 @@ model requests {
   subTasks                          request_sub_tasks[]
   budgetCode                        budget_codes?                 @relation(fields: [budgetCodeId], references: [id], onDelete: SetNull)
   deletedByUser                     User?                         @relation("requests_deletedByTousers", fields: [deletedBy], references: [id])
-  department                        departments                    @relation(fields: [departmentId], references: [id])
+  department                        departments?                  @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  organizationUnit                  organization_units?           @relation(fields: [organizationUnitId], references: [id])
   requester                         User                          @relation("requests_requesterIdTousers", fields: [requesterId], references: [id])
   workRequisitionReceivedBy         User?                         @relation("requests_workRequisitionReceivedByIdTousers", fields: [workRequisitionReceivedById], references: [id])
   solutions                         solutions[]
+  approvalInstances                 approval_instances[]
 
   @@index([budgetCodeId])
   @@index([createdAt])
   @@index([departmentId])
   @@index([isDeleted])
+  @@index([organizationUnitId])
   @@index([requesterId])
   @@index([status])
   @@index([workRequisitionReceived])
@@ -318,26 +331,34 @@ model requests {
 }
 
 model solution_approvals {
-  id                                                 String         @id @default(uuid())
+  id                                                 String                       @id @default(uuid())
   solutionId                                         String
   requiredLevel                                      Int?
   requiredApproverId                                 String?
   approverId                                         String?
   order                                              Int
-  status                                             ApprovalStatus @default(pending)
+  status                                             ApprovalStatus               @default(pending)
   comments                                           String?
-  isCustomChain                                      Boolean        @default(false)
+  isCustomChain                                      Boolean                      @default(false)
   approvedAt                                         DateTime?
-  createdAt                                          DateTime       @default(now())
-  approver                                           User?         @relation("solution_approvals_approverIdTousers", fields: [approverId], references: [id])
-  requiredApprover                                   User?         @relation("solution_approvals_requiredApproverIdTousers", fields: [requiredApproverId], references: [id])
-  solution                                           solutions      @relation(fields: [solutionId], references: [id], onDelete: Cascade)
+  createdAt                                          DateTime                     @default(now())
+  instanceId                                         String?
+  requiredPosition                                   OrganizationPositionCode?
+  candidateGroupId                                   String?
+  routingMode                                        ApprovalRoutingMode          @default(LEGACY_LEVEL)
+  approver                                           User?                        @relation("solution_approvals_approverIdTousers", fields: [approverId], references: [id])
+  requiredApprover                                   User?                        @relation("solution_approvals_requiredApproverIdTousers", fields: [requiredApproverId], references: [id])
+  solution                                           solutions                    @relation(fields: [solutionId], references: [id], onDelete: Cascade)
+  instance                                           approval_instances?          @relation("solution_approval_instance", fields: [instanceId], references: [id], onDelete: Restrict)
+  candidateGroup                                     approval_candidate_groups?   @relation("solution_approval_candidate_group", fields: [candidateGroupId], references: [id], onDelete: Restrict)
 
   @@index([approverId])
   @@index([order])
   @@index([requiredApproverId])
   @@index([solutionId])
   @@index([status])
+  @@index([instanceId])
+  @@index([candidateGroupId])
 }
 
 model solutions {
@@ -356,6 +377,7 @@ model solutions {
   fileAttachments                 file_attachments[]
   inlineDescriptionImageReferences inline_description_image_references[]
   approvals                       solution_approvals[]
+  approvalInstances               approval_instances[]
   request            requests             @relation(fields: [requestId], references: [id], onDelete: Cascade)
   submittedBy        User                @relation(fields: [submittedById], references: [id])
 
@@ -455,6 +477,10 @@ model User {
   requiredApprovalSolutions                                      solution_approvals[]           @relation("solution_approvals_requiredApproverIdTousers")
   solutions                                                       solutions[]
   createdStoragePlanEvents                                        storage_plan_events[]         @relation("storage_plan_events_createdByIdTousers")
+  organizationPositionAssignments                                 organization_position_assignments[]
+  reportingGroupMembers                                           reporting_group_members[]
+  createdApprovalRouteVersions                                    approval_route_versions[]
+  approvalInstancesOrigin                                         approval_instances[]           @relation("approval_instances_originUser")
   department                                                     departments?                   @relation(fields: [departmentId], references: [id])
 
   @@index([departmentId])
@@ -498,4 +524,240 @@ enum UserRole {
   admin
   general_dept
   engineering
+}
+
+// --- Additive organization/approval redesign models (Task 2) ---
+// Behavior remains legacy-default until the controlled cutover; these models
+// only add the target structure, the explicit routing discriminator, and the
+// immutable snapshot/provenance storage.
+
+enum OrganizationUnitType {
+  FACTORY
+  DIVISION
+  DEPARTMENT
+  SECTION
+}
+
+enum OrganizationPositionCode {
+  STAFF
+  SUPERVISOR
+  SECTION_MANAGER
+  DEPARTMENT_MANAGER
+  DIVISION_MANAGER
+  FACTORY_MANAGER
+}
+
+enum ApprovalPhase {
+  REQUEST
+  SOLUTION
+  FINAL
+}
+
+enum ApprovalRouteStatus {
+  DRAFT
+  PUBLISHED
+  RETIRED
+}
+
+enum ApprovalRoutingMode {
+  LEGACY_LEVEL
+  SNAPSHOT_GROUP
+  CUSTOM_PERSON
+}
+
+enum ApprovalInstanceState {
+  PENDING
+  AUTO_APPROVED
+  COMPLETED_NO_ELIGIBLE_STEPS
+  APPROVED
+  REJECTED
+  CANCELLED
+  SUPERSEDED
+}
+
+enum ApprovalSkipReason {
+  VACANT_POSITION
+}
+
+model organization_units {
+  id                    String                               @id @default(uuid())
+  name                  String
+  unitType              OrganizationUnitType
+  parentId              String?
+  legacyDepartmentId    String?                              @unique
+  isActive              Boolean                              @default(true)
+  operationalType       DepartmentType                       @default(GENERAL)
+  createdAt             DateTime                             @default(now())
+  updatedAt             DateTime                             @updatedAt
+  parent                organization_units?                  @relation("organization_units_parent", fields: [parentId], references: [id])
+  children              organization_units[]                 @relation("organization_units_parent")
+  legacyDepartment      departments?                         @relation("organization_units_legacyDepartment", fields: [legacyDepartmentId], references: [id], onDelete: SetNull)
+  positionAssignments   organization_position_assignments[]
+  reportingGroups       reporting_groups[]
+  routeVersions         approval_route_versions[]
+  approvalInstances     approval_instances[]
+  requests              requests[]
+
+  @@index([parentId])
+  @@index([unitType, isActive])
+}
+
+model organization_position_assignments {
+  id               String                    @id @default(uuid())
+  userId           String
+  unitId           String
+  positionCode     OrganizationPositionCode
+  reportingGroupId String?
+  isPrimary        Boolean                   @default(false)
+  isActive         Boolean                   @default(true)
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+  user             User                      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  unit             organization_units        @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  reportingGroup   reporting_groups?         @relation(fields: [reportingGroupId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, unitId, positionCode])
+  @@index([unitId, positionCode, isActive])
+  @@index([userId, isPrimary, isActive])
+}
+
+model reporting_groups {
+  id                  String                               @id @default(uuid())
+  unitId              String
+  parentGroupId       String?
+  name                String
+  isActive            Boolean                              @default(true)
+  createdAt           DateTime                             @default(now())
+  updatedAt           DateTime                             @updatedAt
+  unit                organization_units                   @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  parent              reporting_groups?                    @relation("reporting_groups_parent", fields: [parentGroupId], references: [id])
+  children            reporting_groups[]                   @relation("reporting_groups_parent")
+  members             reporting_group_members[]
+  positionAssignments organization_position_assignments[]
+
+  @@unique([unitId, name])
+  @@index([parentGroupId])
+}
+
+model reporting_group_members {
+  reportingGroupId String
+  userId           String
+  createdAt        DateTime          @default(now())
+  reportingGroup   reporting_groups  @relation(fields: [reportingGroupId], references: [id], onDelete: Cascade)
+  user             User              @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@id([reportingGroupId, userId])
+  @@index([userId])
+}
+
+model approval_route_versions {
+  id                   String                  @id @default(uuid())
+  scopeUnitId          String
+  phase                ApprovalPhase
+  version              Int
+  maximumPositionLevel Int
+  status               ApprovalRouteStatus     @default(DRAFT)
+  createdById          String
+  createdAt            DateTime                @default(now())
+  publishedAt          DateTime?
+  scopeUnit            organization_units      @relation(fields: [scopeUnitId], references: [id], onDelete: Restrict)
+  createdBy            User                    @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  steps                approval_route_steps[]
+  instances            approval_instances[]
+
+  @@unique([scopeUnitId, phase, version])
+  @@index([scopeUnitId, phase, status])
+}
+
+model approval_route_steps {
+  id               String                    @id @default(uuid())
+  routeVersionId   String
+  stepOrder        Int
+  positionCode     OrganizationPositionCode
+  createdAt        DateTime                  @default(now())
+  routeVersion     approval_route_versions   @relation(fields: [routeVersionId], references: [id], onDelete: Cascade)
+  skippedInstances approval_instance_skips[]
+
+  @@unique([routeVersionId, stepOrder])
+  @@unique([routeVersionId, positionCode])
+}
+
+model approval_instances {
+  id               String                     @id @default(uuid())
+  requestId        String?
+  solutionId       String?
+  phase            ApprovalPhase
+  routeVersionId   String?
+  originUserId     String
+  originUnitId     String
+  originContext    Json
+  routingMode      ApprovalRoutingMode
+  state            ApprovalInstanceState      @default(PENDING)
+  attempt          Int                        @default(1)
+  completionReason String?
+  createdAt        DateTime                   @default(now())
+  supersededAt     DateTime?
+  request          requests?                  @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  solution         solutions?                 @relation(fields: [solutionId], references: [id], onDelete: Cascade)
+  routeVersion     approval_route_versions?   @relation(fields: [routeVersionId], references: [id], onDelete: Restrict)
+  originUser       User                       @relation("approval_instances_originUser", fields: [originUserId], references: [id], onDelete: Restrict)
+  originUnit       organization_units         @relation(fields: [originUnitId], references: [id], onDelete: Restrict)
+  requestApprovals request_approvals[]        @relation("request_approval_instance")
+  solutionApprovals solution_approvals[]      @relation("solution_approval_instance")
+  skips            approval_instance_skips[]
+  candidateGroups  approval_candidate_groups[]
+
+  @@index([requestId, phase, supersededAt])
+  @@index([solutionId, phase, supersededAt])
+  @@index([routeVersionId])
+  @@unique([requestId, phase, attempt])
+  @@unique([solutionId, phase, attempt])
+}
+
+model approval_instance_skips {
+  id                String                    @id @default(uuid())
+  approvalInstanceId String
+  routeStepId       String?
+  requiredPosition  OrganizationPositionCode
+  reason            ApprovalSkipReason
+  createdAt         DateTime                  @default(now())
+  approvalInstance  approval_instances        @relation(fields: [approvalInstanceId], references: [id], onDelete: Cascade)
+  routeStep         approval_route_steps?     @relation(fields: [routeStepId], references: [id], onDelete: SetNull)
+
+  @@unique([approvalInstanceId, requiredPosition])
+}
+
+model approval_candidate_groups {
+  id                 String                               @id @default(uuid())
+  approvalInstanceId String
+  requiredPosition   OrganizationPositionCode
+  scopeUnitId        String
+  capturedAt         DateTime                             @default(now())
+  approvalInstance   approval_instances                   @relation(fields: [approvalInstanceId], references: [id], onDelete: Cascade)
+  members            approval_candidate_group_members[]
+  requestApprovals   request_approvals[]                  @relation("request_approval_candidate_group")
+  solutionApprovals  solution_approvals[]                 @relation("solution_approval_candidate_group")
+
+  @@unique([approvalInstanceId, requiredPosition])
+  @@index([scopeUnitId])
+}
+
+model approval_candidate_group_members {
+  candidateGroupId    String
+  userId              String
+  capturedAt          DateTime                    @default(now())
+  capturedDisplayName String
+  candidateGroup      approval_candidate_groups   @relation(fields: [candidateGroupId], references: [id], onDelete: Cascade)
+
+  @@id([candidateGroupId, userId])
+  @@index([userId])
+}
+
+model organization_import_runs {
+  id             String   @id @default(uuid())
+  mappingDigest  String   @unique
+  appliedAt      DateTime @default(now())
+  appliedBy      String
+  targetIdentity String
+  counts         Json
 }

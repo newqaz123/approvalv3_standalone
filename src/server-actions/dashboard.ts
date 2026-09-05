@@ -30,7 +30,7 @@ export type RequestListRow = {
 		status: "pending" | "approved" | "rejected";
 		approver?: { name: string } | null;
 		requiredApprover?: { name: string } | null;
-		requiredLevel: number;
+		requiredLevel: number | null;
 		order: number;
 		approvedAt?: Date | null;
 		isFinalApproval: boolean;
@@ -233,7 +233,7 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
 							try {
 								const potentialApprovers = await getApproversAtLevel(
 									approval.request.departmentId,
-									a.requiredLevel,
+									a.requiredLevel!,
 								);
 								return {
 									...a,
@@ -391,7 +391,7 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
 							try {
 								const potentialApprovers = await getApproversAtLevel(
 									request.departmentId,
-									a.requiredLevel,
+									a.requiredLevel!,
 								);
 								return {
 									...a,
@@ -598,7 +598,7 @@ export async function getMyCreatedRequests(): Promise<RequestListRow[]> {
 						try {
 							const potentialApprovers = await getApproversAtLevel(
 								approvalDepartmentId,
-								approval.requiredLevel,
+								approval.requiredLevel!,
 							);
 							return {
 								...approval,
@@ -852,7 +852,7 @@ export async function getAllRequests(): Promise<RequestListRow[]> {
 						try {
 							const potentialApprovers = await getApproversAtLevel(
 								approvalDepartmentId,
-								approval.requiredLevel,
+								approval.requiredLevel!,
 							);
 							return {
 								...approval,

@@ -478,7 +478,7 @@ export async function getMyRequests(filters?: GetRequestsFilters) {
       // If pending and no specific requiredApprover, load potential approvers at this level
       if (approval.status === 'pending' && !approval.requiredApprover && approvalDepartmentId) {
         try {
-          const potentialApprovers = await getApproversAtLevel(approvalDepartmentId, approval.requiredLevel)
+          const potentialApprovers = await getApproversAtLevel(approvalDepartmentId, approval.requiredLevel!)
           return {
             ...approval,
             potentialApprovers: potentialApprovers.map(p => ({ name: p.name })),
@@ -829,7 +829,15 @@ export async function getRequestFilterOptions() {
       distinct: ['departmentId'],
     })
 
-    const visibleDeptIds = [...new Set(visibleRequests.map(r => r.departmentId))]
+    // Organization-owned (NEW) requests have no legacy department; the visible
+    // department list covers legacy-department requests only.
+    const visibleDeptIds = [
+      ...new Set(
+        visibleRequests
+          .map((r) => r.departmentId)
+          .filter((id): id is string => id !== null),
+      ),
+    ]
 
     departments = await prisma.departments.findMany({
       where: { id: { in: visibleDeptIds } },
