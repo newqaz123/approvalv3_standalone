@@ -18,6 +18,7 @@ export const ORGANIZATION_APPROVAL_FIXTURE = {
   supervisorId: 'supervisor-1',
   sectionManagerId: 'section-manager-1',
   departmentManagerId: 'department-manager-1',
+  divisionManagerId: 'division-manager-1',
   factoryManagerId: 'factory-manager-1',
   engineeringId: 'engineer-1',
   inactiveCandidateId: 'inactive-1',
@@ -81,7 +82,7 @@ export type LegacyNotificationChannel =
  * flagged as residuals instead of being faked as asserted evidence.
  */
 export type LegacyNotificationAssertedVia =
-  | 'recorded collector calls'
+  | 'recorded production delivery (real action + notifications module, mocked SMTP/DB)'
   | 'recorded db writes'
   | 'recorded orchestration dispatch'
   | 'inline in action body (no injectable boundary — residual)'
@@ -134,7 +135,7 @@ export const LEGACY_NOTIFICATION_EXPECTATIONS: readonly LegacyNotificationExpect
     recipientsRule: 'all active approvers at the next pending request-approval level',
     channel: 'in_app+email',
     transition: null,
-    assertedVia: RESIDUAL,
+    assertedVia: 'recorded production delivery (real action + notifications module, mocked SMTP/DB)',
   },
   {
     case: 'request approval phase completed engineering task broadcast',
@@ -143,7 +144,7 @@ export const LEGACY_NOTIFICATION_EXPECTATIONS: readonly LegacyNotificationExpect
     recipientsRule: 'all active users of the ENGINEERING department',
     channel: 'in_app_department_broadcast+email',
     transition: phaseStatusExpectation('REQUEST'),
-    assertedVia: RESIDUAL,
+    assertedVia: 'recorded production delivery (real action + notifications module, mocked SMTP/DB)',
   },
   {
     case: 'request approval phase other status requester notice',
@@ -152,16 +153,17 @@ export const LEGACY_NOTIFICATION_EXPECTATIONS: readonly LegacyNotificationExpect
     recipientsRule: 'the requester',
     channel: 'in_app+email',
     transition: { from: 'SendBackToRequester', to: 'Completed' },
-    assertedVia: RESIDUAL,
+    assertedVia: 'recorded production delivery (real action + notifications module, mocked SMTP/DB)',
   },
   {
     case: 'solution submit custom chain all at submit',
     eventType: 'approval_needed',
     recipientIds: [],
-    recipientsRule: 'every unique non-submitter custom approver, in submitted order',
+    recipientsRule:
+      'notifies every id in the submitted customApproverIds array verbatim (raw list: duplicates and the submitter included), while the persisted chain rows are the sanitized unique non-submitter set',
     channel: 'in_app+email',
     transition: { from: 'SentToEngineer', to: 'DesignCostEstimationApproval' },
-    assertedVia: RESIDUAL,
+    assertedVia: 'recorded production delivery (real action + notifications module, mocked SMTP/DB)',
   },
   {
     case: 'solution submit hierarchy chain first level',
@@ -171,7 +173,7 @@ export const LEGACY_NOTIFICATION_EXPECTATIONS: readonly LegacyNotificationExpect
       'active Engineering users at the first pending hierarchy level (from actual chain data, never arithmetic submitter+1)',
     channel: 'in_app+email',
     transition: { from: 'SentToEngineer', to: 'DesignCostEstimationApproval' },
-    assertedVia: RESIDUAL,
+    assertedVia: 'recorded production delivery (real action + notifications module, mocked SMTP/DB)',
   },
   {
     case: 'solution submit auto top level requester ready',
@@ -180,7 +182,7 @@ export const LEGACY_NOTIFICATION_EXPECTATIONS: readonly LegacyNotificationExpect
     recipientsRule: 'the requester',
     channel: 'in_app+email',
     transition: { from: 'SentToEngineer', to: 'SendBackToRequester' },
-    assertedVia: RESIDUAL,
+    assertedVia: 'recorded production delivery (real action + notifications module, mocked SMTP/DB)',
   },
   {
     case: 'solution approval intermediate next approver',
@@ -190,7 +192,7 @@ export const LEGACY_NOTIFICATION_EXPECTATIONS: readonly LegacyNotificationExpect
       'custom chain: the requiredApproverId of the first pending row only; hierarchy chain: all active Engineering users at its requiredLevel',
     channel: 'in_app+email',
     transition: null,
-    assertedVia: RESIDUAL,
+    assertedVia: 'recorded production delivery (real action + notifications module, mocked SMTP/DB)',
   },
   {
     case: 'solution approval completed requester department ready',
@@ -199,7 +201,7 @@ export const LEGACY_NOTIFICATION_EXPECTATIONS: readonly LegacyNotificationExpect
     recipientsRule: 'all active users of the requester department',
     channel: 'in_app_department_broadcast+email',
     transition: phaseStatusExpectation('SOLUTION'),
-    assertedVia: RESIDUAL,
+    assertedVia: 'recorded production delivery (real action + notifications module, mocked SMTP/DB)',
   },
   {
     case: 'solution rejected submitter rework',
@@ -208,7 +210,7 @@ export const LEGACY_NOTIFICATION_EXPECTATIONS: readonly LegacyNotificationExpect
     recipientsRule: 'the solution submitter',
     channel: 'in_app+email',
     transition: { from: 'DesignCostEstimationApproval', to: 'SentToEngineer' },
-    assertedVia: RESIDUAL,
+    assertedVia: 'recorded production delivery (real action + notifications module, mocked SMTP/DB)',
   },
   {
     case: 'solution resubmit custom chain all approvers',
@@ -217,7 +219,7 @@ export const LEGACY_NOTIFICATION_EXPECTATIONS: readonly LegacyNotificationExpect
     recipientsRule: 'every submitted custom approver (auto path notifies the requester department instead)',
     channel: 'in_app+email',
     transition: { from: 'SentToEngineer', to: 'DesignCostEstimationApproval' },
-    assertedVia: RESIDUAL,
+    assertedVia: 'recorded production delivery (real action + notifications module, mocked SMTP/DB)',
   },
   {
     case: 'final initiate custom chain first step only',
@@ -227,7 +229,7 @@ export const LEGACY_NOTIFICATION_EXPECTATIONS: readonly LegacyNotificationExpect
       'the requiredApproverId of the first pending final-approval row only (order 1), never later steps',
     channel: 'in_app+email',
     transition: { from: 'SendBackToRequester', to: 'FinalApproval' },
-    assertedVia: RESIDUAL,
+    assertedVia: 'recorded production delivery (real action + notifications module, mocked SMTP/DB)',
   },
   {
     case: 'final initiate hierarchy chain first level',
@@ -236,7 +238,7 @@ export const LEGACY_NOTIFICATION_EXPECTATIONS: readonly LegacyNotificationExpect
     recipientsRule: 'active requester-department users at the first pending final level',
     channel: 'in_app+email',
     transition: { from: 'SendBackToRequester', to: 'FinalApproval' },
-    assertedVia: RESIDUAL,
+    assertedVia: 'recorded production delivery (real action + notifications module, mocked SMTP/DB)',
   },
   {
     case: 'final initiate auto top level completed notice',
@@ -245,7 +247,7 @@ export const LEGACY_NOTIFICATION_EXPECTATIONS: readonly LegacyNotificationExpect
     recipientsRule: 'the requester (in-app row only, written inside the transaction)',
     channel: 'in_app',
     transition: { from: 'SendBackToRequester', to: 'Completed' },
-    assertedVia: RESIDUAL,
+    assertedVia: 'recorded production delivery (real action + notifications module, mocked SMTP/DB)',
   },
   {
     case: 'final approval intermediate next approver',
@@ -254,7 +256,7 @@ export const LEGACY_NOTIFICATION_EXPECTATIONS: readonly LegacyNotificationExpect
     recipientsRule: 'the next pending final step only (custom: assigned person; hierarchy: level members)',
     channel: 'in_app+email',
     transition: null,
-    assertedVia: RESIDUAL,
+    assertedVia: 'recorded production delivery (real action + notifications module, mocked SMTP/DB)',
   },
   {
     case: 'final approval completed department broadcast',
@@ -273,7 +275,7 @@ export const LEGACY_NOTIFICATION_EXPECTATIONS: readonly LegacyNotificationExpect
       'Engineering department excluding the rejector (approval_rejected), plus the requester department excluding the rejector (status_changed)',
     channel: 'in_app_department_broadcast+email',
     transition: { from: 'FinalApproval', to: 'SentToEngineer' },
-    assertedVia: RESIDUAL,
+    assertedVia: 'recorded production delivery (real action + notifications module, mocked SMTP/DB)',
   },
   {
     case: 'request cancelled',
@@ -282,7 +284,7 @@ export const LEGACY_NOTIFICATION_EXPECTATIONS: readonly LegacyNotificationExpect
     recipientsRule: 'cancellation notifies no one; only the cancelled activity is written',
     channel: 'in_app',
     transition: { from: 'any current status', to: 'Cancelled' },
-    assertedVia: 'recorded db writes',
+    assertedVia: 'recorded production delivery (real action + notifications module, mocked SMTP/DB)',
   },
   {
     case: 'request completed manual',
@@ -291,6 +293,6 @@ export const LEGACY_NOTIFICATION_EXPECTATIONS: readonly LegacyNotificationExpect
     recipientsRule: 'the requester (in-app row only, written inside the transaction)',
     channel: 'in_app',
     transition: { from: 'SendBackToRequester', to: 'Completed' },
-    assertedVia: RESIDUAL,
+    assertedVia: 'recorded production delivery (real action + notifications module, mocked SMTP/DB)',
   },
 ]

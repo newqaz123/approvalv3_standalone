@@ -1,0 +1,257 @@
+/**
+ * Request-phase workflow characterization: executes the REAL resubmitRequest,
+ * cancelRequest, and approveRequest server actions through the transpile+vm
+ * harness, asserting persisted rows, persisted transitions, ownership/status
+ * negatives, and production notification deliveries.
+ */
+import { describe, it } from 'node:test'
+import assert from 'node:assert/strict'
+import {
+  SCENARIO,
+  baselineRequest,
+  createHarness,
+  departmentRows,
+  enableTestSmtp,
+  workflowUsers,
+  type Harness,
+} from '../fixtures/organization-approval-harness'
+
+const REQUEST_ID = SCENARIO.requestId
+
+function requestHarness(requestStatus: string, approvals: Array<Record<string, unknown>> = [], requestOverrides: Record<string, unknown> = {}): Harness {
+  return createHarness({
+    departments: departmentRows(),
+    users: workflowUsers(),
+    requests: [baselineRequest({ status: requestStatus, ...requestOverrides })],
+    request_approvals: approvals,
+  })
+}
+
+function pendingApproval(id: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return { id, requestId: REQUEST_ID, requiredLevel: 2, order: 1, status: 'pending', isFinalApproval: false, ...overrides }
+}
+
+describe('real approveRequest', () => {
+  it('records the intermediate approval, leaves the status, and notifies the next pending level', async () => {
+    const harness = requestHarness('ImprovementRequest', [
+      pendingApproval('a1'),
+      { id: 'a2', requestId: REQUEST_ID, requiredLevel: 4, order: 2, status: 'pending', isFinalApproval: false },
+    ])
+    enableTestSmtp(harness.state)
+    harness.state.authUserId = 'supervisor-1'
+
+    const result = (await harness.approvals.approveRequest(REQUEST_ID)) as { success: boolean }
+    assert.equal(result.success, true)
+
+    const rows = harness.db.requestApprovalsForRequest(REQUEST_ID).sort((a, b) => (a.order as number) - (b.order as number))
+    assert.deepEqual(
+      rows.map((row) => ({ status: row.status, approverId: row.approverId })),
+      [
+        { status: 'approved', approverId: 'supervisor-1' },
+        { status: 'pending', approverId: undefined },
+      ],
+    )
+    assert.equal(harness.db.requests.rows.get(REQUEST_ID)?.status, 'ImprovementRequest')
+
+    // notifyNextApprover resolves level 4 approvers through getApproversAtLevel.
+    assert.deepEqual(
+      [...harness.db.rows.notifications.values()].map((row) => ({ userId: row.userId, type: row.type })),
+      [{ userId: 'department-manager-1', type: 'approval_needed' }],
+    )
+    assert.deepEqual(harness.state.smtpMessages.map((mail) => mail.to), ['department-manager-1@example.test'])
+  })
+
+  it('completes the ImprovementRequest phase into SentToEngineer and broadcasts request_assigned to engineering', async () => {
+    const harness = requestHarness('ImprovementRequest', [pendingApproval('a1')])
+    enableTestSmtp(harness.state)
+    harness.state.authUserId = 'supervisor-1'
+
+    const result = (await harness.approvals.approveRequest(REQUEST_ID)) as { success: boolean }
+    assert.equal(result.success, true)
+
+    assert.equal(harness.db.requests.rows.get(REQUEST_ID)?.status, 'SentToEngineer')
+    assert.deepEqual(
+      [...harness.db.rows.notifications.values()].map((row) => ({ userId: row.userId, type: row.type })),
+      [
+        { userId: 'engineer-1', type: 'request_assigned' },
+        { userId: SCENARIO.engineeringSupervisorId, type: 'request_assigned' },
+        { userId: SCENARIO.engineeringManagerId, type: 'request_assigned' },
+      ],
+    )
+  })
+
+  it('completes the ladder tail into Completed and notifies the requester of the status change', async () => {
+    const harness = requestHarness('SendBackToRequester', [pendingApproval('a1', { requiredLevel: 4 })])
+    enableTestSmtp(harness.state)
+    harness.state.authUserId = 'department-manager-1'
+
+    const result = (await harness.approvals.approveRequest(REQUEST_ID)) as { success: boolean }
+    assert.equal(result.success, true)
+
+    assert.equal(harness.db.requests.rows.get(REQUEST_ID)?.status, 'Completed')
+    assert.deepEqual(
+      [...harness.db.rows.notifications.values()].map((row) => ({ userId: row.userId, type: row.type })),
+      [{ userId: 'staff-1', type: 'status_changed' }],
+    )
+  })
+
+  it('refuses users without a pending approval assignment at their level', async () => {
+    const harness = requestHarness('ImprovementRequest', [pendingApproval('a1')])
+    harness.state.authUserId = 'department-manager-1' // level 4, no pending level-4 row
+    await assert.rejects(
+      harness.approvals.approveRequest(REQUEST_ID),
+      /You cannot approve this request at this time/,
+    )
+    harness.state.authUserId = 'null-org-1' // unrelated, unassigned
+    await assert.rejects(
+      harness.approvals.approveRequest(REQUEST_ID),
+      /You cannot approve this request at this time/,
+    )
+  })
+
+  it('refuses an assigned out-of-order approver while earlier steps are pending', async () => {
+    const harness = requestHarness('ImprovementRequest', [
+      pendingApproval('a1'),
+      { id: 'a2', requestId: REQUEST_ID, requiredLevel: 4, order: 2, status: 'pending', isFinalApproval: false },
+    ])
+    harness.state.authUserId = 'department-manager-1'
+    await assert.rejects(
+      harness.approvals.approveRequest(REQUEST_ID),
+      /You cannot approve this request at this time/,
+    )
+  })
+})
+
+describe('real resubmitRequest', () => {
+  it('deletes the rejected chain, rebuilds it from the requester level, and keeps the status', async () => {
+    const harness = requestHarness('ImprovementRequest', [
+      { id: 'a1', requestId: REQUEST_ID, requiredLevel: 2, order: 1, status: 'rejected', approverId: 'supervisor-1', isFinalApproval: false },
+      { id: 'a2', requestId: REQUEST_ID, requiredLevel: 4, order: 2, status: 'approved', isFinalApproval: false },
+    ])
+    enableTestSmtp(harness.state)
+    harness.state.authUserId = 'staff-1'
+    const beforeUpdatedAt = harness.db.requests.rows.get(REQUEST_ID)?.updatedAt as Date
+
+    const result = (await harness.requests.resubmitRequest({ requestId: REQUEST_ID })) as { success: boolean }
+    assert.equal(result.success, true)
+
+    // Old rows gone; fresh chain persisted from the requester's level 1.
+    const persisted = harness.db.requestApprovalsForRequest(REQUEST_ID).sort((a, b) => (a.order as number) - (b.order as number))
+    assert.deepEqual(
+      persisted.map((row) => ({ requiredLevel: row.requiredLevel, order: row.order, status: row.status, requiredApproverId: row.requiredApproverId })),
+      [
+        { requiredLevel: 2, order: 1, status: 'pending', requiredApproverId: 'supervisor-1' },
+        { requiredLevel: 4, order: 2, status: 'pending', requiredApproverId: 'department-manager-1' },
+      ],
+    )
+    assert.equal(harness.db.requests.rows.get(REQUEST_ID)?.status, 'ImprovementRequest')
+    assert.ok(((harness.db.requests.rows.get(REQUEST_ID)?.updatedAt as Date).getTime()) > beforeUpdatedAt.getTime())
+    assert.ok(
+      [...harness.db.rows.request_activities.values()].some((row) => row.action === 'resubmitted'),
+    )
+  })
+
+  it('refuses non-requesters and requests without rejections', async () => {
+    const nonowner = requestHarness('ImprovementRequest', [pendingApproval('a1', { status: 'rejected' })])
+    nonowner.state.authUserId = 'null-org-1'
+    await assert.rejects(nonowner.requests.resubmitRequest({ requestId: REQUEST_ID }), /Only the requester can resubmit/)
+
+    const noRejection = requestHarness('ImprovementRequest', [pendingApproval('a1')])
+    noRejection.state.authUserId = 'staff-1'
+    await assert.rejects(noRejection.requests.resubmitRequest({ requestId: REQUEST_ID }), /does not have any rejections/)
+
+    const wrongStatus = requestHarness('SentToEngineer', [pendingApproval('a1', { status: 'rejected' })])
+    wrongStatus.state.authUserId = 'staff-1'
+    await assert.rejects(wrongStatus.requests.resubmitRequest({ requestId: REQUEST_ID }), /department approval phase/)
+  })
+})
+
+describe('real cancelRequest', () => {
+  it('cancels for the owner in a cancellable status and writes only the cancelled activity', async () => {
+    const harness = requestHarness('SentToEngineer')
+    enableTestSmtp(harness.state)
+    harness.state.authUserId = 'staff-1'
+
+    const result = (await harness.requests.cancelRequest({ requestId: REQUEST_ID, reason: 'No longer needed by the line' })) as { success: boolean }
+    assert.equal(result.success, true)
+
+    assert.equal(harness.db.requests.rows.get(REQUEST_ID)?.status, 'Cancelled')
+    const activities = [...harness.db.rows.request_activities.values()]
+    assert.deepEqual(
+      activities.map((row) => ({ action: row.action, from: row.fromStatus, to: row.toStatus })),
+      [{ action: 'cancelled', from: 'SentToEngineer', to: 'Cancelled' }],
+    )
+    // Cancellation notifies no one.
+    assert.deepEqual([...harness.db.rows.notifications.values()], [])
+    assert.deepEqual(harness.state.smtpMessages, [])
+  })
+
+  it('blocks nonowners, wrong statuses, and pending approvals with the production messages', async () => {
+    const nonowner = requestHarness('SentToEngineer')
+    nonowner.state.authUserId = 'null-org-1'
+    await assert.rejects(
+      nonowner.requests.cancelRequest({ requestId: REQUEST_ID, reason: 'No longer needed by the line' }),
+      /Only the requester can cancel their own request/,
+    )
+
+    const wrongStatus = requestHarness('DesignCostEstimationApproval')
+    wrongStatus.state.authUserId = 'staff-1'
+    await assert.rejects(
+      wrongStatus.requests.cancelRequest({ requestId: REQUEST_ID, reason: 'No longer needed by the line' }),
+      /Cannot cancel - request is DesignCostEstimationApproval/,
+    )
+
+    const pendingRequestApproval = requestHarness('ImprovementRequest', [
+      { id: 'a1', requestId: REQUEST_ID, requiredLevel: 2, order: 1, status: 'rejected', isFinalApproval: false },
+      pendingApproval('a2', { requiredLevel: 4, order: 2 }),
+    ])
+    pendingRequestApproval.state.authUserId = 'staff-1'
+    await assert.rejects(
+      pendingRequestApproval.requests.cancelRequest({ requestId: REQUEST_ID, reason: 'No longer needed by the line' }),
+      /Cannot cancel - a request approval is still pending/,
+    )
+  })
+
+  it('blocks on a pending solution approval and succeeds once it clears (paired case)', async () => {
+    const seedApprovals = (): Array<Record<string, unknown>> => [
+      // The cancellation guard's other predicates are satisfied: a rejected
+      // non-final request approval exists and no request approval is pending.
+      { id: 'a1', requestId: REQUEST_ID, requiredLevel: 2, order: 1, status: 'rejected', approverId: 'supervisor-1', isFinalApproval: false },
+    ]
+    const blocked = requestHarness('ImprovementRequest', seedApprovals(), {})
+    blocked.db.seed('solutions', [{ ...baselineSeedSolution() }])
+    blocked.db.seed('solution_approvals', [
+      { id: 'sa-1', solutionId: SCENARIO.solutionId, requestId: REQUEST_ID, requiredLevel: 2, order: 1, status: 'pending', isCustomChain: false },
+    ])
+    blocked.state.authUserId = 'staff-1'
+    await assert.rejects(
+      blocked.requests.cancelRequest({ requestId: REQUEST_ID, reason: 'No longer needed by the line' }),
+      /Cannot cancel - a solution approval is still pending/,
+    )
+    assert.equal(blocked.db.requests.rows.get(REQUEST_ID)?.status, 'ImprovementRequest')
+
+    // Otherwise-identical scenario with the solution approval cleared.
+    const allowed = requestHarness('ImprovementRequest', seedApprovals(), {})
+    allowed.db.seed('solutions', [{ ...baselineSeedSolution() }])
+    allowed.db.seed('solution_approvals', [
+      { id: 'sa-1', solutionId: SCENARIO.solutionId, requestId: REQUEST_ID, requiredLevel: 2, order: 1, status: 'rejected', isCustomChain: false },
+    ])
+    allowed.state.authUserId = 'staff-1'
+    const result = (await allowed.requests.cancelRequest({ requestId: REQUEST_ID, reason: 'No longer needed by the line' })) as { success: boolean }
+    assert.equal(result.success, true)
+    assert.equal(allowed.db.requests.rows.get(REQUEST_ID)?.status, 'Cancelled')
+  })
+})
+
+function baselineSeedSolution(): Record<string, unknown> {
+  return {
+    id: SCENARIO.solutionId,
+    requestId: REQUEST_ID,
+    title: 'Blocked solution',
+    description: '<p>Solution</p>',
+    costEstimate: 100,
+    currency: 'THB',
+    timeline: '1 week',
+    submittedById: 'engineer-1',
+  }
+}

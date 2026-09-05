@@ -37,463 +37,49 @@ import {
   legacyRequestRows,
   phaseStatusExpectation,
 } from '../fixtures/organization-approval-fixtures'
+import { ApprovalWorkflowDb } from '../fixtures/organization-approval-harness'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
 // ---------------------------------------------------------------------------
-// Stateful Prisma-boundary fake (pattern from request-approval-transaction.test.ts)
-//
-// Task 1 is a characterization baseline: every behavioral assertion below drives
-// REAL existing modules through their existing dependency-injection boundaries
-// (createApprovalChain's db parameter, approveRequestApproval's transaction db,
-// updateRequestStatusExpecting's guarded db, runTransactionWithPostCommitNotifications'
-// injected transaction/dispatchers, and the pure policy/permission helpers).
-// No production source was modified for these tests. Notification recipient
-// loops that live inline inside action bodies have no injectable boundary; the
-// fixtures store their expected event/recipient/channel/transition contracts
-// (LEGACY_NOTIFICATION_EXPECTATIONS) and mark them as residuals instead of
-// faking assertions against them.
+// Shared strict fake (organization-approval-harness): the same in-memory
+// database the real server-action tests use. It executes only recognized
+// operations and predicate shapes and throws on anything else, so a fake gap
+// can never silently permit a write. Writes are recorded for persistence
+// assertions.
 // ---------------------------------------------------------------------------
 
-type FakeUserRow = {
-  id: string
-  departmentId: string | null
-  level: number | null
-  isActive: boolean
-  role: string
-  name: string
-  email: string | null
-}
+type FakeRequestRow = Record<string, unknown>
+type FakeRequestApprovalRow = Record<string, unknown>
 
-type FakeExternalApproverRow = {
-  id: string
-  departmentId: string
-  approverId: string
-  approverLevel: number
-}
-
-type FakeRequestRow = {
-  id: string
-  status: RequestStatus
-  requesterId: string
-  title: string
-  departmentId: string
-  updatedAt: Date
-}
-
-type FakeRequestApprovalRow = {
-  id: string
-  requestId: string
-  requiredLevel: number | null
-  requiredApproverId?: string | null
-  order: number
-  status: 'pending' | 'approved' | 'rejected'
-  approverId?: string | null
-  comments?: string | null
-  approvedAt?: Date | null
-  isCustomChain?: boolean
-  isFinalApproval?: boolean
-}
-
-type FakeSolutionApprovalRow = {
-  id: string
-  solutionId: string
-  requestId: string
-  status: 'pending' | 'approved' | 'rejected'
-}
-
-type FakeActivityRow = {
-  requestId: string
-  userId?: string | null
-  action: string
-  comments?: string | null
-  fromStatus?: RequestStatus | null
-  toStatus?: RequestStatus | null
-}
-
-type RequestApprovalStatePredicate = {
-  status?: string
-  isFinalApproval?: boolean
-}
-
-type RequestRelationPredicate = {
-  approvals?: {
-    some?: RequestApprovalStatePredicate
-    none?: RequestApprovalStatePredicate
-  }
-  solutions?: {
-    none?: {
-      approvals?: { some?: RequestApprovalStatePredicate }
-    }
-  }
-}
-
-type RequestUpdateManyWhere = {
-  AND?: Array<Record<string, unknown>>
-  id?: string
-  status?: string | { in?: string[] }
-  updatedAt?: Date
-} & RequestRelationPredicate
-
-/**
- * Evaluates exactly the where-shapes the real workflow writes through:
- * the guarded status transition's `{ AND: [expectedStatusWhere, additionalWhere] }`
- * where the additional builders use `approvals.some/none` and
- * `solutions.none.approvals.some` state predicates (see
- * buildRejectedRequestCancellationWhere / buildRejectedRequestResubmissionWhere).
- */
-function matchesRequestApprovalState(
-  row: { status: string; isFinalApproval?: boolean | null },
-  predicate: RequestApprovalStatePredicate | undefined,
-): boolean {
-  if (!predicate) return true
-  if (predicate.status !== undefined && row.status !== predicate.status) return false
-  if (
-    predicate.isFinalApproval !== undefined &&
-    Boolean(row.isFinalApproval) !== predicate.isFinalApproval
-  ) {
-    return false
-  }
-  return true
-}
-
-class FakeRequestsTable {
-  readonly rows = new Map<string, FakeRequestRow>()
-  afterRead?: () => void
-
-  constructor(private readonly db: BaselineWorkflowDb) {}
-
-  async findUnique(args: {
-    where: { id: string }
-    select: { status: true; requesterId: true; title: true }
-  }): Promise<{ status: RequestStatus; requesterId: string; title: string } | null> {
-    const row = this.rows.get(args.where.id)
-    const result = row
-      ? { status: row.status, requesterId: row.requesterId, title: row.title }
-      : null
-    this.afterRead?.()
-    return result
-  }
-
-  async updateMany(args: Prisma.requestsUpdateManyArgs): Promise<{ count: number }> {
-    // Narrow the Prisma where to the shapes the guarded transition and the
-    // cancellation/resubmission builders actually produce (see
-    // matchesRequestWhere below) so an unexpected predicate shape is a no-op,
-    // mirroring the real conditional UPDATE.
-    const where = args.where as unknown as RequestUpdateManyWhere
-    let count = 0
-    for (const row of this.rows.values()) {
-      if (!this.matches(row, where)) continue
-      Object.assign(row, args.data)
-      count += 1
-    }
-    return { count }
-  }
-
-  private matches(row: FakeRequestRow, where: RequestUpdateManyWhere): boolean {
-    if (where.AND && !where.AND.every((clause) => this.matches(row, clause as unknown as RequestUpdateManyWhere))) {
-      return false
-    }
-    if (where.id !== undefined && row.id !== where.id) return false
-    if (where.updatedAt !== undefined && row.updatedAt.getTime() !== where.updatedAt.getTime()) {
-      return false
-    }
-    if (where.status !== undefined) {
-      const expected =
-        typeof where.status === 'string' ? [where.status] : where.status?.in ?? []
-      if (!expected.includes(row.status)) return false
-    }
-    if (where.approvals) {
-      const approvalRows = this.db.requestApprovalsForRequest(row.id)
-      if (where.approvals.some && !approvalRows.some((a) => matchesRequestApprovalState(a, where.approvals?.some))) {
-        return false
-      }
-      if (where.approvals.none && approvalRows.some((a) => matchesRequestApprovalState(a, where.approvals?.none))) {
-        return false
-      }
-    }
-    if (where.solutions?.none?.approvals?.some) {
-      const predicate = where.solutions.none.approvals.some
-      const hasPendingSolutionApproval = this.db
-        .solutionApprovalsForRequest(row.id)
-        .some((s) => matchesRequestApprovalState(s, predicate))
-      if (hasPendingSolutionApproval) return false
-    }
-    return true
-  }
-}
-
-class FakeRequestApprovalsTable {
-  readonly rows = new Map<string, FakeRequestApprovalRow>()
-
-  async createMany(args: {
-    data: Array<Record<string, unknown>>
-  }): Promise<{ count: number }> {
-    for (const data of args.data) {
-      const id = `created-${this.rows.size + 1}-${String(data.requiredLevel ?? data.requiredApproverId ?? '')}`
-      this.rows.set(id, data as unknown as FakeRequestApprovalRow)
-    }
-    return { count: args.data.length }
-  }
-
-  async update(args: {
-    where: { id: string }
-    data: Partial<FakeRequestApprovalRow>
-  }): Promise<FakeRequestApprovalRow> {
-    const row = this.rows.get(args.where.id)
-    if (!row) throw new Error(`approval ${args.where.id} not found`)
-    Object.assign(row, args.data)
-    return { ...row }
-  }
-
-  async updateMany(args: {
-    where: { requestId?: string; status?: string; isFinalApproval?: boolean }
-    data: Partial<FakeRequestApprovalRow>
-  }): Promise<{ count: number }> {
-    let count = 0
-    for (const row of this.rows.values()) {
-      if (args.where.requestId !== undefined && row.requestId !== args.where.requestId) continue
-      if (args.where.status !== undefined && row.status !== args.where.status) continue
-      if (
-        args.where.isFinalApproval !== undefined &&
-        Boolean(row.isFinalApproval) !== args.where.isFinalApproval
-      ) {
-        continue
-      }
-      Object.assign(row, args.data)
-      count += 1
-    }
-    return { count }
-  }
-
-  async count(args: {
-    where: { requestId: string; status: string }
-  }): Promise<number> {
-    let total = 0
-    for (const row of this.rows.values()) {
-      if (row.requestId === args.where.requestId && row.status === args.where.status) {
-        total += 1
-      }
-    }
-    return total
-  }
-}
-
-class FakeRequestActivitiesTable {
-  readonly rows: FakeActivityRow[] = []
-
-  async create(args: { data: FakeActivityRow }): Promise<FakeActivityRow> {
-    this.rows.push({ ...args.data })
-    return { ...args.data }
-  }
-}
-
-/** Records any notification write; the transactional core must never touch it. */
-class FakeNotificationsTrap {
-  readonly created: Array<Record<string, unknown>> = []
-
-  async create(args: { data: Record<string, unknown> }): Promise<Record<string, unknown>> {
-    this.created.push(args.data)
-    return args.data
-  }
-
-  async createMany(args: { data: Array<Record<string, unknown>> }): Promise<{ count: number }> {
-    this.created.push(...args.data)
-    return { count: args.data.length }
-  }
-}
-
-class FakeUsersTable {
-  readonly rows = new Map<string, FakeUserRow>()
-
-  async findFirst(args: {
-    where: {
-      departmentId?: string
-      level?: number | { gte?: number; lte?: number }
-      isActive?: boolean
-      id?: string
-    }
-    orderBy?: { level?: string }
-    select: Record<string, boolean>
-  }): Promise<Partial<FakeUserRow> | null> {
-    const candidates = [...this.rows.values()]
-      .filter((row) => {
-        if (args.where.departmentId !== undefined && row.departmentId !== args.where.departmentId) {
-          return false
-        }
-        if (args.where.id !== undefined && row.id !== args.where.id) return false
-        if (args.where.isActive !== undefined && row.isActive !== args.where.isActive) return false
-        if (args.where.level !== undefined) {
-          if (typeof args.where.level === 'number') {
-            if (row.level !== args.where.level) return false
-          } else {
-            const { gte, lte } = args.where.level
-            if (row.level === null) return false
-            if (gte !== undefined && row.level < gte) return false
-            if (lte !== undefined && row.level > lte) return false
-          }
-        }
-        return true
-      })
-      .sort((a, b) => (b.level ?? 0) - (a.level ?? 0))
-    return candidates[0] ? { ...candidates[0] } : null
-  }
-
-  async findMany(args: {
-    where: { id?: { in: string[] }; departmentId?: string; level?: number; isActive?: boolean }
-    select: Record<string, boolean>
-  }): Promise<Array<Partial<FakeUserRow>>> {
-    return [...this.rows.values()]
-      .filter((row) => {
-        if (args.where.id?.in && !args.where.id.in.includes(row.id)) return false
-        if (args.where.departmentId !== undefined && row.departmentId !== args.where.departmentId) {
-          return false
-        }
-        if (args.where.level !== undefined && row.level !== args.where.level) return false
-        if (args.where.isActive !== undefined && row.isActive !== args.where.isActive) return false
-        return true
-      })
-      .map((row) => ({ ...row }))
-  }
-
-  async findUnique(args: {
-    where: { id: string }
-    select: Record<string, boolean>
-  }): Promise<Partial<FakeUserRow> | null> {
-    const row = this.rows.get(args.where.id)
-    return row ? { ...row } : null
-  }
-}
-
-class FakeDepartmentApproversTable {
-  readonly rows: FakeExternalApproverRow[] = []
-
-  async findFirst(args: {
-    where: { departmentId: string; approverLevel?: { gte?: number; lte?: number } | number }
-    orderBy?: { approverLevel?: string }
-    select: Record<string, boolean>
-  }): Promise<{ approverLevel: number } | null> {
-    const { gte, lte } =
-      typeof args.where.approverLevel === 'number'
-        ? { gte: args.where.approverLevel, lte: args.where.approverLevel }
-        : args.where.approverLevel ?? {}
-    const matches = this.rows
-      .filter((row) => {
-        if (row.departmentId !== args.where.departmentId) return false
-        if (gte !== undefined && row.approverLevel < gte) return false
-        if (lte !== undefined && row.approverLevel > lte) return false
-        return true
-      })
-      .sort((a, b) => b.approverLevel - a.approverLevel)
-    return matches[0] ? { approverLevel: matches[0].approverLevel } : null
-  }
-
-  async findMany(args: {
-    where: { departmentId: string; approverLevel: number }
-    select: Record<string, boolean>
-  }): Promise<Array<{ id: string; approverId: string }>> {
-    return this.rows
-      .filter(
-        (row) =>
-          row.departmentId === args.where.departmentId &&
-          row.approverLevel === args.where.approverLevel,
-      )
-      .map((row) => ({ id: row.id, approverId: row.approverId }))
-  }
-}
-
-class FakeSolutionApprovalsTable {
-  readonly rows = new Map<string, FakeSolutionApprovalRow>()
-
-  async count(args: { where: { solution: { requestId: string }; status: string } }): Promise<number> {
-    let total = 0
-    for (const row of this.rows.values()) {
-      if (row.requestId === args.where.solution.requestId && row.status === args.where.status) {
-        total += 1
-      }
-    }
-    return total
-  }
-}
-
-/**
- * Stateful fake satisfying the production transaction contracts plus a
- * `$transaction` with real commit/rollback semantics, mirroring
- * request-approval-transaction.test.ts: writes made inside the callback are
- * kept only when it resolves; a throw restores the pre-transaction state.
- * Writes committed through `commitConcurrently` survive this workflow's
- * rollback, exactly like an independently committed concurrent transaction.
- */
-class BaselineWorkflowDb implements RequestApprovalTransactionDb {
-  readonly requests: FakeRequestsTable
-  readonly request_approvals = new FakeRequestApprovalsTable()
-  readonly request_activities = new FakeRequestActivitiesTable()
-  readonly notifications = new FakeNotificationsTrap()
-  readonly user = new FakeUsersTable()
-  readonly department_approvers = new FakeDepartmentApproversTable()
-  readonly solution_approvals = new FakeSolutionApprovalsTable()
-  private readonly concurrentCommits: Array<(db: BaselineWorkflowDb) => void> = []
-
-  constructor() {
-    this.requests = new FakeRequestsTable(this)
-  }
-
-  requestApprovalsForRequest(requestId: string): FakeRequestApprovalRow[] {
-    return [...this.request_approvals.rows.values()].filter((row) => row.requestId === requestId)
-  }
-
-  solutionApprovalsForRequest(requestId: string): FakeSolutionApprovalRow[] {
-    return [...this.solution_approvals.rows.values()].filter(
-      (row) => row.requestId === requestId,
-    )
-  }
-
-  commitConcurrently(write: (db: BaselineWorkflowDb) => void): void {
-    write(this)
-    this.concurrentCommits.push(write)
-  }
-
-  async $transaction<T>(fn: (tx: BaselineWorkflowDb) => Promise<T>): Promise<T> {
-    const requests = structuredClone([...this.requests.rows.entries()])
-    const approvals = structuredClone([...this.request_approvals.rows.entries()])
-    const activities = structuredClone(this.request_activities.rows)
-
-    try {
-      return await fn(this)
-    } catch (error) {
-      this.requests.rows.clear()
-      for (const [id, row] of requests) this.requests.rows.set(id, row)
-      this.request_approvals.rows.clear()
-      for (const [id, row] of approvals) this.request_approvals.rows.set(id, row)
-      this.request_activities.rows.length = 0
-      this.request_activities.rows.push(...activities)
-      for (const write of this.concurrentCommits) write(this)
-      throw error
-    }
-  }
-}
-
-interface BaselineSeed {
+function seedDb(options: {
   requests?: FakeRequestRow[]
-  users?: FakeUserRow[]
-  externalApprovers?: FakeExternalApproverRow[]
+  users?: FakeRequestRow[]
+  externalApprovers?: FakeRequestRow[]
   requestApprovals?: FakeRequestApprovalRow[]
-  solutionApprovals?: FakeSolutionApprovalRow[]
-}
-
-function seedDb(seed: BaselineSeed): BaselineWorkflowDb {
-  const db = new BaselineWorkflowDb()
-  for (const row of seed.requests ?? []) db.requests.rows.set(row.id, { ...row })
-  for (const row of seed.users ?? []) db.user.rows.set(row.id, { ...row })
-  db.department_approvers.rows.push(...(seed.externalApprovers ?? []))
-  for (const row of seed.requestApprovals ?? []) {
-    db.request_approvals.rows.set(row.id, { ...row })
-  }
-  for (const row of seed.solutionApprovals ?? []) {
-    db.solution_approvals.rows.set(row.id, { ...row })
-  }
+  solutions?: FakeRequestApprovalRow[]
+  solutionApprovals?: FakeRequestApprovalRow[]
+}): ApprovalWorkflowDb {
+  const db = new ApprovalWorkflowDb()
+  db.seed('requests', options.requests ?? [])
+  db.seed('user', options.users ?? [])
+  db.seed('department_approvers', options.externalApprovers ?? [])
+  db.seed('request_approvals', options.requestApprovals ?? [])
+  db.seed('solutions', options.solutions ?? [])
+  db.seed('solution_approvals', options.solutionApprovals ?? [])
   return db
 }
+
+/** Row-list helpers over the shared fake's tables (vm-realm-safe). */
+function activityRows(db: ApprovalWorkflowDb): Array<Record<string, unknown>> {
+  return [...db.rows.request_activities.values()]
+}
+
+function notificationRows(db: ApprovalWorkflowDb): Array<Record<string, unknown>> {
+  return [...db.rows.notifications.values()]
+}
+
+const REQUEST = { id: 'r1', requesterId: 'requester-1', title: 'Pump upgrade' } as const
 
 const F = ORGANIZATION_APPROVAL_FIXTURE
 
@@ -504,11 +90,11 @@ const F = ORGANIZATION_APPROVAL_FIXTURE
  * request_approvals.createMany). The behavioral assertions below depend on
  * exactly those members through the real function body.
  */
-function asPrismaTx(db: BaselineWorkflowDb): Parameters<typeof createApprovalChain>[4] {
+function asPrismaTx(db: ApprovalWorkflowDb): Parameters<typeof createApprovalChain>[4] {
   return db as unknown as Parameters<typeof createApprovalChain>[4]
 }
 
-const baselineStaffing: FakeUserRow[] = [
+const baselineStaffing: Array<Record<string, unknown>> = [
   // Baseline PD department staffing: active internal staff at levels 1, 2, 4.
   // Level 3 has only an inactive internal (sparse, skipped); level 5 has no
   // internal staff and is covered by external department approvers. This is
@@ -560,14 +146,14 @@ const baselineStaffing: FakeUserRow[] = [
   },
 ]
 
-const externalLevel5Approver: FakeExternalApproverRow = {
+const externalLevel5Approver: Record<string, unknown> = {
   id: 'ext-1',
   departmentId: F.departmentId,
   approverId: F.customCrossCheckApproverId,
   approverLevel: 5,
 }
 
-function baselineRequest(overrides: Partial<FakeRequestRow> = {}): FakeRequestRow {
+function baselineRequest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     id: 'req-1',
     status: 'ImprovementRequest',
@@ -647,6 +233,27 @@ describe('request submit chain creation (createApprovalChain)', () => {
     assert.ok(
       approvals.every((row) => (row as { status: string }).status === 'pending'),
     )
+
+    // The persisted database write, not only the returned array: the recorded
+    // createMany arguments and the resulting request_approvals rows.
+    const createManyWrite = db.writes
+      .filter((w) => w.model === 'request_approvals' && w.op === 'createMany')
+      .at(-1)
+    assert.ok(createManyWrite)
+    assert.deepEqual(
+      (createManyWrite!.data as Array<Record<string, unknown>>).map((row) => ({
+        requiredLevel: row.requiredLevel,
+        requiredApproverId: row.requiredApproverId,
+        order: row.order,
+        status: row.status,
+      })),
+      [
+        { requiredLevel: 2, requiredApproverId: F.supervisorId, order: 1, status: 'pending' },
+        { requiredLevel: 4, requiredApproverId: F.departmentManagerId, order: 2, status: 'pending' },
+        { requiredLevel: 5, requiredApproverId: F.customCrossCheckApproverId, order: 3, status: 'pending' },
+      ],
+    )
+    assert.equal(db.rows.request_approvals.size, 3)
   })
 
   it('auto-approves the chain when the submitter is top-level in the department', async () => {
@@ -684,6 +291,30 @@ describe('request submit chain creation (createApprovalChain)', () => {
       },
     )
     assert.ok(autoRow.approvedAt instanceof Date)
+
+    // Persisted write and row, not only the returned array.
+    const createManyWrite = db.writes
+      .filter((w) => w.model === 'request_approvals' && w.op === 'createMany')
+      .at(-1)
+    assert.ok(createManyWrite)
+    assert.equal(db.rows.request_approvals.size, 1)
+    const persistedRow = [...db.rows.request_approvals.values()][0]!
+    assert.deepEqual(
+      {
+        requiredLevel: persistedRow.requiredLevel,
+        order: persistedRow.order,
+        status: persistedRow.status,
+        approverId: persistedRow.approverId,
+        comments: persistedRow.comments,
+      },
+      {
+        requiredLevel: 4,
+        order: 1,
+        status: 'approved',
+        approverId: F.departmentManagerId,
+        comments: 'Auto-approved (top-level submitter)',
+      },
+    )
   })
 })
 
@@ -714,11 +345,11 @@ describe('request approval progress and completion (approveRequestApproval)', ()
     assert.deepEqual(result, { pendingApprovals: 1 })
     assert.equal(db.requests.rows.get('req-1')?.status, 'ImprovementRequest')
     assert.equal(
-      db.request_activities.rows.some((a) => a.action === 'status_changed'),
+      activityRows(db).some((a) => a.action === 'status_changed'),
       false,
     )
     // Notifications are the caller's post-commit concern, never the core's.
-    assert.deepEqual(db.notifications.created, [])
+    assert.deepEqual(notificationRows(db), [])
   })
 
   it('completes the request-approval phase with the recorded REQUEST transition and status-change activity', async () => {
@@ -754,7 +385,7 @@ describe('request approval progress and completion (approveRequestApproval)', ()
     )
     assert.equal(db.requests.rows.get('req-1')?.status, 'SentToEngineer')
     assert.deepEqual(
-      db.request_activities.rows
+      activityRows(db)
         .filter((a) => a.action === 'status_changed')
         .map((a) => ({ from: a.fromStatus, to: a.toStatus })),
       [{ from: 'ImprovementRequest', to: 'SentToEngineer' }],
@@ -820,7 +451,7 @@ describe('request approval progress and completion (approveRequestApproval)', ()
     )
 
     assert.equal(db.request_approvals.rows.get('a1')?.status, 'pending')
-    assert.deepEqual(db.request_activities.rows, [])
+    assert.deepEqual(activityRows(db), [])
     assert.equal(db.requests.rows.get('req-1')?.status, 'FinalApproval')
   })
 })
@@ -962,11 +593,27 @@ describe('request cancel and resubmit coordination', () => {
     )
     assert.equal(pendingRequestApprovalDb.requests.rows.get('req-1')?.status, 'ImprovementRequest')
 
+    // Every OTHER cancellation predicate is satisfied here (a rejected
+    // non-final request approval exists, no request approval is pending, the
+    // compare-and-set token matches): the pending SOLUTION approval alone
+    // blocks the write.
     const pendingSolutionApprovalDb = seedDb({
       requests: [baselineRequest({ status: 'SendBackToRequester', updatedAt })],
       users: baselineStaffing,
+      requestApprovals: [
+        {
+          id: 'a1',
+          requestId: 'req-1',
+          requiredLevel: 2,
+          order: 1,
+          status: 'rejected',
+          approverId: F.historicalActorId,
+          isFinalApproval: false,
+        },
+      ],
+      solutions: [{ id: 'sol-1', requestId: 'req-1', status: 'pending' }],
       solutionApprovals: [
-        { id: 's1', solutionId: 'sol-1', requestId: 'req-1', status: 'pending' },
+        { id: 's1', solutionId: 'sol-1', requestId: 'req-1', requiredLevel: 2, order: 1, status: 'pending' },
       ],
     })
 
@@ -983,6 +630,40 @@ describe('request cancel and resubmit coordination', () => {
       (error: unknown) => error instanceof RequestStatusConflictError,
     )
     assert.equal(pendingSolutionApprovalDb.requests.rows.get('req-1')?.status, 'SendBackToRequester')
+
+    // Otherwise-identical scenario with the solution approval cleared: the
+    // cancellation now succeeds, proving the pending-solution predicate was
+    // the deciding one.
+    const solutionClearedDb = seedDb({
+      requests: [baselineRequest({ status: 'SendBackToRequester', updatedAt })],
+      users: baselineStaffing,
+      requestApprovals: [
+        {
+          id: 'a1',
+          requestId: 'req-1',
+          requiredLevel: 2,
+          order: 1,
+          status: 'rejected',
+          approverId: F.historicalActorId,
+          isFinalApproval: false,
+        },
+      ],
+      solutions: [{ id: 'sol-1', requestId: 'req-1', status: 'pending' }],
+      solutionApprovals: [
+        { id: 's1', solutionId: 'sol-1', requestId: 'req-1', requiredLevel: 2, order: 1, status: 'rejected' },
+      ],
+    })
+
+    await solutionClearedDb.$transaction((tx) =>
+      updateRequestStatusExpecting(tx, {
+        requestId: 'req-1',
+        expectedStatuses: ['SendBackToRequester'],
+        additionalWhere: buildRejectedRequestCancellationWhere(updatedAt),
+        data: { status: 'Cancelled' },
+        actionLabel: 'cancel',
+      }),
+    )
+    assert.equal(solutionClearedDb.requests.rows.get('req-1')?.status, 'Cancelled')
   })
 
   it('loses the cancellation race when a competing transition commits before the guarded write', async () => {
@@ -1337,7 +1018,7 @@ describe('post-commit notification channel semantics (runTransactionWithPostComm
     })
 
     assert.equal(result, 'committed')
-    assert.equal(db.request_activities.rows.length, 1)
+    assert.equal(activityRows(db).length, 1)
     assert.deepEqual(dispatched, [
       {
         target: 'user',
@@ -1416,7 +1097,7 @@ describe('post-commit notification channel semantics (runTransactionWithPostComm
     )
 
     assert.deepEqual(dispatched, [])
-    assert.deepEqual(db.request_activities.rows, [])
+    assert.deepEqual(activityRows(db), [])
   })
 
   it('keeps a committed workflow successful when a post-commit dispatch fails', async () => {
@@ -1459,8 +1140,8 @@ describe('post-commit notification channel semantics (runTransactionWithPostComm
 // Viewer vs action authorization (real pure permission helpers)
 // ---------------------------------------------------------------------------
 
-describe('viewer and action authorization baseline', () => {
-  it('allows approval only for assigned or higher-level users and never for unassigned users', () => {
+describe('numeric and UI permission helpers (permission-checks) — identity-free unit coverage', () => {
+  it('compares numeric levels only: higher-or-equal passes and null levels fail, with no identity or assignment semantics', () => {
     assert.equal(canUserApproveAtLevel(4, 2), true)
     assert.equal(canUserApproveAtLevel(2, 2), true)
     assert.equal(canUserApproveAtLevel(2, 4), false)
@@ -1468,7 +1149,7 @@ describe('viewer and action authorization baseline', () => {
     assert.equal(canUserApproveAtLevel(undefined, 2), false)
   })
 
-  it('lets engineering users submit solutions and unrelated general users do nothing on SentToEngineer', () => {
+  it('exposes UI action availability: engineering submit availability and absent review actions on SentToEngineer', () => {
     assert.equal(canUserSubmitSolution('ENGINEERING', 'general'), true)
     assert.equal(canUserSubmitSolution(null, 'engineering'), true)
     assert.equal(canUserSubmitSolution(null, 'general'), false)
@@ -1507,7 +1188,7 @@ describe('viewer and action authorization baseline', () => {
     assert.equal(engineeringViewer.canReviewSolution, false)
   })
 
-  it('limits final-approval initiation to the requester department and read-only viewers get no action buttons', () => {
+  it('limits the final-approval UI action to the requester department and hides action buttons without eligibility', () => {
     assert.equal(
       canUserSubmitFinalApproval('u1', 'r1', F.departmentId, F.departmentId),
       true,
@@ -1592,7 +1273,7 @@ describe('legacy notification expectation matrix', () => {
       )
       assert.match(
         entry.assertedVia,
-        /^(recorded collector calls|recorded db writes|recorded orchestration dispatch|inline in action body)/,
+        /^(recorded production delivery \(real action \+ notifications module, mocked SMTP\/DB\)|recorded db writes|recorded orchestration dispatch|inline in action body)/,
         entry.case,
       )
     }
