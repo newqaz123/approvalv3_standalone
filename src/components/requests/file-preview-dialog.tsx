@@ -1,5 +1,6 @@
 'use client'
 
+import { formatFileSize as defaultFormatFileSize } from '@/lib/format-file-size'
 import { useEffect, useMemo, useState } from 'react'
 import { Download, FileText, Loader2, X } from 'lucide-react'
 import {
@@ -55,7 +56,7 @@ export function FilePreviewDialog({
   open,
   onOpenChange,
   onDownload,
-  formatFileSize,
+  formatFileSize = defaultFormatFileSize,
 }: FilePreviewDialogProps) {
   const [loadState, setLoadState] = useState<LoadState>({ status: 'idle' })
   const previewKind = useMemo<FilePreviewKind>(
@@ -127,7 +128,7 @@ export function FilePreviewDialog({
     }
   }, [file, open, previewKind, url])
 
-  const fileSizeLabel = file?.fileSize && formatFileSize ? formatFileSize(file.fileSize) : null
+  const fileSizeLabel = file ? formatFileSize(file.fileSize ?? NaN) : null
   const showCanvasDownload =
     Boolean(file) && (previewKind === 'unsupported' || loadState.status === 'error' || !url)
 

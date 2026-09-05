@@ -1,5 +1,6 @@
 'use client'
 
+import { formatFileSize } from '@/lib/format-file-size'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -79,11 +80,6 @@ export function ResubmitRequestDialog({
     },
   })
 
-  const formatFileSize = (bytes: number) => {
-    if (bytes < 1024) return bytes + ' B'
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
-    return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
-  }
 
   const getFileIcon = (fileType: string, fileName: string) => {
     if (fileType.startsWith('image/')) {

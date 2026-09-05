@@ -1,5 +1,6 @@
 "use client";
 
+import { formatFileSize } from "@/lib/format-file-size";
 import { useState, useEffect } from "react";
 import { format } from "date-fns";
 import {
@@ -46,6 +47,7 @@ const ACCEPTED_UPLOAD_TYPES = "PDF, Word, Excel, PowerPoint, Images";
 interface FileAttachment {
 	id: string;
 	fileName: string;
+	fileSize?: number | null;
 	fileType: "pdf" | "image" | "docx" | "xlsx" | string;
 	description?: string;
 }
@@ -317,6 +319,9 @@ export function RequestResubmitModal({
 											>
 												{file.fileName}
 											</button>
+											<p className="text-xs text-slate-500 dark:text-slate-400">
+												{formatFileSize(file.fileSize)}
+											</p>
 											{file.description && (
 												<p className="text-xs text-slate-500 truncate">
 													{file.description}
@@ -397,6 +402,9 @@ export function RequestResubmitModal({
 													>
 														{file.name}
 													</button>
+													<span className="shrink-0 text-xs text-slate-500 dark:text-slate-400">
+														{formatFileSize(file.size)}
+													</span>
 													<div className="flex items-center shrink-0">
 														<button
 															type="button"

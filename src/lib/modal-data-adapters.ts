@@ -34,6 +34,7 @@ export interface ModalApprovalStage {
 export interface ModalFileAttachment {
   id: string
   fileName: string
+  fileSize?: number | null
   fileType: string
   description?: string
 }
@@ -116,12 +117,14 @@ export function transformUserToSubmitter(user: {
 export function transformFileAttachments(files: Array<{
   id: string
   fileName: string
+  fileSize?: number | null
   fileType: string
   description?: string | null
 }>): ModalFileAttachment[] {
   return files.map(file => ({
     id: file.id,
     fileName: file.fileName,
+    fileSize: file.fileSize,
     fileType: file.fileType,
     description: file.description || undefined,
   }))
@@ -242,6 +245,7 @@ export function transformSolutionToModal(solution: {
   fileAttachments?: Array<{
     id: string
     fileName: string
+    fileSize?: number | null
     fileType: string
     description?: string | null
   }>
@@ -299,6 +303,7 @@ export function transformRequestToModalData(request: {
   fileAttachments: Array<{
     id: string
     fileName: string
+    fileSize?: number | null
     fileType: string
     description?: string | null
   }>
@@ -348,6 +353,7 @@ export function transformRequestToModalData(request: {
     fileAttachments?: Array<{
       id: string
       fileName: string
+      fileSize?: number | null
       fileType: string
       description?: string | null
     }>

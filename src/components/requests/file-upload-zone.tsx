@@ -1,5 +1,6 @@
 'use client'
 
+import { formatFileSize } from '@/lib/format-file-size'
 import { useState, useCallback } from 'react'
 import { Upload, File, X, Check } from 'lucide-react'
 import { uploadFileAction } from '@/server-actions/files'
@@ -124,11 +125,6 @@ export function FileUploadZone({
     setFiles((prev) => prev.filter((f) => f.id !== id))
   }
 
-  const formatFileSize = (bytes: number) => {
-    if (bytes < 1024) return bytes + ' B'
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
-    return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
-  }
 
   return (
     <div className="space-y-4">

@@ -1,5 +1,6 @@
 "use client";
 
+import { formatFileSize } from "@/lib/format-file-size";
 import { useState } from "react";
 import { format } from "date-fns";
 import {
@@ -67,6 +68,7 @@ interface ApprovalStage {
 interface FileAttachment {
 	id: string;
 	fileName: string;
+	fileSize?: number | null;
 	fileType: "pdf" | "image" | "docx" | "xlsx" | string;
 	description?: string;
 }
@@ -759,6 +761,9 @@ export function ApproverModal({
 												>
 													{file.fileName}
 												</button>
+												<p className="text-xs text-slate-500 dark:text-slate-400">
+													{formatFileSize(file.fileSize)}
+												</p>
 												{file.description && (
 													<p className="text-[10px] text-slate-400 truncate">
 														&ldquo;{file.description}&rdquo;
@@ -828,6 +833,9 @@ export function ApproverModal({
 												>
 													{file.fileName}
 												</button>
+												<p className="text-xs text-slate-500 dark:text-slate-400">
+													{formatFileSize(file.fileSize)}
+												</p>
 												{file.description && (
 													<p className="text-[10px] text-slate-400 truncate">
 														&ldquo;{file.description}&rdquo;
