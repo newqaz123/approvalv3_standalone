@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import Link from 'next/link'
 import { AdminPageSkeleton } from '@/components/admin/admin-skeleton'
 import { BackButton } from '@/components/admin/back-button'
+import { richTextToPlainText } from '@/lib/rich-text-sanitizer'
 
 async function TemplatesList() {
   const templates = await getTemplates({ includeInactive: true })
@@ -30,7 +31,10 @@ async function TemplatesList() {
           </Button>
         </div>
 
-        <TemplatesTable data={templates as any} />
+        <TemplatesTable data={templates.map((template) => ({
+          ...template,
+          description: richTextToPlainText(template.description),
+        }))} />
         </div>
       </div>
     </div>

@@ -70,7 +70,7 @@ export function TemplatesTable({ data }: TemplatesTableProps) {
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this template?')) {
+    if (!confirm('Permanently delete this template? This cannot be undone. Existing requests will not be affected.')) {
       return
     }
 

@@ -248,7 +248,7 @@ export async function updateTemplate(input: UpdateTemplateInput) {
 }
 
 /**
- * Toggle template active status (soft delete/restore)
+ * Toggle template availability without deleting it
  */
 export async function toggleTemplateStatus(id: string) {
   await requireAdmin()
@@ -315,8 +315,8 @@ export async function setTemplateDefault(id: string) {
 }
 
 /**
- * Delete a template (soft delete by setting isActive to false)
- * Equivalent to toggleTemplateStatus for deletion
+ * Permanently delete a non-default template.
+ * Inline image references cascade; shared images retain their other references.
  */
 export async function deleteTemplate(id: string) {
   await requireAdmin()
@@ -333,11 +333,8 @@ export async function deleteTemplate(id: string) {
     throw new Error('Cannot delete the default template')
   }
 
-  await prisma.templates.update({
+  await prisma.templates.delete({
     where: { id },
-    data: {
-      isActive: false,
-    },
   })
 
   revalidatePath('/admin/templates')
