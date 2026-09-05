@@ -191,6 +191,23 @@ async function openResubmitDialog(page: Page, requestId: string): Promise<Locato
   return dialog
 }
 
+/** Opens the canonical request-detail modal through the query-string deep link. */
+async function openRequestDetail(page: Page, requestId: string): Promise<Locator> {
+  await page.goto(`/requests?requestId=${encodeURIComponent(requestId)}`)
+  const dialog = page.getByRole('dialog').last()
+  await expect(dialog).toBeVisible({ timeout: 20_000 })
+  return dialog
+}
+
+/** Opens SubmitterModal in request mode from the /requests page. */
+async function openNewRequest(page: Page): Promise<Locator> {
+  await page.goto('/requests')
+  await page.getByRole('button', { name: 'New Request', exact: true }).click()
+  const dialog = page.getByRole('dialog').filter({ hasText: 'Submit New Request' })
+  await expect(dialog).toBeVisible({ timeout: 20_000 })
+  return dialog
+}
+
 /** Anything (Page or Locator) that can scope a CSS selector. */
 type LocatorScope = { locator(selector: string): Locator }
 
@@ -1375,11 +1392,8 @@ test.describe('Inline description images (release gate)', () => {
     })
 
     // ── 3. Reopen and compare canonical storage plus saved crop rendering. ─
-    await page.goto(`/requests/${encodeURIComponent(requestId)}`)
-    const descriptionCard = page.locator('div.bg-white').filter({
-      has: page.getByRole('heading', { name: 'Description', exact: true }),
-    })
-    const detailImg = descriptionCard.locator('span.rich-text img').first()
+    const detailDialog = await openRequestDetail(page, requestId)
+    const detailImg = detailDialog.locator('span.rich-text img').first()
     await expect(detailImg).toBeVisible({ timeout: 20_000 })
     await expect(detailImg).toHaveAttribute('src', savedPresentation.src)
     await expect(detailImg).toHaveAttribute('alt', 'E2E committed inline image')
@@ -1403,7 +1417,7 @@ test.describe('Inline description images (release gate)', () => {
     })
     expect(Math.abs(savedBox.width - editorFrameBox.width)).toBeLessThanOrEqual(2)
     expect(Math.abs(savedBox.height - editorFrameBox.height)).toBeLessThanOrEqual(2)
-    await expectMaterializedPalette(descriptionCard)
+    await expectMaterializedPalette(detailDialog)
 
     const imageResponse = await page.request.get(savedPresentation.src)
     expect(imageResponse.status()).toBe(200)
@@ -1423,11 +1437,8 @@ test.describe('Inline description images (release gate)', () => {
 
     // Discover the committed image URL from the saved request description.
     await login(page, email, password)
-    await page.goto(`/requests/${encodeURIComponent(requestId)}`)
-    const descriptionCard = page.locator('div.bg-white').filter({
-      has: page.getByRole('heading', { name: 'Description', exact: true }),
-    })
-    const detailImg = descriptionCard.locator('span.rich-text img').first()
+    const detailDialog = await openRequestDetail(page, requestId)
+    const detailImg = detailDialog.locator('span.rich-text img').first()
     await expect(detailImg).toBeVisible({ timeout: 20_000 })
     const committedSrc = await canonicalSrc(detailImg)
 
@@ -1511,30 +1522,25 @@ test.describe('Inline description images (release gate)', () => {
     // ── 8b. Requester copies the template description into a new request ──
     await page.context().clearCookies()
     await login(page, requesterEmail, requesterPassword)
-    await page.goto('/requests/new')
-    await expect(page.getByRole('heading', { name: 'New Improvement Request' })).toBeVisible()
+    const requestDialog = await openNewRequest(page)
 
-    // Legacy attachment uploads POST multipart to the page URL; the request
-    // metadata server action never carries a File. This discriminator counts
-    // only real attachment uploads.
+    // Staged request attachments upload one file per POST to
+    // /api/attachments/stage; the request metadata server action never
+    // carries a File. This discriminator counts only real attachment uploads.
     const attachmentUploads: number[] = []
-    await page.route('**/requests/new', async (route) => {
-      const httpRequest = route.request()
-      if (
-        httpRequest.method() === 'POST'
-        && (httpRequest.headers()['content-type'] ?? '').includes('multipart/form-data')
-      ) {
-        const response = await route.fetch()
-        attachmentUploads.push(response.status())
-        await route.fulfill({ response })
+    await page.route('**/api/attachments/stage', async (route) => {
+      if (route.request().method() !== 'POST') {
+        await route.continue()
         return
       }
-      await route.continue()
+      const response = await route.fetch()
+      attachmentUploads.push(response.status())
+      await route.fulfill({ response })
     })
 
-    await page.getByRole('combobox').first().click()
+    await requestDialog.getByRole('combobox').click()
     await page.getByRole('option', { name: templateName }).click()
-    const formImg = stableImages(page).first()
+    const formImg = stableImages(requestDialog).first()
     await expect(formImg).toBeVisible({ timeout: 20_000 })
     await expect(formImg).toHaveAttribute('src', templateSrc)
     await expectLoadedImage(formImg)
@@ -1563,18 +1569,23 @@ test.describe('Inline description images (release gate)', () => {
     const requestCropImageStyle = await formImg.getAttribute('style')
 
     const uniqueTitle = `E2E inline template image ${Date.now()}`
-    await page.getByPlaceholder('Brief summary of your request').fill(uniqueTitle)
+    // Brief-correction (supervisor-approved): the legacy 'Brief summary of
+    // your request' placeholder was deleted with request-form.tsx; the active
+    // SubmitterModal title input carries the stable id="title".
+    await requestDialog.locator('#title').fill(uniqueTitle)
 
     // ── 9. Existing attachment upload still succeeds independently ────────
-    await page.locator('input#file-upload').setInputFiles(join(FIXTURE_DIR, ATTACHMENT_FIXTURE))
+    const attachmentInput = requestDialog
+      .locator('label')
+      .filter({ hasText: 'Click to upload files' })
+      .locator('input[type="file"]')
+    await attachmentInput.setInputFiles(join(FIXTURE_DIR, ATTACHMENT_FIXTURE))
     await expect(page.getByText(ATTACHMENT_FIXTURE)).toBeVisible()
 
-    await page.getByRole('button', { name: 'Create Request' }).click()
-    await page.waitForURL((url) => url.pathname === '/requests', { timeout: 60_000 })
-    expect(
-      attachmentUploads,
-      'exactly one legacy attachment upload, and it succeeded',
-    ).toEqual([200])
+    await requestDialog.getByRole('button', { name: 'Submit Request' }).click()
+    await expect(page.getByText('Request created successfully')).toBeVisible({ timeout: 60_000 })
+    await expect(requestDialog).toBeHidden({ timeout: 20_000 })
+    expect(attachmentUploads, 'exactly one staged request attachment upload succeeded').toEqual([200])
 
     // ── 8c. The created request renders the shared template image ─────────
     const createdRow = page.getByRole('row', { name: uniqueTitle })

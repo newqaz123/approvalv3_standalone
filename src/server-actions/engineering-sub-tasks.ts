@@ -108,7 +108,7 @@ export async function createSubTask(input: {
       select: { id: true },
     })
 
-    revalidateRequestViews(input.requestId)
+    revalidateRequestViews()
     return { success: true, data: subTask }
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Failed to create sub-task' }
@@ -150,7 +150,7 @@ export async function updateSubTask(input: {
       },
     })
 
-    revalidateRequestViews(existing.requestId)
+    revalidateRequestViews()
     return { success: true }
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Failed to update sub-task' }
@@ -188,7 +188,7 @@ export async function setSubTaskCompleted(id: string, completed: boolean): Promi
       },
     })
 
-    revalidateRequestViews(existing.requestId)
+    revalidateRequestViews()
     return { success: true }
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Failed to update completion' }
@@ -207,7 +207,7 @@ export async function deleteSubTask(id: string): Promise<ActionResult> {
 
     await prisma.request_sub_tasks.delete({ where: { id } })
 
-    revalidateRequestViews(existing.requestId)
+    revalidateRequestViews()
     return { success: true }
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Failed to delete sub-task' }
@@ -228,7 +228,7 @@ export async function toggleWorkRequisitionReceived(requestId: string, received:
       },
     })
 
-    revalidateRequestViews(requestId)
+    revalidateRequestViews()
     return { success: true }
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Failed to update WR status' }

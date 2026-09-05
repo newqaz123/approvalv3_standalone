@@ -138,17 +138,24 @@ test.describe('Modal System - Solution Submission Workflow', () => {
     // Step 4: Click Submit Solution
     await submitButton.click()
     
-    // Step 5: Wait for solution form
-    await page.waitForURL(/\/engineering\/solutions\//, { timeout: 5000 })
-    
-    // Step 6: Fill solution form
-    await page.fill('input[name="title"]', 'Test Solution')
-    await page.fill('textarea[name="description"]', 'This is a test solution')
-    await page.fill('input[name="costEstimate"]', '50000')
-    await page.fill('input[name="timeline"]', '2 weeks')
-    
-    // Step 7: Submit solution
-    await page.click('button:has-text("Submit Solution")')
+    // Step 5: The request modal opens on /engineering; its Submit Solution
+    // action opens the solution authoring modal (no navigation).
+    const requestDialog = page.getByRole('dialog').last()
+    await expect(requestDialog).toBeVisible({ timeout: 5_000 })
+    await requestDialog.getByRole('button', { name: 'Submit Solution' }).click()
+    const solutionDialog = page
+      .getByRole('dialog')
+      .filter({ hasText: 'Submit Engineering Solution' })
+    await expect(solutionDialog).toBeVisible({ timeout: 5_000 })
+
+    // Step 6: Fill solution modal form
+    await solutionDialog.locator('#solutionTitle').fill('Test Solution')
+    await solutionDialog.locator('.rich-text[role="textbox"]').fill('This is a test solution')
+    await solutionDialog.locator('#cost').fill('50000')
+    await solutionDialog.locator('#timeline').fill('2 weeks')
+
+    // Step 7: Submit solution from the modal
+    await solutionDialog.getByRole('button', { name: 'Submit Solution' }).click()
     
     // Wait for success
     await page.waitForSelector('text=Solution submitted successfully', { timeout: 5000 })

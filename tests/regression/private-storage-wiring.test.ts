@@ -43,14 +43,14 @@ it('routes resubmitSolution attachments through private storage', () => {
 // id instead.
 const PATH_HREF = /`\/\$\{[^}]*filePath[^}]*\}`/
 
-it('wires the live request detail page through authorized ID-based download URLs', () => {
-  const page = readFileSync('src/app/(dashboard)/requests/[requestId]/page.tsx', 'utf8')
+it('wires the canonical request detail modal through authorized ID-based download URLs', () => {
+  const modal = readFileSync('src/components/requests/request-modal-router.tsx', 'utf8')
   // No direct path-based download hrefs for request or solution attachments.
-  assert.doesNotMatch(page, PATH_HREF)
-  assert.doesNotMatch(page, /handleDownload\(file\.filePath/)
+  assert.doesNotMatch(modal, PATH_HREF)
+  assert.doesNotMatch(modal, /handleDownload\(file\.filePath/)
   // Imports the authorized URL builder and resolves downloads from file.id.
-  assert.match(page, /getFileDownloadUrl[^'\n]*from '@\/lib\/file-preview'/)
-  assert.match(page, /getFileDownloadUrl\(file\.id\)/)
+  assert.match(modal, /getFileDownloadUrl[^\n]*from ["']@\/lib\/file-preview["']/)
+  assert.match(modal, /getFileDownloadUrl\(file\.id\)/)
 })
 
 it('wires the solution detail component through authorized ID-based download URLs', () => {

@@ -455,7 +455,7 @@ export async function submitSolution(input: SubmitSolutionActionInput) {
     )
   }
 
-  revalidateRequestViews(validated.requestId)
+  revalidateRequestViews()
 
   return { success: true, solutionId: result.id }
 }
@@ -978,7 +978,7 @@ export async function approveSolution(solutionId: string, comments?: string, exp
     }
   })
 
-  revalidateRequestViews(solution.requestId)
+  revalidateRequestViews()
 
   return { success: true }
 }
@@ -1072,7 +1072,7 @@ export async function rejectSolution(solutionId: string, comments: string, expec
     }
   })
 
-  revalidateRequestViews(solution.requestId)
+  revalidateRequestViews()
 
   return { success: true }
 }
@@ -1156,7 +1156,7 @@ export async function markRequestComplete(requestId: string, completionNote?: st
     })
   })
 
-  revalidateRequestViews(requestId)
+  revalidateRequestViews()
 
   return { success: true }
 }
@@ -1439,7 +1439,7 @@ export async function initiateFinalApproval(
     }
   })
 
-  revalidateRequestViews(requestId)
+  revalidateRequestViews()
 
   return { success: true }
 }
@@ -1828,7 +1828,7 @@ export async function approveFinalApproval(requestId: string, comments?: string,
     }
   })
 
-  revalidateRequestViews(requestId)
+  revalidateRequestViews()
 
   return { success: true }
 }
@@ -1968,7 +1968,7 @@ export async function rejectFinalApproval(requestId: string, comments: string, e
     }
   })
 
-  revalidateRequestViews(requestId)
+  revalidateRequestViews()
 
   return { success: true }
 }
@@ -2386,7 +2386,7 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
     }
   }
 
-  revalidateRequestViews(validated.requestId)
+  revalidateRequestViews()
 
   return {
     success: true,

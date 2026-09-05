@@ -7,7 +7,6 @@ const read = (path: string) => readFileSync(path, 'utf8')
 const SUBMIT_SURFACES = [
   'src/components/requests/submitter-modal.tsx',
   'src/components/requests/request-resubmit-modal.tsx',
-  'src/components/solutions/solution-file-upload.tsx',
 ] as const
 
 describe('pre-submit attachment preview', () => {
@@ -40,9 +39,5 @@ describe('pre-submit attachment preview', () => {
     const resubmit = read('src/components/requests/request-resubmit-modal.tsx')
     assert.match(resubmit, /previewSavedFile\(file\)/)
     assert.match(resubmit, /previewLocalFile\(file\)/)
-
-    const solution = read('src/components/solutions/solution-file-upload.tsx')
-    assert.match(solution, /previewSavedFile\(file\)/)
-    assert.match(solution, /previewLocalFile\(file\)/)
   })
 })

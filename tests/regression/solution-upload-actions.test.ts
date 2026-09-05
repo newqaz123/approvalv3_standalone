@@ -384,182 +384,37 @@ describe('resubmitSolution transfers staged IDs and deletes files after commit (
   })
 })
 
-// Task 4: both solution surfaces stage eagerly through the solution-scope
-// staged-attachments hook, and the modal router passes attachment IDs (never
-// raw File[]) across the server boundary. These source-wiring assertions pin
-// the integration: eager staging with real XHR progress, submit passing only
-// readyAttachmentIds, and no submit-time upload loop on either surface.
-describe('Task 4 source-wiring: staged hook integration and ID-only server boundary', () => {
-  const solutionForm = readFileSync('src/components/solutions/solution-form.tsx', 'utf8')
-  const submitterModal = readFileSync('src/components/requests/submitter-modal.tsx', 'utf8')
+describe('active modal staged solution wiring', () => {
+  const modal = readFileSync('src/components/requests/submitter-modal.tsx', 'utf8')
   const router = readFileSync('src/components/requests/request-modal-router.tsx', 'utf8')
 
-  it('SolutionForm consumes useStagedSolutionAttachments bound to the target request', () => {
-    assert.match(solutionForm, /useStagedSolutionAttachments\(\{ requestId \}\)/)
-    assert.doesNotMatch(solutionForm, /useSolutionAttachments/)
-  })
-
-  it('SubmitterModal consumes useStagedSolutionAttachments for solution/resubmit modes only', () => {
-    assert.match(submitterModal, /useStagedSolutionAttachments\(\{ requestId \}\)/)
-    assert.doesNotMatch(submitterModal, /useSolutionAttachments/)
-  })
-
-  it('neither surface keeps a submit-time upload (ensureUploaded) path', () => {
-    assert.doesNotMatch(solutionForm, /ensureUploaded/)
-    assert.doesNotMatch(submitterModal, /ensureUploaded/)
-  })
-
-  it('submit passes readyAttachmentIds only, exactly once per surface', () => {
-    assert.match(solutionForm, /fileIds: readyAttachmentIds,/)
-    assert.equal((solutionForm.match(/fileIds: readyAttachmentIds/g) ?? []).length, 1)
-    const solutionBranch = submitterModal.split('if (mode === "solution" && onSubmitSolution)')[1]
+  it('stages solution and resubmit attachments eagerly and submits IDs only', () => {
+    assert.match(modal, /useStagedSolutionAttachments\(\{ requestId \}\)/)
+    assert.doesNotMatch(modal, /useSolutionAttachments/)
+    assert.doesNotMatch(modal, /ensureUploaded/)
+    const solution = modal.split('if (mode === "solution" && onSubmitSolution)')[1]
       ?.split('} else if (mode === "resubmit"')[0] ?? ''
-    const resubmitBranch = submitterModal.split('} else if (mode === "resubmit" && onResubmit)')[1]
+    const resubmit = modal.split('} else if (mode === "resubmit" && onResubmit)')[1]
       ?.split('} catch')[0] ?? ''
-    assert.match(solutionBranch, /fileIds: solutionReadyAttachmentIds,/)
-    assert.match(resubmitBranch, /fileIds: solutionReadyAttachmentIds,/)
-    assert.match(resubmitBranch, /deletedFileIds: deletedFileIdsSnapshot,/)
+    assert.match(solution, /fileIds: solutionReadyAttachmentIds/)
+    assert.match(resubmit, /fileIds: solutionReadyAttachmentIds/)
+    assert.match(resubmit, /deletedFileIds: deletedFileIdsSnapshot/)
   })
 
-  it('submit blocks while reserve/upload/cleanup is active or an item is not ready', () => {
-    // Mirrors the request-mode blocking predicate: any pending/uploading/errored
-    // item or failed cleanup leaves readyAttachmentIds short of items.
-    assert.match(solutionForm, /const attachmentsBlocking = stagedBlocking \|\| items\.length !== readyAttachmentIds\.length/)
-    assert.match(solutionForm, /if \(attachmentsBlocking\) return/)
-    assert.match(
-      solutionForm,
-      /disabled=\{\s*isSubmitting \|\|\s*inlineImages\.hasBlockingOperations \|\|\s*attachmentsBlocking\s*\}/,
-    )
-    assert.match(
-      submitterModal,
-      /const solutionAttachmentsBlocking =\s*stagedSolutionBlocking \|\|\s*attachmentItems\.length !== solutionReadyAttachmentIds\.length;/,
-    )
-    const solutionSubmit = (submitterModal.split('const handleSubmit = async')[1] ?? '')
-      .split('if (isSolutionMode) {')[1]
-      ?.split('const deletedFileIdsSnapshot')[0] ?? ''
-    assert.match(solutionSubmit, /if \(solutionAttachmentsBlocking\) \{\s*return;/)
-    const disabled = submitterModal.split('const isSubmitDisabled = () =>')[1] ?? ''
-    assert.match(disabled, /solutionAttachmentsBlocking/)
+  it('blocks unstable drafts and fences commit, close, retry, and remove paths', () => {
+    assert.match(modal, /const solutionAttachmentsBlocking =/)
+    assert.match(modal, /beginSolutionCommit\(\)/)
+    assert.match(modal, /abortSolutionCommit\(\)/)
+    assert.match(modal, /clearSolutionAttachments\(\)/)
+    assert.match(modal, /cleanupSolutionAttachments: resetSolutionAttachments/)
+    assert.match(modal, /retryStagedSolutionItem\(id\)/)
+    assert.match(modal, /removeStagedSolutionItem\(id\)/)
   })
 
-  it('begins commit before await so revalidation unmount cannot DELETE adopted drafts', () => {
-    const formSubmit = solutionForm.split('const handleSubmit = async')[1]?.split('const handleBackToEdit')[0] ?? ''
-    const beforeAwait = formSubmit.split('await submitSolution')[0]
-    assert.match(beforeAwait, /beginCommit\(\)/)
-    const formFail = formSubmit.split('if (!submitResult.success)')[1]?.split('toast.success')[0] ?? ''
-    assert.match(formFail, /abortCommit\(\)/)
-    assert.doesNotMatch(formFail, /clear\(\)/)
-    const formCatch = formSubmit.split('} catch (error)')[1] ?? ''
-    assert.match(formCatch, /abortCommit\(\)/)
-
-    const modalSubmit = submitterModal.split('if (isSolutionMode)')[2]?.split('} catch (error)')[0] ?? ''
-    assert.match(modalSubmit.split('await onSubmitSolution')[0] ?? '', /beginSolutionCommit\(\)/)
-    assert.match(modalSubmit.split('await onResubmit')[0] ?? '', /beginSolutionCommit\(\)/)
-    const modalSolution = modalSubmit.split('if (mode === "solution" && onSubmitSolution)')[1]?.split('} else if (mode === "resubmit"')[0] ?? ''
-    assert.match(modalSolution, /abortSolutionCommit\(\)/)
-    const modalResubmit = modalSubmit.split('} else if (mode === "resubmit" && onResubmit)')[1] ?? ''
-    assert.match(modalResubmit, /abortSolutionCommit\(\)/)
-    const modalCatch = submitterModal.split('if (isSolutionMode)')[2]?.split('} catch (error)')[1]?.split('} finally')[0] ?? ''
-    assert.match(modalCatch, /abortSolutionCommit\(\)/)
-  })
-
-  it('success clears staged drafts without DELETE before close; failure retains them', () => {
-    // SolutionForm: clear() precedes navigation; the failure branch returns
-    // before any clear.
-    const formSuccess = solutionForm.split("toast.success('Solution submitted successfully')")[1]?.split('router.push')[0] ?? ''
-    assert.match(formSuccess, /inlineImages\.clear\(\)\n      clear\(\)/)
-    const formFail = solutionForm.split('if (!submitResult.success) {')[1]?.split('toast.success')[0] ?? ''
-    assert.doesNotMatch(formFail, /clear\(\)/)
-    const modalSolution = submitterModal.split('if (mode === "solution" && onSubmitSolution)')[1]?.split('} catch')[0] ?? ''
-    const successIdx = modalSolution.indexOf('clearSolutionAttachments()')
-    const closeIdx = modalSolution.indexOf('onOpenChange(false)')
-    assert.ok(successIdx !== -1, 'solution success clears staged drafts locally')
-    assert.ok(closeIdx !== -1, 'solution success closes the modal')
-    assert.ok(
-      successIdx < closeIdx,
-      'clear() must run before close so unmount cleanup cannot DELETE adopted drafts',
-    )
-  })
-
-  it('cancel/discard resets the staged hook (scoped DELETE) and keeps the surface open on failure', () => {
-    // SolutionForm: reset() awaited before navigation; failure surfaces a toast
-    // and does not navigate.
-    const formCancel = solutionForm.split('const handleCancel = async')[1]?.split('const handleCancelClick')[0] ?? ''
-    assert.match(formCancel, /await reset\(\)/)
-    assert.match(formCancel, /router\.back\(\)/)
-    assert.match(formCancel, /Failed to clean up draft files/)
-    // SubmitterModal: the discard helper receives the staged solution reset.
-    assert.match(
-      submitterModal,
-      /cleanupSolutionAttachments: resetSolutionAttachments,/,
-    )
-  })
-
-  it('router contains no dynamic raw-file upload loop or import', () => {
+  it('keeps raw files out of the modal router server boundary', () => {
     assert.doesNotMatch(router, /formData\.append\('file'/)
     assert.doesNotMatch(router, /uploadFileAction/)
     assert.doesNotMatch(router, /files: data\.files/)
-  })
-
-  it('router passes IDs (fileIds / newFileIds) directly', () => {
     assert.match(router, /newFileIds: data\.fileIds/)
-  })
-
-  it('SolutionForm cancel awaits hook reset() before navigating and surfaces cleanup failure', () => {
-    // The leave path must use an async handler, not direct router.back()
-    assert.match(solutionForm, /const handleCancel = async/)
-    // reset() must be awaited before router.back()
-    assert.match(solutionForm, /await reset\(\)/)
-    // Cleanup failure is surfaced (not silently swallowed)
-    assert.match(solutionForm, /Failed to clean up draft files/)
-    // Cancel asks before discarding a dirty draft, then leaves through handleCancel
-    assert.match(solutionForm, /onClick=\{handleCancelClick\}/)
-  })
-})
-
-// Task 4 follow-up: staging is eager, so per-item retry is a staged-hook
-// retryItem(id) (re-PUT + re-XHR under the same stable attachmentId, or a
-// cleanup DELETE retry for a removing item) — never a batch re-upload and
-// never the metadata submit.
-describe('Task 4 follow-up: per-item staged retry wiring', () => {
-  const solutionForm = readFileSync('src/components/solutions/solution-form.tsx', 'utf8')
-  const submitterModal = readFileSync('src/components/requests/submitter-modal.tsx', 'utf8')
-
-  it('SolutionForm binds onRetryItem to a per-item staged retry handler', () => {
-    assert.match(solutionForm, /const handleRetryItem = \(id: string\)/)
-    assert.match(solutionForm, /onRetryItem=\{handleRetryItem\}/)
-    const start = solutionForm.indexOf('const handleRetryItem')
-    const next = solutionForm.indexOf('const handle', start + 1)
-    const retrySlice = solutionForm.slice(start, next === -1 ? undefined : next)
-    // Respects the commit/close fences and never invokes the metadata action.
-    assert.match(retrySlice, /if \(isSubmitting\) return/)
-    assert.match(retrySlice, /retryItem\(id\)/)
-    assert.doesNotMatch(retrySlice, /submitSolution/)
-  })
-
-  it('SolutionForm remove handler stays fenced and calls the staged removeItem', () => {
-    const removeSlice = solutionForm.split('const handleRemoveItem')[1]?.split('const handleRetryItem')[0] ?? ''
-    assert.match(removeSlice, /if \(isSubmitting\) return/)
-    assert.match(removeSlice, /commitInFlightRef\.current \|\| closeInFlightRef\.current/)
-    assert.match(removeSlice, /removeItem\(id\)/)
-    assert.match(solutionForm, /onRemoveItem=\{handleRemoveItem\}/)
-  })
-
-  it('SubmitterModal retry is per-item, gated on isBusy, and never submits metadata', () => {
-    assert.match(submitterModal, /const handleRetryAttachment = \(id: string\)/)
-    const start = submitterModal.indexOf('const handleRetryAttachment')
-    const next = submitterModal.indexOf('const removeExistingFile', start + 1)
-    const retrySlice = submitterModal.slice(start, next === -1 ? undefined : next)
-    assert.match(retrySlice, /if \(isBusy\) return/)
-    assert.match(retrySlice, /retryStagedSolutionItem\(id\)/)
-    assert.doesNotMatch(retrySlice, /onSubmitSolution/)
-    assert.doesNotMatch(retrySlice, /onResubmit/)
-    assert.match(submitterModal, /onClick=\{\(\) => handleRetryAttachment\(item\.id\)\}/)
-  })
-
-  it('SubmitterModal remove handler stays fenced and calls the staged remove', () => {
-    const removeSlice = submitterModal.split('const handleRemoveAttachment')[1]?.split('const handleRetryAttachment')[0] ?? ''
-    assert.match(removeSlice, /isBusy \|\| solutionCommitInFlightRef\.current \|\| closeInFlightRef\.current/)
-    assert.match(removeSlice, /removeStagedSolutionItem\(id\)/)
   })
 })

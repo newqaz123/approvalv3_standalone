@@ -19,7 +19,6 @@ const listCaller = read("src/components/requests/requests-list-client.tsx");
 const followUpCaller = read(
 	"src/components/dashboard/follow-up-dashboard.tsx",
 );
-const uploadProgress = read("src/lib/attachments/upload-progress.ts");
 
 const requestProps = modal.split("interface SubmitterModalProps")[1]?.split(
 	"onSubmitSolution?:",
@@ -275,11 +274,9 @@ test("callers createRequest with stagedAttachmentIds only — no upload loop, ro
 	}
 });
 
-test("request-dead upload-progress helpers are gone; solution describeUploadProgress remains", () => {
-	assert.doesNotMatch(uploadProgress, /RequestUploadProgress/);
-	assert.doesNotMatch(uploadProgress, /requestPhaseLabel/);
-	assert.doesNotMatch(uploadProgress, /Creating request\.\.\./);
-	assert.match(uploadProgress, /export function describeUploadProgress/);
+test("active modal has no submit-time batch progress dependency", () => {
+	assert.doesNotMatch(modal, /describeUploadProgress/);
+	assert.doesNotMatch(modal, /uploadAttachmentBatch/);
 });
 
 // Task 4: solution/resubmit mirror the request-mode staging UX — eager add,

@@ -223,8 +223,7 @@ export async function createRequest(input: CreateRequestInput) {
     }
   }
 
-  revalidateRequestViews(request.id)
-  revalidatePath('/requests/new')
+  revalidateRequestViews()
 
   return { success: true, requestId: request.id }
 }
@@ -1205,7 +1204,7 @@ export async function cancelRequest(input: { requestId: string; reason: string }
     })
   })
 
-  revalidateRequestViews(requestId)
+  revalidateRequestViews()
 
   return { success: true }
 }
@@ -1302,7 +1301,7 @@ export async function deleteRequest(input: { requestId: string; reason: string }
       }
     }
 
-    revalidateRequestViews(requestId)
+    revalidateRequestViews()
     revalidatePath('/admin')
 
     return {
@@ -1545,7 +1544,7 @@ export async function restoreRequest(input: { requestId: string }) {
       },
     })
 
-    revalidateRequestViews(input.requestId)
+    revalidateRequestViews()
 
     return {
       success: true,
@@ -2029,7 +2028,7 @@ export async function assignEngineers(requestId: string, engineerIds: string[]) 
     )
   }
 
-  revalidateRequestViews(requestId)
+  revalidateRequestViews()
 
   return { success: true }
 }
@@ -2333,7 +2332,7 @@ export async function resubmitRequest(input: {
   const departmentId = request.requester.departmentId!
   await createApprovalChain(input.requestId, departmentId, userLevel, userId)
 
-  revalidateRequestViews(input.requestId)
+  revalidateRequestViews()
 
   return { success: true, request: result }
 }
@@ -2388,7 +2387,7 @@ export async function archiveRequest(requestId: string) {
       }),
     ])
 
-    revalidateRequestViews(requestId)
+    revalidateRequestViews()
 
     return { success: true }
   } catch (error) {
@@ -2439,7 +2438,7 @@ export async function unarchiveRequest(requestId: string) {
       }),
     ])
 
-    revalidateRequestViews(requestId)
+    revalidateRequestViews()
 
     return { success: true }
   } catch (error) {
@@ -2481,7 +2480,7 @@ export async function permanentDeleteRequest(requestId: string) {
       },
     })
 
-    revalidateRequestViews(requestId)
+    revalidateRequestViews()
 
     return { success: true }
   } catch (error) {

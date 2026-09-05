@@ -117,12 +117,6 @@ describe("authenticated shell and navigation", () => {
 		const focusedContracts = new Map([
 			["src/app/(dashboard)/profile/page.tsx", "max-w-2xl"],
 			["src/app/(dashboard)/change-password/page.tsx", "max-w-2xl"],
-			["src/app/(dashboard)/requests/new/page.tsx", "max-w-3xl"],
-			[
-				"src/app/(dashboard)/engineering/solutions/[requestId]/page.tsx",
-				"max-w-4xl",
-			],
-			["src/app/(dashboard)/requests/[requestId]/page.tsx", "max-w-5xl"],
 			["src/app/admin/templates/new/page.tsx", "max-w-2xl"],
 			["src/app/admin/templates/[id]/page.tsx", "max-w-2xl"],
 		]);

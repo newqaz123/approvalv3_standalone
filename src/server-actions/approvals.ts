@@ -341,7 +341,7 @@ export async function approveRequest(
     await notifyNextApprover(requestId)
   }
 
-  revalidateRequestViews(requestId)
+  revalidateRequestViews()
   return { success: true }
 }
 
@@ -428,7 +428,7 @@ export async function rejectRequest(
     },
   })
 
-  revalidateRequestViews(requestId)
+  revalidateRequestViews()
   return { success: true }
 }
 
