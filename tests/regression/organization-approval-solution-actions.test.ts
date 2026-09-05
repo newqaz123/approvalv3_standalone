@@ -300,13 +300,21 @@ describe('real resubmitSolution: custom, normal, and auto', () => {
     assert.equal(updatedSolution?.title, 'Pump retrofit solution (rev 2)')
     assert.equal(updatedSolution?.costEstimate, 1750)
 
+    // Both custom approvers are notified with the production event and email.
     assert.deepEqual(
-      [...harness.db.rows.notifications.values()].map((row) => row.userId),
-      [SCENARIO.customApproverA, SCENARIO.customApproverB],
+      [...harness.db.rows.notifications.values()].map((row) => ({ userId: row.userId, type: row.type, title: row.title })),
+      [
+        { userId: SCENARIO.customApproverA, type: 'approval_needed', title: 'Solution Resubmitted' },
+        { userId: SCENARIO.customApproverB, type: 'approval_needed', title: 'Solution Resubmitted' },
+      ],
+    )
+    assert.deepEqual(
+      harness.state.smtpMessages.map((mail) => mail.to),
+      ['custom-a@example.test', 'custom-b@example.test'],
     )
   })
 
-  it('rebuilds the hierarchy chain and notifies only the first pending level', async () => {
+  it('rebuilds the hierarchy chain, notifies only the first pending level, and moves the request to DesignCostEstimationApproval', async () => {
     const harness = await rejectedSolutionHarness()
     harness.state.authUserId = 'engineer-1'
     harness.state.smtpMessages.length = 0
@@ -322,10 +330,13 @@ describe('real resubmitSolution: custom, normal, and auto', () => {
         { requiredLevel: 4, order: 2, status: 'pending', isCustomChain: false },
       ],
     )
+    // Only the first pending level is notified, with the production event.
+    assert.equal(harness.db.requests.rows.get(REQUEST_ID)?.status, 'DesignCostEstimationApproval')
     assert.deepEqual(
-      [...harness.db.rows.notifications.values()].map((row) => row.userId),
-      [SCENARIO.engineeringSupervisorId],
+      [...harness.db.rows.notifications.values()].map((row) => ({ userId: row.userId, type: row.type, title: row.title })),
+      [{ userId: SCENARIO.engineeringSupervisorId, type: 'approval_needed', title: 'Solution Resubmitted' }],
     )
+    assert.deepEqual(harness.state.smtpMessages.map((mail) => mail.to), ['eng-supervisor-1@example.test'])
   })
 
   it('auto-approves for a top-level submitter and broadcasts solution_ready to the requester department', async () => {

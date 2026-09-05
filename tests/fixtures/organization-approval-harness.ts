@@ -207,8 +207,19 @@ function matchRelationCondition(
 ): boolean {
   const supported = relation.kind === 'many' ? ['some', 'none', 'every'] : ['is']
   for (const op of Object.keys(condition)) {
+    if (relation.kind === 'many') {
+      // List relation filters accept ONLY some/none/every. A direct
+      // related-field shorthand (e.g. approvals: { status: 'pending' }) would
+      // silently impose no restriction here, so it must throw instead.
+      if (!supported.includes(op)) {
+        throw new UnexpectedQueryError(
+          `Unsupported list relation operator '${op}' for ${model}.${key} (supported: ${supported.join(', ')}; wrap field conditions in some/none/every)`,
+        )
+      }
+      continue
+    }
     if (!supported.includes(op) && !MODEL_FIELDS[relation.model].includes(op)) {
-      throw new UnexpectedQueryError(`Unsupported relation operator '${op}' for ${model}.${key} (supported: ${supported.join(', ')})`)
+      throw new UnexpectedQueryError(`Unsupported relation operator '${op}' for ${model}.${key} (supported: 'is' or related-model fields)`)
     }
   }
   const related = resolveRelation(db, model, row, key, relation)

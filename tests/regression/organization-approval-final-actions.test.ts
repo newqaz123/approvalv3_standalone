@@ -177,8 +177,10 @@ describe('real approveFinalApproval', () => {
       [{ from: 'FinalApproval', to: 'Completed' }],
     )
 
-    // Active requester-department users only; all engineering users excluded
-    // (including the inactive-check-exempt raw exclusion list).
+    // Active requester-department users only. NOTE: in this scenario every
+    // engineering user belongs to a different department, so the
+    // department filter alone excludes them. The discriminating
+    // engineering-exclusion scenario lives in the dedicated test below.
     assert.deepEqual(
       [...harness.db.rows.notifications.values()].map((row) => ({ userId: row.userId, type: row.type })),
       [
@@ -231,6 +233,24 @@ describe('real rejectFinalApproval', () => {
         { userId: 'department-manager-1', type: 'status_changed' },
       ],
     )
+
+    // Email channel: one department SMTP send per broadcast; the rejector is
+    // excluded from both recipient lists.
+    assert.equal(harness.state.smtpMessages.length, 2)
+    assert.deepEqual(
+      Array.from(harness.state.smtpMessages[0]!.to as string[]).sort(),
+      ['eng-manager-1@example.test', 'eng-supervisor-1@example.test', 'engineer-1@example.test'],
+    )
+    assert.deepEqual(
+      Array.from(harness.state.smtpMessages[1]!.to as string[]).sort(),
+      ['department-manager-1@example.test', 'staff-1@example.test'],
+    )
+    // Production rewrites email subjects per event type: approval_rejected
+    // becomes "Rejected: <request title>"; status_changed keeps its title.
+    assert.deepEqual(
+      harness.state.smtpMessages.map((mail) => mail.subject),
+      ['Rejected: Baseline pump upgrade', 'Final Approval Rejected'],
+    )
   })
 })
 
@@ -262,5 +282,153 @@ describe('real markRequestComplete', () => {
     const wrongStatus = finalHarness('SentToEngineer')
     wrongStatus.state.authUserId = 'engineer-1'
     await assert.rejects(wrongStatus.solutions.markRequestComplete(REQUEST_ID), /SendBackToRequester status/)
+  })
+})
+
+
+describe('real approveFinalApproval and rejectFinalApproval after CUSTOM initiation', () => {
+  async function customInitiated(): Promise<Harness> {
+    const harness = finalHarness('SendBackToRequester')
+    enableTestSmtp(harness.state)
+    harness.state.authUserId = 'staff-1'
+    await harness.solutions.initiateFinalApproval(REQUEST_ID, true, [SCENARIO.customApproverA, SCENARIO.customApproverB])
+    return harness
+  }
+
+  it('progression: approving custom step 1 notifies only custom step 2 and keeps FinalApproval', async () => {
+    const harness = await customInitiated()
+    harness.state.smtpMessages.length = 0
+    harness.db.rows.notifications.clear()
+    harness.state.authUserId = SCENARIO.customApproverA
+
+    const result = (await harness.solutions.approveFinalApproval(REQUEST_ID)) as { success: boolean }
+    assert.equal(result.success, true)
+
+    const rows = harness.db.requestApprovalsForRequest(REQUEST_ID).sort((a, b) => (a.order as number) - (b.order as number))
+    assert.deepEqual(
+      rows.map((row) => ({ status: row.status, approverId: row.approverId, requiredApproverId: row.requiredApproverId })),
+      [
+        { status: 'approved', approverId: SCENARIO.customApproverA, requiredApproverId: SCENARIO.customApproverA },
+        { status: 'pending', approverId: undefined, requiredApproverId: SCENARIO.customApproverB },
+      ],
+    )
+    assert.equal(harness.db.requests.rows.get(REQUEST_ID)?.status, 'FinalApproval')
+    assert.deepEqual(
+      [...harness.db.rows.notifications.values()].map((row) => ({ userId: row.userId, type: row.type, title: row.title })),
+      [{ userId: SCENARIO.customApproverB, type: 'final_approval_needed', title: 'Final Approval Needed' }],
+    )
+    assert.deepEqual(harness.state.smtpMessages.map((mail) => mail.to), ['custom-b@example.test'])
+  })
+
+  it('completion: approving custom step 2 completes the request and broadcasts to the requester department', async () => {
+    const harness = await customInitiated()
+    harness.state.authUserId = SCENARIO.customApproverA
+    await harness.solutions.approveFinalApproval(REQUEST_ID)
+
+    harness.state.smtpMessages.length = 0
+    harness.db.rows.notifications.clear()
+    harness.state.authUserId = SCENARIO.customApproverB
+    const result = (await harness.solutions.approveFinalApproval(REQUEST_ID)) as { success: boolean }
+    assert.equal(result.success, true)
+
+    assert.equal(harness.db.requests.rows.get(REQUEST_ID)?.status, 'Completed')
+    assert.deepEqual(
+      [...harness.db.rows.notifications.values()].map((row) => ({ userId: row.userId, type: row.type })),
+      [
+        { userId: 'staff-1', type: 'approval_granted' },
+        { userId: 'supervisor-1', type: 'approval_granted' },
+        { userId: 'department-manager-1', type: 'approval_granted' },
+      ],
+    )
+    assert.equal(harness.state.smtpMessages.length, 1)
+    assert.deepEqual(Array.from(harness.state.smtpMessages[0]!.to as string[]).sort(), [
+      'department-manager-1@example.test',
+      'staff-1@example.test',
+      'supervisor-1@example.test',
+    ])
+  })
+
+  it('rejection: a custom approver rejects; request returns to SentToEngineer with both department broadcasts', async () => {
+    const harness = await customInitiated()
+    harness.state.smtpMessages.length = 0
+    harness.db.rows.notifications.clear()
+    harness.state.authUserId = SCENARIO.customApproverA
+
+    const result = (await harness.solutions.rejectFinalApproval(REQUEST_ID, 'Custom chain rejects the design')) as { success: boolean }
+    assert.equal(result.success, true)
+
+    const rows = harness.db.requestApprovalsForRequest(REQUEST_ID)
+    assert.ok(rows.every((row) => row.status === 'rejected'))
+    assert.equal(harness.db.requests.rows.get(REQUEST_ID)?.status, 'SentToEngineer')
+
+    // Engineering department broadcast (rejector is not engineering) and
+    // requester-department broadcast, both with email.
+    assert.deepEqual(
+      [...harness.db.rows.notifications.values()].map((row) => ({ userId: row.userId, type: row.type })),
+      [
+        { userId: 'engineer-1', type: 'approval_rejected' },
+        { userId: SCENARIO.engineeringSupervisorId, type: 'approval_rejected' },
+        { userId: SCENARIO.engineeringManagerId, type: 'approval_rejected' },
+        { userId: 'staff-1', type: 'status_changed' },
+        { userId: 'supervisor-1', type: 'status_changed' },
+        { userId: 'department-manager-1', type: 'status_changed' },
+      ],
+    )
+    assert.equal(harness.state.smtpMessages.length, 2)
+    assert.deepEqual(
+      Array.from(harness.state.smtpMessages[0]!.to as string[]).sort(),
+      ['eng-manager-1@example.test', 'eng-supervisor-1@example.test', 'engineer-1@example.test'],
+    )
+    assert.deepEqual(
+      Array.from(harness.state.smtpMessages[1]!.to as string[]).sort(),
+      ['department-manager-1@example.test', 'staff-1@example.test', 'supervisor-1@example.test'],
+    )
+  })
+})
+
+describe('real approveFinalApproval completion: discriminating engineering exclusion', () => {
+  it('when the requester department IS engineering, the department-derived exclusion removes its own members from the completion broadcast', async () => {
+    // Overlap context: the requester's department IS the engineering
+    // department, so without the production exclusion argument every active
+    // engineering user would receive the completion broadcast. The broadcast
+    // audience equals the exclusion list, which proves the exclusion has an
+    // effect (removing it would add these recipients).
+    const harness = createHarness({
+      departments: departmentRows(),
+      users: [
+        { id: 'eng-requester-1', departmentId: 'department-engineering', level: 1, isActive: true, role: 'engineering', name: 'Engineering Requester', email: 'eng-requester-1@example.test' },
+        { id: 'eng-approver-1', departmentId: 'department-engineering', level: 2, isActive: true, role: 'engineering', name: 'Engineering Approver', email: 'eng-approver-1@example.test' },
+        { id: 'eng-approver-2', departmentId: 'department-engineering', level: 4, isActive: true, role: 'engineering', name: 'Engineering Manager', email: 'eng-approver-2@example.test' },
+      ],
+      requests: [baselineRequest({ status: 'SendBackToRequester', requesterId: 'eng-requester-1', departmentId: 'department-engineering' })],
+      solutions: [baselineSolution()],
+    })
+    enableTestSmtp(harness.state)
+
+    // Initiate the hierarchy final chain inside the engineering department
+    // (initiator level 1 -> chain levels 2 and 4), then approve both steps.
+    harness.state.authUserId = 'eng-requester-1'
+    await harness.solutions.initiateFinalApproval(REQUEST_ID, false)
+    harness.state.authUserId = 'eng-approver-1'
+    await harness.solutions.approveFinalApproval(REQUEST_ID)
+
+    harness.state.smtpMessages.length = 0
+    harness.db.rows.notifications.clear()
+    harness.state.authUserId = 'eng-approver-2'
+    const result = (await harness.solutions.approveFinalApproval(REQUEST_ID)) as { success: boolean }
+    assert.equal(result.success, true)
+    assert.equal(harness.db.requests.rows.get(REQUEST_ID)?.status, 'Completed')
+
+    // The exclusion list is derived from engineering-department membership
+    // (solutions.ts approveFinalApproval) and the broadcast audience is the
+    // same department: every candidate recipient is excluded, so nothing is
+    // written or mailed. Removing the exclusion argument would notify the
+    // active engineering users below and fail this assertion.
+    const audience = [...harness.db.rows.user.values()].filter(
+      (u) => u.departmentId === 'department-engineering' && u.isActive,
+    )
+    assert.ok(audience.length >= 3)
+    assert.deepEqual([...harness.db.rows.notifications.values()], [])
+    assert.deepEqual(harness.state.smtpMessages, [])
   })
 })

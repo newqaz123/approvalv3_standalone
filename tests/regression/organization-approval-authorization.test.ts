@@ -49,14 +49,31 @@ describe('canUserViewRequest: same-section, unrelated, and privileged viewers', 
   })
 
   it('denies inactive users, missing requests, and soft-deleted requests', async () => {
+    // Active vs inactive comparison uses the SAME live same-department request
+    // so inactivity is the only differing condition (review round 2 P2).
+    const activeView = createHarness({
+      departments: departmentRows(),
+      users: [...workflowUsers(), { id: 'dept-viewer', departmentId: 'department-pd', level: 2, isActive: true, role: 'general', name: 'Dept Viewer', email: null }],
+      requests: [baselineRequest()],
+    })
+    activeView.state.authUserId = null
+    assert.equal(await activeView.requestAccess.canUserViewRequest('dept-viewer', SCENARIO.requestId), true)
+
+    const inactiveView = createHarness({
+      departments: departmentRows(),
+      users: [...workflowUsers(), { id: 'dept-viewer', departmentId: 'department-pd', level: 2, isActive: false, role: 'general', name: 'Dept Viewer', email: null }],
+      requests: [baselineRequest()],
+    })
+    inactiveView.state.authUserId = null
+    assert.equal(await inactiveView.requestAccess.canUserViewRequest('dept-viewer', SCENARIO.requestId), false)
+
     const harness = createHarness({
       departments: departmentRows(),
-      users: [...workflowUsers(), { id: 'inactive-viewer', departmentId: 'department-pd', level: 2, isActive: false, role: 'general', name: 'Inactive Viewer', email: null }],
+      users: workflowUsers(),
       requests: [baselineRequest({ id: 'deleted-request', isDeleted: true })],
     })
     harness.state.authUserId = null
 
-    assert.equal(await harness.requestAccess.canUserViewRequest('inactive-viewer', SCENARIO.requestId), false)
     assert.equal(await harness.requestAccess.canUserViewRequest('staff-1', 'missing-request'), false)
     assert.equal(await harness.requestAccess.canUserViewRequest('staff-1', 'deleted-request'), false)
   })

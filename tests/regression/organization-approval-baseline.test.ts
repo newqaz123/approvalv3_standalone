@@ -1273,7 +1273,7 @@ describe('legacy notification expectation matrix', () => {
       )
       assert.match(
         entry.assertedVia,
-        /^(recorded production delivery \(real action \+ notifications module, mocked SMTP\/DB\)|recorded db writes|recorded orchestration dispatch|inline in action body)/,
+        /^(recorded production delivery \(real action \+ notifications module, mocked SMTP\/DB\)|recorded db writes|recorded orchestration dispatch)/,
         entry.case,
       )
     }

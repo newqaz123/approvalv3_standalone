@@ -85,7 +85,6 @@ export type LegacyNotificationAssertedVia =
   | 'recorded production delivery (real action + notifications module, mocked SMTP/DB)'
   | 'recorded db writes'
   | 'recorded orchestration dispatch'
-  | 'inline in action body (no injectable boundary — residual)'
 
 export interface LegacyNotificationExpectation {
   /** Named workflow case (Task 1 baseline ID). */
@@ -108,8 +107,6 @@ export interface LegacyNotificationExpectation {
   assertedVia: LegacyNotificationAssertedVia
 }
 
-const RESIDUAL = 'inline in action body (no injectable boundary — residual)' as const
-
 /**
  * The preserved phase-specific notification contract. Phase-specific rules the
  * redesign must keep exactly: custom solution chains notify ALL approvers at
@@ -126,7 +123,7 @@ export const LEGACY_NOTIFICATION_EXPECTATIONS: readonly LegacyNotificationExpect
       'active internal and external approvers at the first pending request-approval level',
     channel: 'in_app+email',
     transition: null,
-    assertedVia: RESIDUAL,
+    assertedVia: 'recorded production delivery (real action + notifications module, mocked SMTP/DB)',
   },
   {
     case: 'request approval intermediate next approver',

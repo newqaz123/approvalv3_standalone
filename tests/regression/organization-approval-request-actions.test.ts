@@ -31,6 +31,108 @@ function pendingApproval(id: string, overrides: Record<string, unknown> = {}): R
   return { id, requestId: REQUEST_ID, requiredLevel: 2, order: 1, status: 'pending', isFinalApproval: false, ...overrides }
 }
 
+describe('real createRequest', () => {
+  function creationHarness(userId: string): Harness {
+    const harness = createHarness({
+      departments: departmentRows(),
+      users: workflowUsers(),
+    })
+    // createRequest resolves the author through the user-cache boundary.
+    const author = workflowUsers().find((u) => u.id === userId)!
+    harness.state.currentUser = {
+      ...author,
+      department: { id: 'department-pd', type: 'PRODUCTION', name: 'Production PD' },
+    }
+    return harness
+  }
+
+  function creationInput(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      title: 'New coolant line request',
+      description: '<p>Coolant line needs a new pump.</p>',
+      inlineImageSessionId: '00000000-0000-4000-8000-000000000097',
+      stagedAttachmentIds: [],
+      ...overrides,
+    }
+  }
+
+  it('persists the request, its approval chain, and notifies the first-approver level with the production event', async () => {
+    const harness = creationHarness('staff-1')
+    enableTestSmtp(harness.state)
+
+    const result = (await harness.requests.createRequest(creationInput())) as { success: boolean; requestId: string }
+    assert.equal(result.success, true)
+
+    const requestId = result.requestId
+    const persistedRequest = harness.db.requests.rows.get(requestId)
+    assert.deepEqual(
+      {
+        title: persistedRequest?.title,
+        requesterId: persistedRequest?.requesterId,
+        departmentId: persistedRequest?.departmentId,
+        status: persistedRequest?.status,
+      },
+      {
+        title: 'New coolant line request',
+        requesterId: 'staff-1',
+        departmentId: 'department-pd',
+        status: 'ImprovementRequest',
+      },
+    )
+
+    // Persisted chain from the level-1 submitter in PD (levels 2 and 4).
+    const approvals = harness.db.requestApprovalsForRequest(requestId).sort((a, b) => (a.order as number) - (b.order as number))
+    assert.deepEqual(
+      approvals.map((row) => ({ requiredLevel: row.requiredLevel, order: row.order, status: row.status })),
+      [
+        { requiredLevel: 2, order: 1, status: 'pending' },
+        { requiredLevel: 4, order: 2, status: 'pending' },
+      ],
+    )
+    assert.ok([...harness.db.rows.request_activities.values()].some((row) => row.action === 'created'))
+
+    // Production first-approver notification: level-2 approvers, in-app + email.
+    assert.deepEqual(
+      [...harness.db.rows.notifications.values()].map((row) => ({ userId: row.userId, type: row.type, title: row.title })),
+      [{ userId: 'supervisor-1', type: 'approval_needed', title: 'New Approval Request' }],
+    )
+    assert.deepEqual(harness.state.smtpMessages.map((mail) => mail.to), ['supervisor-1@example.test'])
+  })
+
+  it('auto-approves creation for a top-level author: status SentToEngineer and no invented notifications', async () => {
+    const harness = creationHarness('department-manager-1')
+    enableTestSmtp(harness.state)
+
+    const result = (await harness.requests.createRequest(creationInput())) as { success: boolean; requestId: string }
+    assert.equal(result.success, true)
+
+    assert.equal(harness.db.requests.rows.get(result.requestId)?.status, 'SentToEngineer')
+    const approvals = harness.db.requestApprovalsForRequest(result.requestId)
+    assert.deepEqual(
+      approvals.map((row) => ({ status: row.status, approverId: row.approverId, comments: row.comments })),
+      [{ status: 'approved', approverId: 'department-manager-1', comments: 'Auto-approved (top-level submitter)' }],
+    )
+    assert.deepEqual(
+      [...harness.db.rows.request_activities.values()].map((row) => row.action),
+      ['created', 'status_changed'],
+    )
+
+    // Auto-approved creation invents no notifications: no approver notice and
+    // no engineering task broadcast (that belongs to the request-approval
+    // completion step, exercised separately).
+    assert.deepEqual([...harness.db.rows.notifications.values()], [])
+    assert.deepEqual(harness.state.smtpMessages, [])
+  })
+
+  it('refuses authors without a department', async () => {
+    const harness = creationHarness('null-org-1')
+    const result = (await harness.requests.createRequest(creationInput())) as { success: boolean; error?: string }
+    assert.equal(result.success, false)
+    assert.match(result.error ?? '', /department/)
+    assert.equal(harness.db.requests.rows.size, 0)
+  })
+})
+
 describe('real approveRequest', () => {
   it('records the intermediate approval, leaves the status, and notifies the next pending level', async () => {
     const harness = requestHarness('ImprovementRequest', [
@@ -149,6 +251,10 @@ describe('real resubmitRequest', () => {
     assert.ok(
       [...harness.db.rows.request_activities.values()].some((row) => row.action === 'resubmitted'),
     )
+    // Resubmission is notification-silent through every channel: no in-app
+    // rows and no SMTP sends.
+    assert.deepEqual([...harness.db.rows.notifications.values()], [])
+    assert.deepEqual(harness.state.smtpMessages, [])
   })
 
   it('refuses non-requesters and requests without rejections', async () => {
