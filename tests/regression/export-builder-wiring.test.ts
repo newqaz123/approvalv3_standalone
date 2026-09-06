@@ -1,6 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { runInNewContext } from "node:vm";
+import ts from "typescript";
 
 describe("completed approval export builder wiring", () => {
 	it("renders the package builder in the completed final modal", () => {
@@ -133,4 +136,108 @@ describe("completed approval export builder wiring", () => {
 		);
 		assert.match(reportsAction, /generateAdminBackupPdf/);
 	});
+
+	it("rejects generateAdminBackupPdf for a non-admin session even when caller passes an admin id", async () => {
+		const reports = loadReportsModule({
+			requireAdmin: async () => null,
+		});
+
+		await assert.rejects(
+			() => reports.generateAdminBackupPdf("pd2-r1", "admin-1"),
+			/Unauthorized|Admin access required/,
+		);
+		assert.equal(reports.state.pdfGenerated, false);
+		assert.equal(reports.state.exportUserIds.length, 0);
+	});
+
+	it("authorizes generateAdminBackupPdf from requireAdmin session id, not the caller-supplied adminId", async () => {
+		const reports = loadReportsModule({
+			requireAdmin: async () => "admin-1",
+		});
+
+		const pdf = await reports.generateAdminBackupPdf("pd2-r1", "staff-pd1");
+		assert.ok(Buffer.isBuffer(pdf));
+		assert.equal(reports.state.pdfGenerated, true);
+		assert.deepEqual(reports.state.exportUserIds, ["admin-1"]);
+	});
 });
+
+type ReportsHarness = {
+	generateAdminBackupPdf: (requestId: string, adminId: string) => Promise<Buffer>;
+	state: { pdfGenerated: boolean; exportUserIds: string[] };
+};
+
+function loadReportsModule(options: {
+	requireAdmin: () => Promise<string | null>;
+}): ReportsHarness {
+	const state = { pdfGenerated: false, exportUserIds: [] as string[] };
+	const exportableRequest = {
+		id: "pd2-r1",
+		title: "PD2 request",
+		description: "<p>secret</p>",
+		status: "ImprovementRequest",
+		createdAt: new Date("2026-01-01T00:00:00Z"),
+		requesterId: "staff-pd2",
+		requester: { id: "staff-pd2", name: "PD2 Staff", email: "pd2@example.test" },
+		department: { id: "department-pd", name: "Production PD" },
+		fileAttachments: [],
+		activities: [],
+		approvals: [],
+		solutions: [],
+	};
+	const dependencies: Record<string, unknown> = {
+		"@/lib/auth-config": {
+			auth: async () => ({ user: { id: "staff-pd1" } }),
+		},
+		"@/lib/auth": {
+			requireAdmin: options.requireAdmin,
+		},
+		"@/lib/prisma": {
+			default: {
+				user: {
+					findUnique: async ({ where }: { where: { id: string } }) => {
+						state.exportUserIds.push(where.id);
+						return { id: where.id, name: where.id, isActive: true };
+					},
+				},
+				requests: {
+					findFirst: async () => exportableRequest,
+				},
+			},
+		},
+		"@/lib/pdf": {
+			generateRequestPDF: async () => {
+				state.pdfGenerated = true;
+				return Buffer.from("admin-backup-pdf");
+			},
+		},
+		"@/lib/pdf-package": {
+			convertAttachmentToPdf: async () => Buffer.from(""),
+			mergePdfBuffers: async () => Buffer.from(""),
+			validateExportPackageRequestItems: () => [],
+		},
+		"@/lib/request-access": {
+			canUserViewRequest: async () => false,
+		},
+	};
+	const source = readFileSync(join("src", "server-actions", "reports.ts"), "utf8");
+	const compiled = ts.transpileModule(source, {
+		compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+	}).outputText;
+	const moduleExports: Record<string, unknown> = {};
+	runInNewContext(compiled, {
+		exports: moduleExports,
+		require: (name: string) => {
+			if (name in dependencies) return dependencies[name];
+			throw new Error(`Unexpected dependency '${name}' imported by src/server-actions/reports.ts`);
+		},
+		console: { error() {}, warn() {}, log() {} },
+		Buffer,
+		Map,
+		Date,
+	});
+	return {
+		generateAdminBackupPdf: moduleExports.generateAdminBackupPdf as ReportsHarness["generateAdminBackupPdf"],
+		state,
+	};
+}

@@ -84,13 +84,16 @@ describe('visibility caller contracts', () => {
       'src/server-actions/analytics.ts',
       'src/server-actions/budget-control.ts',
       'src/server-actions/files.ts',
-      'src/app/api/inline-images/[id]/route.ts',
       'src/server-actions/reports.ts',
       'src/app/api/files/download/route.ts',
     ]) {
       const source = read(path)
       assert.match(source, /buildRequestVisibilityWhere|canUserViewRequest/)
     }
+    const inlineRoute = read('src/app/api/inline-images/[id]/route.ts')
+    const inlineLifecycle = read('src/lib/inline-images/lifecycle.ts')
+    assert.match(inlineRoute, /canReadInlineImage/)
+    assert.match(inlineLifecycle, /canUserViewRequest/)
   })
 
   it('keeps admin audit and retention paths protected and deleted-record aware', () => {

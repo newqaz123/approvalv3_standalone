@@ -11,6 +11,7 @@ import {
   type ExportPackageRequestItem,
 } from '@/lib/pdf-package'
 import { canUserViewRequest } from '@/lib/request-access'
+import { requireAdmin } from '@/lib/auth'
 
 /**
  * In-memory rate limiting for PDF exports
@@ -214,8 +215,9 @@ async function buildRequestPDFData(
   }
 
   // Ordinary document exports use the shared read policy. Privileged admin
-  // backup (allowIncomplete) keeps requireAdmin at the route and may include
-  // incomplete or deleted-record history without ordinary list exclusions.
+  // backup (allowIncomplete) is only reached after generateAdminBackupPdf
+  // calls requireAdmin; it may include incomplete history without ordinary
+  // list exclusions.
   if (!options?.allowIncomplete && !(await canUserViewRequest(userId, requestId))) {
     throw new Error('You are not authorized to export this request.')
   }
@@ -425,7 +427,11 @@ export async function exportRequestPackageAsPDF(requestId: string, items: Export
   }
 }
 
-export async function generateAdminBackupPdf(requestId: string, adminId: string): Promise<Buffer> {
-  const { pdfData } = await buildRequestPDFData(requestId, adminId, { allowIncomplete: true })
+export async function generateAdminBackupPdf(requestId: string, _adminId: string): Promise<Buffer> {
+  const sessionAdminId = await requireAdmin()
+  if (!sessionAdminId) {
+    throw new Error('Unauthorized - Admin access required')
+  }
+  const { pdfData } = await buildRequestPDFData(requestId, sessionAdminId, { allowIncomplete: true })
   return generateRequestPDF(pdfData)
 }
