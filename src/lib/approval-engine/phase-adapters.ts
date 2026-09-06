@@ -17,11 +17,12 @@
  *   create a `'use server'` import cycle.
  * - `compareNewResolutionWithoutWrites` (shadow) resolves the NEW plan
  *   through the pure engine only and reports problems instead of throwing.
- * - `assertNewCreationEnabled` (new) denies creation until the Task 15
- *   activation support exists.
+ * - `assertNewCreationEnabled` (new) requires mode=new, a completed import
+ *   digest, and current primary-assignment/route coverage for the actor.
  */
 import type { Prisma, RequestStatus } from '@prisma/client'
-import type { ApprovalPhase } from '@/lib/approval-routes/types'
+import type { ApprovalPhase, ApprovalRouteDb, ApprovalRouteStatus } from '@/lib/approval-routes/types'
+import { resolvePublishedApprovalRoute } from '@/lib/approval-routes/resolver'
 import { ApprovalRouteConfigurationError } from '@/lib/approval-routes/validation'
 import { RequestStatusConflictError } from '@/lib/request-status-transition'
 import { resolveReportingBranch } from '@/lib/organization/repository'
@@ -402,29 +403,134 @@ export async function createCustomPersonAttempt(
 // ---------------------------------------------------------------------------
 
 /**
- * Raised when creation is requested in `new` mode before the Task 15
- * activation support exists. Server actions surface its message instead of
- * the generic failure so the denial stays diagnosable.
+ * Raised when creation is requested in `new` mode without a completed import
+ * digest. Server actions surface its message instead of the generic failure
+ * so the denial stays diagnosable. Stale/corrupt mapping and missing
+ * primary/route coverage are configuration errors, not this denial.
  */
 export class ApprovalCreationDisabledError extends Error {
   readonly code = 'APPROVAL_CREATION_DISABLED'
 
   constructor() {
     super(
-      'NEW approval routing is not enabled yet: activation support (import digest and route coverage validation) is not implemented. Keep APPROVAL_ROUTING_MODE on legacy or shadow.',
+      'NEW approval routing is not enabled yet: APPROVAL_ORG_MAPPING_DIGEST must match a completed organization import. Keep APPROVAL_ROUTING_MODE on legacy or shadow.',
     )
     this.name = 'ApprovalCreationDisabledError'
   }
 }
 
+export interface NewCreationGateInput {
+  phase: ApprovalPhase
+  originUserId: string
+  requestId: string
+  solutionId?: string
+}
+
+interface NewCreationGateTx {
+  organization_import_runs: {
+    findUnique(args: { where: { mappingDigest: string } }): Promise<{ id: string; mappingDigest: string } | null>
+  }
+  user: {
+    findUnique(args: { where: { id: string } }): Promise<{ id: string; isActive: boolean } | null>
+  }
+  organization_position_assignments: {
+    findMany(args?: unknown): Promise<Array<{ id: string; userId: string; unitId: string; positionCode: string; reportingGroupId: string | null; isPrimary: boolean; isActive: boolean }>>
+  }
+  organization_units: {
+    findMany(args?: unknown): Promise<Array<{ id: string; name: string; unitType: string; parentId: string | null; isActive: boolean }>>
+  }
+  reporting_groups: {
+    findMany(args?: unknown): Promise<Array<{ id: string; unitId: string; parentGroupId: string | null; name: string; isActive: boolean }>>
+  }
+  reporting_group_members: {
+    findMany(args?: unknown): Promise<Array<{ reportingGroupId: string; userId: string }>>
+  }
+  approval_route_versions: {
+    findMany(args: { where: { scopeUnitId: { in: string[] }; phase: ApprovalPhase } }): Promise<Array<{
+      id: string
+      scopeUnitId: string
+      phase: ApprovalPhase
+      version: number
+      maximumPositionLevel: number
+      status: ApprovalRouteStatus
+    }>>
+  }
+  approval_route_steps: {
+    findMany(args: { where: { routeVersionId: { in: string[] } }; orderBy: { stepOrder: 'asc' } }): Promise<Array<{
+      routeVersionId: string
+      stepOrder: number
+      positionCode: string
+    }>>
+  }
+}
+
+async function assertOriginRouteCoverage(tx: NewCreationGateTx, input: NewCreationGateInput): Promise<void> {
+  const branch = await resolveReportingBranch(input.originUserId, tx as never)
+  if (!branch) {
+    throw new ApprovalRouteConfigurationError(
+      `Absent primary assignment for origin user ${input.originUserId} is a configuration error`,
+    )
+  }
+  const routeDb: ApprovalRouteDb = {
+    loadOriginBranch: (userId) => resolveReportingBranch(userId, tx as never),
+    loadPublishedRoutes: async ({ scopeUnitIds, phase }) => {
+      const versions = await tx.approval_route_versions.findMany({
+        where: { scopeUnitId: { in: [...scopeUnitIds] }, phase },
+      })
+      if (versions.length === 0) return []
+      const steps = await tx.approval_route_steps.findMany({
+        where: { routeVersionId: { in: versions.map((version) => version.id) } },
+        orderBy: { stepOrder: 'asc' },
+      })
+      return versions.map((version) => ({
+        id: version.id,
+        scopeUnitId: version.scopeUnitId,
+        phase: version.phase,
+        version: version.version,
+        maximumPositionLevel: version.maximumPositionLevel as 1 | 2 | 3 | 4 | 5 | 6,
+        status: version.status,
+        steps: steps
+          .filter((step) => step.routeVersionId === version.id)
+          .map((step) => ({ order: step.stepOrder, position: step.positionCode as never })),
+      }))
+    },
+  }
+  await resolvePublishedApprovalRoute({
+    phase: input.phase,
+    originUserId: input.originUserId,
+    originUnitId: branch.primaryUnitId,
+    requestId: input.requestId,
+    originalRequestId: input.requestId,
+    requestDepartmentId: null,
+  }, routeDb)
+}
+
 /**
- * New-mode gate. Task 15 will validate the completed organization import
- * digest and the current origin/route coverage here; until that support
- * exists, new-mode creation is denied with a clear error and nothing is
- * written.
+ * New-mode gate. Mode must be `new`, `APPROVAL_ORG_MAPPING_DIGEST` must match
+ * a completed `organization_import_runs` row, and the actor must have current
+ * primary-assignment plus published-route coverage. Missing digest keeps NEW
+ * creation disabled; stale mapping / missing primary / missing published route
+ * are configuration errors, never empty or vacant routes.
  */
-export async function assertNewCreationEnabled(_tx: Prisma.TransactionClient): Promise<void> {
-  throw new ApprovalCreationDisabledError()
+export async function assertNewCreationEnabled(
+  tx: Prisma.TransactionClient,
+  input?: NewCreationGateInput,
+): Promise<void> {
+  const digest = process.env.APPROVAL_ORG_MAPPING_DIGEST
+  if (!digest) {
+    throw new ApprovalCreationDisabledError()
+  }
+  const run = await (tx as unknown as NewCreationGateTx).organization_import_runs.findUnique({
+    where: { mappingDigest: digest },
+  })
+  if (!run) {
+    throw new ApprovalRouteConfigurationError(
+      `Stale or corrupt organization mapping digest: no completed import run for ${digest}`,
+    )
+  }
+  if (input) {
+    await assertOriginRouteCoverage(tx as unknown as NewCreationGateTx, input)
+  }
 }
 
 /**

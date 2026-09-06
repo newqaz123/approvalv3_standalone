@@ -21,6 +21,7 @@ import type {
 import type { NotificationRecipientDb } from '@/lib/notification-recipients'
 import type { RequestVisibilityActor, RequestVisibilityDb } from '@/lib/request-visibility/types'
 import { canViewRequestByPredicate } from '@/lib/request-visibility/predicate'
+import type { RolloutVerificationDb } from '@/lib/approval-rollout'
 
 export const ORGANIZATION_APPROVAL_FIXTURE = {
   factoryId: 'factory-1',
@@ -1439,4 +1440,41 @@ export function fakeVisibilityDb(): RequestVisibilityDb {
 
 export async function canViewWithFake(input: { userId: string; requestId: string }): Promise<boolean> {
   return canViewRequestByPredicate(fakeVisibilityDb(), input.userId, input.requestId)
+}
+
+// ---------------------------------------------------------------------------
+// Task 15 rollout-verification fake (read-only, no Prisma)
+// ---------------------------------------------------------------------------
+
+export interface FakeRolloutDbInput {
+  mappingBlockers: string[]
+  legacyRowsWithoutDiscriminator: number
+  publishedRouteConflicts: number
+  inactiveSnapshotCandidates?: number
+  pendingSnapshotGroupsMissing?: number
+}
+
+/**
+ * Read-only Task 15 verification fake. Methods return the supplied counts and
+ * zero inactive/missing-group rows unless explicitly supplied. It never calls
+ * Prisma or mutates process state.
+ */
+export function fakeRolloutDb(input: FakeRolloutDbInput): RolloutVerificationDb {
+  return {
+    async loadMappingBlockers() {
+      return [...input.mappingBlockers]
+    },
+    async countLegacyRowsWithoutDiscriminator() {
+      return input.legacyRowsWithoutDiscriminator
+    },
+    async countPublishedRouteConflicts() {
+      return input.publishedRouteConflicts
+    },
+    async countInactiveSnapshotCandidates() {
+      return input.inactiveSnapshotCandidates ?? 0
+    },
+    async countPendingSnapshotGroupsMissing() {
+      return input.pendingSnapshotGroupsMissing ?? 0
+    },
+  }
 }

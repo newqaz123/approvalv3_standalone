@@ -440,14 +440,17 @@ export async function submitSolution(input: SubmitSolutionActionInput) {
     const isTopLevelSubmitter = submitterLevel >= maxLevel
 
     // Rollout gate: creation only. Legacy (the default) and shadow keep the
-    // existing builders exactly; new mode is denied until Task 15 activation.
+    // existing builders exactly; new mode requires a completed import digest and origin coverage.
     const rolloutMode = getApprovalRolloutMode(process.env)
 
     // Create approval chain based on selection
     if (rolloutMode === 'new') {
-      // Denied until Task 15 activation support exists; throws before any NEW
-      // write and rolls the whole submission back.
-      await assertNewCreationEnabled(tx)
+      await assertNewCreationEnabled(tx, {
+        phase: 'SOLUTION',
+        originUserId: user.id,
+        requestId: validated.requestId,
+        solutionId: solution.id,
+      })
       const phaseDb = createPrismaPhaseAdapterDb(tx)
       if (validated.useCustomApprovals && validated.customApproverIds && validated.customApproverIds.length > 0) {
         // Custom ordered-person chain: preserved validators, never
@@ -1596,8 +1599,8 @@ export async function initiateFinalApproval(
   // only after this transaction commits.
   await runSolutionTransactionWithNotifications(async (tx, notifications) => {
     // Rollout gate: creation only. Legacy (the default) and shadow keep the
-    // existing delete-and-rebuild behavior exactly; new mode is denied until
-    // Task 15 activation.
+    // existing delete-and-rebuild behavior exactly; new mode requires a completed
+    // import digest and origin coverage.
     const rolloutMode = getApprovalRolloutMode(process.env)
 
     // Delete old final approval records — legacy/shadow only; NEW mode keeps
@@ -1613,9 +1616,11 @@ export async function initiateFinalApproval(
 
     // Create final approval chain
     if (rolloutMode === 'new') {
-      // Denied until Task 15 activation support exists; throws before any NEW
-      // write and rolls the initiation back.
-      await assertNewCreationEnabled(tx)
+      await assertNewCreationEnabled(tx, {
+        phase: 'FINAL',
+        originUserId: userId,
+        requestId,
+      })
       const phaseDb = createPrismaPhaseAdapterDb(tx)
       if (useCustomChain && customApproverIds && customApproverIds.length > 0) {
         // Custom ordered-person chain: preserved validators, never
@@ -2439,8 +2444,8 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
   // status. Physical file cleanup and queued notification delivery run only
   // AFTER this commits, so slow/failing I/O cannot expire or roll back it.
   // Rollout gate: creation only. Legacy (the default) and shadow keep the
-  // existing delete-and-rebuild behavior exactly; new mode is denied until
-  // Task 15 activation.
+  // existing delete-and-rebuild behavior exactly; new mode requires a completed
+  // import digest and origin coverage.
   const rolloutMode = getApprovalRolloutMode(process.env)
   const result = await runSolutionTransactionWithNotifications(async (tx, notifications) => {
     // Update solution details
@@ -2527,15 +2532,18 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
       })
     }
 
-    // Rollout gate resolved above; new mode is denied until Task 15 activation.
+    // Rollout gate resolved above; new mode requires a completed import digest and origin coverage.
     let isAutoApproved: boolean
     let submittedCustomApprovers: string[] | null = null
     let firstPendingLevel: number | null = null
 
     if (rolloutMode === 'new') {
-      // Denied until Task 15 activation support exists; throws before any NEW
-      // write and rolls the resubmission back (no rows deleted).
-      await assertNewCreationEnabled(tx)
+      await assertNewCreationEnabled(tx, {
+        phase: 'SOLUTION',
+        originUserId: userId,
+        requestId: validated.requestId,
+        solutionId: solution.id,
+      })
       const phaseDb = createPrismaPhaseAdapterDb(tx)
       if (validated.useCustomHierarchy && validated.customApprovers.length > 0) {
         // Custom ordered-person chain: preserved validators, never

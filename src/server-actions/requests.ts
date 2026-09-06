@@ -154,7 +154,7 @@ export async function createRequest(input: CreateRequestInput) {
   let request: { id: string; title: string }
   let approvals: Awaited<ReturnType<typeof createApprovalChain>>
   // Rollout gate: creation only. Legacy (the default) and shadow keep the
-  // existing builder exactly; new mode is denied until Task 15 activation.
+  // existing builder exactly; new mode requires a completed import digest and origin coverage.
   const rolloutMode = getApprovalRolloutMode(process.env)
 
   try {
@@ -197,9 +197,11 @@ export async function createRequest(input: CreateRequestInput) {
       let chain: Awaited<ReturnType<typeof createApprovalChain>>
 
       if (rolloutMode === 'new') {
-        // Denied until Task 15 activation support exists; throws before any
-        // NEW write and rolls the whole creation back.
-        await assertNewCreationEnabled(tx)
+        await assertNewCreationEnabled(tx, {
+          phase: 'REQUEST',
+          originUserId: user.id,
+          requestId: newRequest.id,
+        })
         const attempt = await createRequestApprovalAttempt(
           createPrismaPhaseAdapterDb(tx),
           { requestId: newRequest.id, requesterId: user.id },
@@ -2444,9 +2446,11 @@ export async function resubmitRequest(input: {
     }
 
     if (rolloutMode === 'new') {
-      // Denied until Task 15 activation support exists; throws before any
-      // NEW write and rolls the resubmission back (no rows deleted).
-      await assertNewCreationEnabled(tx)
+      await assertNewCreationEnabled(tx, {
+        phase: 'REQUEST',
+        originUserId: userId,
+        requestId: input.requestId,
+      })
       await createRequestApprovalAttempt(
         createPrismaPhaseAdapterDb(tx),
         { requestId: input.requestId, requesterId: userId },
