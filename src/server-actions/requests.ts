@@ -48,6 +48,15 @@ import {
 } from '@/lib/notification-recipients'
 import { buildRequestVisibilityWhere } from '@/lib/request-visibility/predicate'
 import { canUserViewRequest, createRequestVisibilityDb } from '@/lib/request-access'
+import {
+  evaluateRequestAction,
+  existingAssignEngineersDecision,
+  existingCancelRequestDecision,
+  existingResubmitRequestDecision,
+  getRequestActionCapabilities,
+} from '@/lib/action-permissions'
+
+export { getRequestActionCapabilities }
 import type { Prisma } from '@prisma/client'
 import * as XLSX from 'xlsx'
 
@@ -1196,9 +1205,29 @@ export async function cancelRequest(input: { requestId: string; reason: string }
       hasPendingRequestApprovals: pendingRequestApprovals > 0,
       hasPendingSolutionApprovals: pendingSolutionApprovals > 0,
     })
+    const cancelAction = evaluateRequestAction('CANCEL_REQUEST', {
+      actor: { id: userId, role: '', isActive: true, departmentId: null, departmentType: null },
+      request: { requesterId: request.requesterId, departmentId: null, organizationUnitId: null, status: request.status },
+      canView: true,
+      approval: null,
+      assignedEngineer: false,
+      existingActionDecisions: {
+        CANCEL_REQUEST: existingCancelRequestDecision({
+          userId,
+          requesterId: request.requesterId,
+          status: request.status,
+          hasRejectedRequestApproval: rejectedRequestApprovals > 0,
+          hasPendingRequestApprovals: pendingRequestApprovals > 0,
+          hasPendingSolutionApprovals: pendingSolutionApprovals > 0,
+        }),
+      },
+    })
 
     if (!decision.canCancel) {
       throw new Error(getCancellationBlockedMessage(decision.reason, request.status))
+    }
+    if (!cancelAction.allowed) {
+      throw new Error(getCancellationBlockedMessage('not-requester', request.status))
     }
 
     // Only flip the status while the expected state still matches. The
@@ -2002,11 +2031,42 @@ export async function assignEngineers(requestId: string, engineerIds: string[]) 
   // Validate request exists and is in correct status
   const request = await prisma.requests.findUnique({
     where: { id: requestId },
-    select: { status: true, title: true },
+    select: { status: true, title: true, requesterId: true, departmentId: true, organizationUnitId: true },
   })
 
   if (!request) {
     throw new Error('Request not found')
+  }
+
+  const assignAction = evaluateRequestAction('ASSIGN_ENGINEERS', {
+    actor: {
+      id: user.id,
+      role: user.role,
+      isActive: user.isActive !== false,
+      departmentId: user.departmentId ?? null,
+      departmentType: user.department?.type ?? null,
+    },
+    request: {
+      requesterId: request.requesterId,
+      departmentId: request.departmentId,
+      organizationUnitId: request.organizationUnitId,
+      status: request.status,
+    },
+    canView: true,
+    approval: null,
+    assignedEngineer: false,
+    existingActionDecisions: {
+      ASSIGN_ENGINEERS: existingAssignEngineersDecision({
+        userRole: user.role,
+        status: request.status,
+      }),
+    },
+  })
+  if (!assignAction.allowed) {
+    if (assignAction.reason === 'WRONG_ROLE') {
+      throw new Error('Only engineering users can assign engineers')
+    }
+    throw new Error('Can only assign engineers to requests in SentToEngineer status')
   }
 
   if (request.status !== 'SentToEngineer') {
@@ -2291,6 +2351,33 @@ export async function resubmitRequest(input: {
     throw new Error(
       'Request can only be resubmitted during department approval phase'
     )
+  }
+
+  const resubmitAction = evaluateRequestAction('RESUBMIT_REQUEST', {
+    actor: { id: userId, role: '', isActive: true, departmentId: request.departmentId, departmentType: null },
+    request: {
+      requesterId: request.requesterId,
+      departmentId: request.departmentId,
+      organizationUnitId: request.organizationUnitId,
+      status: request.status,
+    },
+    canView: true,
+    approval: null,
+    assignedEngineer: false,
+    existingActionDecisions: {
+      RESUBMIT_REQUEST: existingResubmitRequestDecision({
+        actorId: userId,
+        requesterId: request.requesterId,
+        status: request.status,
+        hasRejection,
+      }),
+    },
+  })
+  if (!resubmitAction.allowed) {
+    if (resubmitAction.reason === 'NOT_OWNER') {
+      throw new Error('Only the requester can resubmit this request')
+    }
+    throw new Error('Request can only be resubmitted during department approval phase')
   }
 
   // Validate optional updates

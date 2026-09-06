@@ -14,6 +14,11 @@ import {
   type ImageOptimizationResult,
 } from '@/lib/attachments/image-optimization'
 import { canUserViewRequest } from '@/lib/request-access'
+import {
+  evaluateRequestAction,
+  existingDeleteAttachmentDecision,
+  existingUploadAttachmentDecision,
+} from '@/lib/action-permissions'
 
 /**
  * Delete a file attachment
@@ -87,6 +92,30 @@ export async function deleteFileAttachment({ fileId }: { fileId: string }) {
   const isEngineeringPhase = ['SentToEngineer', 'DesignCostEstimationApproval', 'SendBackToRequester', 'FinalApproval'].includes(request.status)
 
   if (!isUploader && !isRequester && !(isEngineeringUser && isEngineeringPhase)) {
+    throw new Error('Unauthorized to delete this file')
+  }
+
+  const deleteAction = evaluateRequestAction('DELETE_ATTACHMENT', {
+    actor: { id: userId, role: user?.role ?? '', isActive: true, departmentId: null, departmentType: null },
+    request: {
+      requesterId: request.requesterId,
+      departmentId: null,
+      organizationUnitId: null,
+      status: request.status,
+    },
+    canView: true,
+    approval: null,
+    assignedEngineer: false,
+    existingActionDecisions: {
+      DELETE_ATTACHMENT: existingDeleteAttachmentDecision({
+        isUploader,
+        isRequester,
+        isEngineeringUser,
+        status: request.status,
+      }),
+    },
+  })
+  if (!deleteAction.allowed) {
     throw new Error('Unauthorized to delete this file')
   }
 
@@ -178,6 +207,29 @@ export async function uploadFileAction(
   const canEngineerUpload = isEngineeringUser && isEngineeringRequest
 
   if (!isRequester && !canEngineerUpload) {
+    return { success: false, error: 'Not authorized to upload to this request' }
+  }
+
+  const uploadAction = evaluateRequestAction('UPLOAD_ATTACHMENT', {
+    actor: { id: userId, role: user?.role ?? '', isActive: true, departmentId: null, departmentType: null },
+    request: {
+      requesterId: dbRequest.requesterId,
+      departmentId: null,
+      organizationUnitId: null,
+      status: dbRequest.status,
+    },
+    canView: true,
+    approval: null,
+    assignedEngineer: false,
+    existingActionDecisions: {
+      UPLOAD_ATTACHMENT: existingUploadAttachmentDecision({
+        isRequester,
+        isEngineeringUser,
+        status: dbRequest.status,
+      }),
+    },
+  })
+  if (!uploadAction.allowed) {
     return { success: false, error: 'Not authorized to upload to this request' }
   }
 

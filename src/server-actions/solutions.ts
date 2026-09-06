@@ -50,6 +50,13 @@ import {
   createSolutionApprovalAttempt,
   markCurrentInstanceOutcome,
 } from '@/lib/approval-engine/phase-adapters'
+import {
+  evaluateRequestAction,
+  existingApprovalDecision,
+  existingInitiateFinalApprovalDecision,
+  existingResubmitSolutionDecision,
+  existingSubmitSolutionDecision,
+} from '@/lib/action-permissions'
 
 type SubmitSolutionActionInput = Omit<SubmitSolutionInput, 'inlineImageSessionId'> & {
   inlineImageSessionId?: string
@@ -286,11 +293,43 @@ export async function submitSolution(input: SubmitSolutionActionInput) {
       status: true,
       departmentId: true,
       requesterId: true,
+      organizationUnitId: true,
     },
   })
 
   if (!request) {
     throw new Error('Request not found')
+  }
+
+  const submitAction = evaluateRequestAction('SUBMIT_SOLUTION', {
+    actor: {
+      id: user.id,
+      role: user.role,
+      isActive: true,
+      departmentId: user.departmentId,
+      departmentType: null,
+    },
+    request: {
+      requesterId: request.requesterId,
+      departmentId: request.departmentId,
+      organizationUnitId: request.organizationUnitId,
+      status: request.status,
+    },
+    canView: true,
+    approval: null,
+    assignedEngineer: false,
+    existingActionDecisions: {
+      SUBMIT_SOLUTION: existingSubmitSolutionDecision({
+        userRole: user.role,
+        status: request.status,
+      }),
+    },
+  })
+  if (!submitAction.allowed) {
+    if (submitAction.reason === 'WRONG_STATUS') {
+      throw new Error(`Request must be in SentToEngineer status to submit solution. Current status: ${request.status}`)
+    }
+    throw new Error('Only engineering users can submit solutions')
   }
 
   if (request.status !== RequestStatus.SentToEngineer) {
@@ -1011,7 +1050,22 @@ export async function approveSolution(solutionId: string, comments?: string, exp
   }
 
   const { canApprove, approval, solution } = await canUserApproveSolution(solutionId)
-  if (!canApprove || !approval) {
+  const approveSolutionAction = evaluateRequestAction('APPROVE_SOLUTION', {
+    actor: { id: userId, role: '', isActive: true, departmentId: null, departmentType: null },
+    request: {
+      requesterId: '',
+      departmentId: solution?.request?.departmentId ?? null,
+      organizationUnitId: null,
+      status: solution?.request?.status ?? '',
+    },
+    canView: true,
+    approval: { canApprove },
+    assignedEngineer: false,
+    existingActionDecisions: {
+      APPROVE_SOLUTION: existingApprovalDecision(Boolean(canApprove && approval)),
+    },
+  })
+  if (!approveSolutionAction.allowed || !canApprove || !approval) {
     throw new Error('You cannot approve this solution at this time')
   }
 
@@ -1094,7 +1148,22 @@ export async function rejectSolution(solutionId: string, comments: string, expec
   }
 
   const { canApprove, approval, solution } = await canUserApproveSolution(solutionId)
-  if (!canApprove || !approval || !solution) {
+  const rejectSolutionAction = evaluateRequestAction('REJECT_SOLUTION', {
+    actor: { id: userId, role: '', isActive: true, departmentId: null, departmentType: null },
+    request: {
+      requesterId: '',
+      departmentId: solution?.request?.departmentId ?? null,
+      organizationUnitId: null,
+      status: solution?.request?.status ?? '',
+    },
+    canView: true,
+    approval: { canApprove },
+    assignedEngineer: false,
+    existingActionDecisions: {
+      REJECT_SOLUTION: existingApprovalDecision(Boolean(canApprove && approval && solution)),
+    },
+  })
+  if (!rejectSolutionAction.allowed || !canApprove || !approval || !solution) {
     throw new Error('You cannot reject this solution at this time')
   }
 
@@ -1458,11 +1527,13 @@ export async function initiateFinalApproval(
   const requestDepartmentId = request.departmentId
   const requestOrganizationUnitId = request.organizationUnitId
   const isTypedUnitRequest = requestOrganizationUnitId !== null
+  let hasDirectOriginUnitMembership = false
   if (isTypedUnitRequest) {
     const directMembership = await prisma.organization_position_assignments.findFirst({
       where: { userId, unitId: requestOrganizationUnitId, isActive: true },
       select: { id: true },
     })
+    hasDirectOriginUnitMembership = Boolean(directMembership)
     if (!directMembership) {
       throw new Error('Only members of the request\'s originating unit can initiate final approval')
     }
@@ -1474,6 +1545,44 @@ export async function initiateFinalApproval(
   }
   if (!isTypedUnitRequest && user.departmentId !== requestDepartmentId) {
     throw new Error('Only department members can initiate final approval')
+  }
+
+  const initiateAction = evaluateRequestAction('INITIATE_FINAL_APPROVAL', {
+    actor: {
+      id: user.id,
+      role: user.role,
+      isActive: true,
+      departmentId: user.departmentId,
+      departmentType: null,
+    },
+    request: {
+      requesterId: request.requesterId,
+      departmentId: request.departmentId,
+      organizationUnitId: request.organizationUnitId,
+      status: request.status,
+    },
+    canView: true,
+    approval: null,
+    assignedEngineer: false,
+    existingActionDecisions: {
+      INITIATE_FINAL_APPROVAL: existingInitiateFinalApprovalDecision({
+        status: request.status,
+        isTypedUnitRequest,
+        hasDirectOriginUnitMembership,
+        userDepartmentId: user.departmentId,
+        requestDepartmentId,
+      }),
+    },
+  })
+  if (!initiateAction.allowed) {
+    if (initiateAction.reason === 'WRONG_STATUS') {
+      throw new Error(`Request must be in SendBackToRequester status to initiate final approval. Current status: ${request.status}`)
+    }
+    throw new Error(
+      isTypedUnitRequest
+        ? 'Only members of the request\'s originating unit can initiate final approval'
+        : 'Only department members can initiate final approval',
+    )
   }
 
   // Get max level in department for top-level check
@@ -1934,7 +2043,17 @@ export async function approveFinalApproval(requestId: string, comments?: string,
   }
 
   const { canApprove, approval } = await canUserApproveFinalApproval(requestId)
-  if (!canApprove || !approval) {
+  const approveFinalAction = evaluateRequestAction('APPROVE_FINAL', {
+    actor: { id: userId, role: '', isActive: true, departmentId: null, departmentType: null },
+    request: { requesterId: '', departmentId: null, organizationUnitId: null, status: 'FinalApproval' },
+    canView: true,
+    approval: { canApprove },
+    assignedEngineer: false,
+    existingActionDecisions: {
+      APPROVE_FINAL: existingApprovalDecision(Boolean(canApprove && approval)),
+    },
+  })
+  if (!approveFinalAction.allowed || !canApprove || !approval) {
     throw new Error('You cannot approve this request at this time')
   }
 
@@ -2027,7 +2146,17 @@ export async function rejectFinalApproval(requestId: string, comments: string, e
   }
 
   const { canApprove, approval } = await canUserApproveFinalApproval(requestId)
-  if (!canApprove || !approval) {
+  const rejectFinalAction = evaluateRequestAction('REJECT_FINAL', {
+    actor: { id: userId, role: '', isActive: true, departmentId: null, departmentType: null },
+    request: { requesterId: '', departmentId: null, organizationUnitId: null, status: 'FinalApproval' },
+    canView: true,
+    approval: { canApprove },
+    assignedEngineer: false,
+    existingActionDecisions: {
+      REJECT_FINAL: existingApprovalDecision(Boolean(canApprove && approval)),
+    },
+  })
+  if (!rejectFinalAction.allowed || !canApprove || !approval) {
     throw new Error('You cannot reject this request at this time')
   }
 
@@ -2264,6 +2393,38 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
   const hasFinalApprovalRejection = request.approvals.some(a => a.status === 'rejected' && a.isFinalApproval)
   
   if (!hasSolutionRejection && !hasFinalApprovalRejection) {
+    throw new Error('Can only resubmit rejected solutions')
+  }
+
+  const resubmitSolutionAction = evaluateRequestAction('RESUBMIT_SOLUTION', {
+    actor: {
+      id: user.id,
+      role: user.role,
+      isActive: true,
+      departmentId: user.departmentId,
+      departmentType: null,
+    },
+    request: {
+      requesterId: request.requesterId,
+      departmentId: request.departmentId,
+      organizationUnitId: request.organizationUnitId,
+      status: request.status,
+    },
+    canView: true,
+    approval: null,
+    assignedEngineer: false,
+    existingActionDecisions: {
+      RESUBMIT_SOLUTION: existingResubmitSolutionDecision({
+        userRole: user.role,
+        hasSolutionRejection,
+        hasFinalApprovalRejection,
+      }),
+    },
+  })
+  if (!resubmitSolutionAction.allowed) {
+    if (resubmitSolutionAction.reason === 'WRONG_ROLE') {
+      throw new Error('Only engineering users can resubmit solutions')
+    }
     throw new Error('Can only resubmit rejected solutions')
   }
 

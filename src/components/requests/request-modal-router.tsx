@@ -11,7 +11,7 @@ import { CompletedFinalModal } from "./completed-final-modal";
 import { RequestResubmitModal } from "./request-resubmit-modal";
 import { FinalApprovalResubmitModal } from "./final-approval-resubmit-modal";
 import { SubmitFinalApprovalModal } from "./submit-final-approval-modal";
-import { getRequest, resubmitRequest } from "@/server-actions/requests";
+import { getRequest, getRequestActionCapabilities, resubmitRequest } from "@/server-actions/requests";
 import { getEngineeringSubTaskOptions } from "@/server-actions/engineering-sub-tasks";
 import {
 	canUserApprove,
@@ -32,9 +32,12 @@ import {
 } from "@/lib/engineering-sub-tasks";
 import {
 	getModalTypeForStatus,
-	canUserSubmitSolution,
-	canUserSubmitFinalApproval,
 } from "@/lib/permission-checks";
+import {
+	shouldShowActionButton,
+	type ActionDecision,
+	type RequestAction,
+} from "@/lib/action-permissions";
 import {
 	evaluateRequesterCancelControl,
 } from "@/lib/cancellation-policy";
@@ -86,6 +89,10 @@ function RequestModalRouterContent({
 	const [loading, setLoading] = useState(true);
 	const [requestData, setRequestData] = useState<any>(null);
 	const [canApprove, setCanApprove] = useState(false);
+	const [actionCapabilities, setActionCapabilities] = useState<Record<
+		RequestAction,
+		ActionDecision
+	> | null>(null);
 	const [userDepartmentType, setUserDepartmentType] = useState<string | null>(
 		null,
 	);
@@ -130,6 +137,7 @@ function RequestModalRouterContent({
 
 			if (!request) {
 				onLoadError?.("Request not found or you may not have access.");
+				setActionCapabilities(null);
 				setLoading(false);
 				onLoadStateChange?.(false);
 				return;
@@ -165,6 +173,7 @@ function RequestModalRouterContent({
 			}
 
 			setCanApprove(approvalCheck.canApprove);
+			setActionCapabilities(await getRequestActionCapabilities(requestId));
 
 			// Get user department info
 			if (user?.id) {
@@ -222,15 +231,25 @@ function RequestModalRouterContent({
 	// Transform data for modals
 	const modalData = transformRequestToModalData(requestData);
 
-	// Determine permissions
-	const isEngineering = canUserSubmitSolution(userDepartmentType, user?.role);
-	const isOriginalRequester = user?.id === requestData.requesterId;
-	const isRequesterDepartment = canUserSubmitFinalApproval(
-		user?.id || "",
-		requestData.requesterId,
-		userDepartmentId,
-		requestData.departmentId,
-	);
+	// Determine permissions. Action buttons come from session-derived
+	// capabilities; canView/engineering/admin read is never a substitute.
+	const canAct = (action: RequestAction) =>
+		Boolean(
+			actionCapabilities &&
+				shouldShowActionButton(action, actionCapabilities[action]),
+		);
+	const approveAction: RequestAction =
+		requestData.status === "FinalApproval"
+			? "APPROVE_FINAL"
+			: requestData.status === "DesignCostEstimationApproval"
+				? "APPROVE_SOLUTION"
+				: "APPROVE_REQUEST";
+	const rejectAction: RequestAction =
+		requestData.status === "FinalApproval"
+			? "REJECT_FINAL"
+			: requestData.status === "DesignCostEstimationApproval"
+				? "REJECT_SOLUTION"
+				: "REJECT_REQUEST";
 
 	// Check for rejections - only consider rejections relevant to current workflow stage
 	const hasRequestRejection =
@@ -275,14 +294,17 @@ function RequestModalRouterContent({
 	// SentToEngineer requests) only suppresses other workflow actions, never
 	// the requester's cancel control. Pending solution approvals come from
 	// the server-computed all-solutions aggregate on the getRequest payload.
-	const canCancel = evaluateRequesterCancelControl({
-		userId: user?.id,
-		request: requestData,
-		viewOnly,
-	}).canCancel;
+	const canCancel =
+		canAct("CANCEL_REQUEST") &&
+		evaluateRequesterCancelControl({
+			userId: user?.id,
+			request: requestData,
+			viewOnly,
+		}).canCancel;
 	const allowActions = !viewOnly;
 
-	const canManageSubTasks = canManageEngineeringSubTasks(user);
+	const canManageSubTasks =
+		canAct("MANAGE_SUB_TASKS") && canManageEngineeringSubTasks(user);
 	const subTasksElement =
 		isSubTaskVisibleForRequestStatus(requestData.status) && subTaskOptions ? (
 			<SubTasksSection
@@ -306,9 +328,9 @@ function RequestModalRouterContent({
 		hasRejection,
 		!!requestData.solutions?.[0],
 		requestData.approvals?.some((a: any) => a.isFinalApproval),
-		allowActions && canApprove,
-		allowActions && isRequesterDepartment,
-		allowActions && isEngineering,
+		allowActions && canAct(approveAction),
+		allowActions && canAct("INITIATE_FINAL_APPROVAL"),
+		allowActions && canAct("SUBMIT_SOLUTION"),
 	);
 
 	// Common handlers
@@ -684,10 +706,10 @@ function RequestModalRouterContent({
 						...modalData,
 						status: requestData.status,
 					}}
-					canApprove={allowActions && canApprove}
+					canApprove={allowActions && canAct(approveAction)}
 					isSubmitting={isSubmitting}
-					onApprove={allowActions ? handleApprove : undefined}
-					onReject={allowActions ? handleReject : undefined}
+					onApprove={allowActions && canAct(approveAction) ? handleApprove : undefined}
+					onReject={allowActions && canAct(rejectAction) ? handleReject : undefined}
 					onPreviewFile={handlePreviewFile}
 					onPreviewSolutionFile={handlePreviewSolutionFile}
 					onDownloadRequestFile={handleDownloadFile}
@@ -733,28 +755,22 @@ function RequestModalRouterContent({
 								: undefined,
 					}}
 					onApprove={
-						allowActions && canApprove ? () => handleApprove("") : undefined
+						allowActions && canAct(approveAction) ? () => handleApprove("") : undefined
 					}
 					onReject={
-						allowActions && canApprove
+						allowActions && canAct(rejectAction)
 							? (reason: string) => handleReject(reason)
 							: undefined
 					}
 					onResubmit={
-						allowActions &&
-						!canApprove &&
-						requestData.status === "SentToEngineer" &&
-						isEngineering &&
-						(hasSolutionRejection ||
-							hasFinalRejection ||
-							hasFinalRejectionInEngineering)
+						allowActions && canAct("RESUBMIT_SOLUTION")
 							? () => {
 									setShowResubmitSolutionModal(true);
 								}
 							: undefined
 					}
 					onSubmitFinalApproval={
-						allowActions && !canApprove && isRequesterDepartment
+						allowActions && canAct("INITIATE_FINAL_APPROVAL")
 							? () => setShowSubmitFinalApprovalModal(true)
 							: undefined
 					}
@@ -847,7 +863,9 @@ function RequestModalRouterContent({
 					userDepartment={userDepartmentType || undefined}
 					userRole={user?.role}
 					onSubmitSolution={
-						allowActions ? () => setShowSolutionModal(true) : undefined
+						allowActions && canAct("SUBMIT_SOLUTION")
+							? () => setShowSolutionModal(true)
+							: undefined
 					}
 					showCancel={canCancel}
 					onCancelled={handleClose}
@@ -872,9 +890,9 @@ function RequestModalRouterContent({
 						requesterName: requestData.requester.name,
 					}}
 					userDepartment={userDepartmentType || undefined}
-					isRequesterDepartment={isRequesterDepartment}
+					isRequesterDepartment={canAct("INITIATE_FINAL_APPROVAL")}
 					onSubmitFinalApproval={
-						allowActions
+						allowActions && canAct("INITIATE_FINAL_APPROVAL")
 							? () => setShowSubmitFinalApprovalModal(true)
 							: undefined
 					}
@@ -908,7 +926,7 @@ function RequestModalRouterContent({
 					onDownloadSolutionFile={handleDownloadSolutionFile}
 					onPreviewFile={handlePreviewFile}
 					onPreviewSolutionFile={handlePreviewSolutionFile}
-					onExport={handleExportReport}
+					onExport={canAct("EXPORT_PDF") ? handleExportReport : undefined}
 					onExportPackage={handleExportPackage}
 					subTasksElement={subTasksElement}
 				/>
@@ -928,7 +946,11 @@ function RequestModalRouterContent({
 						rejectedAt: modalData.rejection?.rejectedAt || "",
 						files: modalData.requestFiles,
 					}}
-					onResubmit={isOriginalRequester ? handleResubmitRequest : undefined}
+					onResubmit={
+						allowActions && canAct("RESUBMIT_REQUEST")
+							? handleResubmitRequest
+							: undefined
+					}
 					showCancel={canCancel}
 					requestId={requestData.id}
 					requestTitle={requestData.title}

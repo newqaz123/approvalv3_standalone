@@ -14,6 +14,38 @@ export function canUserSubmitSolution(
 }
 
 /**
+ * Existing assignEngineers role guard. Assignment stays role-based
+ * (`user.role === 'engineering'`), not PIC-only.
+ */
+export function canUserAssignEngineers(
+  userRole: string | null | undefined
+): boolean {
+  return userRole === 'engineering'
+}
+
+/**
+ * Final-initiation origin membership. Legacy rows keep same-department
+ * membership; NEW typed-unit rows require DIRECT origin-unit membership.
+ * Ancestor/descendant visibility is not membership.
+ */
+export function canInitiateFinalApprovalByOrigin(input: {
+  isTypedUnitRequest: boolean
+  hasDirectOriginUnitMembership: boolean
+  userDepartmentId: string | null | undefined
+  requestDepartmentId: string | null | undefined
+}): boolean {
+  if (input.isTypedUnitRequest) {
+    return input.hasDirectOriginUnitMembership === true
+  }
+  return canUserSubmitFinalApproval(
+    '_',
+    '_',
+    input.userDepartmentId,
+    input.requestDepartmentId,
+  )
+}
+
+/**
  * Check if user can submit final approval (requester's department only)
  */
 export function canUserSubmitFinalApproval(

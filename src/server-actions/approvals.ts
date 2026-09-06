@@ -25,6 +25,10 @@ import {
   createPrismaNotificationRecipientDb,
   resolveApprovalNeededRecipients,
 } from '@/lib/notification-recipients'
+import {
+  evaluateRequestAction,
+  existingApprovalDecision,
+} from '@/lib/action-permissions'
 
 /**
  * Check if data is stale based on updatedAt timestamp
@@ -265,7 +269,22 @@ export async function approveRequest(
   }
 
   const { canApprove, approval } = await canUserApprove(requestId)
-  if (!canApprove || !approval) {
+  const approveAction = evaluateRequestAction('APPROVE_REQUEST', {
+    actor: { id: userId, role: '', isActive: true, departmentId: null, departmentType: null },
+    request: {
+      requesterId: '',
+      departmentId: approval?.request?.departmentId ?? null,
+      organizationUnitId: null,
+      status: approval?.request?.status ?? '',
+    },
+    canView: true,
+    approval: { canApprove },
+    assignedEngineer: false,
+    existingActionDecisions: {
+      APPROVE_REQUEST: existingApprovalDecision(Boolean(canApprove && approval)),
+    },
+  })
+  if (!approveAction.allowed || !canApprove || !approval) {
     throw new Error('You cannot approve this request at this time')
   }
 
@@ -332,7 +351,22 @@ export async function rejectRequest(
   }
 
   const { canApprove, approval } = await canUserApprove(requestId)
-  if (!canApprove || !approval) {
+  const rejectAction = evaluateRequestAction('REJECT_REQUEST', {
+    actor: { id: userId, role: '', isActive: true, departmentId: null, departmentType: null },
+    request: {
+      requesterId: '',
+      departmentId: approval?.request?.departmentId ?? null,
+      organizationUnitId: null,
+      status: approval?.request?.status ?? '',
+    },
+    canView: true,
+    approval: { canApprove },
+    assignedEngineer: false,
+    existingActionDecisions: {
+      REJECT_REQUEST: existingApprovalDecision(Boolean(canApprove && approval)),
+    },
+  })
+  if (!rejectAction.allowed || !canApprove || !approval) {
     throw new Error('You cannot reject this request at this time')
   }
 
