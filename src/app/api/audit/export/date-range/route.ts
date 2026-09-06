@@ -16,7 +16,7 @@ import prisma from '@/lib/prisma'
  */
 export async function GET(request: NextRequest) {
   try {
-    // Admin-only access check
+    // Privileged admin audit export: ordinary request visibility is not applied.
     const adminUserId = await requireAdmin()
     if (!adminUserId) {
       return NextResponse.json(

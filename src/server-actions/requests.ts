@@ -46,6 +46,8 @@ import {
   createPrismaNotificationRecipientDb,
   resolveApprovalNeededRecipients,
 } from '@/lib/notification-recipients'
+import { buildRequestVisibilityWhere } from '@/lib/request-visibility/predicate'
+import { canUserViewRequest, createRequestVisibilityDb } from '@/lib/request-access'
 import type { Prisma } from '@prisma/client'
 import * as XLSX from 'xlsx'
 
@@ -334,10 +336,53 @@ export interface GetRequestsFilters {
   includeArchived?: boolean
 }
 
+function buildRequestFilters(filters?: GetRequestsFilters): Prisma.requestsWhereInput {
+  if (!filters) return {}
+  const clauses: Prisma.requestsWhereInput[] = []
+  if (filters.statuses && filters.statuses.length > 0) {
+    clauses.push({ status: { in: filters.statuses as never } })
+  } else if (filters.status) {
+    clauses.push({ status: filters.status as never })
+  }
+  if (filters.wrStatus === 'received') {
+    clauses.push({ workRequisitionReceived: true })
+  } else if (filters.wrStatus === 'not-received') {
+    clauses.push({ workRequisitionReceived: false })
+  }
+  if (filters.departmentId) {
+    clauses.push({ departmentId: filters.departmentId })
+  }
+  if (filters.requesterId) {
+    clauses.push({ requesterId: filters.requesterId })
+  }
+  if (filters.dateFrom || filters.dateTo) {
+    const createdAt: Prisma.DateTimeFilter = {}
+    if (filters.dateFrom) {
+      createdAt.gte = new Date(filters.dateFrom)
+    }
+    if (filters.dateTo) {
+      const endDate = new Date(filters.dateTo)
+      endDate.setHours(23, 59, 59, 999)
+      createdAt.lte = endDate
+    }
+    clauses.push({ createdAt })
+  }
+  if (filters.search) {
+    clauses.push({
+      OR: [
+        { title: { contains: filters.search, mode: 'insensitive' } },
+        { description: { contains: filters.search, mode: 'insensitive' } },
+        { id: { contains: filters.search, mode: 'insensitive' } },
+        { requester: { name: { contains: filters.search, mode: 'insensitive' } } },
+      ],
+    })
+  }
+  return clauses.length > 0 ? { AND: clauses } : {}
+}
+
 /**
- * Get requests visible to the current user:
- * - Admins see ALL requests across all departments
- * - Regular users see all requests from their department
+ * Get requests visible to the current user through the shared visibility predicate.
+ * Status, archive, search, and other filters are ANDed and never overwrite visibility OR.
  */
 export async function getMyRequests(filters?: GetRequestsFilters) {
   const currentUser = await getCurrentUser()
@@ -346,93 +391,16 @@ export async function getMyRequests(filters?: GetRequestsFilters) {
     throw new Error('User not found')
   }
 
-  // Build where clause based on user role and department type
-  // By default exclude archived requests unless caller opts in
-  const showArchived = filters?.includeArchived === true
-  let whereClause: any
-
-  if (currentUser.role === 'admin') {
-    // Admins see all non-deleted requests
-    whereClause = { isDeleted: false, ...(showArchived ? {} : { isArchived: false }) }
-  } else if (currentUser.department?.type === 'ENGINEERING') {
-    // Engineering users see all non-deleted requests for monitoring purposes
-    whereClause = { isDeleted: false, ...(showArchived ? {} : { isArchived: false }) }
-  } else {
-    // General dept users see:
-    // 1. Requests from their own department, OR
-    // 2. Requests where they are a required approver in request approval chain, OR
-    // 3. Requests where they are a required approver in solution approval chain
-    whereClause = {
-      isDeleted: false,
-      ...(showArchived ? {} : { isArchived: false }),
-      OR: [
-        // Requests from user's own department
-        { departmentId: currentUser.departmentId ?? undefined },
-        // Requests where user is a required approver in request approval chain
-        {
-          approvals: {
-            some: {
-              requiredApproverId: currentUser.id,
-            },
-          },
-        },
-        // Requests where user is a required approver in solution approval chain
-        {
-          solutions: {
-            some: {
-              approvals: {
-                some: {
-                  requiredApproverId: currentUser.id,
-                },
-              },
-            },
-          },
-        },
-      ],
-    }
-  }
-
-  // Apply filters
-  if (filters) {
-    if (filters.statuses && filters.statuses.length > 0) {
-      whereClause.status = { in: filters.statuses as any }
-    } else if (filters.status) {
-      whereClause.status = filters.status
-    }
-    if (filters.wrStatus === 'received') {
-      whereClause.workRequisitionReceived = true
-    } else if (filters.wrStatus === 'not-received') {
-      whereClause.workRequisitionReceived = false
-    }
-    if (filters.departmentId) {
-      whereClause.departmentId = filters.departmentId
-    }
-    if (filters.requesterId) {
-      whereClause.requesterId = filters.requesterId
-    }
-    if (filters.dateFrom || filters.dateTo) {
-      whereClause.createdAt = {}
-      if (filters.dateFrom) {
-        whereClause.createdAt.gte = new Date(filters.dateFrom)
-      }
-      if (filters.dateTo) {
-        const endDate = new Date(filters.dateTo)
-        endDate.setHours(23, 59, 59, 999)
-        whereClause.createdAt.lte = endDate
-      }
-    }
-    if (filters.search) {
-      whereClause.OR = [
-        { title: { contains: filters.search, mode: 'insensitive' } },
-        { description: { contains: filters.search, mode: 'insensitive' } },
-        { id: { contains: filters.search, mode: 'insensitive' } },
-        { requester: { name: { contains: filters.search, mode: 'insensitive' } } },
-      ]
-    }
+  const visibilityWhere = await buildRequestVisibilityWhere(createRequestVisibilityDb(prisma), {
+    userId: currentUser.id,
+    includeArchived: filters?.includeArchived === true,
+  })
+  const requestWhere: Prisma.requestsWhereInput = {
+    AND: [visibilityWhere, buildRequestFilters(filters)],
   }
 
   const requests = await prisma.requests.findMany({
-    where: whereClause,
+    where: requestWhere,
     select: {
       id: true,
       title: true,
@@ -622,6 +590,10 @@ export async function getRequest(id: string) {
 
   if (!userId) {
     throw new Error('Unauthorized')
+  }
+
+  if (!(await canUserViewRequest(userId, id))) {
+    return null
   }
 
   const request = await prisma.requests.findUnique({
@@ -896,14 +868,14 @@ export async function getRequestFilterOptions() {
     throw new Error('User not found')
   }
 
-  const isAdmin = currentUser.role === 'admin'
-  const isEngineering = currentUser.department?.type === 'ENGINEERING'
+  const visibilityWhere = await buildRequestVisibilityWhere(createRequestVisibilityDb(prisma), {
+    userId: currentUser.id,
+    includeArchived: false,
+  })
 
-  // Get departments based on user role
-  let departments
-  if (isAdmin || isEngineering) {
-    // Admin and engineering users see all departments
-    departments = await prisma.departments.findMany({
+  const [departments, requesters] = await Promise.all([
+    prisma.departments.findMany({
+      where: { requests: { some: visibilityWhere } },
       select: {
         id: true,
         name: true,
@@ -911,35 +883,9 @@ export async function getRequestFilterOptions() {
       orderBy: {
         name: 'asc',
       },
-    })
-  } else {
-    // Non-admin, non-engineering: get departments from visible requests
-    // (own dept + cross-department via custom approval chains)
-    const visibleRequests = await prisma.requests.findMany({
-      where: {
-        isDeleted: false,
-        OR: [
-          { departmentId: currentUser.departmentId ?? undefined },
-          { approvals: { some: { requiredApproverId: currentUser.id } } },
-          { solutions: { some: { approvals: { some: { requiredApproverId: currentUser.id } } } } },
-        ],
-      },
-      select: { departmentId: true },
-      distinct: ['departmentId'],
-    })
-
-    // Organization-owned (NEW) requests have no legacy department; the visible
-    // department list covers legacy-department requests only.
-    const visibleDeptIds = [
-      ...new Set(
-        visibleRequests
-          .map((r) => r.departmentId)
-          .filter((id): id is string => id !== null),
-      ),
-    ]
-
-    departments = await prisma.departments.findMany({
-      where: { id: { in: visibleDeptIds } },
+    }),
+    prisma.user.findMany({
+      where: { createdRequests: { some: visibilityWhere } },
       select: {
         id: true,
         name: true,
@@ -947,51 +893,8 @@ export async function getRequestFilterOptions() {
       orderBy: {
         name: 'asc',
       },
-    })
-  }
-
-  // Get requesters (users who have created requests in visible departments)
-  let requesters
-  if (isAdmin || isEngineering) {
-    // Admin and engineering users see all requesters who have created requests
-    requesters = await prisma.user.findMany({
-      where: { createdRequests: { some: {} } },
-      select: {
-        id: true,
-        name: true,
-      },
-      orderBy: {
-        name: 'asc',
-      },
-    })
-  } else {
-    // Non-admin, non-engineering: get requesters from visible requests
-    const visibleRequests = await prisma.requests.findMany({
-      where: {
-        isDeleted: false,
-        OR: [
-          { departmentId: currentUser.departmentId ?? undefined },
-          { approvals: { some: { requiredApproverId: currentUser.id } } },
-          { solutions: { some: { approvals: { some: { requiredApproverId: currentUser.id } } } } },
-        ],
-      },
-      select: { requesterId: true },
-      distinct: ['requesterId'],
-    })
-
-    const visibleRequesterIds = visibleRequests.map(r => r.requesterId)
-
-    requesters = await prisma.user.findMany({
-      where: { id: { in: visibleRequesterIds } },
-      select: {
-        id: true,
-        name: true,
-      },
-      orderBy: {
-        name: 'asc',
-      },
-    })
-  }
+    }),
+  ])
 
   return { departments, requesters }
 }
@@ -1005,6 +908,9 @@ export async function getMyActionItems() {
   if (!user) {
     return []
   }
+
+  // Action eligibility stays on Task 9 discriminator predicates. Visibility is
+  // not approval permission; returned rows are the actionable requests only.
 
   // Build OR conditions for request_approvals (discriminator-aware)
   const requestOrConditions: any[] = [
@@ -1911,13 +1817,16 @@ export async function getRequestsNeedingEngineeringAction(userId: string): Promi
     return { needsSolution: [], needsApproval: [] }
   }
 
+  const visibilityWhere = await buildRequestVisibilityWhere(createRequestVisibilityDb(prisma), {
+    userId,
+    includeArchived: false,
+  })
+
   // Category 1: Requests needing solution submission
   // Status = SentToEngineer, no solution submitted yet
   const needsSolution = await prisma.requests.findMany({
     where: {
-      status: 'SentToEngineer',
-      isDeleted: false,
-      isArchived: false,
+      AND: [visibilityWhere, { status: 'SentToEngineer' }],
     },
     include: {
       department: {
@@ -1983,9 +1892,7 @@ export async function getRequestsNeedingEngineeringAction(userId: string): Promi
   const needsApproval = await prisma.solutions.findMany({
     where: {
       request: {
-        status: 'DesignCostEstimationApproval',
-        isDeleted: false,
-        isArchived: false,
+        AND: [visibilityWhere, { status: 'DesignCostEstimationApproval' }],
       },
     },
     include: {
@@ -2236,43 +2143,44 @@ export async function getRequestsForEngineering(filters?: GetRequestsForEngineer
     throw new Error('Only engineering users can access engineering requests')
   }
 
-  // Build where clause
-  const whereClause: any = {
+  const visibilityWhere = await buildRequestVisibilityWhere(createRequestVisibilityDb(prisma), {
+    userId: user.id,
+    includeArchived: false,
+  })
+  const engineeringFilters: Prisma.requestsWhereInput = {
     status: {
       in: ['SentToEngineer', 'DesignCostEstimationApproval'],
     },
-    isDeleted: false,
-    isArchived: false,
   }
 
-  // Apply filters
   if (filters) {
     if (filters.departmentId) {
-      whereClause.departmentId = filters.departmentId
+      engineeringFilters.departmentId = filters.departmentId
     }
     if (filters.assignedEngineerId) {
-      whereClause.engineerAssignments = {
+      engineeringFilters.engineerAssignments = {
         some: {
           engineerId: filters.assignedEngineerId,
         },
       }
     }
     if (filters.status) {
-      whereClause.status = filters.status
+      engineeringFilters.status = filters.status as never
     }
     if (filters.dateFrom || filters.dateTo) {
-      whereClause.createdAt = {}
+      const createdAt: Prisma.DateTimeFilter = {}
       if (filters.dateFrom) {
-        whereClause.createdAt.gte = new Date(filters.dateFrom)
+        createdAt.gte = new Date(filters.dateFrom)
       }
       if (filters.dateTo) {
         const endDate = new Date(filters.dateTo)
         endDate.setHours(23, 59, 59, 999)
-        whereClause.createdAt.lte = endDate
+        createdAt.lte = endDate
       }
+      engineeringFilters.createdAt = createdAt
     }
     if (filters.search) {
-      whereClause.OR = [
+      engineeringFilters.OR = [
         { title: { contains: filters.search, mode: 'insensitive' } },
         { description: { contains: filters.search, mode: 'insensitive' } },
         { id: { contains: filters.search, mode: 'insensitive' } },
@@ -2282,7 +2190,7 @@ export async function getRequestsForEngineering(filters?: GetRequestsForEngineer
   }
 
   const requests = await prisma.requests.findMany({
-    where: whereClause,
+    where: { AND: [visibilityWhere, engineeringFilters] },
     include: {
       department: {
         select: {

@@ -253,6 +253,7 @@ function matchRelationCondition(
   condition: Where,
 ): boolean {
   const supported = relation.kind === 'many' ? ['some', 'none', 'every'] : ['is']
+  const whereCombinators = new Set(['AND', 'OR', 'NOT'])
   for (const op of Object.keys(condition)) {
     if (relation.kind === 'many') {
       // List relation filters accept ONLY some/none/every. A direct
@@ -267,10 +268,11 @@ function matchRelationCondition(
     }
     if (
       !supported.includes(op) &&
+      !whereCombinators.has(op) &&
       !MODEL_FIELDS[relation.model].includes(op) &&
       !MODEL_RELATIONS[relation.model]?.[op]
     ) {
-      throw new UnexpectedQueryError(`Unsupported relation operator '${op}' for ${model}.${key} (supported: 'is', related-model fields, or nested to-one relations)`)
+      throw new UnexpectedQueryError(`Unsupported relation operator '${op}' for ${model}.${key} (supported: 'is', AND/OR/NOT, related-model fields, or nested to-one relations)`)
     }
   }
   const related = resolveRelation(db, model, row, key, relation)
@@ -856,13 +858,14 @@ export function createHarness(seed: HarnessSeed = {}): Harness {
   dependencies['@/lib/notification-recipients'] = load('lib/notification-recipients.ts')
   dependencies['@/lib/request-visibility/types'] = load('lib/request-visibility/types.ts')
   dependencies['@/lib/request-visibility/predicate'] = load('lib/request-visibility/predicate.ts')
+  const requestAccess = load('lib/request-access.ts')
+  dependencies['@/lib/request-access'] = requestAccess
   dependencies['./notifications'] = load('server-actions/notifications.ts')
   const approvals = load('server-actions/approvals.ts')
   dependencies['./approvals'] = approvals
   const requests = load('server-actions/requests.ts')
   dependencies['@/server-actions/requests'] = requests
   const solutions = load('server-actions/solutions.ts')
-  const requestAccess = load('lib/request-access.ts')
   const dashboard = load('server-actions/dashboard.ts')
 
   return {

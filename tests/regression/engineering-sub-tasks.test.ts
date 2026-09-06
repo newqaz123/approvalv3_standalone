@@ -332,8 +332,10 @@ describe("engineering sub-task request and filter wiring", () => {
 			requests,
 			/wrStatus\?: ['"]all['"] \| ['"]not-received['"] \| ['"]received['"]/,
 		);
-		assert.match(requests, /whereClause\.workRequisitionReceived = true/);
-		assert.match(requests, /whereClause\.workRequisitionReceived = false/);
+		assert.match(requests, /wrStatus === 'received'/);
+		assert.match(requests, /wrStatus === 'not-received'/);
+		assert.match(requests, /workRequisitionReceived: true/);
+		assert.match(requests, /workRequisitionReceived: false/);
 		assert.match(requests, /subTasks:\s*\{/);
 		assert.match(requests, /workRequisitionReceivedAt: true/);
 		assert.match(requests, /workRequisitionReceivedBy/);

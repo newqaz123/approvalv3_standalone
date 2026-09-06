@@ -122,4 +122,15 @@ describe("completed approval export builder wiring", () => {
 		assert.match(reportsAction, /request\.status !== 'Completed'/);
 		assert.doesNotMatch(reportsAction, /FinalApproval', 'Completed/);
 	});
+
+	it("authorizes ordinary PDF exports through the shared visibility predicate", () => {
+		const reportsAction = readFileSync("src/server-actions/reports.ts", "utf8");
+
+		assert.match(reportsAction, /canUserViewRequest/);
+		assert.doesNotMatch(
+			reportsAction,
+			/request\.departmentId === user\.departmentId/,
+		);
+		assert.match(reportsAction, /generateAdminBackupPdf/);
+	});
 });

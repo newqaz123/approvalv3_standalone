@@ -13,6 +13,7 @@ import {
   optimizeImageAttachment,
   type ImageOptimizationResult,
 } from '@/lib/attachments/image-optimization'
+import { canUserViewRequest } from '@/lib/request-access'
 
 /**
  * Delete a file attachment
@@ -69,7 +70,11 @@ export async function deleteFileAttachment({ fileId }: { fileId: string }) {
     throw new Error('Associated request not found')
   }
 
-  // Authorization check
+  if (!(await canUserViewRequest(userId, requestId))) {
+    throw new Error('Unauthorized to delete this file')
+  }
+
+  // Write-specific guards. Section sharing never grants attachment mutation.
   const isUploader = fileAttachment.uploadedById === userId
   const isRequester = request.requesterId === userId
 
@@ -161,6 +166,10 @@ export async function uploadFileAction(
 
   if (!dbRequest) {
     return { success: false, error: 'Request not found' }
+  }
+
+  if (!(await canUserViewRequest(userId, requestId))) {
+    return { success: false, error: 'Not authorized to upload to this request' }
   }
 
   const isRequester = dbRequest.requesterId === userId

@@ -21,7 +21,7 @@ export async function GET(
     // Await params to get requestId (Next.js 15 async params pattern)
     const { requestId } = await params
 
-    // Admin-only access check
+    // Privileged admin audit export: ordinary request visibility is not applied.
     const adminUserId = await requireAdmin()
     if (!adminUserId) {
       return NextResponse.json(

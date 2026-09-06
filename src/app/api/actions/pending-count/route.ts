@@ -1,10 +1,14 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
+import { CURRENT_INSTANCE_ROW_FILTER } from '@/lib/approval-engine/current-instance'
+import { snapshotGroupActionWhere } from '@/lib/approval-engine/transactions'
 
 /**
  * GET /api/actions/pending-count
- * Returns the count of pending approval actions for the current user
+ * Returns the count of pending approval actions for the current user.
+ * Action counts stay on Task 9 eligibility + current-instance filters.
+ * Ordinary request visibility is not applied here.
  */
 export async function GET() {
   try {
@@ -14,44 +18,44 @@ export async function GET() {
       return NextResponse.json({ count: 0 }, { status: 401 })
     }
 
-    // Get user's level, department, and role
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: { level: true, departmentId: true, role: true },
     })
 
-    if (!user || user.level === null) {
+    if (!user) {
       return NextResponse.json({ count: 0 })
     }
 
-    // Build request_approvals OR conditions (department-aware)
     const requestOrConditions: any[] = [
       { requiredApproverId: userId },
+      snapshotGroupActionWhere(userId),
     ]
     if (user.level && user.departmentId) {
       requestOrConditions.push({
+        routingMode: 'LEGACY_LEVEL',
         requiredLevel: user.level,
         request: { departmentId: user.departmentId },
       })
     }
-    // Add cross-department approver assignments
     const crossDeptApprovals = await prisma.department_approvers.findMany({
       where: { approverId: userId },
       select: { departmentId: true, approverLevel: true },
     })
     for (const cda of crossDeptApprovals) {
       requestOrConditions.push({
+        routingMode: 'LEGACY_LEVEL',
         requiredLevel: cda.approverLevel,
         request: { departmentId: cda.departmentId },
       })
     }
 
-    // Build solution_approvals OR conditions (engineering-role-aware)
     const solutionOrConditions: any[] = [
       { requiredApproverId: userId },
+      snapshotGroupActionWhere(userId),
     ]
     if (user.level && user.role === 'engineering') {
-      solutionOrConditions.push({ requiredLevel: user.level })
+      solutionOrConditions.push({ routingMode: 'LEGACY_LEVEL', requiredLevel: user.level })
     }
 
     const [requestApprovalCount, solutionApprovalCount] = await Promise.all([
@@ -59,6 +63,7 @@ export async function GET() {
         where: {
           OR: requestOrConditions,
           status: 'pending',
+          AND: [{ OR: [...CURRENT_INSTANCE_ROW_FILTER] }],
           request: { isDeleted: false, isArchived: false },
         },
       }),
@@ -66,6 +71,7 @@ export async function GET() {
         where: {
           OR: solutionOrConditions,
           status: 'pending',
+          AND: [{ OR: [...CURRENT_INSTANCE_ROW_FILTER] }],
           solution: { request: { isDeleted: false, isArchived: false } },
         },
       }),

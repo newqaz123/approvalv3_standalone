@@ -7,6 +7,9 @@ import { getMyRequests } from "@/server-actions/requests";
 import { buildFollowUpDashboard } from "@/lib/follow-up-dashboard";
 import { CURRENT_INSTANCE_ROW_FILTER } from "@/lib/approval-engine/current-instance";
 import { snapshotGroupActionWhere } from "@/lib/approval-engine/transactions";
+import { buildRequestVisibilityWhere } from "@/lib/request-visibility/predicate";
+import { createRequestVisibilityDb } from "@/lib/request-access";
+import type { Prisma } from "@prisma/client";
 export type {
 	FollowUpActivity,
 	FollowUpDashboardData,
@@ -49,6 +52,9 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
 	if (!user) {
 		return [];
 	}
+
+	// Action eligibility stays on Task 9 discriminator predicates. Visibility is
+	// not approval permission; returned rows are the actionable requests only.
 
 	// Build OR conditions for request_approvals (discriminator-aware)
 	const requestOrConditions: any[] = [
@@ -456,11 +462,13 @@ export async function getMyCreatedRequests(): Promise<RequestListRow[]> {
 		throw new Error("Unauthorized");
 	}
 
+	const visibilityWhere = await buildRequestVisibilityWhere(createRequestVisibilityDb(prisma), {
+		userId,
+		includeArchived: false,
+	});
 	const requests = await prisma.requests.findMany({
 		where: {
-			requesterId: userId,
-			isDeleted: false,
-			isArchived: false,
+			AND: [visibilityWhere, { requesterId: userId }],
 		},
 		select: {
 			id: true,
@@ -671,49 +679,13 @@ export async function getAllRequests(): Promise<RequestListRow[]> {
 		throw new Error("User not found");
 	}
 
-	// Build where clause based on user role and department type
-	let whereClause: any;
-
-	if (currentUser.role === "admin") {
-		// Admins see all non-deleted, non-archived requests
-		whereClause = { isDeleted: false, isArchived: false };
-	} else if (currentUser.department?.type === "ENGINEERING") {
-		// Engineering users see all non-deleted, non-archived requests for monitoring purposes
-		whereClause = { isDeleted: false, isArchived: false };
-	} else {
-		// General dept users see:
-		// 1. Requests from their own department, OR
-		// 2. Requests where they are a required approver in request approval chain, OR
-		// 3. Requests where they are a required approver in solution approval chain
-		whereClause = {
-			isDeleted: false,
-			isArchived: false,
-			OR: [
-				// Requests from user's own department
-				{ departmentId: currentUser.departmentId ?? undefined },
-				// Requests where user is a required approver in request approval chain
-				{
-					approvals: {
-						some: {
-							requiredApproverId: currentUser.id,
-						},
-					},
-				},
-				// Requests where user is a required approver in solution approval chain
-				{
-					solutions: {
-						some: {
-							approvals: {
-								some: {
-									requiredApproverId: currentUser.id,
-								},
-							},
-						},
-					},
-				},
-			],
-		};
-	}
+	const whereClause: Prisma.requestsWhereInput = await buildRequestVisibilityWhere(
+		createRequestVisibilityDb(prisma),
+		{
+			userId: currentUser.id,
+			includeArchived: false,
+		},
+	);
 
 	const requests = await prisma.requests.findMany({
 		where: whereClause,

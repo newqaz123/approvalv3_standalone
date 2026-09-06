@@ -10,6 +10,7 @@ import {
   type ExportableAttachment,
   type ExportPackageRequestItem,
 } from '@/lib/pdf-package'
+import { canUserViewRequest } from '@/lib/request-access'
 
 /**
  * In-memory rate limiting for PDF exports
@@ -129,25 +130,9 @@ async function getCurrentExportUser(userId: string) {
     select: {
       id: true,
       name: true,
-      role: true,
-      departmentId: true,
       isActive: true,
-      department: { select: { type: true } },
     },
   })
-}
-
-function canUserExportRequest(user: NonNullable<Awaited<ReturnType<typeof getCurrentExportUser>>>, request: ExportableRequest): boolean {
-  return (
-    user.role === 'admin' ||
-    user.department?.type === 'ENGINEERING' ||
-    request.requesterId === user.id ||
-    request.departmentId === user.departmentId ||
-    request.approvals.some((a) => a.requiredApproverId === user.id || a.approverId === user.id) ||
-    request.solutions.some((solution) =>
-      solution.approvals.some((a) => a.requiredApproverId === user.id || a.approverId === user.id)
-    )
-  )
 }
 
 function buildApprovalPhases(request: ExportableRequest): RequestPDFData['approvalPhases'] {
@@ -223,18 +208,21 @@ async function buildRequestPDFData(
   request: ExportableRequest
   generatedBy: string
 }> {
-  const request = await getExportableRequest(requestId)
-  if (!request) {
-    throw new Error('Request not found. Please verify the request ID.')
-  }
-
   const currentUser = await getCurrentExportUser(userId)
   if (!currentUser?.isActive) {
     throw new Error('Authentication required. Please log in to export PDFs.')
   }
 
-  if (!canUserExportRequest(currentUser, request)) {
+  // Ordinary document exports use the shared read policy. Privileged admin
+  // backup (allowIncomplete) keeps requireAdmin at the route and may include
+  // incomplete or deleted-record history without ordinary list exclusions.
+  if (!options?.allowIncomplete && !(await canUserViewRequest(userId, requestId))) {
     throw new Error('You are not authorized to export this request.')
+  }
+
+  const request = await getExportableRequest(requestId)
+  if (!request) {
+    throw new Error('Request not found. Please verify the request ID.')
   }
 
   if (!options?.allowIncomplete) {

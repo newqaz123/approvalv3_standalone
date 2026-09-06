@@ -9,6 +9,8 @@ import {
   isSubTaskVisibleForRequestStatus,
   validateSubTaskInput,
 } from '@/lib/engineering-sub-tasks'
+import { buildRequestVisibilityWhere } from '@/lib/request-visibility/predicate'
+import { canUserViewRequest, createRequestVisibilityDb } from '@/lib/request-access'
 
 type ActionResult<T = undefined> = T extends undefined
   ? { success: true } | { success: false; error: string }
@@ -24,6 +26,11 @@ async function requireSubTaskManager() {
 }
 
 async function requireVisibleStageRequest(requestId: string) {
+  const user = await getCurrentUser()
+  if (!user || !(await canUserViewRequest(user.id, requestId))) {
+    throw new Error('Request not found')
+  }
+
   const request = await prisma.requests.findUnique({
     where: { id: requestId },
     select: { id: true, status: true, isDeleted: true },
@@ -278,18 +285,26 @@ export async function getStaleSubTaskRequests(input: { olderThanDays?: number; s
   const threshold = new Date()
   threshold.setDate(threshold.getDate() - input.olderThanDays)
 
+  const visibilityWhere = await buildRequestVisibilityWhere(createRequestVisibilityDb(prisma), {
+    userId: user.id,
+    includeArchived: false,
+  })
+
   return prisma.requests.findMany({
     where: {
-      isDeleted: false,
-      isArchived: false,
-      status: { in: ['SentToEngineer', 'SendBackToRequester', 'FinalApproval', 'Completed'] as any },
-      subTasks: {
-        some: {
-          isCompleted: false,
-          updatedAt: { lte: threshold },
-          ...(input.stageId ? { stageId: input.stageId } : {}),
+      AND: [
+        visibilityWhere,
+        {
+          status: { in: ['SentToEngineer', 'SendBackToRequester', 'FinalApproval', 'Completed'] as any },
+          subTasks: {
+            some: {
+              isCompleted: false,
+              updatedAt: { lte: threshold },
+              ...(input.stageId ? { stageId: input.stageId } : {}),
+            },
+          },
         },
-      },
+      ],
     },
     select: {
       id: true,

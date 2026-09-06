@@ -100,6 +100,11 @@ export function createPrismaRequestVisibilityDb(client = prisma): RequestVisibil
   }
 }
 
+/** Adapter for ordinary request queries. Raw Prisma has no findActor/findRequest. */
+export function createRequestVisibilityDb(client = prisma): RequestVisibilityDb {
+  return createPrismaRequestVisibilityDb(client)
+}
+
 export async function canUserViewRequest(userId: string, requestId: string): Promise<boolean> {
-  return canViewRequestByPredicate(createPrismaRequestVisibilityDb(), userId, requestId)
+  return canViewRequestByPredicate(createRequestVisibilityDb(), userId, requestId)
 }

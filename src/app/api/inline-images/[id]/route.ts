@@ -17,7 +17,9 @@ async function parseImageId(params: ImageRouteContext['params']): Promise<string
   return parsed.success ? parsed.data : null
 }
 
-/** Streams one authenticated private inline image using only its database path. */
+/** Streams one authenticated private inline image using only its database path.
+ *  Request/solution references authorize through canReadInlineImage -> canUserViewRequest.
+ */
 export async function GET(_request: Request, { params }: ImageRouteContext) {
   const { user } = (await auth()) ?? {}
   if (!user?.id) {

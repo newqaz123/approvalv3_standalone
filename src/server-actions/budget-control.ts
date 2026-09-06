@@ -13,6 +13,9 @@ import {
   normalizeBudgetCode,
 } from '@/lib/budget-control'
 import type { BudgetMonitorData, BudgetMonitorFilters, BudgetRequestRecord } from '@/types/budget'
+import { buildRequestVisibilityWhere } from '@/lib/request-visibility/predicate'
+import { createRequestVisibilityDb } from '@/lib/request-access'
+import type { Prisma } from '@prisma/client'
 
 const MAX_BUDGET_MONEY_AMOUNT = 9999999999999.99
 
@@ -94,20 +97,11 @@ const pasteBudgetCodesSchema = z.object({
   })).min(1),
 })
 
-function buildVisibleRequestWhere(user: NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>) {
-  if (user.role === 'admin' || user.department?.type === 'ENGINEERING') {
-    return { isDeleted: false, isArchived: false }
-  }
-
-  return {
-    isDeleted: false,
-    isArchived: false,
-    OR: [
-      { departmentId: user.departmentId ?? undefined },
-      { approvals: { some: { requiredApproverId: user.id } } },
-      { solutions: { some: { approvals: { some: { requiredApproverId: user.id } } } } },
-    ],
-  }
+async function buildVisibleRequestWhere(user: NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>): Promise<Prisma.requestsWhereInput> {
+  return buildRequestVisibilityWhere(createRequestVisibilityDb(prisma), {
+    userId: user.id,
+    includeArchived: false,
+  })
 }
 
 function applyBudgetFilters(where: any, filters: BudgetMonitorFilters) {
@@ -198,8 +192,7 @@ async function requireVisibleRequest(requestId: string) {
 
   const request = await prisma.requests.findFirst({
     where: {
-      id: requestId,
-      ...buildVisibleRequestWhere(user),
+      AND: [{ id: requestId }, await buildVisibleRequestWhere(user)],
     },
     select: { id: true },
   })
@@ -213,7 +206,8 @@ export async function getBudgetMonitorData(input: BudgetMonitorFilters = {}): Pr
   if (!user) throw new Error('Unauthorized')
 
   const filters = filtersSchema.parse(input)
-  const where = applyBudgetFilters(buildVisibleRequestWhere(user), filters)
+  const visibilityWhere = await buildVisibleRequestWhere(user)
+  const where = applyBudgetFilters({ AND: [visibilityWhere] }, filters)
   const visibleWhere = { ...where, status: where.status ?? { not: 'Cancelled' } }
 
   const [requests, departments, creatorBudgetCodes] = await Promise.all([
@@ -373,8 +367,7 @@ export async function updateBudgetCodeAmount(input: z.infer<typeof budgetAmountS
 
   const visibleUsage = await prisma.requests.findFirst({
     where: {
-      ...buildVisibleRequestWhere(user),
-      budgetCodeId: data.budgetCodeId,
+      AND: [await buildVisibleRequestWhere(user), { budgetCodeId: data.budgetCodeId }],
     },
     select: { id: true },
   })
@@ -451,8 +444,7 @@ export async function pasteBudgetCodes(input: z.infer<typeof pasteBudgetCodesSch
 
     const visibleUsage = await prisma.requests.findFirst({
       where: {
-        ...buildVisibleRequestWhere(user),
-        budgetCodeId: existing.id,
+        AND: [await buildVisibleRequestWhere(user), { budgetCodeId: existing.id }],
       },
       select: { id: true },
     })
