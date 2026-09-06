@@ -42,6 +42,10 @@ import {
   markCurrentInstanceOutcome,
 } from '@/lib/approval-engine/phase-adapters'
 import { snapshotGroupActionWhere } from '@/lib/approval-engine/transactions'
+import {
+  createPrismaNotificationRecipientDb,
+  resolveApprovalNeededRecipients,
+} from '@/lib/notification-recipients'
 import type { Prisma } from '@prisma/client'
 import * as XLSX from 'xlsx'
 
@@ -283,6 +287,33 @@ export async function createRequest(input: CreateRequestInput) {
         message: `📋 New Approval Request: "${request.title}" requires your approval (Level ${firstLevel}).`,
         requestId: request.id,
       })
+    }
+  } else if (rolloutMode === 'new') {
+    const nextApproval = await prisma.request_approvals.findFirst({
+      where: {
+        requestId: request.id,
+        status: 'pending',
+        isFinalApproval: false,
+        OR: [...CURRENT_INSTANCE_ROW_FILTER],
+      },
+      orderBy: { order: 'asc' },
+      select: { id: true },
+    })
+    if (nextApproval) {
+      const recipients = await resolveApprovalNeededRecipients(
+        createPrismaNotificationRecipientDb(prisma),
+        { approvalId: nextApproval.id, phase: 'REQUEST' },
+      )
+      const { createNotification } = await import('./notifications')
+      for (const userId of recipients) {
+        await createNotification({
+          userId,
+          type: 'approval_needed',
+          title: 'New Approval Request',
+          message: `📋 New Approval Request: "${request.title}" requires your approval.`,
+          requestId: request.id,
+        })
+      }
     }
   }
 

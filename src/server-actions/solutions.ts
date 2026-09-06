@@ -31,7 +31,13 @@ import {
 import {
   runTransactionWithPostCommitNotifications,
   type PostCommitNotificationCollector,
+  type NotificationPayload,
 } from '@/lib/post-commit-notifications'
+import {
+  createPrismaNotificationRecipientDb,
+  resolveApprovalNeededRecipients,
+  resolveStatusBroadcastRecipients,
+} from '@/lib/notification-recipients'
 import { getApprovalRolloutMode } from '@/lib/approval-rollout'
 import { createApprovalEngineDb } from '@/lib/approval-engine/instances'
 import {
@@ -129,6 +135,31 @@ async function runSolutionTransactionWithNotifications<T>(
       )
     },
   })
+}
+
+async function queueOriginUnitStatusBroadcast(
+  tx: Prisma.TransactionClient,
+  notifications: PostCommitNotificationCollector,
+  input: {
+    requestId: string
+    notification: NotificationPayload
+    excludeUserIds?: readonly string[]
+  },
+) {
+  const recipients = await resolveStatusBroadcastRecipients(
+    createPrismaNotificationRecipientDb(tx),
+    {
+      legacyDepartmentId: null,
+      requestId: input.requestId,
+      excludeUserIds: input.excludeUserIds,
+    },
+  )
+  for (const userId of recipients) {
+    notifications.user({
+      userId,
+      ...input.notification,
+    })
+  }
 }
 
 const SOLUTION_DRAFT_READY_PREFIX = 'solution-drafts/ready/'
@@ -442,9 +473,32 @@ export async function submitSolution(input: SubmitSolutionActionInput) {
             message: `Engineering solution for "${request.title}" is ready for your review.`,
             requestId: validated.requestId,
           })
+        } else {
+          const nextApproval = await tx.solution_approvals.findFirst({
+            where: {
+              solutionId: solution.id,
+              status: 'pending',
+              OR: [...CURRENT_INSTANCE_ROW_FILTER],
+            },
+            orderBy: { order: 'asc' },
+            select: { id: true },
+          })
+          if (nextApproval) {
+            const recipients = await resolveApprovalNeededRecipients(
+              createPrismaNotificationRecipientDb(tx),
+              { approvalId: nextApproval.id, phase: 'SOLUTION' },
+            )
+            for (const userId of recipients) {
+              pendingNotifications.push({
+                userId,
+                type: 'approval_needed',
+                title: 'Solution Submitted for Approval',
+                message: `📤 Solution Submitted: "${request.title}" has a new solution ready for your approval.`,
+                requestId: request.id,
+              })
+            }
+          }
         }
-        // Pending NEW attempts: approver notifications resolve from candidate
-        // groups in Tasks 9/10 and are intentionally not invented here.
       }
     } else if (validated.useCustomApprovals && validated.customApproverIds && validated.customApproverIds.length > 0) {
       // Custom approval chain (never auto-approved)
@@ -1005,6 +1059,16 @@ export async function approveSolution(solutionId: string, comments?: string, exp
           message: `📤 Ready for Review: "${request.title}" has been completed and awaits your department's final review.`,
           requestId: solution.requestId,
         })
+      } else if (request) {
+        await queueOriginUnitStatusBroadcast(tx, notifications, {
+          requestId: solution.requestId,
+          notification: {
+            type: 'solution_ready',
+            title: 'Solution Ready for Review',
+            message: `📤 Ready for Review: "${request.title}" has been completed and awaits your department's final review.`,
+            requestId: solution.requestId,
+          },
+        })
       }
     } else {
       await queueNextSolutionApproverNotifications(tx, solutionId, notifications)
@@ -1278,6 +1342,23 @@ async function queueNextSolutionApproverNotifications(
 
   if (!nextApproval) return
 
+  if (nextApproval.routingMode === 'SNAPSHOT_GROUP') {
+    const recipients = await resolveApprovalNeededRecipients(
+      createPrismaNotificationRecipientDb(tx),
+      { approvalId: nextApproval.id, phase: 'SOLUTION' },
+    )
+    for (const userId of recipients) {
+      notifications.user({
+        userId,
+        type: 'approval_needed',
+        title: 'Solution Approval Needed',
+        message: `Solution "${nextApproval.solution.title}" needs your approval.`,
+        requestId: nextApproval.solution.requestId,
+      })
+    }
+    return
+  }
+
   // For custom chain: notify specific requiredApproverId
   if (nextApproval.isCustomChain && nextApproval.requiredApproverId) {
     notifications.user({
@@ -1480,9 +1561,9 @@ export async function initiateFinalApproval(
               requestId,
             },
           })
+        } else {
+          await queueNextFinalApproverNotifications(tx, requestId, notifications)
         }
-        // Pending NEW attempts: first-approver notifications resolve from
-        // candidate groups in Tasks 9/10 and are intentionally not invented.
       }
     } else if (useCustomChain && customApproverIds && customApproverIds.length > 0) {
       // Custom approval chain (never auto-approved)
@@ -1584,8 +1665,8 @@ export async function initiateFinalApproval(
     })
 
     // Resolve and queue first approver notification(s) only if not top-level.
-    // NEW custom attempts notify their first step inline; NEW normal pending
-    // notifications resolve from candidate groups in Tasks 9/10.
+    // NEW custom attempts notify their first step inline; NEW SNAPSHOT pending
+    // is queued in the new-mode branch above.
     if (rolloutMode !== 'new' && (useCustomChain || !isTopLevelInitiator)) {
       await queueNextFinalApproverNotifications(
         tx,
@@ -1746,6 +1827,23 @@ async function queueNextFinalApproverNotifications(
 
   if (!nextApproval) return
 
+  if (nextApproval.routingMode === 'SNAPSHOT_GROUP') {
+    const recipients = await resolveApprovalNeededRecipients(
+      createPrismaNotificationRecipientDb(tx),
+      { approvalId: nextApproval.id, phase: 'FINAL' },
+    )
+    for (const userId of recipients) {
+      notifications.user({
+        userId,
+        type: 'final_approval_needed',
+        title: 'Final Approval Needed',
+        message: `Request "${nextApproval.request.title}" needs your final approval.`,
+        requestId,
+      })
+    }
+    return
+  }
+
   // For custom chain: notify specific requiredApproverId
   if (nextApproval.isCustomChain && nextApproval.requiredApproverId) {
     notifications.user({
@@ -1870,18 +1968,18 @@ export async function approveFinalApproval(requestId: string, comments?: string,
       if (!request) {
         throw new Error('Request not found')
       }
+      const engineeringDept = await tx.departments.findFirst({
+        where: { type: 'ENGINEERING' },
+        select: { id: true },
+      })
+      const engineeringUsers = engineeringDept
+        ? await tx.user.findMany({
+            where: { departmentId: engineeringDept.id },
+            select: { id: true },
+          })
+        : []
+      const engineeringUserIds = engineeringUsers.map((u) => u.id)
       if (request.departmentId) {
-        const engineeringDept = await tx.departments.findFirst({
-          where: { type: 'ENGINEERING' },
-          select: { id: true },
-        })
-        const engineeringUsers = engineeringDept
-          ? await tx.user.findMany({
-              where: { departmentId: engineeringDept.id },
-              select: { id: true },
-            })
-          : []
-        const engineeringUserIds = engineeringUsers.map((u) => u.id)
         notifications.department(
           request.departmentId,
           {
@@ -1892,6 +1990,17 @@ export async function approveFinalApproval(requestId: string, comments?: string,
           },
           engineeringUserIds,
         )
+      } else {
+        await queueOriginUnitStatusBroadcast(tx, notifications, {
+          requestId,
+          notification: {
+            type: 'approval_granted',
+            title: 'Request Completed',
+            message: `✅ Request Completed: "${request.title}" has been fully approved and completed.`,
+            requestId,
+          },
+          excludeUserIds: engineeringUserIds,
+        })
       }
     } else {
       await queueNextFinalApproverNotifications(tx, requestId, notifications)
@@ -2049,6 +2158,17 @@ export async function rejectFinalApproval(requestId: string, comments: string, e
           },
           [userId],
         )
+      } else {
+        await queueOriginUnitStatusBroadcast(tx, notifications, {
+          requestId,
+          notification: {
+            type: 'status_changed',
+            title: 'Final Approval Rejected',
+            message: `❌ Final Approval Rejected: "${request.title}" was rejected during final approval. The request has been returned to engineering for revision.`,
+            requestId,
+          },
+          excludeUserIds: [userId],
+        })
       }
     }
   })
@@ -2562,9 +2682,32 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
           })
         }
       }
+    } else {
+      const nextApproval = await prisma.solution_approvals.findFirst({
+        where: {
+          solutionId: result.updatedSolution.id,
+          status: 'pending',
+          OR: [...CURRENT_INSTANCE_ROW_FILTER],
+        },
+        orderBy: { order: 'asc' },
+        select: { id: true },
+      })
+      if (nextApproval) {
+        const recipients = await resolveApprovalNeededRecipients(
+          createPrismaNotificationRecipientDb(prisma),
+          { approvalId: nextApproval.id, phase: 'SOLUTION' },
+        )
+        for (const userId of recipients) {
+          await createNotification({
+            userId,
+            type: 'approval_needed',
+            title: 'Solution Resubmitted',
+            message: `📤 Solution resubmitted for "${request.title}". Please review the updated solution.`,
+            requestId: request.id,
+          })
+        }
+      }
     }
-    // NEW normal pending: approver notifications resolve from candidate
-    // groups in Tasks 9/10 and are intentionally not invented here.
   }
 
   revalidateRequestViews()

@@ -466,6 +466,8 @@ export class ApprovalWorkflowDb {
   readonly approval_candidate_groups: ModelTable
   readonly approval_candidate_group_members: ModelTable
   readonly request_engineer_assignments: ModelTable
+  readonly organization_units: ModelTable
+  readonly organization_position_assignments: ModelTable
 
   constructor() {
     for (const model of Object.keys(MODEL_FIELDS)) {
@@ -486,6 +488,8 @@ export class ApprovalWorkflowDb {
     this.approval_candidate_groups = this.table('approval_candidate_groups') as ModelTable
     this.approval_candidate_group_members = this.table('approval_candidate_group_members') as ModelTable
     this.request_engineer_assignments = this.table('request_engineer_assignments') as ModelTable
+    this.organization_units = this.table('organization_units') as ModelTable
+    this.organization_position_assignments = this.table('organization_position_assignments') as ModelTable
   }
 
   tableRows(model: string): Map<string, Row> {
@@ -849,6 +853,7 @@ export function createHarness(seed: HarnessSeed = {}): Harness {
   dependencies['@/lib/approval-engine/transactions'] = load('lib/approval-engine/transactions.ts')
   dependencies['@/lib/approval-engine/phase-adapters'] = load('lib/approval-engine/phase-adapters.ts')
   dependencies['@/lib/approval-rollout'] = load('lib/approval-rollout.ts')
+  dependencies['@/lib/notification-recipients'] = load('lib/notification-recipients.ts')
   dependencies['./notifications'] = load('server-actions/notifications.ts')
   const approvals = load('server-actions/approvals.ts')
   dependencies['./approvals'] = approvals

@@ -219,5 +219,16 @@ describe('solution workflow transaction notification boundaries', () => {
       queueNextFinal,
       /userId:\s*approver\.id[\s\S]*?type:\s*'final_approval_needed'/,
     )
+
+    assert.match(
+      queueNextSolution,
+      /routingMode === 'SNAPSHOT_GROUP'[\s\S]*resolveApprovalNeededRecipients/,
+    )
+    assert.match(
+      queueNextFinal,
+      /routingMode === 'SNAPSHOT_GROUP'[\s\S]*resolveApprovalNeededRecipients/,
+    )
+    assert.match(approveSolution, /queueOriginUnitStatusBroadcast/)
+    assert.match(approveFinalApproval, /queueOriginUnitStatusBroadcast/)
   })
 })

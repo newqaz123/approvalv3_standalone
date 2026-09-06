@@ -21,6 +21,10 @@ import {
   canUserApproveRequest,
   createPrismaApprovalTransactionDb,
 } from '@/lib/approval-engine/transactions'
+import {
+  createPrismaNotificationRecipientDb,
+  resolveApprovalNeededRecipients,
+} from '@/lib/notification-recipients'
 
 /**
  * Check if data is stale based on updatedAt timestamp
@@ -487,11 +491,26 @@ async function notifyNextApprover(requestId: string) {
 
   if (!nextApproval) return
 
-  // NEW SNAPSHOT_GROUP rows carry no legacy level audience (requiredLevel is
-  // always null, and the request may be organization-owned): skip the legacy
-  // notification without throwing — Tasks 9/10 own candidate-group
-  // notifications, and a substituted audience is never acceptable.
+  // NEW SNAPSHOT_GROUP rows notify only the persisted current-step candidate
+  // group (active users, identity-deduped). Live position holders, visibility
+  // descendants, and ancestor managers are never a substitute audience.
   if (nextApproval.routingMode === 'SNAPSHOT_GROUP') {
+    const recipients = await resolveApprovalNeededRecipients(
+      createPrismaNotificationRecipientDb(prisma),
+      { approvalId: nextApproval.id, phase: 'REQUEST' },
+    )
+    const { createNotification } = await import('./notifications')
+    await Promise.all(
+      recipients.map((userId) =>
+        createNotification({
+          userId,
+          type: 'approval_needed',
+          title: 'Approval Needed',
+          message: `Request "${nextApproval.request.title}" needs your approval`,
+          requestId,
+        }),
+      ),
+    )
     return
   }
 

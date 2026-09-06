@@ -18,6 +18,7 @@ import type {
   ApprovalRowForTransaction,
   ApprovalTransactionDb,
 } from '@/lib/approval-engine/transactions'
+import type { NotificationRecipientDb } from '@/lib/notification-recipients'
 
 export const ORGANIZATION_APPROVAL_FIXTURE = {
   factoryId: 'factory-1',
@@ -1096,5 +1097,84 @@ export function fakeCustomPersonApprovalDb(input: {
       row.requestStatus = query.to
     },
     async setInstanceOutcome() {},
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Task 10 notification-recipient fake
+// ---------------------------------------------------------------------------
+
+export interface FakeNotificationDbInput {
+  row: {
+    routingMode: 'SNAPSHOT_GROUP' | 'LEGACY_LEVEL' | 'CUSTOM_PERSON'
+    candidateGroupId: string | null
+    requiredLevel: number | null
+  }
+  groups?: Record<string, string[]>
+  activeUsers?: string[]
+  livePositionHolders?: string[]
+  legacyLevelHolders?: string[]
+  customRecipientIds?: readonly string[]
+  reviewedSectionRecipientIds?: readonly string[]
+  originUnitMemberIds?: readonly string[]
+  firstLegacyDepartmentMemberIds?: readonly string[]
+}
+
+/**
+ * In-memory `NotificationRecipientDb`. Methods return the supplied rows only.
+ * `livePositionHolders` and `firstLegacyDepartmentMemberIds` exist to prove
+ * that NEW / origin-unit resolution never consults those audiences.
+ */
+export function fakeNotificationDb(input: FakeNotificationDbInput): NotificationRecipientDb {
+  const groups = input.groups ?? {}
+  const activeUsers = input.activeUsers
+  const livePositionHolders = input.livePositionHolders ?? []
+  const firstLegacyDepartmentMemberIds = input.firstLegacyDepartmentMemberIds ?? []
+  void livePositionHolders
+  void firstLegacyDepartmentMemberIds
+
+  const uniqueActive = async (userIds: readonly string[]): Promise<readonly string[]> => {
+    const seen = new Set<string>()
+    const ordered: string[] = []
+    for (const userId of userIds) {
+      if (seen.has(userId)) continue
+      seen.add(userId)
+      ordered.push(userId)
+    }
+    if (!activeUsers) return ordered
+    const allowed = new Set(activeUsers)
+    return ordered.filter((userId) => allowed.has(userId))
+  }
+
+  return {
+    async findApprovalRow(query) {
+      return {
+        routingMode: input.row.routingMode,
+        candidateGroupId: input.row.candidateGroupId,
+        requiredLevel: input.row.requiredLevel,
+        requiredApproverId: null,
+        requestId: query.approvalId.startsWith('legacy') ? 'legacy-r1' : 'r1',
+        isCurrentInstance: true,
+        status: 'pending',
+      }
+    },
+    async findCandidateGroupMemberIds(candidateGroupId) {
+      return groups[candidateGroupId] ?? []
+    },
+    async findActiveUserIds(userIds) {
+      return uniqueActive(userIds)
+    },
+    async findLegacyApproverIds() {
+      return input.legacyLevelHolders ?? []
+    },
+    async findCustomRecipientIds() {
+      return input.customRecipientIds ?? []
+    },
+    async findReviewedSectionRecipientIds(query) {
+      if (query.legacyDepartmentId === null) {
+        return input.originUnitMemberIds ?? []
+      }
+      return input.reviewedSectionRecipientIds ?? []
+    },
   }
 }

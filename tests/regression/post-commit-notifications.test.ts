@@ -1,5 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import {
   runTransactionWithPostCommitNotifications,
   type PostCommitNotificationPlan,
@@ -173,4 +175,21 @@ describe('post-commit notification transactions', () => {
     assert.equal(logged[0]?.plan.target, 'user')
     assert.match(String(logged[0]?.error), /notification database unavailable/)
   })
+})
+
+describe('post-commit notification compatibility (no new channel)', () => {
+  it('retains only user and department delivery targets',
+    () => {
+      const source = readFileSync(
+        resolve(process.cwd(), 'src/lib/post-commit-notifications.ts'),
+        'utf8',
+      )
+      assert.match(source, /target: 'user'/)
+      assert.match(source, /target: 'department'/)
+      assert.doesNotMatch(source, /target: 'unit'/)
+      assert.doesNotMatch(source, /target: 'section'/)
+      assert.doesNotMatch(source, /target: 'subscription'/)
+      assert.doesNotMatch(source, /retryQueue|dedupeKey/)
+    },
+  )
 })
