@@ -1,31 +1,33 @@
 /**
  * Owner-provisioned disposable-CI integration tests for the organization
- * approval redesign row-integrity constraints (Task 2 fix round 2).
+ * approval redesign row-integrity constraints (Task 2 fix round 3).
  *
  * These tests are NOT part of `npm run check` (which only runs
  * tests/regression) and are NEVER executed locally — the source task has no
  * database authority and no migration may be applied here. They require a
  * database with this migration already applied, provided ONLY through
  * ORGANIZATION_APPROVAL_CI_DATABASE_URL; without that variable every test
- * self-skips so the file is inert outside CI. An explicit guard rejects a CI
- * URL that equals the application's DATABASE_URL so the target can never
- * silently default to a local development database.
+ * self-skips. An explicit guard rejects a CI URL equal to the application's
+ * DATABASE_URL, and PrismaClient is always constructed with the explicit CI
+ * datasource URL, so the target can never silently default to a local env.
  *
- * What they prove beyond locally-assertable contracts: real PostgreSQL
- * execution of the row-mode CHECKs, latest-row applicability of the deferred
- * cross-table audit triggers, FOR SHARE per-instance serialization under two
- * connections with alternate completion orders, and SetNull compatibility.
+ * Connection affinity (fix round 3): concurrency schedules NEVER issue raw
+ * BEGIN/COMMIT/ROLLBACK through pooled clients. Each participant runs in its
+ * own pinned interactive transaction (`$transaction(async tx => …,
+ * { isolationLevel, timeout, maxWait })` on its own client) and every
+ * statement inside uses that transaction client. A separate observer
+ * connection reads `pg_blocking_pids` to prove the intended blocking point
+ * before any barrier is released. Rejection handlers are attached to
+ * transaction promises immediately so expected failures are never unhandled.
  *
- * Fixture discipline (fix round 2): every scenario seeds its own
- * prerequisites in actual FK order (department -> users -> organization unit
- * -> request -> solution/instance -> approval rows / candidate groups), and
- * registers failure-safe cleanup immediately after the prerequisites exist,
- * deleting only this test's IDs in FK-safe reverse order — no truncation, no
- * global reset, no shared state between scenarios.
+ * Fixture discipline: cleanup is registered BEFORE the first seed write,
+ * tracks exactly the IDs each scenario created in creation order, and runs
+ * them in FK-safe reverse order as idempotent deleteMany calls. Failures are
+ * collected and reported via AggregateError instead of being swallowed.
  */
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient, Prisma } from '@prisma/client'
 
 const CI_DATABASE_URL = process.env.ORGANIZATION_APPROVAL_CI_DATABASE_URL
 const hasCI = typeof CI_DATABASE_URL === 'string' && CI_DATABASE_URL.length > 0
@@ -37,9 +39,6 @@ let prisma: PrismaClient | null = null
 
 before(async () => {
   if (!hasCI) return
-  // Guard: the test target must be the explicitly provisioned disposable CI
-  // database and can never silently fall back to the application's
-  // DATABASE_URL (PrismaClient is constructed with an explicit datasource).
   assert.notEqual(
     CI_DATABASE_URL,
     process.env.DATABASE_URL,
@@ -60,74 +59,121 @@ function client(): PrismaClient {
   return prisma
 }
 
+function newClient(): PrismaClient {
+  return new PrismaClient({ datasources: { db: { url: CI_DATABASE_URL as string } } })
+}
+
 function scenarioId(n: number): string {
   return `00000000-0004-4000-8000-${String(n).padStart(12, '0')}`
 }
 
-/** FK-safe cleanup for exactly the IDs a scenario created. Never throws. */
-async function cleanupIds(
-  db: PrismaClient,
-  ids: {
-    approvalRowIds?: string[]
-    solutionApprovalRowIds?: string[]
-    candidateGroupIds?: string[]
-    instanceIds?: string[]
-    solutionIds?: string[]
-    requestIds?: string[]
-    unitIds?: string[]
-    userIds?: string[]
-    departmentIds?: string[]
-  },
+/** Bounded condition wait: fails the test instead of hanging CI. */
+async function waitFor(
+  condition: () => boolean | Promise<boolean>,
+  message: string,
+  deadlineMs = 15000,
 ): Promise<void> {
-  for (const id of ids.approvalRowIds ?? []) {
-    await db.request_approvals.deleteMany({ where: { id } }).catch(() => {})
+  const deadline = Date.now() + deadlineMs
+  while (!(await condition())) {
+    if (Date.now() > deadline) throw new Error(`Timed out: ${message}`)
+    await new Promise((resolve) => setTimeout(resolve, 100))
   }
-  for (const id of ids.solutionApprovalRowIds ?? []) {
-    await db.solution_approvals.deleteMany({ where: { id } }).catch(() => {})
-  }
-  for (const id of ids.candidateGroupIds ?? []) {
-    await db.approval_candidate_groups.deleteMany({ where: { id } }).catch(() => {})
-  }
-  for (const id of ids.instanceIds ?? []) {
-    await db.approval_instances.deleteMany({ where: { id } }).catch(() => {})
-  }
-  for (const id of ids.solutionIds ?? []) {
-    await db.solutions.deleteMany({ where: { id } }).catch(() => {})
-  }
-  for (const id of ids.requestIds ?? []) {
-    await db.requests.deleteMany({ where: { id } }).catch(() => {})
-  }
-  for (const id of ids.unitIds ?? []) {
-    await db.organization_units.deleteMany({ where: { id } }).catch(() => {})
-  }
-  for (const id of ids.userIds ?? []) {
-    await db.user.deleteMany({ where: { id } }).catch(() => {})
-  }
-  for (const id of ids.departmentIds ?? []) {
-    await db.departments.deleteMany({ where: { id } }).catch(() => {})
-  }
-}
-
-interface OrgPrerequisites {
-  departmentId: string
-  requesterId: string
-  originUserId: string
-  designatedApproverId: string
-  unitId: string
-  requestId: string
-  instanceId: string
 }
 
 /**
- * Seeds a complete, self-contained organization-owned request with an
- * AUTO_APPROVED REQUEST-phase instance, in actual FK order, and returns the
- * IDs plus an FK-safe cleanup that only touches these IDs.
+ * Failure-safe scoped cleanup: tracks exactly the IDs this scenario created
+ * (in creation order) and deletes them in reverse registration order, which
+ * is FK-safe because children are always created after their parents.
+ * Deletions are idempotent deleteMany calls; failures are collected and
+ * reported as an AggregateError after best-effort completion instead of
+ * being swallowed.
+ */
+class ScenarioCleanup {
+  private readonly steps: Array<{ description: string; run: () => Promise<unknown> }> = []
+
+  constructor(private readonly db: PrismaClient) {}
+
+  private track(description: string, run: () => Promise<unknown>): void {
+    this.steps.push({ description, run })
+  }
+
+  trackApprovalRow(id: string): void {
+    this.track(`request_approvals ${id}`, () => this.db.request_approvals.deleteMany({ where: { id } }))
+  }
+
+  trackSolutionApprovalRow(id: string): void {
+    this.track(`solution_approvals ${id}`, () => this.db.solution_approvals.deleteMany({ where: { id } }))
+  }
+
+  trackCandidateGroup(id: string): void {
+    this.track(`approval_candidate_groups ${id}`, () => this.db.approval_candidate_groups.deleteMany({ where: { id } }))
+  }
+
+  trackInstance(id: string): void {
+    this.track(`approval_instances ${id}`, () => this.db.approval_instances.deleteMany({ where: { id } }))
+  }
+
+  trackRequest(id: string): void {
+    this.track(`requests ${id}`, () => this.db.requests.deleteMany({ where: { id } }))
+  }
+
+  trackUnit(id: string): void {
+    this.track(`organization_units ${id}`, () => this.db.organization_units.deleteMany({ where: { id } }))
+  }
+
+  trackUser(id: string): void {
+    this.track(`users ${id}`, () => this.db.user.deleteMany({ where: { id } }))
+  }
+
+  trackDepartment(id: string): void {
+    this.track(`departments ${id}`, () => this.db.departments.deleteMany({ where: { id } }))
+  }
+
+  async run(): Promise<void> {
+    const failures: Array<{ description: string; error: unknown }> = []
+    for (const step of [...this.steps].reverse()) {
+      try {
+        await step.run()
+      } catch (error) {
+        failures.push({ description: step.description, error })
+      }
+    }
+    if (failures.length > 0) {
+      throw new AggregateError(
+        failures.map((failure) =>
+          failure.error instanceof Error ? failure.error : new Error(String(failure.error)),
+        ),
+        `scoped cleanup failures: ${failures.map((failure) => failure.description).join(', ')}`,
+      )
+    }
+  }
+}
+
+interface AutoAuditSeed {
+  departmentId: string
+  requesterId: string
+  originUserId: string
+  unitId: string
+  requestId: string
+  instanceId: string
+  cleanup: ScenarioCleanup
+}
+
+/**
+ * Seeds a complete, self-contained organization-owned request with a
+ * SNAPSHOT_GROUP instance, in actual FK order. Cleanup is registered with the
+ * test BEFORE the first seed write, so even partial setup failure is cleaned.
  */
 async function seedAutoAuditScenario(
   db: PrismaClient,
   base: number,
+  t: { after: (fn: () => unknown) => void },
   overrides: { instanceState?: 'PENDING' | 'AUTO_APPROVED'; phase?: 'REQUEST' | 'FINAL' } = {},
-): Promise<OrgPrerequisites & { cleanup: () => Promise<void> }> {
+): Promise<AutoAuditSeed> {
+  const cleanup = new ScenarioCleanup(db)
+  // Registered before the first seed write: partial setup failure is cleaned.
+  t.after(() => cleanup.run())
+
   const departmentId = scenarioId(base + 1)
   const requesterId = scenarioId(base + 2)
   const originUserId = scenarioId(base + 3)
@@ -135,18 +181,26 @@ async function seedAutoAuditScenario(
   const requestId = scenarioId(base + 5)
   const instanceId = scenarioId(base + 6)
 
+  cleanup.trackDepartment(departmentId)
   await db.departments.create({
     data: { id: departmentId, name: `CI dept ${departmentId}`, type: 'GENERAL' },
   })
+
+  cleanup.trackUser(requesterId)
+  cleanup.trackUser(originUserId)
   await db.user.createMany({
     data: [
       { id: requesterId, name: `CI requester ${base}`, email: `ci-requester-${base}@example.test`, isActive: true, departmentId },
       { id: originUserId, name: `CI origin ${base}`, email: `ci-origin-${base}@example.test`, isActive: true },
     ],
   })
+
+  cleanup.trackUnit(unitId)
   await db.organization_units.create({
     data: { id: unitId, name: `CI unit ${unitId}`, unitType: 'FACTORY', operationalType: 'GENERAL' },
   })
+
+  cleanup.trackRequest(requestId)
   await db.requests.create({
     data: {
       id: requestId,
@@ -158,6 +212,8 @@ async function seedAutoAuditScenario(
       organizationUnitId: unitId,
     },
   })
+
+  cleanup.trackInstance(instanceId)
   await db.approval_instances.create({
     data: {
       id: instanceId,
@@ -171,31 +227,35 @@ async function seedAutoAuditScenario(
     },
   })
 
-  const cleanup = async () =>
-    cleanupIds(db, { instanceIds: [instanceId], requestIds: [requestId], unitIds: [unitId], userIds: [originUserId, requesterId], departmentIds: [departmentId] })
-
-  return { departmentId, requesterId, originUserId, designatedApproverId: originUserId, unitId, requestId, instanceId, cleanup }
+  return { departmentId, requesterId, originUserId, unitId, requestId, instanceId, cleanup }
 }
 
-/** Raw two-connection transaction helper: explicit BEGIN/COMMIT control. */
-function rawBegin(client: PrismaClient): Promise<unknown> {
-  return client.$executeRawUnsafe('BEGIN')
+const PINNED_TX_OPTIONS = { timeout: 60000, maxWait: 5000 } as const
+
+/** Lock-timeout safety inside pinned transactions: bounded waits, no hangs. */
+async function setLocalLockTimeout(tx: Prisma.TransactionClient, timeout = '10s'): Promise<void> {
+  await tx.$executeRawUnsafe(`SET LOCAL lock_timeout = '${timeout}'`)
 }
-function rawSetLockTimeout(client: PrismaClient): Promise<unknown> {
-  // Fail fast instead of hanging CI if serialization assumptions break.
-  return client.$executeRawUnsafe("SET LOCAL lock_timeout = '5s'")
+
+async function backendPid(tx: Prisma.TransactionClient): Promise<number> {
+  const rows = await tx.$queryRawUnsafe<Array<{ pid: number }>>('SELECT pg_backend_pid() AS pid')
+  return Number(rows[0]?.pid ?? 0)
 }
 
 ci('organization approval row-integrity constraints (CI database)', () => {
   it('accepts version-0 historical rows with null level and null designated approver', async (t) => {
     const db = client()
+    const cleanup = new ScenarioCleanup(db)
+    t.after(() => cleanup.run())
+
     const departmentId = scenarioId(1)
     const requesterId = scenarioId(2)
     const requestId = scenarioId(3)
     const rowId = scenarioId(4)
-    const cleanup = async () =>
-      cleanupIds(db, { approvalRowIds: [rowId], requestIds: [requestId], userIds: [requesterId], departmentIds: [departmentId] })
-    t.after(cleanup)
+    cleanup.trackDepartment(departmentId)
+    cleanup.trackUser(requesterId)
+    cleanup.trackRequest(requestId)
+    cleanup.trackApprovalRow(rowId)
 
     await db.departments.create({ data: { id: departmentId, name: `CI dept ${departmentId}`, type: 'GENERAL' } })
     await db.user.create({ data: { id: requesterId, name: 'CI requester', email: `ci-${requesterId}@example.test`, isActive: true, departmentId } })
@@ -222,12 +282,17 @@ ci('organization approval row-integrity constraints (CI database)', () => {
 
   it('rejects a version-0 row masquerading as SNAPSHOT_GROUP', async (t) => {
     const db = client()
+    const cleanup = new ScenarioCleanup(db)
+    t.after(() => cleanup.run())
+
     const departmentId = scenarioId(11)
     const requesterId = scenarioId(12)
     const requestId = scenarioId(13)
-    const cleanup = async () =>
-      cleanupIds(db, { approvalRowIds: [scenarioId(14)], requestIds: [requestId], userIds: [requesterId], departmentIds: [departmentId] })
-    t.after(cleanup)
+    const rowId = scenarioId(14)
+    cleanup.trackDepartment(departmentId)
+    cleanup.trackUser(requesterId)
+    cleanup.trackRequest(requestId)
+    cleanup.trackApprovalRow(rowId)
 
     await db.departments.create({ data: { id: departmentId, name: `CI dept ${departmentId}`, type: 'GENERAL' } })
     await db.user.create({ data: { id: requesterId, name: 'CI requester', email: `ci-${requesterId}@example.test`, isActive: true, departmentId } })
@@ -239,7 +304,7 @@ ci('organization approval row-integrity constraints (CI database)', () => {
       () =>
         db.request_approvals.create({
           data: {
-            id: scenarioId(14),
+            id: rowId,
             requestId,
             order: 1,
             status: 'approved',
@@ -253,13 +318,14 @@ ci('organization approval row-integrity constraints (CI database)', () => {
 
   it('accepts a strict version-1 approved auto self-audit row without a candidate group', async (t) => {
     const db = client()
-    const seed = await seedAutoAuditScenario(db, 20)
-    t.after(seed.cleanup)
+    const seed = await seedAutoAuditScenario(db, 20, t)
+    const rowId = scenarioId(27)
+    seed.cleanup.trackApprovalRow(rowId)
 
     await db.$transaction((tx) =>
       tx.request_approvals.create({
         data: {
-          id: scenarioId(27),
+          id: rowId,
           requestId: seed.requestId,
           approverId: seed.originUserId,
           order: 1,
@@ -272,17 +338,19 @@ ci('organization approval row-integrity constraints (CI database)', () => {
         },
       }),
     )
-    const row = await db.request_approvals.findUnique({ where: { id: scenarioId(27) } })
+    const row = await db.request_approvals.findUnique({ where: { id: rowId } })
     assert.ok(row)
     assert.equal(row.candidateGroupId, null)
   })
 
   it('accepts a pending group-less row that gains its candidate group later in the same transaction', async (t) => {
     const db = client()
-    const seed = await seedAutoAuditScenario(db, 30)
-    t.after(seed.cleanup)
-
+    const seed = await seedAutoAuditScenario(db, 30, t)
+    const rowId = scenarioId(38)
     const candidateGroupId = scenarioId(37)
+    seed.cleanup.trackApprovalRow(rowId)
+    seed.cleanup.trackCandidateGroup(candidateGroupId)
+
     await db.approval_candidate_groups.create({
       data: {
         id: candidateGroupId,
@@ -291,19 +359,13 @@ ci('organization approval row-integrity constraints (CI database)', () => {
         scopeUnitId: seed.unitId,
       },
     })
-    const extendedCleanup = async () => {
-      await cleanupIds(db, { approvalRowIds: [scenarioId(38)], candidateGroupIds: [candidateGroupId] })
-      await seed.cleanup()
-    }
-    t.after(extendedCleanup)
-
     // The INSERT queues a group-less trigger event; the UPDATE attaches the
     // group before commit. Latest-row applicability must make the final
     // grouped state succeed.
     await db.$transaction(async (tx) => {
       await tx.request_approvals.create({
         data: {
-          id: scenarioId(38),
+          id: rowId,
           requestId: seed.requestId,
           order: 1,
           status: 'pending',
@@ -314,24 +376,25 @@ ci('organization approval row-integrity constraints (CI database)', () => {
         },
       })
       await tx.request_approvals.update({
-        where: { id: scenarioId(38) },
+        where: { id: rowId },
         data: { candidateGroupId },
       })
     })
-    const row = await db.request_approvals.findUnique({ where: { id: scenarioId(38) } })
+    const row = await db.request_approvals.findUnique({ where: { id: rowId } })
     assert.ok(row)
     assert.equal(row.candidateGroupId, candidateGroupId)
   })
 
   it('accepts inserting and deleting a group-less row within the same transaction', async (t) => {
     const db = client()
-    const seed = await seedAutoAuditScenario(db, 40)
-    t.after(seed.cleanup)
+    const seed = await seedAutoAuditScenario(db, 40, t)
+    const rowId = scenarioId(47)
+    seed.cleanup.trackApprovalRow(rowId)
 
     await db.$transaction(async (tx) => {
       await tx.request_approvals.create({
         data: {
-          id: scenarioId(47),
+          id: rowId,
           requestId: seed.requestId,
           order: 1,
           status: 'pending',
@@ -341,18 +404,20 @@ ci('organization approval row-integrity constraints (CI database)', () => {
           requiredPosition: 'SUPERVISOR',
         },
       })
-      await tx.request_approvals.delete({ where: { id: scenarioId(47) } })
+      await tx.request_approvals.delete({ where: { id: rowId } })
     })
-    const row = await db.request_approvals.findUnique({ where: { id: scenarioId(47) } })
+    const row = await db.request_approvals.findUnique({ where: { id: rowId } })
     assert.equal(row, null)
   })
 
   it('accepts ordinary grouped version-1 snapshot rows', async (t) => {
     const db = client()
-    const seed = await seedAutoAuditScenario(db, 50)
-    t.after(seed.cleanup)
-
+    const seed = await seedAutoAuditScenario(db, 50, t)
+    const rowId = scenarioId(58)
     const candidateGroupId = scenarioId(57)
+    seed.cleanup.trackApprovalRow(rowId)
+    seed.cleanup.trackCandidateGroup(candidateGroupId)
+
     await db.approval_candidate_groups.create({
       data: {
         id: candidateGroupId,
@@ -361,16 +426,10 @@ ci('organization approval row-integrity constraints (CI database)', () => {
         scopeUnitId: seed.unitId,
       },
     })
-    const extendedCleanup = async () => {
-      await cleanupIds(db, { approvalRowIds: [scenarioId(58)], candidateGroupIds: [candidateGroupId] })
-      await seed.cleanup()
-    }
-    t.after(extendedCleanup)
-
     await db.$transaction((tx) =>
       tx.request_approvals.create({
         data: {
-          id: scenarioId(58),
+          id: rowId,
           requestId: seed.requestId,
           order: 1,
           status: 'pending',
@@ -386,15 +445,16 @@ ci('organization approval row-integrity constraints (CI database)', () => {
 
   it('rejects a version-1 rejected group-less snapshot row on a pending instance', async (t) => {
     const db = client()
-    const seed = await seedAutoAuditScenario(db, 60, { instanceState: 'PENDING' })
-    t.after(seed.cleanup)
+    const seed = await seedAutoAuditScenario(db, 60, t, { instanceState: 'PENDING' })
+    const rowId = scenarioId(67)
+    seed.cleanup.trackApprovalRow(rowId)
 
     await assert.rejects(
       () =>
         db.$transaction((tx) =>
           tx.request_approvals.create({
             data: {
-              id: scenarioId(67),
+              id: rowId,
               requestId: seed.requestId,
               approverId: seed.originUserId,
               order: 1,
@@ -412,15 +472,16 @@ ci('organization approval row-integrity constraints (CI database)', () => {
 
   it('rejects malformed final group-less rows (wrong approver on a FINAL instance)', async (t) => {
     const db = client()
-    const seed = await seedAutoAuditScenario(db, 70, { phase: 'FINAL' })
-    t.after(seed.cleanup)
+    const seed = await seedAutoAuditScenario(db, 70, t, { phase: 'FINAL' })
+    const rowId = scenarioId(77)
+    seed.cleanup.trackApprovalRow(rowId)
 
     await assert.rejects(
       () =>
         db.$transaction((tx) =>
           tx.request_approvals.create({
             data: {
-              id: scenarioId(77),
+              id: rowId,
               requestId: seed.requestId,
               approverId: seed.requesterId, // NOT the instance origin user
               order: 1,
@@ -439,12 +500,13 @@ ci('organization approval row-integrity constraints (CI database)', () => {
 
   it('rejects a later instance state mutation that would invalidate an existing audit row', async (t) => {
     const db = client()
-    const seed = await seedAutoAuditScenario(db, 80)
-    t.after(seed.cleanup)
+    const seed = await seedAutoAuditScenario(db, 80, t)
+    const rowId = scenarioId(84)
+    seed.cleanup.trackApprovalRow(rowId)
 
     await db.request_approvals.create({
       data: {
-        id: scenarioId(84),
+        id: rowId,
         requestId: seed.requestId,
         approverId: seed.originUserId,
         order: 1,
@@ -466,18 +528,21 @@ ci('organization approval row-integrity constraints (CI database)', () => {
 
   it('preserves SetNull deletion semantics for version-0 custom designated approvers distinct from the requester', async (t) => {
     const db = client()
+    const cleanup = new ScenarioCleanup(db)
+    // Registered before the first write; unconditional idempotent deletes
+    // (the already-deleted approver simply deletes zero rows).
+    t.after(() => cleanup.run())
+
     const departmentId = scenarioId(91)
     const requesterId = scenarioId(92)
     const designatedApproverId = scenarioId(93)
     const requestId = scenarioId(94)
     const rowId = scenarioId(95)
-    // Cleanup registered now and made failure-safe; it only touches this
-    // scenario's IDs in FK-safe order.
-    let deletedApprover = false
-    const cleanup = async () => {
-      await cleanupIds(db, { approvalRowIds: [rowId], requestIds: [requestId], userIds: deletedApprover ? [requesterId] : [requesterId, designatedApproverId], departmentIds: [departmentId] })
-    }
-    t.after(cleanup)
+    cleanup.trackDepartment(departmentId)
+    cleanup.trackUser(requesterId)
+    cleanup.trackUser(designatedApproverId)
+    cleanup.trackRequest(requestId)
+    cleanup.trackApprovalRow(rowId)
 
     await db.departments.create({ data: { id: departmentId, name: `CI dept ${departmentId}`, type: 'GENERAL' } })
     // Requester and designated approver are distinct users: deleting the
@@ -501,7 +566,6 @@ ci('organization approval row-integrity constraints (CI database)', () => {
       },
     })
 
-    deletedApprover = true
     await db.user.delete({ where: { id: designatedApproverId } })
 
     const row = await db.request_approvals.findUnique({ where: { id: rowId } })
@@ -524,50 +588,158 @@ ci('organization approval row-integrity constraints (CI database)', () => {
     assert.equal(request.requesterId, requesterId)
   })
 
-  it('serializes: a committed group-less audit row makes a concurrent-connection demotion fail', async (t) => {
+  it('audit-first: the audit validation holds FOR SHARE and the concurrent demotion fails by integrity error', async (t) => {
     const db = client()
-    const seed = await seedAutoAuditScenario(db, 100)
-    t.after(seed.cleanup)
+    const seed = await seedAutoAuditScenario(db, 100, t)
+    const rowId = scenarioId(107)
+    seed.cleanup.trackApprovalRow(rowId)
 
-    const c1 = new PrismaClient({ datasources: { db: { url: CI_DATABASE_URL as string } } })
-    const c2 = new PrismaClient({ datasources: { db: { url: CI_DATABASE_URL } } })
+    const c1 = newClient()
+    const c2 = newClient()
     await c1.$connect()
     await c2.$connect()
-    const disconnect = async () => {
-      await c1.$executeRawUnsafe('ROLLBACK').catch(() => {})
-      await c2.$executeRawUnsafe('ROLLBACK').catch(() => {})
-      await c1.$disconnect()
-      await c2.$disconnect()
-    }
-    t.after(disconnect)
+    t.after(async () => {
+      await c1.$disconnect().catch(() => {})
+      await c2.$disconnect().catch(() => {})
+    })
 
-    // Barrier 1: c1 opens a transaction and inserts a valid group-less audit
-    // row (valid against the still-AUTO_APPROVED instance).
-    await rawBegin(c1)
-    await rawSetLockTimeout(c1)
-    await c1.$executeRawUnsafe(
-      `INSERT INTO "request_approvals" ("id", "requestId", "approverId", "order", "status", "routingMode", "integrityVersion", "instanceId", "requiredPosition") VALUES ('${scenarioId(107)}', '${seed.requestId}', '${seed.originUserId}', 1, 'approved', 'SNAPSHOT_GROUP', 1, '${seed.instanceId}', 'SUPERVISOR')`,
+    const observed = { pidA: 0, pidB: 0 }
+    let releaseAuditTransaction = (): void => {}
+
+    // Connection A: pinned interactive transaction. Insert the valid audit
+    // row and force its deferred validation to run NOW (SET CONSTRAINTS ALL
+    // IMMEDIATE) while the transaction stays open holding FOR SHARE.
+    const txAPromise = c1.$transaction(
+      async (txA) => {
+        await setLocalLockTimeout(txA)
+        await txA.$executeRawUnsafe(
+          `INSERT INTO "request_approvals" ("id", "requestId", "approverId", "order", "status", "routingMode", "integrityVersion", "instanceId", "requiredPosition") VALUES ('${rowId}', '${seed.requestId}', '${seed.originUserId}', 1, 'approved', 'SNAPSHOT_GROUP', 1, '${seed.instanceId}', 'SUPERVISOR')`,
+        )
+        await txA.$executeRawUnsafe('SET CONSTRAINTS ALL IMMEDIATE')
+        observed.pidA = await backendPid(txA)
+        await new Promise<void>((resolve) => {
+          releaseAuditTransaction = resolve
+        })
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, ...PINNED_TX_OPTIONS },
     )
-    // Barrier 2: c2 opens a transaction and demotes the instance state.
-    await rawBegin(c2)
-    await rawSetLockTimeout(c2)
-    await c2.$executeRawUnsafe(
-      `UPDATE "approval_instances" SET "state" = 'PENDING' WHERE "id" = '${seed.instanceId}'`,
+    txAPromise.catch(() => {})
+    await waitFor(() => observed.pidA !== 0, 'audit transaction never signalled its backend pid')
+
+    // Connection B: pinned READ COMMITTED transaction demoting the instance.
+    // Its UPDATE must block on A's FOR SHARE.
+    const txBPromise = c2.$transaction(
+      async (txB) => {
+        await setLocalLockTimeout(txB, '30s')
+        observed.pidB = await backendPid(txB)
+        await txB.$executeRawUnsafe(
+          `UPDATE "approval_instances" SET "state" = 'PENDING' WHERE "id" = '${seed.instanceId}'`,
+        )
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, ...PINNED_TX_OPTIONS },
     )
-    // Barrier 3: c1's commit is STARTED first (its deferred trigger blocks on
-    // the instance row lock c2's update holds) with the rejection handled so
-    // the test can proceed to release it.
-    const c1Commit = c1.$executeRawUnsafe('COMMIT')
-    c1Commit.catch(() => {})
-    // Barrier 4: c2 commits — its deferred validation cannot see c1's
-    // uncommitted row, so it passes and releases the instance row lock.
-    await c2.$executeRawUnsafe('COMMIT')
-    // c1's commit then acquires the lock, re-reads the demoted state, and
-    // must fail instead of committing the invalid relationship.
-    await assert.rejects(() => c1Commit, /group-less snapshot/)
-    // Barrier 4: c2 commits; the audit row it never saw is gone, but the
-    // demotion itself is the surviving outcome.
-    await c2.$executeRawUnsafe('COMMIT')
+    txBPromise.catch(() => {})
+    await waitFor(() => observed.pidB !== 0, 'demotion transaction never signalled its backend pid')
+
+    // Bounded observer on a separate connection: prove B is actually blocked
+    // by A before releasing anything.
+    await waitFor(
+      async () => {
+        const blockers = await db.$queryRawUnsafe<Array<{ blockers: number[] }>>(
+          `SELECT ARRAY(SELECT unnest(pg_blocking_pids(${observed.pidB}))) AS blockers`,
+        )
+        return (blockers[0]?.blockers ?? []).includes(observed.pidA)
+      },
+      'the demotion UPDATE never reached the FOR SHARE wait on the audit transaction',
+    )
+
+    // Release A: the audit transaction commits (validation already passed).
+    releaseAuditTransaction()
+    await txAPromise
+
+    // B's UPDATE proceeds against the committed audit row; its deferred
+    // commit validation must fail by integrity error — never lock timeout.
+    await assert.rejects(() => txBPromise, /group-less snapshot/)
+
+    const instance = await db.approval_instances.findUnique({ where: { id: seed.instanceId } })
+    assert.ok(instance)
+    assert.equal(instance.state, 'AUTO_APPROVED', 'the audit-committed state must survive')
+    const row = await db.request_approvals.findUnique({ where: { id: rowId } })
+    assert.ok(row, 'the valid audit row must be persisted')
+  })
+
+  it('demotion-first: a demotion holding its update lock forces the audit validation to fail (alternate lock order)', async (t) => {
+    const db = client()
+    const seed = await seedAutoAuditScenario(db, 200, t)
+    const rowId = scenarioId(207)
+    seed.cleanup.trackApprovalRow(rowId)
+
+    const c1 = newClient()
+    const c2 = newClient()
+    await c1.$connect()
+    await c2.$connect()
+    t.after(async () => {
+      await c1.$disconnect().catch(() => {})
+      await c2.$disconnect().catch(() => {})
+    })
+
+    const observed = { pidA: 0, pidB: 0 }
+    let releaseDemotion = (): void => {}
+
+    // Connection B: pinned transaction demotes the instance FIRST and holds
+    // its update lock open until the audit side is confirmed blocked on it.
+    const txBPromise = c2.$transaction(
+      async (txB) => {
+        await setLocalLockTimeout(txB)
+        observed.pidB = await backendPid(txB)
+        await txB.$executeRawUnsafe(
+          `UPDATE "approval_instances" SET "state" = 'PENDING' WHERE "id" = '${seed.instanceId}'`,
+        )
+        await new Promise<void>((resolve) => {
+          releaseDemotion = resolve
+        })
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, ...PINNED_TX_OPTIONS },
+    )
+    txBPromise.catch(() => {})
+    await waitFor(() => observed.pidB !== 0, 'demotion transaction never signalled its backend pid')
+
+    // Connection A: pinned transaction inserts the audit row and forces its
+    // deferred validation; the FOR SHARE must block on B's held update lock.
+    const txAPromise = c1.$transaction(
+      async (txA) => {
+        await setLocalLockTimeout(txA, '30s')
+        observed.pidA = await backendPid(txA)
+        await txA.$executeRawUnsafe(
+          `INSERT INTO "request_approvals" ("id", "requestId", "approverId", "order", "status", "routingMode", "integrityVersion", "instanceId", "requiredPosition") VALUES ('${rowId}', '${seed.requestId}', '${seed.originUserId}', 1, 'approved', 'SNAPSHOT_GROUP', 1, '${seed.instanceId}', 'SUPERVISOR')`,
+        )
+        await txA.$executeRawUnsafe('SET CONSTRAINTS ALL IMMEDIATE')
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, ...PINNED_TX_OPTIONS },
+    )
+    txAPromise.catch(() => {})
+    await waitFor(() => observed.pidA !== 0, 'audit transaction never signalled its backend pid')
+
+    // Bounded observer: prove the audit validation is actually blocked by the
+    // held demotion before releasing it.
+    await waitFor(
+      async () => {
+        const blockers = await db.$queryRawUnsafe<Array<{ blockers: number[] }>>(
+          `SELECT ARRAY(SELECT unnest(pg_blocking_pids(${observed.pidA}))) AS blockers`,
+        )
+        return (blockers[0]?.blockers ?? []).includes(observed.pidB)
+      },
+      'the audit validation never reached the FOR SHARE wait on the held demotion',
+    )
+
+    // Release B: its deferred scan cannot see the uncommitted audit row, so
+    // the demotion commits and releases the lock.
+    releaseDemotion()
+    await txBPromise
+
+    // A's validation then reads the demoted state and must reject the row.
+    await assert.rejects(() => txAPromise, /group-less snapshot/)
+
     const instance = await db.approval_instances.findUnique({ where: { id: seed.instanceId } })
     assert.ok(instance)
     assert.equal(instance.state, 'PENDING', 'the demotion is the surviving committed state')
@@ -575,47 +747,134 @@ ci('organization approval row-integrity constraints (CI database)', () => {
     assert.equal(row, null, 'the invalid audit row must not be persisted')
   })
 
-  it('serializes: a concurrent demotion cannot rescue itself after an uncommitted audit insert commits (alternate completion order)', async (t) => {
+  it('rejects REPEATABLE READ demotion whose snapshot predates the committed audit row', async (t) => {
     const db = client()
-    const seed = await seedAutoAuditScenario(db, 110)
-    t.after(seed.cleanup)
+    const seed = await seedAutoAuditScenario(db, 300, t)
+    const rowId = scenarioId(307)
+    seed.cleanup.trackApprovalRow(rowId)
 
-    const c1 = new PrismaClient({ datasources: { db: { url: CI_DATABASE_URL as string } } })
-    const c2 = new PrismaClient({ datasources: { db: { url: CI_DATABASE_URL } } })
-    await c1.$connect()
+    const c2 = newClient()
     await c2.$connect()
-    const disconnect = async () => {
-      await c1.$executeRawUnsafe('ROLLBACK').catch(() => {})
-      await c2.$executeRawUnsafe('ROLLBACK').catch(() => {})
-      await c1.$disconnect()
-      await c2.$disconnect()
-    }
-    t.after(disconnect)
+    t.after(async () => {
+      await c2.$disconnect().catch(() => {})
+    })
 
-    // Barrier 1: c1 inserts the valid group-less audit row in a transaction.
-    await rawBegin(c1)
-    await rawSetLockTimeout(c1)
-    await c1.$executeRawUnsafe(
-      `INSERT INTO "request_approvals" ("id", "requestId", "approverId", "order", "status", "routingMode", "integrityVersion", "instanceId", "requiredPosition") VALUES ('${scenarioId(117)}', '${seed.requestId}', '${seed.originUserId}', 1, 'approved', 'SNAPSHOT_GROUP', 1, '${seed.instanceId}', 'SUPERVISOR')`,
+    let snapshotEstablished = (): void => {}
+    const snapshotPromise = new Promise<void>((resolve) => {
+      snapshotEstablished = resolve
+    })
+    let releaseDemotion = (): void => {}
+    const releasePromise = new Promise<void>((resolve) => {
+      releaseDemotion = resolve
+    })
+
+    // B starts REPEATABLE READ and establishes its snapshot BEFORE the audit
+    // row exists.
+    const txBPromise = c2.$transaction(
+      async (txB) => {
+        await txB.$queryRawUnsafe('SELECT 1')
+        snapshotEstablished()
+        await releasePromise
+        await txB.$executeRawUnsafe(
+          `UPDATE "approval_instances" SET "state" = 'PENDING' WHERE "id" = '${seed.instanceId}'`,
+        )
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, ...PINNED_TX_OPTIONS },
     )
-    // Barrier 2: c2 demotes the instance state in a parallel transaction.
-    await rawBegin(c2)
-    await rawSetLockTimeout(c2)
-    await c2.$executeRawUnsafe(
-      `UPDATE "approval_instances" SET "state" = 'PENDING' WHERE "id" = '${seed.instanceId}'`,
+    txBPromise.catch(() => {})
+    await snapshotPromise
+
+    // A commits a valid audit row (plain autocommit write; READ COMMITTED
+    // validation passes against the AUTO_APPROVED instance).
+    await db.request_approvals.create({
+      data: {
+        id: rowId,
+        requestId: seed.requestId,
+        approverId: seed.originUserId,
+        order: 1,
+        status: 'approved',
+        routingMode: 'SNAPSHOT_GROUP',
+        integrityVersion: 1,
+        instanceId: seed.instanceId,
+        requiredPosition: 'SUPERVISOR',
+      },
+    })
+
+    // B demotes and commits: the instance trigger gates isolation FIRST
+    // (before the snapshot scan could miss the audit row) and must reject
+    // REPEATABLE READ with the explicit integrity-isolation error.
+    releaseDemotion()
+    await assert.rejects(
+      () => txBPromise,
+      /requires READ COMMITTED or SERIALIZABLE isolation/,
     )
-    // Alternate completion order: the demotion connection commits FIRST —
-    // its deferred validation cannot see the uncommitted audit row, so it
-    // passes and releases the instance row lock.
-    await c2.$executeRawUnsafe('COMMIT')
-    // Only then does the audit insert attempt its commit: the deferred
-    // trigger re-reads the latest persisted instance (PENDING) and must
-    // reject the row instead of committing the invalid relationship.
-    await assert.rejects(() => c1.$executeRawUnsafe('COMMIT'), /group-less snapshot/)
+
+    // State and audit row are preserved; nothing invalid committed.
     const instance = await db.approval_instances.findUnique({ where: { id: seed.instanceId } })
     assert.ok(instance)
-    assert.equal(instance.state, 'PENDING')
-    const row = await db.request_approvals.findFirst({ where: { instanceId: seed.instanceId } })
-    assert.equal(row, null)
+    assert.equal(instance.state, 'AUTO_APPROVED')
+    const row = await db.request_approvals.findUnique({ where: { id: rowId } })
+    assert.ok(row)
+  })
+
+  it('under SERIALIZABLE a concurrent audit insert and demotion ends in a serialization/integrity failure, never an invalid commit', async (t) => {
+    const db = client()
+    const seed = await seedAutoAuditScenario(db, 400, t)
+    const rowId = scenarioId(407)
+    seed.cleanup.trackApprovalRow(rowId)
+
+    const c1 = newClient()
+    const c2 = newClient()
+    await c1.$connect()
+    await c2.$connect()
+    t.after(async () => {
+      await c1.$disconnect().catch(() => {})
+      await c2.$disconnect().catch(() => {})
+    })
+
+    // Concurrent pinned SERIALIZABLE transactions: audit insert + demotion.
+    const outcomes = await Promise.allSettled([
+      c1.$transaction(
+        async (txA) => {
+          await setLocalLockTimeout(txA, '10s')
+          await txA.$executeRawUnsafe(
+            `INSERT INTO "request_approvals" ("id", "requestId", "approverId", "order", "status", "routingMode", "integrityVersion", "instanceId", "requiredPosition") VALUES ('${rowId}', '${seed.requestId}', '${seed.originUserId}', 1, 'approved', 'SNAPSHOT_GROUP', 1, '${seed.instanceId}', 'SUPERVISOR')`,
+          )
+          await txA.$executeRawUnsafe('SET CONSTRAINTS ALL IMMEDIATE')
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, ...PINNED_TX_OPTIONS },
+      ),
+      c2.$transaction(
+        async (txB) => {
+          await setLocalLockTimeout(txB, '10s')
+          await txB.$executeRawUnsafe(
+            `UPDATE "approval_instances" SET "state" = 'PENDING' WHERE "id" = '${seed.instanceId}'`,
+          )
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, ...PINNED_TX_OPTIONS },
+      ),
+    ])
+
+    const rejected = outcomes.filter((outcome) => outcome.status === 'rejected')
+    assert.ok(
+      rejected.length >= 1,
+      'SERIALIZABLE must not let both the audit insert and the demotion commit',
+    )
+    for (const rejection of rejected) {
+      const message = String((rejection as PromiseRejectedResult).reason)
+      assert.match(
+        message,
+        /group-less snapshot|invalidat|serializ|could not serialize/i,
+        'every rejection must be an integrity or serialization failure',
+      )
+    }
+
+    // The surviving committed combination must be valid: either the audit row
+    // won (instance still AUTO_APPROVED) or the demotion won (no audit row).
+    const instance = await db.approval_instances.findUnique({ where: { id: seed.instanceId } })
+    assert.ok(instance)
+    const rows = await db.request_approvals.findMany({ where: { instanceId: seed.instanceId } })
+    const invalidCombination = instance.state === 'PENDING' && rows.length > 0
+    assert.equal(invalidCombination, false, 'a demoted instance must never retain a group-less audit row')
   })
 })

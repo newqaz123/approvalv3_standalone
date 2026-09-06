@@ -465,6 +465,25 @@ ALTER TABLE "solution_approvals"
 -- "supersededAt" writes.
 -- ------------------------------------------------------------------
 
+-- Strict group-less snapshot integrity is proven only for READ COMMITTED
+-- (FOR SHARE coordination) and SERIALIZABLE (PostgreSQL SSI). REPEATABLE
+-- READ snapshots can miss a concurrently committed audit row and accept an
+-- invalid demotion, so unsupported isolation levels are rejected explicitly
+-- on both mutation paths BEFORE any row-existence shortcut. Legacy
+-- version0-only writes never reach this gate and keep prior isolation
+-- behavior.
+CREATE OR REPLACE FUNCTION "enforce_groupless_snapshot_audit_isolation"() RETURNS void AS $$
+DECLARE
+  v_isolation text;
+BEGIN
+  v_isolation := current_setting('transaction_isolation');
+  IF v_isolation NOT IN ('read committed', 'serializable') THEN
+    RAISE EXCEPTION 'group-less snapshot integrity requires READ COMMITTED or SERIALIZABLE isolation, got %', v_isolation
+      USING ERRCODE = 'P0004';
+  END IF;
+END;
+$$ LANGUAGE plpgsql;
+
 CREATE OR REPLACE FUNCTION "approval_groupless_snapshot_audit_ok"(
   p_table_kind text,
   p_row_id text
@@ -541,6 +560,16 @@ DECLARE
   v_routing_mode text;
   v_candidate_group_id text;
 BEGIN
+  -- Isolation gate FIRST: any event that involves strict metadata enforces
+  -- the supported isolation set before the row-existence shortcuts below.
+  -- Legacy version0-only writes (neither version nor mode touches the strict
+  -- metadata) keep prior isolation behavior. The LATEST persisted row still
+  -- decides group-less applicability after the gate.
+  IF NEW."integrityVersion" = 1 OR NEW."routingMode" = 'SNAPSHOT_GROUP'
+     OR OLD."integrityVersion" = 1 OR OLD."routingMode" = 'SNAPSHOT_GROUP' THEN
+    PERFORM "enforce_groupless_snapshot_audit_isolation"();
+  END IF;
+
   -- Applicability is decided from the LATEST persisted row, never the stale
   -- queued event payload: later statements of the same transaction may have
   -- attached a candidate group (or the row may have been deleted) after this
@@ -570,8 +599,13 @@ DECLARE
   v_routing_mode text;
   v_candidate_group_id text;
 BEGIN
-  -- See the request-side function: applicability always comes from the
-  -- latest persisted row, not from the queued event payload.
+  -- See the request-side function: the isolation gate fires first for events
+  -- involving strict metadata, then latest-row applicability applies.
+  IF NEW."integrityVersion" = 1 OR NEW."routingMode" = 'SNAPSHOT_GROUP'
+     OR OLD."integrityVersion" = 1 OR OLD."routingMode" = 'SNAPSHOT_GROUP' THEN
+    PERFORM "enforce_groupless_snapshot_audit_isolation"();
+  END IF;
+
   SELECT "integrityVersion", "routingMode", "candidateGroupId"
     INTO v_integrity_version, v_routing_mode, v_candidate_group_id
     FROM "solution_approvals" WHERE "id" = NEW."id";
@@ -592,6 +626,13 @@ $$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION "enforce_groupless_snapshot_audit_on_instance"() RETURNS trigger AS $$
 BEGIN
+  -- Isolation gate FIRST: relevant snapshot-mode state/identity mutations
+  -- must enforce supported isolation even when the transaction snapshot
+  -- contains no visible audit row; a mode change out of snapshot cannot
+  -- evade the gate (OLD routing mode participates in the condition).
+  IF OLD."routingMode" = 'SNAPSHOT_GROUP' OR NEW."routingMode" = 'SNAPSHOT_GROUP' THEN
+    PERFORM "enforce_groupless_snapshot_audit_isolation"();
+  END IF;
   IF EXISTS (
     SELECT 1 FROM "request_approvals" r
      WHERE r."instanceId" = NEW."id"

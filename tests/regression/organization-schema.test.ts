@@ -369,6 +369,57 @@ describe('organization approval migration SQL contract', () => {
     }
   })
 
+  it('rejects unsupported isolation on both mutation paths before applicability shortcuts', () => {
+    // Strict group-less snapshot integrity is proven for READ COMMITTED (FOR
+    // SHARE coordination) and SERIALIZABLE (PostgreSQL SSI). REPEATABLE READ
+    // snapshots can miss a concurrently committed audit row and accept an
+    // invalid demotion, so unsupported isolation is rejected explicitly
+    // BEFORE any row-existence shortcut. Legacy version0-only writes never
+    // reach the gate and keep prior isolation behavior.
+    assert.match(sql, /CREATE OR REPLACE FUNCTION "enforce_groupless_snapshot_audit_isolation"/)
+    assert.match(sql, /current_setting\('transaction_isolation'\)/)
+    assert.match(sql, /NOT IN \('read committed', 'serializable'\)/)
+    assert.match(sql, /ERRCODE = 'P0004'/)
+    for (const table of ['request_approvals', 'solution_approvals']) {
+      const fnStart = sql.indexOf(
+        `CREATE OR REPLACE FUNCTION "enforce_${table}_groupless_snapshot_audit"()`,
+      )
+      assert.ok(fnStart >= 0, `${table} trigger function must exist`)
+      const fnEnd = sql.indexOf('$$ LANGUAGE plpgsql;', fnStart)
+      const triggerFn = sql.slice(fnStart, fnEnd)
+      const gatePos = triggerFn.indexOf('PERFORM "enforce_groupless_snapshot_audit_isolation"()')
+      const applicabilityPos = triggerFn.indexOf('SELECT "integrityVersion", "routingMode", "candidateGroupId"')
+      assert.ok(gatePos >= 0, `${table} trigger must run the isolation gate`)
+      assert.ok(
+        applicabilityPos > gatePos,
+        `${table} trigger must gate isolation BEFORE the latest-row applicability shortcut`,
+      )
+      assert.match(
+        triggerFn,
+        /NEW\."integrityVersion" = 1 OR NEW\."routingMode" = 'SNAPSHOT_GROUP' OR OLD\."integrityVersion" = 1 OR OLD\."routingMode" = 'SNAPSHOT_GROUP'/,
+        `${table} isolation gate must fire only for events involving strict metadata`,
+      )
+    }
+    const instanceFnStart = sql.indexOf(
+      'CREATE OR REPLACE FUNCTION "enforce_groupless_snapshot_audit_on_instance"()',
+    )
+    assert.ok(instanceFnStart >= 0, 'instance trigger function must exist')
+    const instanceFnEnd = sql.indexOf('$$ LANGUAGE plpgsql;', instanceFnStart)
+    const instanceFn = sql.slice(instanceFnStart, instanceFnEnd)
+    const instanceGatePos = instanceFn.indexOf('PERFORM "enforce_groupless_snapshot_audit_isolation"()')
+    const scanPos = instanceFn.indexOf('EXISTS (')
+    assert.ok(instanceGatePos >= 0, 'instance trigger must run the isolation gate')
+    assert.ok(
+      scanPos > instanceGatePos,
+      'instance trigger must gate isolation BEFORE the child scan (snapshot may hide committed audit rows)',
+    )
+    assert.match(
+      instanceFn,
+      /OLD\."routingMode" = 'SNAPSHOT_GROUP' OR NEW\."routingMode" = 'SNAPSHOT_GROUP'/,
+      'instance gate must fire for snapshot-mode state/identity mutations, including mode changes out of snapshot',
+    )
+  })
+
   it('enforces the group-less snapshot exception through deferred cross-table triggers', () => {
     // The exception is narrow: an approved audit row whose actual approver is
     // the linked instance's origin user, on an AUTO_APPROVED SNAPSHOT_GROUP
@@ -439,10 +490,14 @@ describe('organization approval migration SQL contract', () => {
         ),
         `${table} trigger must succeed for deleted rows and rows that are no longer group-less version-1 snapshots`,
       )
+      // Applicability (everything after the latest-row SELECT) must never
+      // decide from stale queued NEW metadata; NEW."id" (immutable row
+      // identity) and the isolation gate condition remain legitimate.
+      const postSelect = triggerFn.slice(triggerFn.indexOf('IF v_integrity_version IS NULL'))
       assert.doesNotMatch(
-        triggerFn,
+        postSelect,
         /NEW\."(integrityVersion|candidateGroupId|routingMode)"/,
-        `${table} trigger must never decide applicability from stale queued NEW fields`,
+        `${table} trigger must never decide group-less applicability from stale queued NEW fields`,
       )
     }
     assert.ok(
