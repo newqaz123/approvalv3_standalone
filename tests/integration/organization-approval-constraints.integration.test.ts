@@ -31,6 +31,7 @@ import { PrismaClient, Prisma } from '@prisma/client'
 
 const CI_DATABASE_URL = process.env.ORGANIZATION_APPROVAL_CI_DATABASE_URL
 const hasCI = typeof CI_DATABASE_URL === 'string' && CI_DATABASE_URL.length > 0
+const PINNED_TX_OPTIONS = { timeout: 60000, maxWait: 5000 } as const
 
 // A skipped describe still documents the CI contract for the reviewer.
 const ci = hasCI ? describe : describe.skip
@@ -90,8 +91,13 @@ async function waitFor(
  */
 class ScenarioCleanup {
   private readonly steps: Array<{ description: string; run: () => Promise<unknown> }> = []
+  private readonly beforeCleanup: Array<{ description: string; run: () => Promise<unknown> }> = []
 
   constructor(private readonly db: PrismaClient) {}
+
+  before(description: string, run: () => Promise<unknown>): void {
+    this.beforeCleanup.push({ description, run })
+  }
 
   private track(description: string, run: () => Promise<unknown>): void {
     this.steps.push({ description, run })
@@ -130,6 +136,25 @@ class ScenarioCleanup {
   }
 
   async run(): Promise<void> {
+    const preconditionFailures: Array<{ description: string; error: unknown }> = []
+    for (const step of this.beforeCleanup) {
+      try {
+        await step.run()
+      } catch (error) {
+        preconditionFailures.push({ description: step.description, error })
+      }
+    }
+    // Fixture deletion is unsafe until every participant has drained. Do not
+    // continue into FK cleanup when a precondition failed.
+    if (preconditionFailures.length > 0) {
+      throw new AggregateError(
+        preconditionFailures.map((failure) =>
+          failure.error instanceof Error ? failure.error : new Error(String(failure.error)),
+        ),
+        `cleanup preconditions failed: ${preconditionFailures.map((failure) => failure.description).join(', ')}`,
+      )
+    }
+
     const failures: Array<{ description: string; error: unknown }> = []
     for (const step of [...this.steps].reverse()) {
       try {
@@ -147,6 +172,174 @@ class ScenarioCleanup {
       )
     }
   }
+}
+
+const PARTICIPANT_READINESS_TIMEOUT_MS = 15000
+const PARTICIPANT_DRAIN_TIMEOUT_MS = PINNED_TX_OPTIONS.timeout + 5000
+
+/**
+ * Owns barriers and started transaction promises for one concurrency case.
+ * Readiness waits fail as soon as a participant ends before signalling; close
+ * always releases barriers, drains every started transaction, and disconnects
+ * only after the drain succeeds.
+ */
+class ParticipantLifecycle {
+  private readonly participants: Promise<unknown>[] = []
+  private readonly releases: Array<() => void> = []
+  private closePromise: Promise<void> | null = null
+
+  constructor(
+    private readonly cleanup: ScenarioCleanup,
+    private readonly clients: PrismaClient[],
+  ) {
+    cleanup.before('participant drain and disconnect', () => this.close())
+  }
+
+  ownBarrier(release: () => void): void {
+    this.releases.push(release)
+  }
+
+  start<T>(promise: Promise<T>): Promise<T> {
+    const participant = Promise.resolve(promise)
+    this.participants.push(participant)
+    // Attach immediately; readiness and final drain add their own observers.
+    void participant.catch(() => {})
+    return promise
+  }
+
+  async waitFor(
+    condition: () => boolean | Promise<boolean>,
+    message: string,
+    deadlineMs = PARTICIPANT_READINESS_TIMEOUT_MS,
+  ): Promise<void> {
+    const readiness = waitFor(condition, message, deadlineMs)
+    const participantFailures = this.participants.map((participant) =>
+      participant.then(
+        () => {
+          throw new Error(`${message}: participant completed before signalling`)
+        },
+        (error: unknown) => {
+          const failure = new Error(`${message}: participant failed before signalling: ${String(error)}`)
+          ;(failure as Error & { cause?: unknown }).cause = error
+          throw failure
+        },
+      ),
+    )
+    await Promise.race([readiness, ...participantFailures])
+  }
+
+  async waitForSignal(signal: Promise<unknown>, message: string): Promise<void> {
+    const readiness = signal.then(() => undefined)
+    const participantFailures = this.participants.map((participant) =>
+      participant.then(
+        () => {
+          throw new Error(`${message}: participant completed before signalling`)
+        },
+        (error: unknown) => {
+          const failure = new Error(`${message}: participant failed before signalling: ${String(error)}`)
+          ;(failure as Error & { cause?: unknown }).cause = error
+          throw failure
+        },
+      ),
+    )
+    await Promise.race([readiness, ...participantFailures])
+  }
+
+  async close(): Promise<void> {
+    if (this.closePromise) return this.closePromise
+    this.closePromise = this.releaseDrainAndDisconnect()
+    return this.closePromise
+  }
+
+  private async releaseDrainAndDisconnect(): Promise<void> {
+    const releaseFailures: unknown[] = []
+    for (const release of this.releases) {
+      try {
+        release()
+      } catch (error) {
+        releaseFailures.push(error)
+      }
+    }
+
+    let drained = false
+    let drainTimeout: ReturnType<typeof setTimeout> | undefined
+    try {
+      await Promise.race([
+        Promise.allSettled(this.participants),
+        new Promise<never>((_, reject) => {
+          drainTimeout = setTimeout(
+            () => reject(new Error(`participant drain timed out after ${PARTICIPANT_DRAIN_TIMEOUT_MS}ms`)),
+            PARTICIPANT_DRAIN_TIMEOUT_MS,
+          )
+        }),
+      ])
+      drained = true
+    } catch (error) {
+      throw new AggregateError(
+        [
+          ...releaseFailures,
+          error,
+        ].map((failure) => (failure instanceof Error ? failure : new Error(String(failure)))),
+        'participant lifecycle teardown failed; fixture cleanup is unsafe',
+      )
+    } finally {
+      if (drainTimeout) clearTimeout(drainTimeout)
+    }
+
+    if (!drained || releaseFailures.length > 0) {
+      throw new AggregateError(
+        releaseFailures.map((error) => (error instanceof Error ? error : new Error(String(error)))),
+        'participant lifecycle teardown failed; fixture cleanup is unsafe',
+      )
+    }
+
+    const disconnectFailures: unknown[] = []
+    for (const db of this.clients) {
+      try {
+        await db.$disconnect()
+      } catch (error) {
+        disconnectFailures.push(error)
+      }
+    }
+    if (disconnectFailures.length > 0) {
+      throw new AggregateError(
+        disconnectFailures.map((error) => (error instanceof Error ? error : new Error(String(error)))),
+        'participant client disconnect failed',
+      )
+    }
+  }
+}
+
+async function withParticipantLifecycle<T>(
+  lifecycle: ParticipantLifecycle,
+  body: (participants: ParticipantLifecycle) => Promise<T>,
+): Promise<T> {
+  let result!: T
+  let bodyFailed = false
+  let bodyError: unknown
+  let teardownError: unknown
+  try {
+    result = await body(lifecycle)
+  } catch (error) {
+    bodyFailed = true
+    bodyError = error
+  } finally {
+    try {
+      await lifecycle.close()
+    } catch (error) {
+      teardownError = error
+    }
+  }
+
+  if (bodyFailed && teardownError) {
+    throw new AggregateError(
+      [bodyError, teardownError].map((error) => (error instanceof Error ? error : new Error(String(error)))),
+      'test failure and participant teardown failure',
+    )
+  }
+  if (bodyFailed) throw bodyError
+  if (teardownError) throw teardownError
+  return result
 }
 
 interface AutoAuditSeed {
@@ -229,8 +422,6 @@ async function seedAutoAuditScenario(
 
   return { departmentId, requesterId, originUserId, unitId, requestId, instanceId, cleanup }
 }
-
-const PINNED_TX_OPTIONS = { timeout: 60000, maxWait: 5000 } as const
 
 /** Lock-timeout safety inside pinned transactions: bounded waits, no hangs. */
 async function setLocalLockTimeout(tx: Prisma.TransactionClient, timeout = '10s'): Promise<void> {
@@ -348,8 +539,8 @@ ci('organization approval row-integrity constraints (CI database)', () => {
     const seed = await seedAutoAuditScenario(db, 30, t)
     const rowId = scenarioId(38)
     const candidateGroupId = scenarioId(37)
-    seed.cleanup.trackApprovalRow(rowId)
     seed.cleanup.trackCandidateGroup(candidateGroupId)
+    seed.cleanup.trackApprovalRow(rowId)
 
     await db.approval_candidate_groups.create({
       data: {
@@ -415,8 +606,8 @@ ci('organization approval row-integrity constraints (CI database)', () => {
     const seed = await seedAutoAuditScenario(db, 50, t)
     const rowId = scenarioId(58)
     const candidateGroupId = scenarioId(57)
-    seed.cleanup.trackApprovalRow(rowId)
     seed.cleanup.trackCandidateGroup(candidateGroupId)
+    seed.cleanup.trackApprovalRow(rowId)
 
     await db.approval_candidate_groups.create({
       data: {
@@ -596,20 +787,19 @@ ci('organization approval row-integrity constraints (CI database)', () => {
 
     const c1 = newClient()
     const c2 = newClient()
+    const lifecycle = new ParticipantLifecycle(seed.cleanup, [c1, c2])
+    await withParticipantLifecycle(lifecycle, async (participants) => {
     await c1.$connect()
     await c2.$connect()
-    t.after(async () => {
-      await c1.$disconnect().catch(() => {})
-      await c2.$disconnect().catch(() => {})
-    })
 
     const observed = { pidA: 0, pidB: 0 }
     let releaseAuditTransaction = (): void => {}
+    participants.ownBarrier(() => releaseAuditTransaction())
 
     // Connection A: pinned interactive transaction. Insert the valid audit
     // row and force its deferred validation to run NOW (SET CONSTRAINTS ALL
     // IMMEDIATE) while the transaction stays open holding FOR SHARE.
-    const txAPromise = c1.$transaction(
+    const txAPromise = participants.start(c1.$transaction(
       async (txA) => {
         await setLocalLockTimeout(txA)
         await txA.$executeRawUnsafe(
@@ -622,13 +812,12 @@ ci('organization approval row-integrity constraints (CI database)', () => {
         })
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, ...PINNED_TX_OPTIONS },
-    )
-    txAPromise.catch(() => {})
-    await waitFor(() => observed.pidA !== 0, 'audit transaction never signalled its backend pid')
+    ))
+    await participants.waitFor(() => observed.pidA !== 0, 'audit transaction never signalled its backend pid')
 
     // Connection B: pinned READ COMMITTED transaction demoting the instance.
     // Its UPDATE must block on A's FOR SHARE.
-    const txBPromise = c2.$transaction(
+    const txBPromise = participants.start(c2.$transaction(
       async (txB) => {
         await setLocalLockTimeout(txB, '30s')
         observed.pidB = await backendPid(txB)
@@ -637,13 +826,12 @@ ci('organization approval row-integrity constraints (CI database)', () => {
         )
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, ...PINNED_TX_OPTIONS },
-    )
-    txBPromise.catch(() => {})
-    await waitFor(() => observed.pidB !== 0, 'demotion transaction never signalled its backend pid')
+    ))
+    await participants.waitFor(() => observed.pidB !== 0, 'demotion transaction never signalled its backend pid')
 
     // Bounded observer on a separate connection: prove B is actually blocked
     // by A before releasing anything.
-    await waitFor(
+    await participants.waitFor(
       async () => {
         const blockers = await db.$queryRawUnsafe<Array<{ blockers: number[] }>>(
           `SELECT ARRAY(SELECT unnest(pg_blocking_pids(${observed.pidB}))) AS blockers`,
@@ -666,6 +854,7 @@ ci('organization approval row-integrity constraints (CI database)', () => {
     assert.equal(instance.state, 'AUTO_APPROVED', 'the audit-committed state must survive')
     const row = await db.request_approvals.findUnique({ where: { id: rowId } })
     assert.ok(row, 'the valid audit row must be persisted')
+    })
   })
 
   it('demotion-first: a demotion holding its update lock forces the audit validation to fail (alternate lock order)', async (t) => {
@@ -676,19 +865,18 @@ ci('organization approval row-integrity constraints (CI database)', () => {
 
     const c1 = newClient()
     const c2 = newClient()
+    const lifecycle = new ParticipantLifecycle(seed.cleanup, [c1, c2])
+    await withParticipantLifecycle(lifecycle, async (participants) => {
     await c1.$connect()
     await c2.$connect()
-    t.after(async () => {
-      await c1.$disconnect().catch(() => {})
-      await c2.$disconnect().catch(() => {})
-    })
 
     const observed = { pidA: 0, pidB: 0 }
     let releaseDemotion = (): void => {}
+    participants.ownBarrier(() => releaseDemotion())
 
     // Connection B: pinned transaction demotes the instance FIRST and holds
     // its update lock open until the audit side is confirmed blocked on it.
-    const txBPromise = c2.$transaction(
+    const txBPromise = participants.start(c2.$transaction(
       async (txB) => {
         await setLocalLockTimeout(txB)
         observed.pidB = await backendPid(txB)
@@ -700,13 +888,12 @@ ci('organization approval row-integrity constraints (CI database)', () => {
         })
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, ...PINNED_TX_OPTIONS },
-    )
-    txBPromise.catch(() => {})
-    await waitFor(() => observed.pidB !== 0, 'demotion transaction never signalled its backend pid')
+    ))
+    await participants.waitFor(() => observed.pidB !== 0, 'demotion transaction never signalled its backend pid')
 
     // Connection A: pinned transaction inserts the audit row and forces its
     // deferred validation; the FOR SHARE must block on B's held update lock.
-    const txAPromise = c1.$transaction(
+    const txAPromise = participants.start(c1.$transaction(
       async (txA) => {
         await setLocalLockTimeout(txA, '30s')
         observed.pidA = await backendPid(txA)
@@ -716,13 +903,12 @@ ci('organization approval row-integrity constraints (CI database)', () => {
         await txA.$executeRawUnsafe('SET CONSTRAINTS ALL IMMEDIATE')
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, ...PINNED_TX_OPTIONS },
-    )
-    txAPromise.catch(() => {})
-    await waitFor(() => observed.pidA !== 0, 'audit transaction never signalled its backend pid')
+    ))
+    await participants.waitFor(() => observed.pidA !== 0, 'audit transaction never signalled its backend pid')
 
     // Bounded observer: prove the audit validation is actually blocked by the
     // held demotion before releasing it.
-    await waitFor(
+    await participants.waitFor(
       async () => {
         const blockers = await db.$queryRawUnsafe<Array<{ blockers: number[] }>>(
           `SELECT ARRAY(SELECT unnest(pg_blocking_pids(${observed.pidA}))) AS blockers`,
@@ -745,6 +931,7 @@ ci('organization approval row-integrity constraints (CI database)', () => {
     assert.equal(instance.state, 'PENDING', 'the demotion is the surviving committed state')
     const row = await db.request_approvals.findFirst({ where: { instanceId: seed.instanceId } })
     assert.equal(row, null, 'the invalid audit row must not be persisted')
+    })
   })
 
   it('rejects REPEATABLE READ demotion whose snapshot predates the committed audit row', async (t) => {
@@ -754,23 +941,23 @@ ci('organization approval row-integrity constraints (CI database)', () => {
     seed.cleanup.trackApprovalRow(rowId)
 
     const c2 = newClient()
+    const lifecycle = new ParticipantLifecycle(seed.cleanup, [c2])
+    await withParticipantLifecycle(lifecycle, async (participants) => {
     await c2.$connect()
-    t.after(async () => {
-      await c2.$disconnect().catch(() => {})
-    })
 
     let snapshotEstablished = (): void => {}
     const snapshotPromise = new Promise<void>((resolve) => {
       snapshotEstablished = resolve
     })
     let releaseDemotion = (): void => {}
+    participants.ownBarrier(() => releaseDemotion())
     const releasePromise = new Promise<void>((resolve) => {
       releaseDemotion = resolve
     })
 
     // B starts REPEATABLE READ and establishes its snapshot BEFORE the audit
     // row exists.
-    const txBPromise = c2.$transaction(
+    const txBPromise = participants.start(c2.$transaction(
       async (txB) => {
         await txB.$queryRawUnsafe('SELECT 1')
         snapshotEstablished()
@@ -780,9 +967,8 @@ ci('organization approval row-integrity constraints (CI database)', () => {
         )
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, ...PINNED_TX_OPTIONS },
-    )
-    txBPromise.catch(() => {})
-    await snapshotPromise
+    ))
+    await participants.waitForSignal(snapshotPromise, 'REPEATABLE READ transaction never established its snapshot')
 
     // A commits a valid audit row (plain autocommit write; READ COMMITTED
     // validation passes against the AUTO_APPROVED instance).
@@ -815,6 +1001,7 @@ ci('organization approval row-integrity constraints (CI database)', () => {
     assert.equal(instance.state, 'AUTO_APPROVED')
     const row = await db.request_approvals.findUnique({ where: { id: rowId } })
     assert.ok(row)
+    })
   })
 
   it('under SERIALIZABLE a concurrent audit insert and demotion ends in a serialization/integrity failure, never an invalid commit', async (t) => {
@@ -825,16 +1012,14 @@ ci('organization approval row-integrity constraints (CI database)', () => {
 
     const c1 = newClient()
     const c2 = newClient()
+    const lifecycle = new ParticipantLifecycle(seed.cleanup, [c1, c2])
+    await withParticipantLifecycle(lifecycle, async (participants) => {
     await c1.$connect()
     await c2.$connect()
-    t.after(async () => {
-      await c1.$disconnect().catch(() => {})
-      await c2.$disconnect().catch(() => {})
-    })
 
     // Concurrent pinned SERIALIZABLE transactions: audit insert + demotion.
     const outcomes = await Promise.allSettled([
-      c1.$transaction(
+      participants.start(c1.$transaction(
         async (txA) => {
           await setLocalLockTimeout(txA, '10s')
           await txA.$executeRawUnsafe(
@@ -843,8 +1028,8 @@ ci('organization approval row-integrity constraints (CI database)', () => {
           await txA.$executeRawUnsafe('SET CONSTRAINTS ALL IMMEDIATE')
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, ...PINNED_TX_OPTIONS },
-      ),
-      c2.$transaction(
+      )),
+      participants.start(c2.$transaction(
         async (txB) => {
           await setLocalLockTimeout(txB, '10s')
           await txB.$executeRawUnsafe(
@@ -852,7 +1037,7 @@ ci('organization approval row-integrity constraints (CI database)', () => {
           )
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, ...PINNED_TX_OPTIONS },
-      ),
+      )),
     ])
 
     const rejected = outcomes.filter((outcome) => outcome.status === 'rejected')
@@ -876,5 +1061,6 @@ ci('organization approval row-integrity constraints (CI database)', () => {
     const rows = await db.request_approvals.findMany({ where: { instanceId: seed.instanceId } })
     const invalidCombination = instance.state === 'PENDING' && rows.length > 0
     assert.equal(invalidCombination, false, 'a demoted instance must never retain a group-less audit row')
+    })
   })
 })
