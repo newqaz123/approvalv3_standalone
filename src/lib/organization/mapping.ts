@@ -101,6 +101,9 @@ export function validateReviewedOrganizationMapping(mapping: ReviewedOrganizatio
     const target = unitsById.get(external.targetUnitId)
     if (!target) fail(`external approver ${external.legacyDepartmentApproverId} targets unknown unit ${external.targetUnitId}`)
     if (positionUnit[external.positionCode] !== target.unitType) fail(`external approver ${external.legacyDepartmentApproverId} position does not match target unit`)
+    if (external.disposition === 'PARENT_SCOPE' && !mapping.positionAssignments.some((assignment) =>
+      assignment.userId === external.userId && assignment.unitId === external.targetUnitId && assignment.positionCode === external.positionCode,
+    )) fail(`PARENT_SCOPE external approver ${external.legacyDepartmentApproverId} requires a matching explicit assignment`)
   }
 
   for (const level of mapping.legacyLevelMappings) {

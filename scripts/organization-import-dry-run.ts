@@ -77,8 +77,7 @@ export function buildOrganizationImportReport(input: {
   }
 
   for (const user of legacyUsers) {
-    if (!user.isActive) continue
-    if (!mappedUsers.has(user.id)) blockingReasons.push(`USER_NOT_MAPPED:${user.id}`)
+    if (user.isActive && !mappedUsers.has(user.id)) blockingReasons.push(`USER_NOT_MAPPED:${user.id}`)
     if (user.level !== null && !explicitLevels.has(user.level)) blockingReasons.push(`USER_LEVEL_NOT_EXPLICITLY_MAPPED:${user.id}:${user.level}`)
   }
   for (const assignment of mapping.positionAssignments) {
@@ -98,9 +97,20 @@ export function buildOrganizationImportReport(input: {
       if (reviewed.userId !== approver.approverId) blockingReasons.push(`EXTERNAL_APPROVER_USER_MISMATCH:${approver.id}`)
       if (reviewed.disposition === 'PARENT_SCOPE') {
         const department = departmentMappings.get(approver.departmentId)
-        const target = department ? unitsById.get(department.targetUnitId) : undefined
-        const parent = target?.parentId ? unitsById.get(target.parentId) : undefined
-        if (!parent || reviewed.targetUnitId !== parent.id) blockingReasons.push(`EXTERNAL_APPROVER_PARENT_SCOPE_MISMATCH:${approver.id}`)
+        const source = department ? unitsById.get(department.targetUnitId) : undefined
+        const target = unitsById.get(reviewed.targetUnitId)
+        const targetIsExplicitAssignment = mapping.positionAssignments.some((assignment) =>
+          assignment.userId === reviewed.userId && assignment.unitId === reviewed.targetUnitId && assignment.positionCode === reviewed.positionCode,
+        )
+        let current = source
+        if (source?.unitType === 'SECTION') current = source.parentId ? unitsById.get(source.parentId) : undefined
+        let targetIsInReviewedScope = false
+        while (current) {
+          if (current.id === reviewed.targetUnitId) { targetIsInReviewedScope = true; break }
+          current = current.parentId ? unitsById.get(current.parentId) : undefined
+        }
+        if (!target || target.unitType === 'SECTION' || !targetIsInReviewedScope) blockingReasons.push(`EXTERNAL_APPROVER_PARENT_SCOPE_MISMATCH:${approver.id}`)
+        if (!targetIsExplicitAssignment) blockingReasons.push(`EXTERNAL_APPROVER_PARENT_ASSIGNMENT_NOT_MAPPED:${approver.id}`)
       }
     }
     if (reviewed && !legacyUsers.some((user) => user.id === reviewed.userId)) blockingReasons.push(`USER_MAPPING_NOT_FOUND:${reviewed.userId}`)
@@ -179,4 +189,3 @@ if (invokedAsScript) {
     process.exitCode = 1
   })
 }
-
