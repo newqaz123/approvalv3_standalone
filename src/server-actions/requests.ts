@@ -30,6 +30,17 @@ import {
   buildRejectedRequestResubmissionWhere,
   updateRequestStatusExpecting,
 } from '@/lib/request-status-transition'
+import { getApprovalRolloutMode } from '@/lib/approval-rollout'
+import { createApprovalEngineDb } from '@/lib/approval-engine/instances'
+import {
+  ApprovalCreationDisabledError,
+  CURRENT_INSTANCE_ROW_FILTER,
+  assertNewCreationEnabled,
+  compareNewResolutionWithoutWrites,
+  createPrismaPhaseAdapterDb,
+  createRequestApprovalAttempt,
+  markCurrentInstanceOutcome,
+} from '@/lib/approval-engine/phase-adapters'
 import type { Prisma } from '@prisma/client'
 import * as XLSX from 'xlsx'
 
@@ -126,6 +137,9 @@ export async function createRequest(input: CreateRequestInput) {
 
   let request: { id: string; title: string }
   let approvals: Awaited<ReturnType<typeof createApprovalChain>>
+  // Rollout gate: creation only. Legacy (the default) and shadow keep the
+  // existing builder exactly; new mode is denied until Task 15 activation.
+  const rolloutMode = getApprovalRolloutMode(process.env)
 
   try {
     const txResult = await prisma.$transaction(async (tx) => {
@@ -164,13 +178,58 @@ export async function createRequest(input: CreateRequestInput) {
         },
       })
 
-      const chain = await createApprovalChain(
-        newRequest.id,
-        user.departmentId!,
-        user.level || 1,
-        user.id,
-        tx,
-      )
+      let chain: Awaited<ReturnType<typeof createApprovalChain>>
+
+      if (rolloutMode === 'new') {
+        // Denied until Task 15 activation support exists; throws before any
+        // NEW write and rolls the whole creation back.
+        await assertNewCreationEnabled(tx)
+        const attempt = await createRequestApprovalAttempt(
+          createPrismaPhaseAdapterDb(tx),
+          { requestId: newRequest.id, requesterId: user.id },
+        )
+        chain = []
+        if (attempt.statusChange) {
+          newRequest = { ...newRequest, status: attempt.statusChange.to }
+          await tx.request_activities.create({
+            data: {
+              requestId: newRequest.id,
+              userId: user.id,
+              action: 'status_changed',
+              fromStatus: attempt.statusChange.from,
+              toStatus: attempt.statusChange.to,
+              comments: attempt.completedWithoutSteps
+                ? 'Auto-completed: NO_ELIGIBLE_APPROVAL_STEPS (no eligible approval steps)'
+                : 'Auto-approved by position ceiling',
+            },
+          })
+        }
+        // The request's origin unit is persisted once, at creation.
+        if (!newRequest.organizationUnitId) {
+          newRequest = { ...newRequest, organizationUnitId: attempt.instance.originUnitId }
+          await tx.requests.update({
+            where: { id: newRequest.id },
+            data: { organizationUnitId: attempt.instance.originUnitId },
+          })
+        }
+      } else {
+        chain = await createApprovalChain(
+          newRequest.id,
+          user.departmentId!,
+          user.level || 1,
+          user.id,
+          tx,
+        )
+        if (rolloutMode === 'shadow') {
+          // Read-only NEW resolution alongside the legacy result; reports a
+          // missing/unmapped route without ever failing the submission.
+          await compareNewResolutionWithoutWrites(createApprovalEngineDb(tx), {
+            phase: 'REQUEST',
+            requestId: newRequest.id,
+            originUserId: user.id,
+          })
+        }
+      }
 
       const isTopLevel = chain.length > 0 && chain[0].status === 'approved'
       if (isTopLevel) {
@@ -199,6 +258,9 @@ export async function createRequest(input: CreateRequestInput) {
     console.error('Failed to create request atomically:', error)
     if (error instanceof Error && error.message === ATTACHMENT_ADOPTION_ERROR) {
       return { success: false, error: ATTACHMENT_ADOPTION_ERROR }
+    }
+    if (error instanceof ApprovalCreationDisabledError) {
+      return { success: false, error: error.message }
     }
     return { success: false, error: 'Failed to create request — please try again' }
   }
@@ -1162,10 +1224,10 @@ export async function cancelRequest(input: { requestId: string; reason: string }
       rejectedRequestApprovals,
     ] = await Promise.all([
       tx.request_approvals.count({
-        where: { requestId, status: 'pending' },
+        where: { requestId, status: 'pending', OR: [...CURRENT_INSTANCE_ROW_FILTER] },
       }),
       tx.solution_approvals.count({
-        where: { solution: { requestId }, status: 'pending' },
+        where: { solution: { requestId }, status: 'pending', OR: [...CURRENT_INSTANCE_ROW_FILTER] },
       }),
       tx.request_approvals.count({
         where: { requestId, status: 'rejected', isFinalApproval: false },
@@ -1202,6 +1264,14 @@ export async function cancelRequest(input: { requestId: string; reason: string }
       data: { status: 'Cancelled' },
       actionLabel: 'cancel',
     })
+
+    // Record the cancellation on the current NEW instances (REQUEST, and any
+    // SOLUTION/FINAL attempts of the request's documents) so no further
+    // action can target them. Only PENDING instances transition — a terminal
+    // outcome is preserved — and cancellation adds no notification events.
+    await markCurrentInstanceOutcome(tx, { requestId, phase: 'REQUEST', outcome: 'CANCELLED' })
+    await markCurrentInstanceOutcome(tx, { requestId, phase: 'SOLUTION', outcome: 'CANCELLED' })
+    await markCurrentInstanceOutcome(tx, { requestId, phase: 'FINAL', outcome: 'CANCELLED' })
 
     // Audit trail with the actual previous status. Approvals, solutions,
     // files, engineer assignments, and subtasks are intentionally preserved.
@@ -2289,6 +2359,7 @@ export async function resubmitRequest(input: {
   }
 
   // Perform resubmit in transaction
+  const rolloutMode = getApprovalRolloutMode(process.env)
   const result = await prisma.$transaction(async (tx) => {
     // The same-status guarded update locks the request row and requires the
     // rejected approval to still exist. If cancellation committed first, the
@@ -2317,12 +2388,31 @@ export async function resubmitRequest(input: {
       })
     }
 
-    // Delete all existing approvals
-    await tx.request_approvals.deleteMany({
-      where: {
-        requestId: input.requestId,
-      },
-    })
+    if (rolloutMode === 'new') {
+      // Denied until Task 15 activation support exists; throws before any
+      // NEW write and rolls the resubmission back (no rows deleted).
+      await assertNewCreationEnabled(tx)
+      await createRequestApprovalAttempt(
+        createPrismaPhaseAdapterDb(tx),
+        { requestId: input.requestId, requesterId: userId },
+      )
+    } else {
+      if (rolloutMode === 'shadow') {
+        await compareNewResolutionWithoutWrites(createApprovalEngineDb(tx), {
+          phase: 'REQUEST',
+          requestId: input.requestId,
+          originUserId: userId,
+        })
+      }
+      // Delete all existing approvals (legacy mode keeps its behavior;
+      // NEW attempt rows would belong to superseded history and are never
+      // deleted here).
+      await tx.request_approvals.deleteMany({
+        where: {
+          requestId: input.requestId,
+        },
+      })
+    }
 
     // Log resubmit activity
     await tx.request_activities.create({
@@ -2340,10 +2430,13 @@ export async function resubmitRequest(input: {
     })
   })
 
-  // Create fresh approval chain
-  const userLevel = request.requester.level || 1
-  const departmentId = request.requester.departmentId!
-  await createApprovalChain(input.requestId, departmentId, userLevel, userId)
+  // Create fresh approval chain (legacy/shadow creation only; the new mode
+  // created its attempt inside the transaction above).
+  if (rolloutMode !== 'new') {
+    const userLevel = request.requester.level || 1
+    const departmentId = request.requester.departmentId!
+    await createApprovalChain(input.requestId, departmentId, userLevel, userId)
+  }
 
   revalidateRequestViews()
 

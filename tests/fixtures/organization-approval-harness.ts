@@ -49,14 +49,35 @@ const MODEL_FIELDS: Record<string, readonly string[]> = {
   user: ['id', 'departmentId', 'level', 'isActive', 'role', 'name', 'email', 'createdAt'],
   department_approvers: ['id', 'departmentId', 'approverId', 'approverLevel', 'createdAt'],
   departments: ['id', 'type', 'name', 'createdAt'],
-  requests: ['id', 'status', 'requesterId', 'title', 'description', 'departmentId', 'projectEstimateCost', 'engineeringCostEstimate', 'updatedAt', 'createdAt', 'isDeleted'],
-  request_approvals: ['id', 'requestId', 'requiredLevel', 'requiredApproverId', 'order', 'status', 'approverId', 'comments', 'approvedAt', 'isCustomChain', 'isFinalApproval', 'routingMode', 'integrityVersion', 'createdAt'],
+  requests: ['id', 'status', 'requesterId', 'title', 'description', 'departmentId', 'organizationUnitId', 'projectEstimateCost', 'engineeringCostEstimate', 'updatedAt', 'createdAt', 'isDeleted'],
+  request_approvals: ['id', 'requestId', 'requiredLevel', 'requiredApproverId', 'order', 'status', 'approverId', 'comments', 'approvedAt', 'isCustomChain', 'isFinalApproval', 'routingMode', 'integrityVersion', 'instanceId', 'requiredPosition', 'candidateGroupId', 'createdAt'],
   request_activities: ['id', 'requestId', 'userId', 'action', 'comments', 'fromStatus', 'toStatus', 'createdAt'],
   notifications: ['id', 'userId', 'type', 'title', 'message', 'requestId', 'readAt', 'createdAt'],
   solutions: ['id', 'requestId', 'title', 'description', 'costEstimate', 'currency', 'timeline', 'conceptDesign', 'submittedById', 'submittedAt', 'createdAt', 'updatedAt'],
-  solution_approvals: ['id', 'solutionId', 'requiredLevel', 'requiredApproverId', 'order', 'status', 'approverId', 'comments', 'approvedAt', 'isCustomChain', 'routingMode', 'integrityVersion', 'createdAt'],
+  solution_approvals: ['id', 'solutionId', 'requiredLevel', 'requiredApproverId', 'order', 'status', 'approverId', 'comments', 'approvedAt', 'isCustomChain', 'routingMode', 'integrityVersion', 'instanceId', 'requiredPosition', 'candidateGroupId', 'createdAt'],
   file_attachments: ['id', 'requestId', 'solutionId', 'uploadedById', 'filePath', 'fileName', 'createdAt'],
   email_settings: ['id', 'enabled', 'host', 'port', 'username', 'password', 'fromAddress', 'createdAt'],
+  approval_instances: ['id', 'requestId', 'solutionId', 'phase', 'routeVersionId', 'originUserId', 'originUnitId', 'originContext', 'routingMode', 'state', 'attempt', 'completionReason', 'supersededAt', 'createdAt'],
+  organization_units: ['id', 'name', 'unitType', 'parentId', 'legacyDepartmentId', 'isActive', 'operationalType', 'createdAt', 'updatedAt'],
+  organization_position_assignments: ['id', 'userId', 'unitId', 'positionCode', 'reportingGroupId', 'isPrimary', 'isActive', 'createdAt', 'updatedAt'],
+  reporting_groups: ['id', 'unitId', 'parentGroupId', 'name', 'isActive', 'createdAt'],
+  reporting_group_members: ['id', 'reportingGroupId', 'userId', 'createdAt'],
+  approval_route_versions: ['id', 'scopeUnitId', 'phase', 'version', 'maximumPositionLevel', 'status', 'createdById', 'createdAt', 'publishedAt'],
+  approval_route_steps: ['id', 'routeVersionId', 'stepOrder', 'positionCode', 'createdAt'],
+}
+
+/** JSON-valued columns the field write-shape guard must not reject. */
+const JSON_FIELDS = new Set(['approval_instances.originContext'])
+
+/**
+ * Task 2 column defaults the database applies but bare test seeds omit. The
+ * current-instance row filter queries `instanceId: null`, which must match
+ * legacy rows exactly as it does in Postgres.
+ */
+const MODEL_COLUMN_DEFAULTS: Record<string, Row> = {
+  requests: { organizationUnitId: null },
+  request_approvals: { instanceId: null, requiredPosition: null, candidateGroupId: null, routingMode: 'LEGACY_LEVEL', integrityVersion: 0 },
+  solution_approvals: { instanceId: null, requiredPosition: null, candidateGroupId: null, routingMode: 'LEGACY_LEVEL', integrityVersion: 0 },
 }
 
 /** Relation config: FK resolution + list/to-one kind. Unknown keys throw. */
@@ -77,6 +98,7 @@ const MODEL_RELATIONS: Record<
     request: { kind: 'one', model: 'requests', foreignKey: 'requestId' },
     approver: { kind: 'one', model: 'user', foreignKey: 'approverId' },
     requiredApprover: { kind: 'one', model: 'user', foreignKey: 'requiredApproverId' },
+    instance: { kind: 'one', model: 'approval_instances', foreignKey: 'instanceId' },
   },
   solutions: {
     request: { kind: 'one', model: 'requests', foreignKey: 'requestId' },
@@ -85,6 +107,11 @@ const MODEL_RELATIONS: Record<
     submittedBy: { kind: 'one', model: 'user', foreignKey: 'submittedById' },
   },
   solution_approvals: {
+    solution: { kind: 'one', model: 'solutions', foreignKey: 'solutionId' },
+    instance: { kind: 'one', model: 'approval_instances', foreignKey: 'instanceId' },
+  },
+  approval_instances: {
+    request: { kind: 'one', model: 'requests', foreignKey: 'requestId' },
     solution: { kind: 'one', model: 'solutions', foreignKey: 'solutionId' },
   },
 }
@@ -152,7 +179,7 @@ function assertFields(model: string, data: Row, label: string): void {
       throw new UnexpectedQueryError(`${label}: unsupported field '${key}' for ${model}`)
     }
     const value = data[key]
-    if (value !== null && typeof value === 'object' && !isDateLike(value)) {
+    if (value !== null && typeof value === 'object' && !isDateLike(value) && !JSON_FIELDS.has(`${model}.${key}`)) {
       throw new UnexpectedQueryError(`${label}: unsupported write value for '${key}' on ${model} (nested write operators are not modeled)`)
     }
   }
@@ -399,6 +426,7 @@ export class ApprovalWorkflowDb {
   readonly solution_approvals: ModelTable
   readonly file_attachments: ModelTable
   readonly email_settings: ModelTable
+  readonly approval_instances: ModelTable
 
   constructor() {
     for (const model of Object.keys(MODEL_FIELDS)) {
@@ -415,6 +443,7 @@ export class ApprovalWorkflowDb {
     this.solution_approvals = this.table('solution_approvals') as ModelTable
     this.file_attachments = this.table('file_attachments') as ModelTable
     this.email_settings = this.table('email_settings') as ModelTable
+    this.approval_instances = this.table('approval_instances') as ModelTable
   }
 
   tableRows(model: string): Map<string, Row> {
@@ -462,7 +491,7 @@ export class ApprovalWorkflowDb {
       },
       async create(args) {
         assertExactKeys(args, ['data'], `${model}.create args`)
-        const data = { ...args.data }
+        const data = { ...(MODEL_COLUMN_DEFAULTS[model] ?? {}), ...args.data }
         if (!data.id) {
           db.autoId += 1
           data.id = `${model}-created-${db.autoId}`
@@ -476,7 +505,7 @@ export class ApprovalWorkflowDb {
       async createMany(args) {
         assertExactKeys(args, ['data'], `${model}.createMany args`)
         for (const data of args.data) {
-          const row = { ...data }
+          const row = { ...(MODEL_COLUMN_DEFAULTS[model] ?? {}), ...data }
           if (!row.id) {
             db.autoId += 1
             row.id = `${model}-created-${db.autoId}`
@@ -533,7 +562,7 @@ export class ApprovalWorkflowDb {
   seed(model: string, rows: Row[]): void {
     if (!this.tables[model]) throw new Error(`Unknown seed model '${model}'`)
     for (const row of rows) {
-      this.tables[model].set(String(row.id), { ...row })
+      this.tables[model].set(String(row.id), { ...(MODEL_COLUMN_DEFAULTS[model] ?? {}), ...row })
     }
   }
 
@@ -611,6 +640,13 @@ export interface HarnessSeed {
   solutions?: Row[]
   solution_approvals?: Row[]
   file_attachments?: Row[]
+  approval_instances?: Row[]
+  organization_units?: Row[]
+  organization_position_assignments?: Row[]
+  reporting_groups?: Row[]
+  reporting_group_members?: Row[]
+  approval_route_versions?: Row[]
+  approval_route_steps?: Row[]
 }
 
 export interface Harness {
@@ -646,6 +682,13 @@ export function createHarness(seed: HarnessSeed = {}): Harness {
   db.seed('solutions', seed.solutions ?? [])
   db.seed('solution_approvals', seed.solution_approvals ?? [])
   db.seed('file_attachments', seed.file_attachments ?? [])
+  db.seed('approval_instances', seed.approval_instances ?? [])
+  db.seed('organization_units', seed.organization_units ?? [])
+  db.seed('organization_position_assignments', seed.organization_position_assignments ?? [])
+  db.seed('reporting_groups', seed.reporting_groups ?? [])
+  db.seed('reporting_group_members', seed.reporting_group_members ?? [])
+  db.seed('approval_route_versions', seed.approval_route_versions ?? [])
+  db.seed('approval_route_steps', seed.approval_route_steps ?? [])
 
   const dependencies: Record<string, unknown> = {
     '@/lib/prisma': { default: db.asPrisma() },
@@ -732,6 +775,25 @@ export function createHarness(seed: HarnessSeed = {}): Harness {
   }
 
   // Load in dependency order; later modules see earlier real modules.
+  // The NEW approval-engine modules are loaded as REAL production modules so
+  // the workflow actions can consult the rollout gate and (in shadow mode) the
+  // read-only NEW resolver through the same strict dependency allowlist.
+  dependencies['@/lib/organization/types'] = load('lib/organization/types.ts')
+  dependencies['./types'] = dependencies['@/lib/organization/types']
+  dependencies['@/lib/organization/tree'] = load('lib/organization/tree.ts')
+  dependencies['./tree'] = dependencies['@/lib/organization/tree']
+  dependencies['@/lib/organization/repository'] = load('lib/organization/repository.ts')
+  dependencies['@/lib/approval-routes/validation'] = load('lib/approval-routes/validation.ts')
+  dependencies['./validation'] = dependencies['@/lib/approval-routes/validation']
+  dependencies['@/lib/approval-routes/resolver'] = load('lib/approval-routes/resolver.ts')
+  dependencies['@/lib/approval-engine/candidate-groups'] = load('lib/approval-engine/candidate-groups.ts')
+  dependencies['./candidate-groups'] = dependencies['@/lib/approval-engine/candidate-groups']
+  dependencies['@/lib/approval-engine/phase-origin'] = load('lib/approval-engine/phase-origin.ts')
+  dependencies['./phase-origin'] = dependencies['@/lib/approval-engine/phase-origin']
+  dependencies['@/lib/approval-engine/instances'] = load('lib/approval-engine/instances.ts')
+  dependencies['./instances'] = dependencies['@/lib/approval-engine/instances']
+  dependencies['@/lib/approval-engine/phase-adapters'] = load('lib/approval-engine/phase-adapters.ts')
+  dependencies['@/lib/approval-rollout'] = load('lib/approval-rollout.ts')
   dependencies['./notifications'] = load('server-actions/notifications.ts')
   const approvals = load('server-actions/approvals.ts')
   dependencies['./approvals'] = approvals

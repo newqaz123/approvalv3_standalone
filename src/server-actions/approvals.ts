@@ -15,6 +15,7 @@ import {
   approveRequestApproval,
   type RequestStatusChangeResult,
 } from '@/lib/request-approval-transaction'
+import { markCurrentInstanceOutcome, CURRENT_INSTANCE_ROW_FILTER } from '@/lib/approval-engine/phase-adapters'
 
 /**
  * Check if data is stale based on updatedAt timestamp
@@ -255,13 +256,15 @@ export async function canUserApprove(
     return { canApprove: false }
   }
 
-  // Find pending approval for this user's effective level
+  // Find pending approval for this user's effective level (current attempts
+  // only: superseded history is never actionable)
   const approval = await prisma.request_approvals.findFirst({
     where: {
       requestId,
       requiredLevel: effectiveLevel,
       status: 'pending',
       isFinalApproval: false,
+      OR: [...CURRENT_INSTANCE_ROW_FILTER],
     },
     include: {
       request: {
@@ -277,13 +280,14 @@ export async function canUserApprove(
     return { canApprove: false }
   }
 
-  // Check if this is the current approval in sequence
+  // Check if this is the current approval in sequence (current attempts only)
   const previousApprovals = await prisma.request_approvals.findMany({
     where: {
       requestId,
       order: { lt: approval.order },
       status: 'pending',
       isFinalApproval: false,
+      OR: [...CURRENT_INSTANCE_ROW_FILTER],
     },
   })
 
@@ -390,28 +394,48 @@ export async function rejectRequest(
     }
   }
 
-  // Update approval
-  await prisma.request_approvals.update({
-    where: { id: approval.id },
-    data: {
-      approverId: userId,
-      status: 'rejected',
-      comments,
-      approvedAt: new Date(),
-    },
+  // Reject atomically: the matched row, the audit activity, the remaining
+  // current pending rows, and the current instance's REJECTED outcome commit
+  // together; a failure rolls all of it back.
+  await prisma.$transaction(async (tx) => {
+    await tx.request_approvals.update({
+      where: { id: approval.id },
+      data: {
+        approverId: userId,
+        status: 'rejected',
+        comments,
+        approvedAt: new Date(),
+      },
+    })
+
+    await tx.request_activities.create({
+      data: {
+        requestId,
+        userId,
+        action: 'rejected',
+        comments,
+      },
+    })
+
+    // Mark all remaining CURRENT approvals as rejected; superseded history
+    // is never rewritten.
+    await tx.request_approvals.updateMany({
+      where: {
+        requestId,
+        status: 'pending',
+        OR: [...CURRENT_INSTANCE_ROW_FILTER],
+      },
+      data: {
+        status: 'rejected',
+      },
+    })
+
+    // Record the outcome on the current REQUEST instance (PENDING only) so
+    // no further action can target it. No new notification events here.
+    await markCurrentInstanceOutcome(tx, { requestId, phase: 'REQUEST', outcome: 'REJECTED' })
   })
 
-  // Log activity
-  await prisma.request_activities.create({
-    data: {
-      requestId,
-      userId,
-      action: 'rejected',
-      comments,
-    },
-  })
-
-  // Notify requester of rejection with reason
+  // Notify requester of rejection with reason (post-commit)
   const { createNotification } = await import('./notifications')
   const rejectedRequest = await prisma.requests.findUnique({
     where: { id: requestId },
@@ -427,17 +451,6 @@ export async function rejectRequest(
       requestId,
     })
   }
-
-  // Mark all remaining approvals as rejected
-  await prisma.request_approvals.updateMany({
-    where: {
-      requestId,
-      status: 'pending',
-    },
-    data: {
-      status: 'rejected',
-    },
-  })
 
   revalidateRequestViews()
   return { success: true }
@@ -496,6 +509,7 @@ async function notifyNextApprover(requestId: string) {
     where: {
       requestId,
       status: 'pending',
+      OR: [...CURRENT_INSTANCE_ROW_FILTER],
     },
     orderBy: { order: 'asc' },
     include: {
