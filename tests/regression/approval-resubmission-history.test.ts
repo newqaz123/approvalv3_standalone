@@ -257,7 +257,7 @@ describe('pending, action, and notification queries filter current instance iden
     assert.equal(harness.db.requests.rows.get(REQUEST_ID)?.status, 'Cancelled')
   })
 
-  it('never notifies a wrapped pending row as the next approver', async () => {
+  it('never notifies a wrapped pending row as the next approver and completes on the last current step', async () => {
     const harness = harnessWithInstances({
       requestStatus: 'ImprovementRequest',
       approvals: [
@@ -271,9 +271,19 @@ describe('pending, action, and notification queries filter current instance iden
 
     const result = (await harness.approvals.approveRequest(REQUEST_ID)) as { success: boolean }
     assert.equal(result.success, true)
-    // The wrapped level-4 row is skipped as a notification target; no
-    // notification is invented for wrapped history.
-    assert.deepEqual([...harness.db.rows.notifications.values()], [])
+    // The wrapped level-4 pending row is invisible to the completion count:
+    // a3 was the last CURRENT approval, so the phase completes into
+    // SentToEngineer with the pinned engineering task broadcast — the wrapped
+    // row neither blocks completion nor is notified.
+    assert.equal(harness.db.requests.rows.get(REQUEST_ID)?.status, 'SentToEngineer')
+    assert.deepEqual(
+      [...harness.db.rows.notifications.values()].map((row) => ({ userId: row.userId, type: row.type })),
+      [
+        { userId: 'engineer-1', type: 'request_assigned' },
+        { userId: SCENARIO.engineeringSupervisorId, type: 'request_assigned' },
+        { userId: SCENARIO.engineeringManagerId, type: 'request_assigned' },
+      ],
+    )
   })
 
   it('rejects onto the current instance outcome atomically without new notification events', async () => {
@@ -320,6 +330,270 @@ describe('pending, action, and notification queries filter current instance iden
     assert.equal(terminalResult.success, true)
     assert.equal(terminal.db.rows.approval_instances.get('instance-auto-1')?.state, 'AUTO_APPROVED', 'cancellation never overwrites a terminal instance outcome')
     assert.deepEqual([...terminal.db.rows.notifications.values()], [])
+  })
+})
+
+describe('superseded pending rows never look current anywhere', () => {
+  function supersededPendingHarness(extraApprovals: Array<Record<string, unknown>> = [], options: {
+    requestStatus?: string
+    extraInstances?: Array<Record<string, unknown>>
+    solutions?: Array<Record<string, unknown>>
+    solutionApprovals?: Array<Record<string, unknown>>
+  } = {}): Harness {
+    return harnessWithInstances({
+      requestStatus: options.requestStatus ?? 'ImprovementRequest',
+      approvals: [
+        {
+          id: 'a-super',
+          requestId: REQUEST_ID,
+          requiredLevel: 4,
+          order: 1,
+          status: 'pending',
+          isFinalApproval: false,
+          instanceId: 'instance-superseded-1',
+          routingMode: 'LEGACY_LEVEL',
+          integrityVersion: 0,
+        },
+        ...extraApprovals,
+      ],
+      solutions: options.solutions ?? [],
+      solutionApprovals: options.solutionApprovals ?? [],
+      instances: [
+        wrappedInstance(),
+        ...(options.extraInstances ?? []),
+      ],
+    })
+  }
+
+  function currentInstance(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return wrappedInstance({ id: 'instance-current-1', state: 'PENDING', supersededAt: null, attempt: 2, ...overrides })
+  }
+
+  it('inbox actionability ignores superseded pending rows and still sees current-instance rows', async () => {
+    const author = workflowUsers().find((u) => u.id === 'department-manager-1')!
+    const hidden = supersededPendingHarness()
+    hidden.state.currentUser = { ...author, department: { id: 'department-pd', type: 'PRODUCTION', name: 'Production PD' } }
+    const hiddenItems = (await hidden.requests.getMyActionItems()) as Array<{ id: string }>
+    assert.equal(
+      hiddenItems.filter((item) => item.id === REQUEST_ID).length,
+      0,
+      'a pending row on a superseded instance is never offered as an action',
+    )
+
+    const visible = supersededPendingHarness(
+      [
+        {
+          id: 'a-cur',
+          requestId: REQUEST_ID,
+          requiredLevel: 4,
+          order: 2,
+          status: 'pending',
+          isFinalApproval: false,
+          instanceId: 'instance-current-1',
+          routingMode: 'LEGACY_LEVEL',
+          integrityVersion: 0,
+        },
+      ],
+      { extraInstances: [currentInstance()] },
+    )
+    visible.state.currentUser = { ...author, department: { id: 'department-pd', type: 'PRODUCTION', name: 'Production PD' } }
+    const visibleItems = (await visible.requests.getMyActionItems()) as Array<{ id: string }>
+    assert.equal(
+      visibleItems.filter((item) => item.id === REQUEST_ID).length,
+      1,
+      'the identical row on the current instance stays actionable',
+    )
+  })
+
+  it('blocking counts ignore superseded pending rows so the current step stays actionable', async () => {
+    const author = workflowUsers().find((u) => u.id === 'department-manager-1')!
+    const harness = supersededPendingHarness(
+      [
+        {
+          id: 'a-cur',
+          requestId: REQUEST_ID,
+          requiredLevel: 4,
+          order: 2,
+          status: 'pending',
+          isFinalApproval: false,
+          instanceId: 'instance-current-1',
+          routingMode: 'LEGACY_LEVEL',
+          integrityVersion: 0,
+        },
+      ],
+      { extraInstances: [currentInstance()] },
+    )
+    harness.state.currentUser = { ...author, department: { id: 'department-pd', type: 'PRODUCTION', name: 'Production PD' } }
+    const items = (await harness.requests.getMyActionItems()) as Array<{ id: string }>
+    assert.equal(
+      items.filter((item) => item.id === REQUEST_ID).length,
+      1,
+      'the superseded order-1 pending row must not block the current order-2 step',
+    )
+  })
+
+  it('engineering needsApproval ignores superseded solution pending rows', async () => {
+    const solutionSeed = [{
+      id: SCENARIO.solutionId,
+      requestId: REQUEST_ID,
+      title: 'Solution',
+      description: '<p>S</p>',
+      costEstimate: 10,
+      currency: 'THB',
+      timeline: '1 week',
+      submittedById: 'engineer-1',
+    }]
+    const supersededRow = {
+      id: 'sa-super',
+      solutionId: SCENARIO.solutionId,
+      requiredLevel: null,
+      requiredApproverId: 'engineer-1',
+      order: 1,
+      status: 'pending',
+      isCustomChain: true,
+      instanceId: 'instance-superseded-sol',
+      routingMode: 'CUSTOM_PERSON',
+      integrityVersion: 1,
+    }
+    const hidden = harnessWithInstances({
+      requestStatus: 'DesignCostEstimationApproval',
+      solutions: solutionSeed,
+      solutionApprovals: [supersededRow],
+      instances: [wrappedInstance({ id: 'instance-superseded-sol', solutionId: SCENARIO.solutionId, requestId: null, phase: 'SOLUTION' })],
+    })
+    const hiddenResult = (await hidden.requests.getRequestsNeedingEngineeringAction('engineer-1')) as { needsApproval: Array<{ request: { id: string } }> }
+    assert.equal(
+      hiddenResult.needsApproval.filter((entry) => entry.request.id === REQUEST_ID).length,
+      0,
+      'a pending row on a superseded solution instance is never offered for approval',
+    )
+
+    const visible = harnessWithInstances({
+      requestStatus: 'DesignCostEstimationApproval',
+      solutions: solutionSeed,
+      solutionApprovals: [{ ...supersededRow, id: 'sa-cur', instanceId: 'instance-current-sol' }],
+      instances: [
+        wrappedInstance({
+          id: 'instance-current-sol',
+          solutionId: SCENARIO.solutionId,
+          requestId: null,
+          phase: 'SOLUTION',
+          state: 'PENDING',
+          supersededAt: null,
+          routingMode: 'CUSTOM_PERSON',
+        }),
+      ],
+    })
+    const visibleResult = (await visible.requests.getRequestsNeedingEngineeringAction('engineer-1')) as { needsApproval: Array<{ request: { id: string } }> }
+    assert.equal(
+      visibleResult.needsApproval.filter((entry) => entry.request.id === REQUEST_ID).length,
+      1,
+      'the identical row on the current solution instance stays offered',
+    )
+  })
+
+  it('last-step approval completes the phase when only superseded pending rows remain', async () => {
+    const harness = supersededPendingHarness([
+      {
+        id: 'a2',
+        requestId: REQUEST_ID,
+        requiredLevel: 4,
+        order: 2,
+        status: 'pending',
+        isFinalApproval: false,
+      },
+    ])
+    harness.state.authUserId = 'department-manager-1'
+
+    const result = (await harness.approvals.approveRequest(REQUEST_ID)) as { success: boolean }
+    assert.equal(result.success, true)
+    assert.equal(
+      harness.db.requests.rows.get(REQUEST_ID)?.status,
+      'SentToEngineer',
+      'superseded pending history must not block the phase completion',
+    )
+  })
+
+  it('superseded pending request and solution rows do not block rejected-request cancellation', async () => {
+    const harness = harnessWithInstances({
+      requestStatus: 'ImprovementRequest',
+      approvals: [
+        { id: 'a-rejected', requestId: REQUEST_ID, requiredLevel: 2, order: 1, status: 'rejected', approverId: 'supervisor-1', isFinalApproval: false },
+        {
+          id: 'a-super',
+          requestId: REQUEST_ID,
+          requiredLevel: 4,
+          order: 2,
+          status: 'pending',
+          isFinalApproval: false,
+          instanceId: 'instance-superseded-1',
+          routingMode: 'LEGACY_LEVEL',
+          integrityVersion: 0,
+        },
+      ],
+      solutions: [{
+        id: SCENARIO.solutionId,
+        requestId: REQUEST_ID,
+        title: 'Solution',
+        description: '<p>S</p>',
+        costEstimate: 10,
+        currency: 'THB',
+        timeline: '1 week',
+        submittedById: 'engineer-1',
+      }],
+      solutionApprovals: [{
+        id: 'sa-super',
+        solutionId: SCENARIO.solutionId,
+        requiredLevel: 2,
+        order: 1,
+        status: 'pending',
+        isCustomChain: false,
+        instanceId: 'instance-superseded-sol',
+        routingMode: 'LEGACY_LEVEL',
+        integrityVersion: 0,
+      }],
+      instances: [
+        wrappedInstance(),
+        wrappedInstance({ id: 'instance-superseded-sol', solutionId: SCENARIO.solutionId, requestId: null, phase: 'SOLUTION' }),
+      ],
+    })
+    harness.state.authUserId = 'staff-1'
+
+    const result = (await harness.requests.cancelRequest({ requestId: REQUEST_ID, reason: 'No longer needed by the line' })) as { success: boolean }
+    assert.equal(result.success, true, 'superseded pending history must not block cancellation')
+    assert.equal(harness.db.requests.rows.get(REQUEST_ID)?.status, 'Cancelled')
+  })
+
+  it('a committed NEW intermediate approve skips the legacy next-approver notification without throwing', async () => {
+    const harness = harnessWithInstances({
+      requestStatus: 'ImprovementRequest',
+      approvals: [
+        { id: 'a1', requestId: REQUEST_ID, requiredLevel: 2, order: 1, status: 'pending', isFinalApproval: false },
+        {
+          id: 'a-snap',
+          requestId: REQUEST_ID,
+          requiredLevel: null,
+          order: 2,
+          status: 'pending',
+          isFinalApproval: false,
+          requiredPosition: 'SECTION_MANAGER',
+          instanceId: 'instance-current-1',
+          routingMode: 'SNAPSHOT_GROUP',
+          integrityVersion: 1,
+          candidateGroupId: 'group-1',
+        },
+      ],
+      instances: [wrappedInstance({ id: 'instance-current-1', state: 'PENDING', supersededAt: null, attempt: 1, routingMode: 'SNAPSHOT_GROUP' })],
+    })
+    harness.state.authUserId = 'supervisor-1'
+
+    // A null-level SNAPSHOT row is next: the legacy level audience does not
+    // exist, so the notification is a silent no-op, never a thrown error and
+    // never a substituted audience.
+    const result = (await harness.approvals.approveRequest(REQUEST_ID)) as { success: boolean }
+    assert.equal(result.success, true)
+    assert.equal(harness.db.rows.request_approvals.get('a1')?.status, 'approved')
+    assert.deepEqual([...harness.db.rows.notifications.values()], [])
   })
 })
 

@@ -382,18 +382,16 @@ export async function submitSolution(input: SubmitSolutionActionInput) {
           'Custom approval chain must have at least one approver after removing submitter',
         )
         await assertCustomApproversExist(tx, orderedApprovers)
+        // Single status writer: createCustomPersonAttempt applies and guards
+        // SentToEngineer -> DesignCostEstimationApproval; no action-level
+        // status write here (a second CAS would match zero rows and roll the
+        // submission back once `new` is enabled).
         await createCustomPersonAttempt(phaseDb, {
           requestId: validated.requestId,
           solutionId: solution.id,
           phase: 'SOLUTION',
           initiatorId: user.id,
           orderedApproverIds: orderedApprovers,
-        })
-        await updateRequestStatusExpecting(tx, {
-          requestId: validated.requestId,
-          expectedStatuses: [RequestStatus.SentToEngineer],
-          data: { status: RequestStatus.DesignCostEstimationApproval },
-          actionLabel: 'submit solution',
         })
         // Preserve custom solution notify-all-at-submit (raw submitted list).
         for (const approverId of validated.customApproverIds) {
@@ -1544,17 +1542,13 @@ export async function initiateFinalApproval(
           'Custom approval chain must have at least one approver after removing initiator',
         )
         await assertCustomApproversExist(tx, orderedApprovers)
+        // Single status writer: the adapter applies and guards
+        // SendBackToRequester -> FinalApproval; no action-level CAS here.
         await createCustomPersonAttempt(phaseDb, {
           requestId,
           phase: 'FINAL',
           initiatorId: userId,
           orderedApproverIds: orderedApprovers,
-        })
-        await updateRequestStatusExpecting(tx, {
-          requestId,
-          expectedStatuses: [RequestStatus.SendBackToRequester],
-          data: { status: RequestStatus.FinalApproval },
-          actionLabel: 'initiate final approval',
         })
         notifications.user({
           userId: orderedApprovers[0],
@@ -2486,15 +2480,11 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
         })
         isAutoApproved = false
         submittedCustomApprovers = validated.customApprovers
-        await updateRequestStatusExpecting(tx, {
-          requestId: validated.requestId,
-          expectedStatuses: [
-            RequestStatus.SentToEngineer,
-            RequestStatus.DesignCostEstimationApproval,
-          ],
-          data: { status: RequestStatus.DesignCostEstimationApproval },
-          actionLabel: 'resubmit solution',
-        })
+        // Single status writer: the adapter applies and guards
+        // DesignCostEstimationApproval from the document's actual status
+        // (SentToEngineer, or DesignCostEstimationApproval on the
+        // rejected-solution route, where it correctly no-ops); no
+        // action-level CAS here.
       } else {
         const attempt = await createSolutionApprovalAttempt(phaseDb, {
           requestId: validated.requestId,

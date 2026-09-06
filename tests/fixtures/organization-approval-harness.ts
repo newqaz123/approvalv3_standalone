@@ -49,7 +49,7 @@ const MODEL_FIELDS: Record<string, readonly string[]> = {
   user: ['id', 'departmentId', 'level', 'isActive', 'role', 'name', 'email', 'createdAt'],
   department_approvers: ['id', 'departmentId', 'approverId', 'approverLevel', 'createdAt'],
   departments: ['id', 'type', 'name', 'createdAt'],
-  requests: ['id', 'status', 'requesterId', 'title', 'description', 'departmentId', 'organizationUnitId', 'projectEstimateCost', 'engineeringCostEstimate', 'updatedAt', 'createdAt', 'isDeleted'],
+  requests: ['id', 'status', 'requesterId', 'title', 'description', 'departmentId', 'organizationUnitId', 'projectEstimateCost', 'engineeringCostEstimate', 'updatedAt', 'createdAt', 'isDeleted', 'isArchived'],
   request_approvals: ['id', 'requestId', 'requiredLevel', 'requiredApproverId', 'order', 'status', 'approverId', 'comments', 'approvedAt', 'isCustomChain', 'isFinalApproval', 'routingMode', 'integrityVersion', 'instanceId', 'requiredPosition', 'candidateGroupId', 'createdAt'],
   request_activities: ['id', 'requestId', 'userId', 'action', 'comments', 'fromStatus', 'toStatus', 'createdAt'],
   notifications: ['id', 'userId', 'type', 'title', 'message', 'requestId', 'readAt', 'createdAt'],
@@ -75,7 +75,7 @@ const JSON_FIELDS = new Set(['approval_instances.originContext'])
  * legacy rows exactly as it does in Postgres.
  */
 const MODEL_COLUMN_DEFAULTS: Record<string, Row> = {
-  requests: { organizationUnitId: null },
+  requests: { organizationUnitId: null, isDeleted: false, isArchived: false },
   request_approvals: { instanceId: null, requiredPosition: null, candidateGroupId: null, routingMode: 'LEGACY_LEVEL', integrityVersion: 0 },
   solution_approvals: { instanceId: null, requiredPosition: null, candidateGroupId: null, routingMode: 'LEGACY_LEVEL', integrityVersion: 0 },
 }
@@ -93,6 +93,7 @@ const MODEL_RELATIONS: Record<
     solutions: { kind: 'many', model: 'solutions', foreignKey: 'requestId' },
     requester: { kind: 'one', model: 'user', localKey: 'requesterId' },
     department: { kind: 'one', model: 'departments', foreignKey: 'departmentId' },
+    fileAttachments: { kind: 'many', model: 'file_attachments', foreignKey: 'requestId' },
   },
   request_approvals: {
     request: { kind: 'one', model: 'requests', foreignKey: 'requestId' },
@@ -370,6 +371,20 @@ function projectRow(
   const result = structuredClone(row)
   if (include) {
     for (const [key, spec] of Object.entries(include)) {
+      if (key === '_count') {
+        // Minimal _count support: counts of listed to-many relations.
+        const countSelect = ((spec ?? {}) as { select?: Select }).select ?? {}
+        const counts: Row = {}
+        for (const relName of Object.keys(countSelect)) {
+          const relation = MODEL_RELATIONS[model]?.[relName]
+          if (!relation || relation.kind !== 'many') {
+            throw new UnexpectedQueryError(`Unsupported _count key '${relName}' for ${model}`)
+          }
+          counts[relName] = resolveRelation(db, model, row, relName, relation).length
+        }
+        result[key] = counts
+        continue
+      }
       const relation = MODEL_RELATIONS[model]?.[key]
       if (!relation) {
         throw new UnexpectedQueryError(`Unsupported include key '${key}' for ${model}`)
@@ -792,6 +807,8 @@ export function createHarness(seed: HarnessSeed = {}): Harness {
   dependencies['./phase-origin'] = dependencies['@/lib/approval-engine/phase-origin']
   dependencies['@/lib/approval-engine/instances'] = load('lib/approval-engine/instances.ts')
   dependencies['./instances'] = dependencies['@/lib/approval-engine/instances']
+  dependencies['@/lib/approval-engine/current-instance'] = load('lib/approval-engine/current-instance.ts')
+  dependencies['./current-instance'] = dependencies['@/lib/approval-engine/current-instance']
   dependencies['@/lib/approval-engine/phase-adapters'] = load('lib/approval-engine/phase-adapters.ts')
   dependencies['@/lib/approval-rollout'] = load('lib/approval-rollout.ts')
   dependencies['./notifications'] = load('server-actions/notifications.ts')

@@ -197,6 +197,44 @@ describe('phase approval adapters', () => {
       assert.equal(db.requestStatus(), 'DesignCostEstimationApproval')
     })
 
+    it('applies exactly ONE guarded status write on the custom path (single writer)', async () => {
+      const db = createPhaseAdapterFixture({ phase: 'SOLUTION', planOutcome: 'PENDING' })
+      const result = await createCustomPersonAttempt(db, {
+        requestId: 'r1',
+        solutionId: 's1',
+        phase: 'SOLUTION',
+        initiatorId: 'engineer-1',
+        orderedApproverIds: ['custom-approver-1'],
+      })
+
+      // The adapter is the single status writer: exactly one CAS application,
+      // so an action-level second write would be a double transition.
+      assert.deepEqual(db.statusUpdates(), [{ from: 'SentToEngineer', to: 'DesignCostEstimationApproval' }])
+      assert.deepEqual(result.statusChange, { from: 'SentToEngineer', to: 'DesignCostEstimationApproval' })
+      assert.equal(db.requestStatus(), 'DesignCostEstimationApproval')
+    })
+
+    it('custom re-attempt from DesignCostEstimationApproval writes no status and never conflicts', async () => {
+      const db = createPhaseAdapterFixture({
+        phase: 'SOLUTION',
+        planOutcome: 'PENDING',
+        initialStatus: 'DesignCostEstimationApproval',
+      })
+      const result = await createCustomPersonAttempt(db, {
+        requestId: 'r1',
+        solutionId: 's1',
+        phase: 'SOLUTION',
+        initiatorId: 'engineer-1',
+        orderedApproverIds: ['custom-approver-2'],
+      })
+
+      // The pending target equals the current status: the guarded writer
+      // no-ops instead of throwing a status conflict on the custom path.
+      assert.deepEqual(db.statusUpdates(), [])
+      assert.equal(result.statusChange, undefined)
+      assert.equal(db.requestStatus(), 'DesignCostEstimationApproval')
+    })
+
     it('keeps the final custom row identity on request_approvals with isFinalApproval true', async () => {
       const db = createPhaseAdapterFixture({ phase: 'FINAL', planOutcome: 'PENDING' })
       const result = await createCustomPersonAttempt(db, {
@@ -207,6 +245,7 @@ describe('phase approval adapters', () => {
       })
 
       assert.deepEqual(result.statusChange, { from: 'SendBackToRequester', to: 'FinalApproval' })
+      assert.deepEqual(db.statusUpdates(), [{ from: 'SendBackToRequester', to: 'FinalApproval' }])
       const row = db.approvalRows()[0]
       assert.deepEqual(
         { requestId: row?.requestId, solutionId: row?.solutionId, isFinalApproval: row?.isFinalApproval, requiredApproverId: row?.requiredApproverId, routingMode: row?.routingMode, instanceId: row?.instanceId },

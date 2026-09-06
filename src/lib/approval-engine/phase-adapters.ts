@@ -63,14 +63,11 @@ export interface PhaseAttemptResult {
 }
 
 /**
- * Current-instance identity filter for approval-row queries: legacy rows
- * (instanceId null) always count, NEW rows count only while their instance is
- * not superseded, so wrapped resubmission history never looks current.
+ * Current-instance identity filter for approval-row queries. Shared with the
+ * lib workflow modules via `./current-instance` (dependency-free) and
+ * re-exported here for the existing server-action consumers.
  */
-export const CURRENT_INSTANCE_ROW_FILTER = [
-  { instanceId: null },
-  { instance: { supersededAt: null } },
-] as const
+export { CURRENT_INSTANCE_ROW_FILTER } from './current-instance'
 
 // ---------------------------------------------------------------------------
 // Exact phase status transitions

@@ -524,6 +524,14 @@ async function notifyNextApprover(requestId: string) {
 
   if (!nextApproval) return
 
+  // NEW SNAPSHOT_GROUP rows carry no legacy level audience (requiredLevel is
+  // always null, and the request may be organization-owned): skip the legacy
+  // notification without throwing — Tasks 9/10 own candidate-group
+  // notifications, and a substituted audience is never acceptable.
+  if (nextApproval.routingMode === 'SNAPSHOT_GROUP') {
+    return
+  }
+
   // Legacy notification boundaries require the request's department and the
   // pending row's level. A missing value is an unsupported (organization-owned)
   // state: reject explicitly instead of querying a substituted audience.

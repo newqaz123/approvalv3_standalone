@@ -1,4 +1,5 @@
 import type { Prisma, RequestStatus } from '@prisma/client'
+import { CURRENT_INSTANCE_ROW_FILTER } from './approval-engine/current-instance'
 import {
   RequestStatusConflictError,
   updateRequestStatusExpecting,
@@ -48,7 +49,14 @@ export interface RequestApprovalTransactionDb {
         approvedAt: Date
       }
     }): Promise<unknown>
-    count(args: { where: { requestId: string; status: 'pending' } }): Promise<number>
+    count(args: {
+      where: {
+        requestId: string
+        status: 'pending'
+        /** Current-instance identity: superseded history never completes a phase. */
+        OR: Array<{ instanceId: null } | { instance: { supersededAt: null } }>
+      }
+    }): Promise<number>
   }
   request_activities: {
     create(args: {
@@ -167,11 +175,14 @@ export async function approveRequestApproval(
     },
   })
 
-  // Check if this was the last approval
+  // Check if this was the last approval. Only CURRENT pending rows count:
+  // pending rows on a superseded instance are resubmission history and can
+  // never complete (or block completing) the phase.
   const pendingApprovals = await db.request_approvals.count({
     where: {
       requestId: input.requestId,
       status: 'pending',
+      OR: [...CURRENT_INSTANCE_ROW_FILTER],
     },
   })
 

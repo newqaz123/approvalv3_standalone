@@ -802,7 +802,7 @@ export async function getRequest(id: string) {
   // solution payloads are loaded.
   if (request) {
     const pendingSolutionApprovals = await prisma.solution_approvals.count({
-      where: { solution: { requestId: id }, status: 'pending' },
+      where: { solution: { requestId: id }, status: 'pending', OR: [...CURRENT_INSTANCE_ROW_FILTER] },
     })
     ;(request as any).hasPendingSolutionApprovals = pendingSolutionApprovals > 0
   }
@@ -1014,6 +1014,8 @@ export async function getMyActionItems() {
     where: {
       OR: requestOrConditions,
       status: 'pending',
+      // Superseded resubmission history is never actionable.
+      AND: [{ OR: [...CURRENT_INSTANCE_ROW_FILTER] }],
       request: {
         isDeleted: false, // Exclude soft-deleted requests
         isArchived: false, // Archived requests are not actionable
@@ -1059,6 +1061,7 @@ export async function getMyActionItems() {
         requestId: approval.requestId,
         order: { lt: approval.order },
         status: 'pending',
+        OR: [...CURRENT_INSTANCE_ROW_FILTER],
       },
     })
 
@@ -1086,6 +1089,8 @@ export async function getMyActionItems() {
     where: {
       OR: solutionOrConditions,
       status: 'pending',
+      // Superseded resubmission history is never actionable.
+      AND: [{ OR: [...CURRENT_INSTANCE_ROW_FILTER] }],
       solution: {
         request: {
           isDeleted: false,
@@ -1136,6 +1141,7 @@ export async function getMyActionItems() {
         solutionId: approval.solutionId,
         order: { lt: approval.order },
         status: 'pending',
+        OR: [...CURRENT_INSTANCE_ROW_FILTER],
       },
     })
 
@@ -1966,6 +1972,7 @@ export async function getRequestsNeedingEngineeringAction(userId: string): Promi
       where: {
         solutionId: solution.id,
         status: 'pending',
+        OR: [...CURRENT_INSTANCE_ROW_FILTER],
       },
       orderBy: {
         order: 'asc',
@@ -1980,6 +1987,7 @@ export async function getRequestsNeedingEngineeringAction(userId: string): Promi
           solutionId: solution.id,
           order: { lt: approval.order },
           status: 'pending',
+          OR: [...CURRENT_INSTANCE_ROW_FILTER],
         },
       })
 
