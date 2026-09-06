@@ -225,15 +225,25 @@ export async function canUserApprove(
     return { canApprove: false }
   }
 
+  // Organization-owned requests have no legacy department; the legacy approval
+  // boundary does not support them yet and must fail closed instead of treating
+  // a null actor department as the same membership.
+  const requestDepartmentId = request.departmentId
+  if (requestDepartmentId === null) {
+    return { canApprove: false }
+  }
+
   // Determine effective level for this user in this department
   // Check if user is an internal approver for the request's department
-  let effectiveLevel = user.departmentId === request.departmentId ? user.level : null
+  let effectiveLevel =
+    user.departmentId !== null && user.departmentId === requestDepartmentId
+      ? user.level
+      : null
 
   // Also check if user is a cross-department approver (DepartmentApprover)
   if (!effectiveLevel) {
     const deptApprover = await prisma.department_approvers.findFirst({
-      // Legacy rows always carry a department; keep this authorization filter exact.
-      where: { departmentId: request.departmentId!, approverId: userId },
+      where: { departmentId: requestDepartmentId, approverId: userId },
       select: { approverLevel: true },
     })
     if (deptApprover) {
@@ -500,10 +510,17 @@ async function notifyNextApprover(requestId: string) {
 
   if (!nextApproval) return
 
+  // Legacy notification boundaries require the request's department and the
+  // pending row's level. A missing value is an unsupported (organization-owned)
+  // state: reject explicitly instead of querying a substituted audience.
+  if (nextApproval.request.departmentId === null || nextApproval.requiredLevel === null) {
+    throw new Error('Cannot notify the next approver: organization-owned requests are not supported by legacy notifications yet')
+  }
+
   // Get users at this level
   const approvers = await getApproversAtLevel(
-    nextApproval.request.departmentId!,
-    nextApproval.requiredLevel!
+    nextApproval.request.departmentId,
+    nextApproval.requiredLevel
   )
 
   // Create notifications for all approvers at this level
@@ -564,15 +581,20 @@ export async function getRequestApprovals(requestId: string) {
       let eligibleApprovers: Array<{ id: string; name: string; level: number | null }> = []
 
       if (approval.status === 'pending') {
-        // Get both internal and external approvers at this level
-        const allApprovers = await getApproversAtLevel(
-          request.departmentId!,
-          approval.requiredLevel!
-        )
-        // Filter out users with null level and limit to first 3
-        eligibleApprovers = allApprovers
-          .filter(u => u.level !== null)
-          .slice(0, 3)
+        // Read-only eligibility display: without the request's legacy department
+        // or the row's level there is nothing to look up. Fail closed to an
+        // empty eligibility list instead of querying a substituted audience.
+        if (request.departmentId !== null && approval.requiredLevel !== null) {
+          // Get both internal and external approvers at this level
+          const allApprovers = await getApproversAtLevel(
+            request.departmentId,
+            approval.requiredLevel
+          )
+          // Filter out users with null level and limit to first 3
+          eligibleApprovers = allApprovers
+            .filter(u => u.level !== null)
+            .slice(0, 3)
+        }
       }
 
       return {

@@ -460,7 +460,7 @@ export async function createNotification(data: {
  * Notify all users in a department (with optional exclusions)
  */
 export async function notifyUsersInDepartment(
-	departmentId: string,
+	departmentId: string | null,
 	notification: {
 		type:
 			| "approval_needed"
@@ -476,6 +476,16 @@ export async function notifyUsersInDepartment(
 	},
 	excludeUserIds?: string[],
 ) {
+	// Legacy department notifications target a real department. An
+	// organization-owned request has none yet; reject here so a missing
+	// department is never queried as "all departmentless users" and never
+	// substituted with a default audience.
+	if (departmentId === null) {
+		throw new Error(
+			"Cannot send a department notification without a legacy department (organization-owned requests are not supported yet)",
+		);
+	}
+
 	// Get all active users in the department
 	const users = await prisma.user.findMany({
 		where: {

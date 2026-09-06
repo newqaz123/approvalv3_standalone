@@ -14,6 +14,14 @@
 -- assigns no positions, maps no departments, and reinterprets no legacy
 -- levels: existing numeric fields and rows remain unchanged except for the
 -- custom discriminator initialization below.
+--
+-- Row integrity versioning: integrityVersion 0 marks legacy-compatible rows
+-- (historical null levels, deleted custom approvers via the existing
+-- ON DELETE SET NULL, rows later wrapped into an instance). integrityVersion 1
+-- marks newly written rows with strictly enforced metadata. Version 0 rows can
+-- never masquerade as SNAPSHOT_GROUP. Future NEW instance persistence
+-- (Task 7/8) must write version 1 rows; no historic identity is backfilled and
+-- the compatibility branch is a real CHECK branch, not a validation exception.
 
 -- CreateEnum
 CREATE TYPE "OrganizationUnitType" AS ENUM ('FACTORY', 'DIVISION', 'DEPARTMENT', 'SECTION');
@@ -39,6 +47,7 @@ CREATE TYPE "ApprovalSkipReason" AS ENUM ('VACANT_POSITION');
 -- AlterTable
 ALTER TABLE "request_approvals" ADD COLUMN     "candidateGroupId" TEXT,
 ADD COLUMN     "instanceId" TEXT,
+ADD COLUMN     "integrityVersion" INTEGER NOT NULL DEFAULT 0,
 ADD COLUMN     "requiredPosition" "OrganizationPositionCode",
 ADD COLUMN     "routingMode" "ApprovalRoutingMode" NOT NULL DEFAULT 'LEGACY_LEVEL',
 ALTER COLUMN "requiredLevel" DROP NOT NULL;
@@ -50,6 +59,7 @@ ALTER COLUMN "departmentId" DROP NOT NULL;
 -- AlterTable
 ALTER TABLE "solution_approvals" ADD COLUMN     "candidateGroupId" TEXT,
 ADD COLUMN     "instanceId" TEXT,
+ADD COLUMN     "integrityVersion" INTEGER NOT NULL DEFAULT 0,
 ADD COLUMN     "requiredPosition" "OrganizationPositionCode",
 ADD COLUMN     "routingMode" "ApprovalRoutingMode" NOT NULL DEFAULT 'LEGACY_LEVEL';
 
@@ -358,12 +368,17 @@ ALTER TABLE "approval_candidate_groups" ADD CONSTRAINT "approval_candidate_group
 -- AddForeignKey
 ALTER TABLE "approval_candidate_group_members" ADD CONSTRAINT "approval_candidate_group_members_candidateGroupId_fkey" FOREIGN KEY ("candidateGroupId") REFERENCES "approval_candidate_groups"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
+
 -- ------------------------------------------------------------------
 -- Compatibility operations (Prisma cannot express these).
 -- ------------------------------------------------------------------
 
 -- The generated DDL has already added both routingMode columns with
--- NOT NULL DEFAULT 'LEGACY_LEVEL'. Existing rows remain legacy by default.
+-- NOT NULL DEFAULT 'LEGACY_LEVEL'. Existing rows remain legacy by default and
+-- stay at integrityVersion 0: the compatibility branch of the row-mode check
+-- below deliberately imposes no level or designated-approver requirements on
+-- them, so historical null-level rows and custom rows whose designated account
+-- was deleted (existing ON DELETE SET NULL semantics) remain valid.
 UPDATE "request_approvals"
 SET "routingMode" = 'CUSTOM_PERSON'
 WHERE "isCustomChain" = true;
@@ -402,35 +417,172 @@ ALTER TABLE "requests"
   ADD CONSTRAINT "requests_one_origin_owner"
   CHECK ("departmentId" IS NOT NULL OR "organizationUnitId" IS NOT NULL);
 
--- Row-mode integrity: the routing discriminator must agree with the row
--- metadata. Snapshot rows are linked to their instance and required position;
--- a pending snapshot row must carry its captured candidate group, while
--- approved auto self-rows legitimately have no pending candidate group and
--- are identified through their instance state, never a fabricated pool.
--- Custom rows keep their explicit required approver and chain flag.
--- Legacy rows retain their required level.
+-- Row-mode integrity, scoped by integrityVersion:
+--   version 0: legacy compatibility only — LEGACY_LEVEL or CUSTOM_PERSON, and
+--     never a snapshot row, so compatibility rows cannot masquerade as
+--     SNAPSHOT_GROUP. No level/approver/instance requirements.
+--   version 1: strict metadata for NEW rows. Grouped snapshot rows carry the
+--     mandatory candidate group; the group-less form is admitted structurally
+--     here but only passes the deferred triggers below when it is an approved
+--     auto self-audit row of its instance.
 ALTER TABLE "request_approvals"
   ADD CONSTRAINT "request_approvals_row_mode_integrity"
   CHECK (
-    ("routingMode" = 'LEGACY_LEVEL' AND "requiredLevel" IS NOT NULL)
-    OR ("routingMode" = 'CUSTOM_PERSON' AND "isCustomChain" = true AND "requiredApproverId" IS NOT NULL)
-    OR (
-      "routingMode" = 'SNAPSHOT_GROUP'
-      AND "instanceId" IS NOT NULL
-      AND "requiredPosition" IS NOT NULL
-      AND ("candidateGroupId" IS NOT NULL OR "status" <> 'pending')
+    "integrityVersion" = 0 AND "routingMode" IN ('LEGACY_LEVEL', 'CUSTOM_PERSON')
+    OR "integrityVersion" = 1 AND (
+      "routingMode" = 'LEGACY_LEVEL' AND "requiredLevel" IS NOT NULL
+      OR "routingMode" = 'CUSTOM_PERSON' AND "isCustomChain" = true AND "requiredApproverId" IS NOT NULL
+      OR "routingMode" = 'SNAPSHOT_GROUP' AND "instanceId" IS NOT NULL AND "requiredPosition" IS NOT NULL
     )
   );
 
 ALTER TABLE "solution_approvals"
   ADD CONSTRAINT "solution_approvals_row_mode_integrity"
   CHECK (
-    ("routingMode" = 'LEGACY_LEVEL' AND "requiredLevel" IS NOT NULL)
-    OR ("routingMode" = 'CUSTOM_PERSON' AND "isCustomChain" = true AND "requiredApproverId" IS NOT NULL)
-    OR (
-      "routingMode" = 'SNAPSHOT_GROUP'
-      AND "instanceId" IS NOT NULL
-      AND "requiredPosition" IS NOT NULL
-      AND ("candidateGroupId" IS NOT NULL OR "status" <> 'pending')
+    "integrityVersion" = 0 AND "routingMode" IN ('LEGACY_LEVEL', 'CUSTOM_PERSON')
+    OR "integrityVersion" = 1 AND (
+      "routingMode" = 'LEGACY_LEVEL' AND "requiredLevel" IS NOT NULL
+      OR "routingMode" = 'CUSTOM_PERSON' AND "isCustomChain" = true AND "requiredApproverId" IS NOT NULL
+      OR "routingMode" = 'SNAPSHOT_GROUP' AND "instanceId" IS NOT NULL AND "requiredPosition" IS NOT NULL
     )
   );
+
+-- ------------------------------------------------------------------
+-- Group-less snapshot audit integrity (cross-table, deferred).
+--
+-- A version-1 SNAPSHOT_GROUP approval row without a candidate group is only
+-- valid as an approved auto self-audit row: status approved, actual approver
+-- equal to the linked instance's originUserId, instance in AUTO_APPROVED state
+-- with SNAPSHOT_GROUP mode, and matching owner and phase. The check always
+-- re-reads the latest persisted rows at constraint time (deferred to commit),
+-- so no stale event snapshot can pass, and a later instance mutation that
+-- would invalidate an existing audit row is rejected.
+--
+-- Task 8 ruling: supersession sets "supersededAt" while PRESERVING the prior
+-- terminal state — AUTO_APPROVED is never erased into SUPERSEDED. The state is
+-- therefore the durable audit proof guarded here, which is why the instance
+-- trigger validates "state" mutations and does not need to fire on
+-- "supersededAt" writes.
+-- ------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION "approval_groupless_snapshot_audit_ok"(
+  p_table_kind text,
+  p_row_id text
+) RETURNS boolean AS $$
+DECLARE
+  v_status text;
+  v_approver_id text;
+  v_instance_id text;
+  v_owner_id text;
+  v_is_final boolean;
+  v_instance_state text;
+  v_instance_origin text;
+  v_instance_mode text;
+  v_instance_request text;
+  v_instance_solution text;
+  v_instance_phase text;
+BEGIN
+  IF p_table_kind = 'request' THEN
+    SELECT "status", "approverId", "instanceId", "requestId", "isFinalApproval"
+      INTO v_status, v_approver_id, v_instance_id, v_owner_id, v_is_final
+      FROM "request_approvals" WHERE "id" = p_row_id;
+  ELSE
+    SELECT "status", "approverId", "instanceId", "solutionId", NULL::boolean
+      INTO v_status, v_approver_id, v_instance_id, v_owner_id, v_is_final
+      FROM "solution_approvals" WHERE "id" = p_row_id;
+  END IF;
+
+  IF v_instance_id IS NULL THEN
+    RETURN false;
+  END IF;
+
+  SELECT "state", "originUserId", "routingMode", "requestId", "solutionId", "phase"
+    INTO v_instance_state, v_instance_origin, v_instance_mode, v_instance_request, v_instance_solution, v_instance_phase
+    FROM "approval_instances" WHERE "id" = v_instance_id;
+
+  IF v_instance_state IS NULL THEN
+    RETURN false;
+  END IF;
+
+  RETURN v_status = 'approved'
+    AND v_instance_state = 'AUTO_APPROVED'
+    AND v_approver_id IS NOT NULL
+    AND v_approver_id = v_instance_origin
+    AND v_instance_mode = 'SNAPSHOT_GROUP'
+    AND (
+      (
+        p_table_kind = 'request'
+        AND v_instance_request IS NOT NULL AND v_instance_request = v_owner_id
+        AND ((v_instance_phase = 'FINAL') = v_is_final)
+      )
+      OR (
+        p_table_kind = 'solution'
+        AND v_instance_solution IS NOT NULL AND v_instance_solution = v_owner_id
+        AND v_instance_phase = 'SOLUTION'
+      )
+    );
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION "enforce_request_approvals_groupless_snapshot_audit"() RETURNS trigger AS $$
+BEGIN
+  IF NEW."integrityVersion" = 1
+     AND NEW."routingMode" = 'SNAPSHOT_GROUP'
+     AND NEW."candidateGroupId" IS NULL
+     AND NOT "approval_groupless_snapshot_audit_ok"('request', NEW."id") THEN
+    RAISE EXCEPTION 'group-less snapshot approval row % is not an approved auto self-audit row of its instance', NEW."id";
+  END IF;
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION "enforce_solution_approvals_groupless_snapshot_audit"() RETURNS trigger AS $$
+BEGIN
+  IF NEW."integrityVersion" = 1
+     AND NEW."routingMode" = 'SNAPSHOT_GROUP'
+     AND NEW."candidateGroupId" IS NULL
+     AND NOT "approval_groupless_snapshot_audit_ok"('solution', NEW."id") THEN
+    RAISE EXCEPTION 'group-less snapshot approval row % is not an approved auto self-audit row of its instance', NEW."id";
+  END IF;
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION "enforce_groupless_snapshot_audit_on_instance"() RETURNS trigger AS $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM "request_approvals" r
+     WHERE r."instanceId" = NEW."id"
+       AND r."integrityVersion" = 1
+       AND r."routingMode" = 'SNAPSHOT_GROUP'
+       AND r."candidateGroupId" IS NULL
+       AND NOT "approval_groupless_snapshot_audit_ok"('request', r."id")
+  ) OR EXISTS (
+    SELECT 1 FROM "solution_approvals" s
+     WHERE s."instanceId" = NEW."id"
+       AND s."integrityVersion" = 1
+       AND s."routingMode" = 'SNAPSHOT_GROUP'
+       AND s."candidateGroupId" IS NULL
+       AND NOT "approval_groupless_snapshot_audit_ok"('solution', s."id")
+  ) THEN
+    RAISE EXCEPTION 'approval instance % mutation would invalidate an existing group-less snapshot audit row', NEW."id";
+  END IF;
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE CONSTRAINT TRIGGER "request_approvals_groupless_snapshot_audit_guard"
+AFTER INSERT OR UPDATE ON "request_approvals"
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW EXECUTE FUNCTION "enforce_request_approvals_groupless_snapshot_audit"();
+
+CREATE CONSTRAINT TRIGGER "solution_approvals_groupless_snapshot_audit_guard"
+AFTER INSERT OR UPDATE ON "solution_approvals"
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW EXECUTE FUNCTION "enforce_solution_approvals_groupless_snapshot_audit"();
+
+CREATE CONSTRAINT TRIGGER "approval_instances_groupless_snapshot_audit_guard"
+AFTER UPDATE OF "state", "originUserId", "requestId", "solutionId", "phase", "routingMode"
+ON "approval_instances"
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW EXECUTE FUNCTION "enforce_groupless_snapshot_audit_on_instance"();

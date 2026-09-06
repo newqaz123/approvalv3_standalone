@@ -101,6 +101,7 @@ describe('organization approval schema contract', () => {
       assert.match(block, /requiredPosition\s+OrganizationPositionCode\?/)
       assert.match(block, /candidateGroupId\s+String\?/)
       assert.match(block, /routingMode\s+ApprovalRoutingMode\s+@default\(LEGACY_LEVEL\)/)
+      assert.match(block, /integrityVersion\s+Int\s+@default\(0\)/)
       assert.match(
         block,
         new RegExp(
@@ -241,6 +242,10 @@ describe('organization approval generated client metadata', () => {
       const routingMode = findField(findModel(model), 'routingMode')
       assert.equal(routingMode.isRequired, true, `${model}.routingMode must be required`)
       assert.equal(routingMode.type, 'ApprovalRoutingMode')
+      const integrityVersion = findField(findModel(model), 'integrityVersion')
+      assert.equal(integrityVersion.isRequired, true, `${model}.integrityVersion must be required`)
+      assert.equal(integrityVersion.type, 'Int')
+      assert.equal(integrityVersion.default, 0, `${model}.integrityVersion must default to 0 (legacy compatibility)`)
     }
   })
 })
@@ -301,7 +306,7 @@ describe('organization approval migration SQL contract', () => {
     )
   })
 
-  it('keeps row modes honest, including approved auto self-rows without pending groups', () => {
+  it('scopes strict row-mode integrity to version 1 and keeps version 0 legacy-compatible', () => {
     for (const table of ['request_approvals', 'solution_approvals']) {
       const constraint = `ALTER TABLE "${table}" ADD CONSTRAINT "${table}_row_mode_integrity"`
       assert.ok(
@@ -309,18 +314,16 @@ describe('organization approval migration SQL contract', () => {
           normalized(`
             ${constraint}
             CHECK (
-              ("routingMode" = 'LEGACY_LEVEL' AND "requiredLevel" IS NOT NULL)
-              OR ("routingMode" = 'CUSTOM_PERSON' AND "isCustomChain" = true AND "requiredApproverId" IS NOT NULL)
-              OR (
-                "routingMode" = 'SNAPSHOT_GROUP'
-                AND "instanceId" IS NOT NULL
-                AND "requiredPosition" IS NOT NULL
-                AND ("candidateGroupId" IS NOT NULL OR "status" <> 'pending')
+              "integrityVersion" = 0 AND "routingMode" IN ('LEGACY_LEVEL', 'CUSTOM_PERSON')
+              OR "integrityVersion" = 1 AND (
+                "routingMode" = 'LEGACY_LEVEL' AND "requiredLevel" IS NOT NULL
+                OR "routingMode" = 'CUSTOM_PERSON' AND "isCustomChain" = true AND "requiredApproverId" IS NOT NULL
+                OR "routingMode" = 'SNAPSHOT_GROUP' AND "instanceId" IS NOT NULL AND "requiredPosition" IS NOT NULL
               )
             );
           `),
         ),
-        `${table} row-mode integrity check must tie routingMode to row metadata`,
+        `${table} row-mode integrity check must separate legacy-compatible version 0 from strict version 1`,
       )
       assert.ok(
         sql.indexOf(`UPDATE "${table}" SET "routingMode" = 'CUSTOM_PERSON'`) <
@@ -328,6 +331,111 @@ describe('organization approval migration SQL contract', () => {
         `discriminator initialization must run before the ${table} row-mode check`,
       )
     }
+  })
+
+  it('admits historical version-0 rows without re-imposing strict metadata', () => {
+    // Historical rows keep null levels and null designated approvers (deleted
+    // custom accounts were always SetNull), and may later be wrapped into an
+    // instance. Version 0 must accept them; strict metadata applies only to
+    // version 1. NOT VALID must not substitute for the compatibility branch.
+    assert.doesNotMatch(sql, /NOT VALID/i)
+    for (const table of ['request_approvals', 'solution_approvals']) {
+      const statement =
+        sql.match(new RegExp(`ALTER TABLE "${table}" ADD CONSTRAINT "${table}_row_mode_integrity" [\\s\\S]*?;`))?.[0] ?? ''
+      const versionBoundary = statement.indexOf('"integrityVersion" = 1')
+      assert.ok(versionBoundary > 0, `${table} row-mode check must scope strict rules to version 1`)
+      const v0Branch = statement.slice(0, versionBoundary)
+      assert.match(
+        v0Branch,
+        /"routingMode" IN \('LEGACY_LEVEL', 'CUSTOM_PERSON'\)/,
+        `${table} version 0 must be restricted to legacy and custom modes only`,
+      )
+      assert.doesNotMatch(
+        v0Branch,
+        /"requiredApproverId" IS NOT NULL/,
+        `${table} version 0 must not require a designated approver`,
+      )
+      assert.doesNotMatch(
+        v0Branch,
+        /"requiredLevel" IS NOT NULL/,
+        `${table} version 0 must not require a level`,
+      )
+      const v1Branch = statement.slice(versionBoundary)
+      assert.match(
+        v1Branch,
+        /"requiredApproverId" IS NOT NULL/,
+        `${table} version 1 custom rows must require a designated approver`,
+      )
+    }
+  })
+
+  it('enforces the group-less snapshot exception through deferred cross-table triggers', () => {
+    // The exception is narrow: an approved audit row whose actual approver is
+    // the linked instance's origin user, on an AUTO_APPROVED SNAPSHOT_GROUP
+    // instance matching owner and phase. Grouped snapshot rows keep their
+    // mandatory candidate group. A later instance mutation re-validates the
+    // latest persisted rows, so no stale event snapshot can pass.
+    assert.match(sql, /CREATE OR REPLACE FUNCTION "approval_groupless_snapshot_audit_ok"/)
+    for (const fragment of [
+      normalized(`v_status = 'approved'`),
+      normalized(`v_instance_state = 'AUTO_APPROVED'`),
+      normalized(`v_approver_id = v_instance_origin`),
+      normalized(`v_instance_mode = 'SNAPSHOT_GROUP'`),
+      normalized(`v_instance_request IS NOT NULL AND v_instance_request = v_owner_id`),
+      normalized(`(v_instance_phase = 'FINAL') = v_is_final`),
+      normalized(`v_instance_solution IS NOT NULL AND v_instance_solution = v_owner_id`),
+      normalized(`v_instance_phase = 'SOLUTION'`),
+    ]) {
+      assert.ok(sql.includes(fragment), `audit predicate must include ${fragment}`)
+    }
+    for (const table of ['request_approvals', 'solution_approvals']) {
+      assert.ok(
+        sql.includes(
+          normalized(`
+            CREATE CONSTRAINT TRIGGER "${table}_groupless_snapshot_audit_guard"
+            AFTER INSERT OR UPDATE ON "${table}"
+            DEFERRABLE INITIALLY DEFERRED
+            FOR EACH ROW EXECUTE FUNCTION "enforce_${table}_groupless_snapshot_audit"();
+          `),
+        ),
+        `${table} must carry a deferred row-level group-less snapshot audit trigger`,
+      )
+      assert.ok(
+        sql.includes(
+          normalized(`
+            IF NEW."integrityVersion" = 1
+              AND NEW."routingMode" = 'SNAPSHOT_GROUP'
+              AND NEW."candidateGroupId" IS NULL
+          `),
+        ),
+        `${table} trigger must gate only group-less version-1 snapshot rows`,
+      )
+    }
+    assert.ok(
+      sql.includes(
+        normalized(`
+          CREATE CONSTRAINT TRIGGER "approval_instances_groupless_snapshot_audit_guard"
+          AFTER UPDATE OF "state", "originUserId", "requestId", "solutionId", "phase", "routingMode"
+          ON "approval_instances"
+          DEFERRABLE INITIALLY DEFERRED
+          FOR EACH ROW EXECUTE FUNCTION "enforce_groupless_snapshot_audit_on_instance"();
+        `),
+      ),
+      'instance mutations must re-validate group-less snapshot audit rows',
+    )
+    assert.ok(
+      sql.includes(
+        normalized(
+          'AND NOT "approval_groupless_snapshot_audit_ok"(\'request\', r."id")',
+        ),
+      ) &&
+        sql.includes(
+          normalized(
+            'AND NOT "approval_groupless_snapshot_audit_ok"(\'solution\', s."id")',
+          ),
+        ),
+      'instance-side validation must re-check the latest persisted rows',
+    )
   })
 
   it('requires every request to keep one present origin owner', () => {

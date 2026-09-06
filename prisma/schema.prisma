@@ -171,6 +171,12 @@ model request_approvals {
   requiredPosition                                  OrganizationPositionCode?
   candidateGroupId                                  String?
   routingMode                                       ApprovalRoutingMode          @default(LEGACY_LEVEL)
+  // 0 = legacy-compatible rows (historical null levels, deleted custom
+  // approvers via SetNull, rows later wrapped into an instance). 1 = strict
+  // NEW metadata enforced by the row-mode CHECK and the group-less snapshot
+  // audit triggers. Future NEW instance persistence (Task 7/8) must create
+  // rows with integrityVersion 1.
+  integrityVersion                                  Int                          @default(0)
   approver                                          User?                        @relation("request_approvals_approverIdTousers", fields: [approverId], references: [id])
   request                                           requests                     @relation(fields: [requestId], references: [id], onDelete: Cascade)
   requiredApprover                                  User?                        @relation("request_approvals_requiredApproverIdTousers", fields: [requiredApproverId], references: [id])
@@ -346,6 +352,9 @@ model solution_approvals {
   requiredPosition                                   OrganizationPositionCode?
   candidateGroupId                                   String?
   routingMode                                        ApprovalRoutingMode          @default(LEGACY_LEVEL)
+  // Same versioning contract as request_approvals: 0 legacy-compatible,
+  // 1 strict NEW metadata.
+  integrityVersion                                   Int                          @default(0)
   approver                                           User?                        @relation("solution_approvals_approverIdTousers", fields: [approverId], references: [id])
   requiredApprover                                   User?                        @relation("solution_approvals_requiredApproverIdTousers", fields: [requiredApproverId], references: [id])
   solution                                           solutions                    @relation(fields: [solutionId], references: [id], onDelete: Cascade)
@@ -696,6 +705,9 @@ model approval_instances {
   attempt          Int                        @default(1)
   completionReason String?
   createdAt        DateTime                   @default(now())
+  // Task 8 ruling: supersession sets supersededAt while PRESERVING the prior
+  // terminal state — AUTO_APPROVED is never erased into SUPERSEDED. The state
+  // stays the durable audit proof for group-less auto self-rows.
   supersededAt     DateTime?
   request          requests?                  @relation(fields: [requestId], references: [id], onDelete: Cascade)
   solution         solutions?                 @relation(fields: [solutionId], references: [id], onDelete: Cascade)

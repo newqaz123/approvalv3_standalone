@@ -50,11 +50,11 @@ const MODEL_FIELDS: Record<string, readonly string[]> = {
   department_approvers: ['id', 'departmentId', 'approverId', 'approverLevel', 'createdAt'],
   departments: ['id', 'type', 'name', 'createdAt'],
   requests: ['id', 'status', 'requesterId', 'title', 'description', 'departmentId', 'projectEstimateCost', 'engineeringCostEstimate', 'updatedAt', 'createdAt', 'isDeleted'],
-  request_approvals: ['id', 'requestId', 'requiredLevel', 'requiredApproverId', 'order', 'status', 'approverId', 'comments', 'approvedAt', 'isCustomChain', 'isFinalApproval', 'createdAt'],
+  request_approvals: ['id', 'requestId', 'requiredLevel', 'requiredApproverId', 'order', 'status', 'approverId', 'comments', 'approvedAt', 'isCustomChain', 'isFinalApproval', 'routingMode', 'integrityVersion', 'createdAt'],
   request_activities: ['id', 'requestId', 'userId', 'action', 'comments', 'fromStatus', 'toStatus', 'createdAt'],
   notifications: ['id', 'userId', 'type', 'title', 'message', 'requestId', 'readAt', 'createdAt'],
   solutions: ['id', 'requestId', 'title', 'description', 'costEstimate', 'currency', 'timeline', 'conceptDesign', 'submittedById', 'submittedAt', 'createdAt', 'updatedAt'],
-  solution_approvals: ['id', 'solutionId', 'requiredLevel', 'requiredApproverId', 'order', 'status', 'approverId', 'comments', 'approvedAt', 'isCustomChain', 'createdAt'],
+  solution_approvals: ['id', 'solutionId', 'requiredLevel', 'requiredApproverId', 'order', 'status', 'approverId', 'comments', 'approvedAt', 'isCustomChain', 'routingMode', 'integrityVersion', 'createdAt'],
   file_attachments: ['id', 'requestId', 'solutionId', 'uploadedById', 'filePath', 'fileName', 'createdAt'],
   email_settings: ['id', 'enabled', 'host', 'port', 'username', 'password', 'fromAddress', 'createdAt'],
 }
@@ -75,6 +75,8 @@ const MODEL_RELATIONS: Record<
   },
   request_approvals: {
     request: { kind: 'one', model: 'requests', foreignKey: 'requestId' },
+    approver: { kind: 'one', model: 'user', foreignKey: 'approverId' },
+    requiredApprover: { kind: 'one', model: 'user', foreignKey: 'requiredApproverId' },
   },
   solutions: {
     request: { kind: 'one', model: 'requests', foreignKey: 'requestId' },

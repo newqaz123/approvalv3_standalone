@@ -193,9 +193,10 @@ describe('solution workflow transaction notification boundaries', () => {
 
     assert.match(
       autoApprovedBranch,
-      // request.department carries a compile-safe non-null assertion (legacy
-      // rows always have a department); the notification contract is unchanged.
-      /notifications\.department\(request\.department!?\.id,[\s\S]*?type:\s*'solution_ready'/,
+      // The department argument is either the historical request.department.id
+      // read or the explicit non-null local captured after the legacy-boundary
+      // guard; the notification contract is unchanged.
+      /notifications\.department\((?:request\.department!?\.id|requestDepartmentId),[\s\S]*?type:\s*'solution_ready'/,
       'auto-approved resubmission must queue its requester-department notification inside the isAutoApproved branch',
     )
 

@@ -497,6 +497,10 @@ async function createCustomApprovalChain(
     order: index + 1,
     status: 'pending' as const,
     isCustomChain: true,
+    // Explicit discriminator: without it the row would default to LEGACY_LEVEL
+    // and violate the row-mode integrity check. Compatibility version 0 is
+    // kept until NEW instance integration (Task 7/8).
+    routingMode: 'CUSTOM_PERSON' as const,
   }))
 
   await tx.solution_approvals.createMany({ data: approvals })
@@ -781,7 +785,12 @@ export async function canUserApproveSolution(solutionId: string): Promise<{
     return { canApprove: false }
   }
 
-  // Check if request is in correct status
+  // Organization-owned requests have no legacy department; legacy solution
+  // approval is an unsupported boundary until NEW adapters are integrated.
+  // Fail closed instead of authorizing through a null-department match.
+  if (solution.request.departmentId === null) {
+    return { canApprove: false }
+  }
   if (solution.request.status !== RequestStatus.DesignCostEstimationApproval) {
     // Convert Decimal to number before returning
     return {
@@ -959,8 +968,15 @@ export async function approveSolution(solutionId: string, comments?: string, exp
           },
         })
 
+        if (request.departmentId === null) {
+          // Unreachable while the solution-approval gate rejects
+          // organization-owned requests; kept as an explicit legacy-boundary
+          // guard so a missing department can never select an audience.
+          throw new Error('Cannot notify requester department: organization-owned requests are not supported by legacy notifications yet')
+        }
+
         // Queue requester-department notification for post-commit dispatch.
-        notifications.department(request.departmentId!, {
+        notifications.department(request.departmentId, {
           type: 'solution_ready',
           title: 'Solution Ready for Review',
           message: `📤 Ready for Review: "${request.title}" has been completed and awaits your department's final review.`,
@@ -1321,13 +1337,19 @@ export async function initiateFinalApproval(
   }
 
   // Validate caller is in request's department
-  if (user.departmentId !== request.departmentId) {
+  if (request.departmentId === null) {
+    // Organization-owned requests have no legacy department; final approval
+    // creation is a legacy boundary and must fail closed before any write.
+    throw new Error('Organization-owned requests are not supported by legacy final approval yet')
+  }
+  const requestDepartmentId = request.departmentId
+  if (user.departmentId !== requestDepartmentId) {
     throw new Error('Only department members can initiate final approval')
   }
 
   // Get max level in department for top-level check
   const maxLevel = validateApprovalLevel(
-    await getMaxValidLevelInDepartment(prisma, request.departmentId!),
+    await getMaxValidLevelInDepartment(prisma, request.departmentId),
   )
   const initiatorLevel = normalizeSubmitterLevel(user.level)
   const isTopLevelInitiator = initiatorLevel >= maxLevel
@@ -1404,7 +1426,7 @@ export async function initiateFinalApproval(
       })
     } else {
       // Use department hierarchy
-      await createHierarchyFinalApprovalChain(tx, requestId, request.departmentId!, userId)
+      await createHierarchyFinalApprovalChain(tx, requestId, requestDepartmentId, userId)
       // Update request status to FinalApproval via the shared expected-status
       // guard (see updateRequestStatusExpecting).
       await updateRequestStatusExpecting(tx, {
@@ -1483,6 +1505,8 @@ async function createCustomFinalApprovalChain(
     status: 'pending' as const,
     isCustomChain: true,
     isFinalApproval: true,
+    // Explicit discriminator (compatibility version 0 until NEW integration).
+    routingMode: 'CUSTOM_PERSON' as const,
   }))
 
   await tx.request_approvals.createMany({ data: approvals })
@@ -1600,7 +1624,9 @@ async function queueNextFinalApproverNotifications(
   }
 
   // For hierarchy chain: notify all users at requiredLevel in request's department
-  if (nextApproval.requiredLevel) {
+  if (nextApproval.requiredLevel && nextApproval.request.departmentId) {
+    // The departmentId truthiness guard keeps a missing legacy department from
+    // being queried as an audience (never notify departmentless users).
     const approvers = await tx.user.findMany({
       where: {
         departmentId: nextApproval.request.departmentId,
@@ -1646,10 +1672,16 @@ export async function canUserApproveFinalApproval(requestId: string): Promise<{
   // Check request status
   const request = await prisma.requests.findUnique({
     where: { id: requestId },
-    select: { status: true },
+    select: { status: true, departmentId: true },
   })
 
   if (!request || request.status !== RequestStatus.FinalApproval) {
+    return { canApprove: false }
+  }
+
+  // Organization-owned requests have no legacy department; final approval is
+  // an unsupported legacy boundary until NEW adapters are integrated.
+  if (request.departmentId === null) {
     return { canApprove: false }
   }
 
@@ -1805,10 +1837,17 @@ export async function approveFinalApproval(requestId: string, comments?: string,
 
       const engineeringUserIds = engineeringUsers.map(u => u.id)
 
+      if (request.departmentId === null) {
+        // Unreachable while the final-approval gate rejects organization-owned
+        // requests; kept as an explicit legacy-boundary guard so a missing
+        // department can never select an audience.
+        throw new Error('Cannot notify requester department: organization-owned requests are not supported by legacy notifications yet')
+      }
+
       // Queue requester-department completion notification for post-commit
       // dispatch, excluding engineering users.
       notifications.department(
-        request.departmentId!,
+        request.departmentId,
         {
           type: 'approval_granted',
           title: 'Request Completed',
@@ -2042,6 +2081,13 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
     throw new Error('Request not found')
   }
 
+  // Organization-owned requests have no legacy department; legacy solution
+  // resubmission is an unsupported boundary until NEW adapters are integrated.
+  if (request.departmentId === null) {
+    throw new Error('Organization-owned requests are not supported by legacy solution resubmission yet')
+  }
+  const requestDepartmentId: string = request.departmentId
+
   const solution = request.solutions[0]
   if (!solution) {
     throw new Error('No solution found for this request')
@@ -2169,6 +2215,10 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
           order: index + 1,
           status: 'pending',
           isCustomChain: true,
+          // Explicit discriminator (compatibility version 0 until NEW
+          // integration); the default would misclassify the row and violate
+          // the row-mode integrity check.
+          routingMode: 'CUSTOM_PERSON' as const,
         })
       })
     } else {
@@ -2288,7 +2338,7 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
       })
 
       // Queue requester-department notification for post-commit dispatch.
-      notifications.department(request.department!.id, {
+      notifications.department(requestDepartmentId, {
         type: 'solution_ready',
         title: 'Solution Ready for Review',
         message: `📤 Ready for Review: "${request.title}" solution has been updated and is ready for your department's final review.`,

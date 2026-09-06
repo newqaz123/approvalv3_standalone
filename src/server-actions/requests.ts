@@ -476,9 +476,14 @@ export async function getMyRequests(filters?: GetRequestsFilters) {
     // Load potential approvers for pending approvals that don't have a requiredApprover
     const approvals = await Promise.all(rawApprovals.map(async (approval) => {
       // If pending and no specific requiredApprover, load potential approvers at this level
-      if (approval.status === 'pending' && !approval.requiredApprover && approvalDepartmentId) {
+      if (
+        approval.status === 'pending' &&
+        !approval.requiredApprover &&
+        approvalDepartmentId &&
+        approval.requiredLevel !== null
+      ) {
         try {
-          const potentialApprovers = await getApproversAtLevel(approvalDepartmentId, approval.requiredLevel!)
+          const potentialApprovers = await getApproversAtLevel(approvalDepartmentId, approval.requiredLevel)
           return {
             ...approval,
             potentialApprovers: potentialApprovers.map(p => ({ name: p.name })),

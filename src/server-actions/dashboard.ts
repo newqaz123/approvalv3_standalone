@@ -228,12 +228,13 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
 						if (
 							a.status === "pending" &&
 							!a.requiredApprover &&
-							approval.request.departmentId
+							approval.request.departmentId &&
+							a.requiredLevel !== null
 						) {
 							try {
 								const potentialApprovers = await getApproversAtLevel(
 									approval.request.departmentId,
-									a.requiredLevel!,
+									a.requiredLevel,
 								);
 								return {
 									...a,
@@ -386,12 +387,13 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
 						if (
 							a.status === "pending" &&
 							!a.requiredApprover &&
-							request.departmentId
+							request.departmentId &&
+							a.requiredLevel !== null
 						) {
 							try {
 								const potentialApprovers = await getApproversAtLevel(
 									request.departmentId,
-									a.requiredLevel!,
+									a.requiredLevel,
 								);
 								return {
 									...a,
@@ -593,12 +595,13 @@ export async function getMyCreatedRequests(): Promise<RequestListRow[]> {
 					if (
 						approval.status === "pending" &&
 						!approval.requiredApprover &&
-						approvalDepartmentId
+						approvalDepartmentId &&
+						approval.requiredLevel !== null
 					) {
 						try {
 							const potentialApprovers = await getApproversAtLevel(
 								approvalDepartmentId,
-								approval.requiredLevel!,
+								approval.requiredLevel,
 							);
 							return {
 								...approval,
@@ -847,12 +850,13 @@ export async function getAllRequests(): Promise<RequestListRow[]> {
 					if (
 						approval.status === "pending" &&
 						!approval.requiredApprover &&
-						approvalDepartmentId
+						approvalDepartmentId &&
+						approval.requiredLevel !== null
 					) {
 						try {
 							const potentialApprovers = await getApproversAtLevel(
 								approvalDepartmentId,
-								approval.requiredLevel!,
+								approval.requiredLevel,
 							);
 							return {
 								...approval,
