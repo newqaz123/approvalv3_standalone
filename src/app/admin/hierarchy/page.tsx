@@ -1,4 +1,5 @@
 import { Suspense } from 'react'
+import Link from 'next/link'
 import { auth } from '@/lib/auth-config'
 import { redirect } from 'next/navigation'
 import prisma from '@/lib/prisma'
@@ -53,9 +54,18 @@ export default async function HierarchyPage({ searchParams }: HierarchyPageProps
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">Hierarchy Management</h1>
+        <h1 className="text-2xl font-bold">Legacy Hierarchy Compatibility</h1>
         <p className="text-muted-foreground">
-          Manage the approval hierarchy for each department. Drag users between levels to update their position.
+          Numeric levels and department_approvers are legacy compatibility data for in-flight rows.
+          They are not the six organization positions. Keep this page until legacy in-flight rows are
+          retired. Drag remains available only for those legacy rows.
+        </p>
+        <p className="mt-2 text-sm">
+          For typed units and positions, use{' '}
+          <Link href="/admin/organization" className="text-primary underline">
+            Organization administration
+          </Link>
+          .
         </p>
       </div>
 

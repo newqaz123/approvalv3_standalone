@@ -10,15 +10,16 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
-import { UserForm } from '@/components/admin/user-form'
+import { UserForm, type OrganizationUnitOption } from '@/components/admin/user-form'
 import { Plus } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 
 interface CreateUserDialogProps {
   departments: any[]
+  organizationUnits?: OrganizationUnitOption[]
 }
 
-export function CreateUserDialog({ departments }: CreateUserDialogProps) {
+export function CreateUserDialog({ departments, organizationUnits = [] }: CreateUserDialogProps) {
   const [open, setOpen] = useState(false)
   const router = useRouter()
 
@@ -44,6 +45,7 @@ export function CreateUserDialog({ departments }: CreateUserDialogProps) {
         </DialogHeader>
         <UserForm
           departments={departments}
+          organizationUnits={organizationUnits}
           onSuccess={handleSuccess}
           onCancel={() => setOpen(false)}
         />

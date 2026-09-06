@@ -6,25 +6,36 @@ import { requireAdmin } from '@/lib/auth'
 import { revalidatePath } from 'next/cache'
 import { auth } from '@/lib/auth-config'
 import { validateApprovalLevel } from '@/lib/approval-levels'
+import type { OrganizationPositionCode } from '@/lib/organization/types'
+import { savePositionAssignment } from './organization'
 
 export type UserRole = 'admin' | 'general_dept' | 'engineering'
+
+export interface UserPositionAssignmentInput {
+  unitId: string
+  positionCode: OrganizationPositionCode
+  reportingGroupId?: string | null
+  isPrimary?: boolean
+}
 
 export interface CreateUserInput {
   name: string
   email: string
-  departmentId: string
+  departmentId?: string | null
   role: UserRole
   password?: string
   level?: number | null
+  positionAssignment?: UserPositionAssignmentInput
 }
 
 export interface UpdateUserInput {
   id: string
   name: string
   email: string
-  departmentId: string
+  departmentId?: string | null
   role?: UserRole // Optional to allow manual override
   level?: number | null
+  positionAssignment?: UserPositionAssignmentInput
 }
 
 export type UserWithDepartment = {
@@ -37,6 +48,12 @@ export type UserWithDepartment = {
   isActive: boolean
   createdAt: Date
   departmentApproverRoles?: { id: string; department: { id: string; name: string } }[]
+  organizationAssignment?: {
+    unitId: string
+    unitName: string
+    unitType: string
+    positionCode: OrganizationPositionCode
+  } | null
 }
 
 export type CurrentUserProfile = {
@@ -65,14 +82,36 @@ export async function getUsers() {
             }
           }
         }
-      }
+      },
+      organizationPositionAssignments: {
+        where: { isActive: true, isPrimary: true },
+        include: {
+          unit: {
+            select: { id: true, name: true, unitType: true },
+          },
+        },
+      },
     },
     orderBy: {
       name: 'asc',
     },
   })
 
-  return users
+  return users.map((user) => {
+    const primary = user.organizationPositionAssignments[0]
+    const { organizationPositionAssignments, ...rest } = user
+    return {
+      ...rest,
+      organizationAssignment: primary
+        ? {
+            unitId: primary.unit.id,
+            unitName: primary.unit.name,
+            unitType: primary.unit.unitType,
+            positionCode: primary.positionCode,
+          }
+        : null,
+    }
+  })
 }
 
 /**
@@ -97,14 +136,20 @@ export async function getUser(id: string) {
 export async function createUser(input: CreateUserInput) {
   const adminUserId = await requireAdmin()
   const level = validateApprovalLevel(input.level, { allowNull: true })
+  const departmentId = input.departmentId ?? null
 
-  // Check if department exists
-  const department = await prisma.departments.findUnique({
-    where: { id: input.departmentId },
-  })
+  if (!departmentId && !input.positionAssignment) {
+    throw new Error('Department or a valid organization position assignment is required')
+  }
 
-  if (!department) {
-    throw new Error('Department not found')
+  if (departmentId) {
+    const department = await prisma.departments.findUnique({
+      where: { id: departmentId },
+    })
+
+    if (!department) {
+      throw new Error('Department not found')
+    }
   }
 
   // Check if email already exists
@@ -115,8 +160,9 @@ export async function createUser(input: CreateUserInput) {
     throw new Error('A user with this email already exists')
   }
 
-  // Automatically determine role based on department
-  const autoRole: UserRole = input.departmentId === 'ENG' ? 'engineering' : 'general_dept'
+  // Automatically determine role based on department; NEW managers may supply a system role.
+  const autoRole: UserRole = departmentId === 'ENG' ? 'engineering' : 'general_dept'
+  const finalRole: UserRole = input.positionAssignment ? (input.role || autoRole) : autoRole
 
   // Hash default password (admin sets it, or use default)
   const password = input.password || 'changeme'
@@ -127,14 +173,25 @@ export async function createUser(input: CreateUserInput) {
       email: input.email,
       name: input.name,
       passwordHash,
-      departmentId: input.departmentId,
-      role: autoRole,
+      departmentId,
+      role: finalRole,
       level,
       isActive: true,
       forcePasswordChange: true,
       updatedAt: new Date(),
     },
   })
+
+  if (input.positionAssignment) {
+    await savePositionAssignment({
+      userId: user.id,
+      unitId: input.positionAssignment.unitId,
+      positionCode: input.positionAssignment.positionCode,
+      reportingGroupId: input.positionAssignment.reportingGroupId ?? null,
+      isPrimary: input.positionAssignment.isPrimary ?? true,
+      isActive: true,
+    })
+  }
 
   console.log(`User created: ${input.email} (password must be changed on first login)`)
 
@@ -147,7 +204,7 @@ export async function createUser(input: CreateUserInput) {
  */
 export async function updateUser(input: UpdateUserInput) {
   const adminUserId = await requireAdmin()
-  const level = validateApprovalLevel(input.level, { allowNull: true })
+  const validatedLevel = validateApprovalLevel(input.level, { allowNull: true })
 
   // Verify admin authentication
   if (!adminUserId) {
@@ -162,8 +219,12 @@ export async function updateUser(input: UpdateUserInput) {
     throw new Error('User not found')
   }
 
+  // Keep existing legacy department/level when omitted so in-flight attempts still resolve.
+  const nextDepartmentId = input.departmentId === undefined ? existingUser.departmentId : input.departmentId
+  const level = input.level === undefined ? existingUser.level : validatedLevel
+
   // Use provided role, or auto-determine based on department
-  const autoRole: UserRole = input.departmentId === 'ENG' ? 'engineering' : 'general_dept'
+  const autoRole: UserRole = nextDepartmentId === 'ENG' ? 'engineering' : 'general_dept'
   const finalRole: UserRole = input.role || autoRole
 
   // Track original values for audit logging
@@ -173,8 +234,9 @@ export async function updateUser(input: UpdateUserInput) {
   const originalDepartmentId = existingUser.departmentId
   const originalLevel = existingUser.level
 
-  // Check for pending approvals before changing department
-  if (input.departmentId && input.departmentId !== originalDepartmentId) {
+  // Check for pending approvals before changing department. Do not clear legacy
+  // fields that still serve in-flight attempts.
+  if (nextDepartmentId !== originalDepartmentId) {
     // Check for pending request approvals
     const pendingRequestApprovals = await prisma.request_approvals.findMany({
       where: {
@@ -215,19 +277,30 @@ export async function updateUser(input: UpdateUserInput) {
     data: {
       name: input.name,
       email: input.email,
-      departmentId: input.departmentId,
+      departmentId: nextDepartmentId,
       role: finalRole,
       level,
       updatedAt: new Date(),
     },
   })
 
+  if (input.positionAssignment) {
+    await savePositionAssignment({
+      userId: input.id,
+      unitId: input.positionAssignment.unitId,
+      positionCode: input.positionAssignment.positionCode,
+      reportingGroupId: input.positionAssignment.reportingGroupId ?? null,
+      isPrimary: input.positionAssignment.isPrimary ?? true,
+      isActive: true,
+    })
+  }
+
   // Audit logging: Track all admin changes
   const changes: string[] = []
   if (input.name !== originalName) changes.push(`name: "${originalName}" → "${input.name}"`)
   if (input.email !== originalEmail) changes.push(`email: "${originalEmail}" → "${input.email}"`)
   if (finalRole !== originalRole) changes.push(`role: "${originalRole}" → "${finalRole}"`)
-  if (input.departmentId !== originalDepartmentId) changes.push(`departmentId: "${originalDepartmentId}" → "${input.departmentId}"`)
+  if (nextDepartmentId !== originalDepartmentId) changes.push(`departmentId: "${originalDepartmentId}" → "${nextDepartmentId}"`)
   if (level !== originalLevel) changes.push(`level: "${String(originalLevel ?? 'null')}" → "${String(level ?? 'null')}"`)
 
   if (changes.length > 0) {

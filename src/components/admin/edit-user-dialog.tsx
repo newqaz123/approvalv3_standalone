@@ -10,11 +10,12 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
-import { UserForm } from '@/components/admin/user-form'
+import { UserForm, type OrganizationUnitOption } from '@/components/admin/user-form'
 import { AdditionalDepartmentsSection } from '@/components/admin/additional-departments-section'
 import { Pencil } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import type { departments as Department } from '@prisma/client'
+import type { OrganizationPositionCode } from '@/lib/organization/types'
 
 interface EditUserDialogProps {
   user: {
@@ -24,13 +25,16 @@ interface EditUserDialogProps {
     departmentId: string | null
     role: 'admin' | 'general_dept' | 'engineering'
     level: number | null
+    unitId?: string
+    positionCode?: OrganizationPositionCode
   }
   departments: Department[]
+  organizationUnits?: OrganizationUnitOption[]
   open?: boolean
   onOpenChange?: (open: boolean) => void
 }
 
-export function EditUserDialog({ user, departments, open: externalOpen, onOpenChange: externalOnOpenChange }: EditUserDialogProps) {
+export function EditUserDialog({ user, departments, organizationUnits = [], open: externalOpen, onOpenChange: externalOnOpenChange }: EditUserDialogProps) {
   const [internalOpen, setInternalOpen] = useState(false)
   const open = externalOpen !== undefined ? externalOpen : internalOpen
   const setOpen = externalOnOpenChange || setInternalOpen
@@ -59,6 +63,7 @@ export function EditUserDialog({ user, departments, open: externalOpen, onOpenCh
         </DialogHeader>
         <UserForm
           departments={departments as (Department & { levelNames: Record<string, string> | null })[]}
+          organizationUnits={organizationUnits}
           initialData={{
             id: user.id,
             name: user.name,
@@ -66,16 +71,20 @@ export function EditUserDialog({ user, departments, open: externalOpen, onOpenCh
             departmentId: user.departmentId || '',
             role: user.role,
             level: user.level,
+            unitId: user.unitId || '',
+            positionCode: user.positionCode,
           }}
           onSuccess={handleSuccess}
           onCancel={() => setOpen(false)}
         />
-        <AdditionalDepartmentsSection
-          userId={user.id}
-          userRole={user.role}
-          userHomeDepartmentId={user.departmentId || ''}
-          departments={departments as (Department & { levelNames: Record<string, string> | null })[]}
-        />
+        {user.departmentId ? (
+          <AdditionalDepartmentsSection
+            userId={user.id}
+            userRole={user.role}
+            userHomeDepartmentId={user.departmentId}
+            departments={departments as (Department & { levelNames: Record<string, string> | null })[]}
+          />
+        ) : null}
       </DialogContent>
     </Dialog>
   )

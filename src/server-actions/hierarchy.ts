@@ -18,6 +18,31 @@ const VALID_LEVEL_FILTER = {
   lte: MAX_APPROVAL_LEVEL,
 } as const
 
+const NEW_ORGANIZATION_WRITE_KEYS = [
+  'unitId',
+  'positionCode',
+  'reportingGroupId',
+  'scopeUnitId',
+  'routeVersionId',
+  'instanceId',
+  'candidateGroupId',
+  'originUnitId',
+] as const
+
+/** Legacy hierarchy may only mutate User.level and department_approvers. */
+function rejectNewOrganizationWrites(payload: unknown, label: string): void {
+  if (!payload || typeof payload !== 'object') return
+  const records = Array.isArray(payload) ? payload : [payload]
+  for (const record of records) {
+    if (!record || typeof record !== 'object') continue
+    for (const key of NEW_ORGANIZATION_WRITE_KEYS) {
+      if (Object.prototype.hasOwnProperty.call(record, key)) {
+        throw new Error(`Legacy hierarchy compatibility cannot write NEW organization ${key} (${label})`)
+      }
+    }
+  }
+}
+
 function emptyUsersByLevel(displayLevels: number[]): Record<number, HierarchyUser[]> {
   const usersByLevel: Record<number, HierarchyUser[]> = {}
   for (const level of displayLevels) {
@@ -201,6 +226,7 @@ export async function updateHierarchy(
   departmentId: string,
   updates: Array<{ userId: string; level: number | null; isExternal?: boolean }>
 ): Promise<{ success: boolean; error?: string }> {
+  rejectNewOrganizationWrites(updates, 'updateHierarchy')
   const { user: _authUser } = (await auth()) ?? {}; const adminId = _authUser?.id
   if (!adminId) throw new Error('Unauthorized')
 
@@ -497,6 +523,7 @@ export async function updateUserLevel(
   newLevel: number,
   expectedUpdatedAt?: Date
 ): Promise<{ success: boolean; error?: string }> {
+  rejectNewOrganizationWrites({ userId, newLevel }, 'updateUserLevel')
   const { user: _authUser } = (await auth()) ?? {}; const adminId = _authUser?.id
   if (!adminId) {
     throw new Error('Unauthorized')

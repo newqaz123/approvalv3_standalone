@@ -8,9 +8,16 @@ import { BackButton } from '@/components/admin/back-button'
 
 async function UsersList() {
   const users = await getUsers()
-  const departments = await prisma.departments.findMany({
-    orderBy: { name: 'asc' },
-  })
+  const [departments, organizationUnits] = await Promise.all([
+    prisma.departments.findMany({
+      orderBy: { name: 'asc' },
+    }),
+    prisma.organization_units.findMany({
+      where: { isActive: true },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true, unitType: true },
+    }),
+  ])
 
   return (
     <div>
@@ -24,10 +31,10 @@ async function UsersList() {
               Manage user accounts and permissions
             </p>
           </div>
-          <CreateUserDialog departments={departments} />
+          <CreateUserDialog departments={departments} organizationUnits={organizationUnits} />
         </div>
 
-        <UserTable data={users as any} departments={departments} />
+        <UserTable data={users as any} departments={departments} organizationUnits={organizationUnits} />
         </div>
       </div>
     </div>

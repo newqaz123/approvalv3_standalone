@@ -41,13 +41,27 @@ import { EditUserDialog } from '@/components/admin/edit-user-dialog'
 import { ResetPasswordDialog } from '@/components/admin/reset-password-dialog'
 import { AdminCard, AdminCardsEmptyState } from '@/components/mobile/admin-card'
 import { Mail, Building, Shield, Hash } from 'lucide-react'
+import type { OrganizationUnitOption } from '@/components/admin/user-form'
+import { POSITION_LABELS } from '@/components/admin/organization/PositionAssignmentTable'
 
 interface UserTableProps {
   data: UserWithDepartment[]
   departments: Department[]
+  organizationUnits?: OrganizationUnitOption[]
 }
 
-export function UserTable({ data, departments }: UserTableProps) {
+function organizationOrLegacyLabel(user: UserWithDepartment): string {
+  if (user.organizationAssignment) {
+    const position = POSITION_LABELS[user.organizationAssignment.positionCode] ?? user.organizationAssignment.positionCode
+    return `${user.organizationAssignment.unitName} · ${position}`
+  }
+  const departmentName = user.department?.name || 'No department'
+  return user.level !== null && user.level !== undefined
+    ? `Legacy: ${departmentName} / Level ${user.level}`
+    : `Legacy: ${departmentName}`
+}
+
+export function UserTable({ data, departments, organizationUnits = [] }: UserTableProps) {
   const router = useRouter()
   const [processingId, setProcessingId] = useState<string | null>(null)
   const [userToDeactivate, setUserToDeactivate] = useState<{ id: string; name: string } | null>(null)
@@ -82,8 +96,8 @@ export function UserTable({ data, departments }: UserTableProps) {
     },
     {
       accessorKey: 'department',
-      header: 'Department',
-      cell: ({ row }) => row.original.department?.name || 'None',
+      header: 'Unit / Position',
+      cell: ({ row }) => organizationOrLegacyLabel(row.original),
     },
     {
       id: 'additionalDepts',
@@ -256,8 +270,8 @@ export function UserTable({ data, departments }: UserTableProps) {
                     icon: <Mail className="h-3.5 w-3.5" />,
                   },
                   {
-                    label: 'Department',
-                    value: user.department?.name || 'None',
+                    label: 'Unit / Position',
+                    value: organizationOrLegacyLabel(user),
                     icon: <Building className="h-3.5 w-3.5" />,
                   },
                   {
@@ -357,8 +371,11 @@ export function UserTable({ data, departments }: UserTableProps) {
             departmentId: data.find(u => u.id === editingUserId)!.department?.id || null,
             role: data.find(u => u.id === editingUserId)!.role,
             level: data.find(u => u.id === editingUserId)!.level,
+            unitId: data.find(u => u.id === editingUserId)!.organizationAssignment?.unitId,
+            positionCode: data.find(u => u.id === editingUserId)!.organizationAssignment?.positionCode,
           }}
           departments={departments}
+          organizationUnits={organizationUnits}
           open={true}
           onOpenChange={(open) => !open && setEditingUserId(null)}
         />
