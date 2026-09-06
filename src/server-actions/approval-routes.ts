@@ -277,13 +277,15 @@ async function loadCandidateNames(userIds: readonly string[]): Promise<Array<{ i
 /**
  * Read-only route preview for a selected origin user. It never persists
  * snapshots and never publishes. The origin branch comes from the
- * organization repository, the scope selection is the nearest published
- * route for the phase, and candidate pools use the production engine
+ * organization repository, candidate pools use the production engine
  * adapter so preview counts use the exact runtime identity semantics
  * (active primary requiredPosition holders on the group path or the unit
- * ancestor scope). An explicit, validated draft override replaces the
- * stored published route. Origins at or above the ceiling preview as
- * auto-approved with zero steps, matching the engine builder.
+ * ancestor scope). Selection is the SAME nearest-scope walk as runtime: a
+ * supplied draft is validated and substituted at its own scope IN MEMORY
+ * ONLY, and the `DRAFT` sentinel is reported only when that substituted
+ * draft actually wins; a nearer published route otherwise wins and its
+ * version id is reported. Origins at or above the winning route's ceiling
+ * preview as auto-approved with zero steps, matching the engine builder.
  */
 export async function previewApprovalRoute(input: PreviewApprovalRouteInput): Promise<RoutePreview> {
   await requireRouteAdmin()
@@ -297,27 +299,36 @@ export async function previewApprovalRoute(input: PreviewApprovalRouteInput): Pr
     )
   }
 
+  const storedRoutes = await loadRouteVersions(branch.unitPath, phase)
+
+  let selected: ApprovalRouteVersionDefinition
   let routeVersionId: string
-  let scopeUnitId: string
-  let maximumPositionLevel: OrganizationPositionLevel
-  let steps: ApprovalRouteStepDefinition[]
 
   if (input.draft) {
     await validateScopeUnit(input.draft.scopeUnitId)
     const draftDefinition = validatedDefinition(input.draft, 'DRAFT')
-    routeVersionId = DRAFT_PREVIEW_VERSION_ID
-    scopeUnitId = draftDefinition.scopeUnitId
-    maximumPositionLevel = draftDefinition.maximumPositionLevel
-    steps = draftDefinition.steps.map((step) => ({ ...step }))
+    // Preview-only substitution: the unsaved draft competes for selection at
+    // its own scope, replacing the stored route there IN MEMORY ONLY. A
+    // nearer published route on the origin branch still wins, exactly like
+    // runtime; the sentinel marks the preview only when the draft wins.
+    const substituted = [
+      ...storedRoutes.filter((route) => route.scopeUnitId !== draftDefinition.scopeUnitId),
+      { ...draftDefinition, status: 'PUBLISHED' as const },
+    ]
+    selected = selectNearestPublishedRoute(branch.unitPath, substituted, phase)
+    validateRouteDefinition(selected)
+    routeVersionId =
+      selected.scopeUnitId === draftDefinition.scopeUnitId ? DRAFT_PREVIEW_VERSION_ID : selected.id
   } else {
-    const routes = await loadRouteVersions(branch.unitPath, phase)
-    const selected = selectNearestPublishedRoute(branch.unitPath, routes, phase)
+    // Pure published selection: identical to runtime route resolution.
+    selected = selectNearestPublishedRoute(branch.unitPath, storedRoutes, phase)
     validateRouteDefinition(selected)
     routeVersionId = selected.id
-    scopeUnitId = selected.scopeUnitId
-    maximumPositionLevel = selected.maximumPositionLevel
-    steps = selected.steps.map((step) => ({ ...step }))
   }
+
+  const scopeUnitId = selected.scopeUnitId
+  const maximumPositionLevel = selected.maximumPositionLevel
+  const steps = selected.steps.map((step) => ({ ...step }))
 
   const originLevel = ORGANIZATION_POSITION_LEVEL[branch.primaryPosition]
   if (originLevel >= maximumPositionLevel) {

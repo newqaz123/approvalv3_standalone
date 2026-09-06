@@ -16,6 +16,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
   ROUTE_SCENARIO,
+  UnexpectedWriteError,
   createRouteScenarioHarness,
   routeDefinitionInput,
   standardPublishedRoutes,
@@ -327,7 +328,7 @@ describe('publishApprovalRoute', () => {
 
 describe('previewApprovalRoute', () => {
   it('resolves the nearest published scope and computes per-step candidate counts, names, and ceiling without writing', async () => {
-    const harness = createRouteScenarioHarness({ publishedRoutes: standardPublishedRoutes() })
+    const harness = createRouteScenarioHarness({ publishedRoutes: standardPublishedRoutes(), failOnWrite: true })
 
     const preview = (await harness.actions.previewApprovalRoute({
       scopeUnitId: ROUTE_SCENARIO.sectionOneId,
@@ -376,7 +377,7 @@ describe('previewApprovalRoute', () => {
   })
 
   it('falls back to the nearest ancestor scope and flags vacant positions as runtime skips', async () => {
-    const harness = createRouteScenarioHarness({ publishedRoutes: standardPublishedRoutes() })
+    const harness = createRouteScenarioHarness({ publishedRoutes: standardPublishedRoutes(), failOnWrite: true })
 
     const preview = (await harness.actions.previewApprovalRoute({
       scopeUnitId: ROUTE_SCENARIO.sectionTwoId,
@@ -402,7 +403,7 @@ describe('previewApprovalRoute', () => {
   })
 
   it('auto-approves an origin at or above the ceiling with zero steps', async () => {
-    const harness = createRouteScenarioHarness({ publishedRoutes: standardPublishedRoutes() })
+    const harness = createRouteScenarioHarness({ publishedRoutes: standardPublishedRoutes(), failOnWrite: true })
 
     const preview = (await harness.actions.previewApprovalRoute({
       scopeUnitId: ROUTE_SCENARIO.departmentId,
@@ -417,7 +418,7 @@ describe('previewApprovalRoute', () => {
   })
 
   it('drops positions at or below the origin exactly like the engine builder', async () => {
-    const harness = createRouteScenarioHarness({ publishedRoutes: standardPublishedRoutes() })
+    const harness = createRouteScenarioHarness({ publishedRoutes: standardPublishedRoutes(), failOnWrite: true })
 
     const preview = (await harness.actions.previewApprovalRoute({
       scopeUnitId: ROUTE_SCENARIO.sectionOneId,
@@ -433,7 +434,7 @@ describe('previewApprovalRoute', () => {
   })
 
   it('previews a validated unsaved draft override instead of the stored published route', async () => {
-    const harness = createRouteScenarioHarness({ publishedRoutes: standardPublishedRoutes() })
+    const harness = createRouteScenarioHarness({ publishedRoutes: standardPublishedRoutes(), failOnWrite: true })
     const s = ROUTE_SCENARIO
 
     const preview = (await harness.actions.previewApprovalRoute({
@@ -508,7 +509,7 @@ describe('previewApprovalRoute', () => {
   })
 
   it('rejects a preview for an origin without an unambiguous reporting branch', async () => {
-    const harness = createRouteScenarioHarness({ publishedRoutes: standardPublishedRoutes() })
+    const harness = createRouteScenarioHarness({ publishedRoutes: standardPublishedRoutes(), failOnWrite: true })
 
     await assert.rejects(
       () =>
@@ -518,6 +519,133 @@ describe('previewApprovalRoute', () => {
           originUserId: 'user-ghost',
         }),
       /reporting branch/,
+    )
+    assert.equal(harness.db.writes.length, 0)
+  })
+})
+
+
+// ---------------------------------------------------------------------------
+// P1 fix-round: preview must run nearest-scope selection WITH the draft
+// substituted in-memory, never skipping published selection.
+// ---------------------------------------------------------------------------
+
+describe('previewApprovalRoute nearest-scope selection with draft override', () => {
+  const s = ROUTE_SCENARIO
+
+  it('reports the nearer PUBLISHED section route when a department-scope draft is supplied (reviewer repro)', async () => {
+    // Section one's REQUEST route is published. The editor draft targets the
+    // department scope; the origin is section-one staff, whose nearest scope
+    // is the section, so runtime would select the SECTION route — the preview
+    // must report that route, not the farther department draft.
+    const harness = createRouteScenarioHarness({ publishedRoutes: standardPublishedRoutes(), failOnWrite: true })
+
+    const preview = (await harness.actions.previewApprovalRoute({
+      scopeUnitId: s.departmentId,
+      phase: 'REQUEST',
+      originUserId: s.staffOneId,
+      draft: {
+        scopeUnitId: s.departmentId,
+        phase: 'REQUEST',
+        maximumPositionLevel: 6,
+        steps: [{ order: 1, position: 'FACTORY_MANAGER' }],
+      },
+    })) as {
+      routeVersionId: string
+      scopeUnitId: string
+      maximumPositionLevel: number
+      steps: Array<{ order: number; position: string }>
+    }
+
+    assert.equal(preview.routeVersionId, s.publishedRouteSectionOneId, 'the nearer published section route wins')
+    assert.equal(preview.scopeUnitId, s.sectionOneId)
+    assert.equal(preview.maximumPositionLevel, 4, 'the winning route ceiling is reported, not the draft ceiling')
+    assert.deepEqual(
+      [...preview.steps].map((step) => [step.order, step.position]),
+      [
+        [1, 'SUPERVISOR'],
+        [2, 'SECTION_MANAGER'],
+        [3, 'DEPARTMENT_MANAGER'],
+      ],
+    )
+    assert.equal(harness.db.writes.length, 0)
+
+    // The read-only view really is armed: a direct write attempt rejects.
+    await assert.rejects(
+      () =>
+        Promise.resolve().then(() =>
+          (harness.prismaView.approval_route_versions as { create: (args: unknown) => Promise<unknown> }).create({ data: {} }),
+        ),
+      UnexpectedWriteError,
+    )
+  })
+
+  it('keeps the DRAFT sentinel when the draft scope is itself the nearest scope', async () => {
+    const harness = createRouteScenarioHarness({ publishedRoutes: standardPublishedRoutes(), failOnWrite: true })
+
+    // Draft at the section scope: it substitutes the stored section route
+    // in-memory and wins selection as the nearest scope.
+    const preview = (await harness.actions.previewApprovalRoute({
+      scopeUnitId: s.sectionOneId,
+      phase: 'REQUEST',
+      originUserId: s.staffOneId,
+      draft: {
+        scopeUnitId: s.sectionOneId,
+        phase: 'REQUEST',
+        maximumPositionLevel: 4,
+        steps: [{ order: 1, position: 'SECTION_MANAGER' }],
+      },
+    })) as {
+      routeVersionId: string
+      scopeUnitId: string
+      steps: Array<{ position: string; candidateCount: number }>
+    }
+
+    assert.equal(preview.routeVersionId, 'DRAFT')
+    assert.equal(preview.scopeUnitId, s.sectionOneId)
+    assert.deepEqual(
+      [...preview.steps].map((step) => [step.position, step.candidateCount]),
+      [['SECTION_MANAGER', 1]],
+    )
+    assert.equal(harness.db.writes.length, 0)
+  })
+
+  it('lets a draft at a nearer scope override a farther published route', async () => {
+    // Only the department scope has a published route; the draft targets the
+    // section (nearer on the origin branch), so the draft wins selection.
+    const harness = createRouteScenarioHarness({
+      publishedRoutes: standardPublishedRoutes().filter(
+        (route) => route.id !== ROUTE_SCENARIO.publishedRouteSectionOneId,
+      ),
+      failOnWrite: true,
+    })
+
+    const preview = (await harness.actions.previewApprovalRoute({
+      scopeUnitId: s.sectionOneId,
+      phase: 'REQUEST',
+      originUserId: s.staffOneId,
+      draft: {
+        scopeUnitId: s.sectionOneId,
+        phase: 'REQUEST',
+        maximumPositionLevel: 4,
+        steps: [
+          { order: 1, position: 'SUPERVISOR' },
+          { order: 2, position: 'SECTION_MANAGER' },
+        ],
+      },
+    })) as {
+      routeVersionId: string
+      scopeUnitId: string
+      maximumPositionLevel: number
+      steps: Array<{ position: string }>
+    }
+
+    assert.equal(preview.routeVersionId, 'DRAFT', 'the nearer draft outranks the farther published route')
+    assert.equal(preview.scopeUnitId, s.sectionOneId)
+    assert.equal(preview.maximumPositionLevel, 4)
+    assert.deepEqual(
+      [...preview.steps].map((step) => step.position),
+      ['SUPERVISOR', 'SECTION_MANAGER'],
     )
     assert.equal(harness.db.writes.length, 0)
   })

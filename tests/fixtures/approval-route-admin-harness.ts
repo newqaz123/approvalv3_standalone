@@ -49,6 +49,18 @@ const MODEL_KEYS: Record<string, (row: Row) => string> = {
 
 export class UnexpectedQueryError extends Error {}
 
+/**
+ * Thrown the moment a mutating prisma call is attempted through the
+ * fail-on-write view used by preview tests: writes fail immediately, not
+ * merely in a post-hoc assertion.
+ */
+export class UnexpectedWriteError extends Error {
+  constructor(model: string, op: string) {
+    super(`Unexpected write '${op}' on ${model}: this harness prisma view is read-only`)
+    this.name = 'UnexpectedWriteError'
+  }
+}
+
 /** Prisma-shaped unique-constraint violation (P2002). */
 export class FakeUniqueViolationError extends Error {
   readonly code = 'P2002'
@@ -368,15 +380,41 @@ export class ApprovalRouteAdminDb {
   }
 
   /** The `prisma` default-export surface the real modules see. */
-  asPrisma(): Record<string, unknown> {
+  asPrisma(options: { readOnly?: boolean } = {}): Record<string, unknown> {
     const prismaLike: Record<string, unknown> = {
       $transaction: (fn: (tx: ApprovalRouteAdminDb) => Promise<unknown>) => this.$transaction(fn),
     }
     for (const model of Object.keys(MODEL_FIELDS)) {
-      prismaLike[model] = this.table(model)
+      const table = this.table(model)
+      prismaLike[model] = options.readOnly ? readOnlyModelView(model, table) : table
+    }
+    if (options.readOnly) {
+      prismaLike.$executeRaw = () => {
+        throw new UnexpectedWriteError('prisma', '$executeRaw')
+      }
+      prismaLike.$executeRawUnsafe = () => {
+        throw new UnexpectedWriteError('prisma', '$executeRawUnsafe')
+      }
     }
     return prismaLike
   }
+}
+
+const READ_OPS = ['findUnique', 'findFirst', 'findMany'] as const
+const WRITE_OPS = ['create', 'createMany', 'update', 'updateMany', 'delete', 'deleteMany', 'upsert'] as const
+
+/** Fails on write: read ops delegate; every mutating op throws immediately. */
+function readOnlyModelView(model: string, table: ModelTable): ModelTable {
+  const view: Record<string, unknown> = {}
+  for (const op of READ_OPS) {
+    view[op] = table[op].bind(table)
+  }
+  for (const op of WRITE_OPS) {
+    view[op] = () => {
+      throw new UnexpectedWriteError(model, op)
+    }
+  }
+  return view as unknown as ModelTable
 }
 
 interface ModelTable {
@@ -417,6 +455,8 @@ const MODULE_UNDER_TEST = 'server-actions/approval-routes.ts'
 export interface ApprovalRouteHarness {
   db: ApprovalRouteAdminDb
   state: ApprovalRouteHarnessState
+  /** The exact prisma view injected into the module (read-only when failOnWrite). */
+  prismaView: Record<string, unknown>
   actions: {
     saveApprovalRouteDraft: (input: unknown) => Promise<unknown>
     publishApprovalRoute: (input: unknown) => Promise<unknown>
@@ -424,9 +464,16 @@ export interface ApprovalRouteHarness {
   }
 }
 
-export function createApprovalRouteHarness(): ApprovalRouteHarness {
+export interface ApprovalRouteHarnessOptions {
+  publishedRoutes?: PublishedRouteSeed[]
+  /** Any mutating prisma call throws UnexpectedWriteError immediately. */
+  failOnWrite?: boolean
+}
+
+export function createApprovalRouteHarness(options: ApprovalRouteHarnessOptions = {}): ApprovalRouteHarness {
   const state: ApprovalRouteHarnessState = { adminId: 'admin-1', revalidatedPaths: [] }
   const db = new ApprovalRouteAdminDb()
+  const prismaView = db.asPrisma({ readOnly: options.failOnWrite === true })
 
   const compiled = new Map<string, Record<string, unknown>>()
 
@@ -457,7 +504,7 @@ export function createApprovalRouteHarness(): ApprovalRouteHarness {
         return compileModule(resolved, makeRequire(resolved))
       }
       if (name === '@/lib/prisma') {
-        return { default: db.asPrisma() }
+        return { default: prismaView }
       }
       if (name === '@/lib/auth') {
         return {
@@ -476,7 +523,7 @@ export function createApprovalRouteHarness(): ApprovalRouteHarness {
 
   const actions = compileModule(MODULE_UNDER_TEST, makeRequire(MODULE_UNDER_TEST)) as unknown as ApprovalRouteHarness['actions']
 
-  return { db, state, actions }
+  return { db, state, prismaView, actions }
 }
 
 // ---------------------------------------------------------------------------
@@ -604,8 +651,10 @@ export function seedRouteOrganization(db: ApprovalRouteAdminDb): void {
   db.seed('reporting_group_members', routeGroupMembers())
 }
 
-export function createRouteScenarioHarness(options: { publishedRoutes?: PublishedRouteSeed[] } = {}): ApprovalRouteHarness {
-  const harness = createApprovalRouteHarness()
+export interface RouteScenarioHarnessOptions extends ApprovalRouteHarnessOptions {}
+
+export function createRouteScenarioHarness(options: RouteScenarioHarnessOptions = {}): ApprovalRouteHarness {
+  const harness = createApprovalRouteHarness(options)
   seedRouteOrganization(harness.db)
   if (options.publishedRoutes) seedPublishedRoutes(harness.db, options.publishedRoutes)
   return harness
