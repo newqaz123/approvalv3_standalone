@@ -21,7 +21,13 @@ import {
   reconcileInlineDescriptionImages,
 } from '@/lib/inline-images/references'
 import { revalidateRequestViews } from './request-view-invalidation'
-import { updateRequestStatusExpecting } from '@/lib/request-status-transition'
+import { RequestStatusConflictError, updateRequestStatusExpecting } from '@/lib/request-status-transition'
+import {
+  advanceApprovalAtomically,
+  canUserApproveFinal as engineCanUserApproveFinal,
+  canUserApproveSolution as engineCanUserApproveSolution,
+  createPrismaApprovalTransactionDb,
+} from '@/lib/approval-engine/transactions'
 import {
   runTransactionWithPostCommitNotifications,
   type PostCommitNotificationCollector,
@@ -911,93 +917,34 @@ export async function canUserApproveSolution(solutionId: string): Promise<{
     return { canApprove: false }
   }
 
-  // Organization-owned requests have no legacy department; legacy solution
-  // approval is an unsupported boundary until NEW adapters are integrated.
-  // Fail closed instead of authorizing through a null-department match.
-  if (solution.request.departmentId === null) {
-    return { canApprove: false }
-  }
-  if (solution.request.status !== RequestStatus.DesignCostEstimationApproval) {
-    // Convert Decimal to number before returning
-    return {
-      canApprove: false,
-      solution: {
-        ...solution,
-        costEstimate: Number(solution.costEstimate),
-      },
-    }
-  }
-
-  // Get engineering department ID
-  const engineeringDept = await prisma.departments.findFirst({
-    where: { type: 'ENGINEERING' },
-    select: { id: true },
-  })
-
-  if (!engineeringDept) {
-    return { canApprove: false }
-  }
-
-  // Find pending approval for this user
-  let approval: any = null
-
-  // Check for custom chain approval (any role can be in custom chain),
-  // current attempts only: superseded history is never actionable
-  approval = await prisma.solution_approvals.findFirst({
-    where: {
-      solutionId,
-      status: 'pending',
-      isCustomChain: true,
-      requiredApproverId: userId,
-      OR: [...CURRENT_INSTANCE_ROW_FILTER],
-    },
-    orderBy: { order: 'asc' },
-  })
-
-  // If no custom chain approval, check hierarchy approval (engineering only)
-  if (!approval && user.level && user.role === UserRole.engineering) {
-    approval = await prisma.solution_approvals.findFirst({
-      where: {
-        solutionId,
-        status: 'pending',
-        isCustomChain: false,
-        requiredLevel: user.level,
-        OR: [...CURRENT_INSTANCE_ROW_FILTER],
-      },
-      orderBy: { order: 'asc' },
-    })
-  }
-
-  if (!approval) {
-    // Convert Decimal to number before returning
-    return {
-      canApprove: false,
-      solution: {
-        ...solution,
-        costEstimate: Number(solution.costEstimate),
-      },
-    }
-  }
-
-  // Check if all previous approvals are completed (current attempts only)
-  const previousApprovals = await prisma.solution_approvals.findMany({
-    where: {
-      solutionId,
-      order: { lt: approval.order },
-      status: 'pending',
-      OR: [...CURRENT_INSTANCE_ROW_FILTER],
-    },
-  })
-
-  const canApprove = previousApprovals.length === 0
-
-  // Convert Decimal to number before returning
   const serializedSolution = {
     ...solution,
     costEstimate: Number(solution.costEstimate),
   }
 
-  return { canApprove, approval, solution: serializedSolution }
+  const approval = await prisma.solution_approvals.findFirst({
+    where: {
+      solutionId,
+      status: 'pending',
+      OR: [...CURRENT_INSTANCE_ROW_FILTER],
+    },
+    orderBy: { order: 'asc' },
+  })
+
+  if (!approval) {
+    return { canApprove: false, solution: serializedSolution }
+  }
+
+  const eligibility = await engineCanUserApproveSolution(
+    createPrismaApprovalTransactionDb(prisma as Prisma.TransactionClient),
+    { approvalId: approval.id, actorId: userId },
+  )
+
+  return {
+    canApprove: eligibility.canApprove,
+    approval: eligibility.canApprove ? approval : undefined,
+    solution: serializedSolution,
+  }
 }
 
 /**
@@ -1029,99 +976,41 @@ export async function approveSolution(solutionId: string, comments?: string, exp
   // Keep workflow writes atomic; notification plans are dispatched only
   // after this transaction commits.
   await runSolutionTransactionWithNotifications(async (tx, notifications) => {
-    // Update approval
-    await tx.solution_approvals.update({
-      where: { id: approval.id },
-      data: {
-        approverId: userId,
-        status: 'approved',
-        comments,
-        approvedAt: new Date(),
-      },
-    })
-
-    // Get solution details for logging
     const solutionData = await tx.solutions.findUnique({
       where: { id: solutionId },
       select: { requestId: true, title: true, costEstimate: true },
     })
-
     if (!solutionData) {
       throw new Error('Solution not found')
     }
 
-    // Log activity
-    await tx.request_activities.create({
-      data: {
-        requestId: solutionData.requestId,
-        userId,
-        action: 'solution_approved',
-        comments: comments || `Solution "${solutionData.title}" approved at step ${approval.order}`,
-      },
+    const result = await advanceApprovalAtomically(createPrismaApprovalTransactionDb(tx), {
+      approvalId: approval.id,
+      actorId: userId,
+      phase: 'SOLUTION',
+      comments,
     })
 
-    // Check if this was the last approval (current attempts only)
-    const pendingApprovals = await tx.solution_approvals.count({
-      where: {
-        solutionId,
-        status: 'pending',
-        OR: [...CURRENT_INSTANCE_ROW_FILTER],
-      },
-    })
-
-    // If no more pending approvals, transition request status
-    if (pendingApprovals === 0) {
-      // Update request status to SendBackToRequester
-      await tx.requests.update({
-        where: { id: solutionData.requestId },
-        data: {
-          status: RequestStatus.SendBackToRequester,
-          projectEstimateCost: solutionData.costEstimate,
-        },
-      })
-
-      // Get request for notification (include departmentId for department-wide notification)
+    if (result.statusChange) {
+      // Last-row adapter write copies projectEstimateCost: solutionData.costEstimate
+      // onto the request (locked FOR UPDATE in the same transaction).
       const request = await tx.requests.findUnique({
         where: { id: solutionData.requestId },
-        select: { requesterId: true, title: true, departmentId: true },
+        select: { title: true, departmentId: true },
       })
-
       if (request) {
-        // Log status change
-        await tx.request_activities.create({
-          data: {
-            requestId: solutionData.requestId,
-            userId: request.requesterId,
-            action: 'status_changed',
-            fromStatus: RequestStatus.DesignCostEstimationApproval,
-            toStatus: RequestStatus.SendBackToRequester,
-            comments: `Solution "${solutionData.title}" approved. Request sent back to requester for final review.`,
-          },
-        })
-
         if (request.departmentId === null) {
-          // Unreachable while the solution-approval gate rejects
-          // organization-owned requests; kept as an explicit legacy-boundary
-          // guard so a missing department can never select an audience.
           throw new Error('Cannot notify requester department: organization-owned requests are not supported by legacy notifications yet')
         }
-
-        // Queue requester-department notification for post-commit dispatch.
         notifications.department(request.departmentId, {
           type: 'solution_ready',
           title: 'Solution Ready for Review',
           message: `📤 Ready for Review: "${request.title}" has been completed and awaits your department's final review.`,
-          requestId: solutionData.requestId,
+          requestId: solution.requestId,
         })
       }
     } else {
-      // Resolve and queue the next approver notification using transaction
-      // reads only; delivery starts after commit.
-      await queueNextSolutionApproverNotifications(
-        tx,
-        solutionId,
-        notifications,
-      )
+      await queueNextSolutionApproverNotifications(tx, solutionId, notifications)
     }
   })
 
@@ -1163,9 +1052,12 @@ export async function rejectSolution(solutionId: string, comments: string, expec
   // Keep workflow writes atomic; notification plans are dispatched only
   // after this transaction commits.
   await runSolutionTransactionWithNotifications(async (tx, notifications) => {
-    // Update approval to rejected
-    await tx.solution_approvals.update({
-      where: { id: approval.id },
+    const rejected = await tx.solution_approvals.updateMany({
+      where: {
+        id: approval.id,
+        status: 'pending',
+        OR: [...CURRENT_INSTANCE_ROW_FILTER],
+      },
       data: {
         approverId: userId,
         status: 'rejected',
@@ -1173,6 +1065,11 @@ export async function rejectSolution(solutionId: string, comments: string, expec
         approvedAt: new Date(),
       },
     })
+    if (rejected.count !== 1) {
+      throw new RequestStatusConflictError(
+        'Cannot reject this solution - it was changed by someone else. Please refresh and try again.',
+      )
+    }
 
     // Mark all remaining pending approvals as rejected (current attempts
     // only; superseded history is never rewritten)
@@ -1910,72 +1807,26 @@ export async function canUserApproveFinalApproval(requestId: string): Promise<{
     return { canApprove: false }
   }
 
-  // Check request status
-  const request = await prisma.requests.findUnique({
-    where: { id: requestId },
-    select: { status: true, departmentId: true },
-  })
-
-  if (!request || request.status !== RequestStatus.FinalApproval) {
-    return { canApprove: false }
-  }
-
-  // Organization-owned requests have no legacy department; final approval is
-  // an unsupported legacy boundary until NEW adapters are integrated.
-  if (request.departmentId === null) {
-    return { canApprove: false }
-  }
-
-  // Find pending approval for this user (current attempts only: superseded
-  // history is never actionable)
-  let approval: any = null
-
-  // Check for custom chain approval
-  approval = await prisma.request_approvals.findFirst({
+  const approval = await prisma.request_approvals.findFirst({
     where: {
       requestId,
       status: 'pending',
       isFinalApproval: true,
-      isCustomChain: true,
-      requiredApproverId: userId,
       OR: [...CURRENT_INSTANCE_ROW_FILTER],
     },
     orderBy: { order: 'asc' },
   })
 
-  // If no custom chain approval, check hierarchy approval
-  if (!approval && user.level) {
-    approval = await prisma.request_approvals.findFirst({
-      where: {
-        requestId,
-        status: 'pending',
-        isFinalApproval: true,
-        isCustomChain: false,
-        requiredLevel: user.level,
-        OR: [...CURRENT_INSTANCE_ROW_FILTER],
-      },
-      orderBy: { order: 'asc' },
-    })
-  }
-
   if (!approval) {
     return { canApprove: false }
   }
 
-  // Check if all previous approvals are completed (current attempts only)
-  const previousApprovals = await prisma.request_approvals.findMany({
-    where: {
-      requestId,
-      isFinalApproval: true,
-      order: { lt: approval.order },
-      status: 'pending',
-      OR: [...CURRENT_INSTANCE_ROW_FILTER],
-    },
-  })
+  const eligibility = await engineCanUserApproveFinal(
+    createPrismaApprovalTransactionDb(prisma as Prisma.TransactionClient),
+    { approvalId: approval.id, actorId: userId },
+  )
 
-  const canApprove = previousApprovals.length === 0
-
-  return { canApprove, approval }
+  return { canApprove: eligibility.canApprove, approval: eligibility.canApprove ? approval : undefined }
 }
 
 /**
@@ -2007,91 +1858,35 @@ export async function approveFinalApproval(requestId: string, comments?: string,
   // Keep workflow writes atomic; notification plans are dispatched only
   // after this transaction commits.
   await runSolutionTransactionWithNotifications(async (tx, notifications) => {
-    // Update approval
-    await tx.request_approvals.update({
-      where: { id: approval.id },
-      data: {
-        approverId: userId,
-        status: 'approved',
-        comments,
-        approvedAt: new Date(),
-      },
+    const result = await advanceApprovalAtomically(createPrismaApprovalTransactionDb(tx), {
+      approvalId: approval.id,
+      actorId: userId,
+      phase: 'FINAL',
+      comments,
     })
 
-    // Get request details for logging
-    const request = await tx.requests.findUnique({
-      where: { id: requestId },
-      select: { requesterId: true, title: true, departmentId: true },
-    })
-
-    if (!request) {
-      throw new Error('Request not found')
-    }
-
-    // Log activity
-    await tx.request_activities.create({
-      data: {
-        requestId,
-        userId,
-        action: 'final_approval_approved',
-        comments: comments || `Final approval approved at step ${approval.order}`,
-      },
-    })
-
-    // Check if this was the last approval (current attempts only)
-    const pendingApprovals = await tx.request_approvals.count({
-      where: {
-        requestId,
-        isFinalApproval: true,
-        status: 'pending',
-        OR: [...CURRENT_INSTANCE_ROW_FILTER],
-      },
-    })
-
-    // If no more pending approvals, mark as completed
-    if (pendingApprovals === 0) {
-      await tx.requests.update({
+    if (result.statusChange) {
+      const request = await tx.requests.findUnique({
         where: { id: requestId },
-        data: { status: RequestStatus.Completed },
+        select: { title: true, departmentId: true },
       })
-
-      // Log completion
-      await tx.request_activities.create({
-        data: {
-          requestId,
-          userId: request.requesterId,
-          action: 'status_changed',
-          fromStatus: RequestStatus.FinalApproval,
-          toStatus: RequestStatus.Completed,
-          comments: `All final approvals completed. Request marked as completed.`,
-        },
-      })
-
-      // Get engineering department to exclude engineers from requester dept notification
+      if (!request) {
+        throw new Error('Request not found')
+      }
+      if (request.departmentId === null) {
+        throw new Error('Cannot notify requester department: organization-owned requests are not supported by legacy notifications yet')
+      }
       const engineeringDept = await tx.departments.findFirst({
         where: { type: 'ENGINEERING' },
         select: { id: true },
       })
-
-      // Get engineering users to exclude
       const engineeringUsers = engineeringDept
         ? await tx.user.findMany({
             where: { departmentId: engineeringDept.id },
             select: { id: true },
           })
         : []
-
-      const engineeringUserIds = engineeringUsers.map(u => u.id)
-
-      if (request.departmentId === null) {
-        // Unreachable while the final-approval gate rejects organization-owned
-        // requests; kept as an explicit legacy-boundary guard so a missing
-        // department can never select an audience.
-        throw new Error('Cannot notify requester department: organization-owned requests are not supported by legacy notifications yet')
-      }
-
-      // Queue requester-department completion notification for post-commit
-      // dispatch, excluding engineering users.
+      const engineeringUserIds = engineeringUsers.map((u) => u.id)
       notifications.department(
         request.departmentId,
         {
@@ -2103,13 +1898,7 @@ export async function approveFinalApproval(requestId: string, comments?: string,
         engineeringUserIds,
       )
     } else {
-      // Resolve and queue the next approver notification using transaction
-      // reads only; delivery starts after commit.
-      await queueNextFinalApproverNotifications(
-        tx,
-        requestId,
-        notifications,
-      )
+      await queueNextFinalApproverNotifications(tx, requestId, notifications)
     }
   })
 
@@ -2152,9 +1941,13 @@ export async function rejectFinalApproval(requestId: string, comments: string, e
   // Keep workflow writes atomic; both department notification plans are
   // dispatched concurrently only after this transaction commits.
   await runSolutionTransactionWithNotifications(async (tx, notifications) => {
-    // Update approval to rejected
-    await tx.request_approvals.update({
-      where: { id: approval.id },
+    const rejected = await tx.request_approvals.updateMany({
+      where: {
+        id: approval.id,
+        status: 'pending',
+        isFinalApproval: true,
+        OR: [...CURRENT_INSTANCE_ROW_FILTER],
+      },
       data: {
         approverId: userId,
         status: 'rejected',
@@ -2162,6 +1955,11 @@ export async function rejectFinalApproval(requestId: string, comments: string, e
         approvedAt: new Date(),
       },
     })
+    if (rejected.count !== 1) {
+      throw new RequestStatusConflictError(
+        'Cannot reject this request - it was changed by someone else. Please refresh and try again.',
+      )
+    }
 
     // Mark all remaining final approvals as rejected (current attempts only;
     // superseded history is never rewritten)

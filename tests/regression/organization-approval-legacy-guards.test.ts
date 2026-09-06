@@ -88,7 +88,7 @@ describe('legacy approval boundary: null-department actor and organization-owned
     assert.equal(result.success, true)
     assert.ok(
       harness.db.writes.some(
-        (write) => write.model === 'request_approvals' && write.op === 'update',
+        (write) => write.model === 'request_approvals' && (write.op === 'update' || write.op === 'updateMany'),
       ),
       'the approval itself must still persist',
     )

@@ -41,6 +41,7 @@ import {
   createRequestApprovalAttempt,
   markCurrentInstanceOutcome,
 } from '@/lib/approval-engine/phase-adapters'
+import { snapshotGroupActionWhere } from '@/lib/approval-engine/transactions'
 import type { Prisma } from '@prisma/client'
 import * as XLSX from 'xlsx'
 
@@ -974,15 +975,17 @@ export async function getMyActionItems() {
     return []
   }
 
-  // Build OR conditions for request_approvals (department-aware)
+  // Build OR conditions for request_approvals (discriminator-aware)
   const requestOrConditions: any[] = [
-    // Custom chain approvals (always include)
+    // Custom chain / CUSTOM_PERSON approvals (always include)
     { requiredApproverId: user.id },
+    snapshotGroupActionWhere(user.id),
   ]
 
-  // Add hierarchy-based approvals scoped to user's own department
+  // Add hierarchy-based approvals scoped to user's own department (LEGACY_LEVEL)
   if (user.level && user.departmentId) {
     requestOrConditions.push({
+      routingMode: 'LEGACY_LEVEL',
       requiredLevel: user.level,
       request: { departmentId: user.departmentId },
     })
@@ -995,18 +998,20 @@ export async function getMyActionItems() {
   })
   for (const cda of crossDeptApprovals) {
     requestOrConditions.push({
+      routingMode: 'LEGACY_LEVEL',
       requiredLevel: cda.approverLevel,
       request: { departmentId: cda.departmentId },
     })
   }
 
-  // Build OR conditions for solution_approvals (engineering-role-aware)
+  // Build OR conditions for solution_approvals (discriminator-aware)
   const solutionOrConditions: any[] = [
     { requiredApproverId: user.id },
+    snapshotGroupActionWhere(user.id),
   ]
   // Only match by level for engineering users (matches canUserApproveSolution logic)
   if (user.level && user.role === 'engineering') {
-    solutionOrConditions.push({ requiredLevel: user.level })
+    solutionOrConditions.push({ routingMode: 'LEGACY_LEVEL', requiredLevel: user.level })
   }
 
   // Find all pending approvals for user's level OR custom approver ID
@@ -1213,6 +1218,12 @@ export async function cancelRequest(input: { requestId: string; reason: string }
   // under READ COMMITTED), so a concurrent transition or resubmission cannot
   // race past cancellation.
   await prisma.$transaction(async (tx) => {
+    // Serialize cancel against concurrent approval advancement on the same
+    // request. Prisma has no first-class FOR UPDATE on findUnique; the tagged
+    // $queryRaw lock matches createPrismaApprovalTransactionDb.
+    if (typeof tx.$queryRaw === 'function') {
+      await tx.$queryRaw`SELECT id FROM requests WHERE id = ${requestId} FOR UPDATE`
+    }
     const request = await tx.requests.findUnique({
       where: { id: requestId },
       select: { id: true, requesterId: true, status: true, updatedAt: true },
@@ -1992,11 +2003,21 @@ export async function getRequestsNeedingEngineeringAction(userId: string): Promi
       })
 
       if (blockingApprovals === 0) {
-        // This is the next actionable approval
-        // Check if it's for this user
+        // This is the next actionable approval. SNAPSHOT_GROUP uses persisted
+        // candidate membership, never a live requiredLevel match.
+        const snapshotGroupId = approval.routingMode === 'SNAPSHOT_GROUP' ? approval.candidateGroupId : null
+        const isSnapshotMember =
+          snapshotGroupId !== null &&
+          Boolean(
+            await prisma.approval_candidate_group_members.findFirst({
+              where: { candidateGroupId: snapshotGroupId, userId },
+              select: { userId: true },
+            }),
+          )
         const isForUser =
+          Boolean(isSnapshotMember) ||
           (approval.requiredApproverId === userId) ||
-          (approval.requiredLevel === user.level && !approval.isCustomChain)
+          (approval.routingMode !== 'SNAPSHOT_GROUP' && approval.requiredLevel === user.level && !approval.isCustomChain)
 
         if (isForUser) {
           needsApprovalFiltered.push({

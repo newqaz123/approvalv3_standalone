@@ -14,6 +14,10 @@ import type { RequestStatus } from '@prisma/client'
 import type { ApprovalInstancePlan, ApprovalStepPlan } from '@/lib/approval-engine/types'
 import type { ApprovalEngineDb, PhaseOrigin } from '@/lib/approval-engine/types'
 import type { PhaseAdapterDb } from '@/lib/approval-engine/phase-adapters'
+import type {
+  ApprovalRowForTransaction,
+  ApprovalTransactionDb,
+} from '@/lib/approval-engine/transactions'
 
 export const ORGANIZATION_APPROVAL_FIXTURE = {
   factoryId: 'factory-1',
@@ -865,5 +869,232 @@ export function createFakeApprovalEngineDb(
     replaceCandidates: (position, ids) => {
       candidateMap.set(position, [...ids])
     },
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Task 9 transaction-boundary fakes (no I/O)
+// ---------------------------------------------------------------------------
+
+const INACTIVE_SNAPSHOT_IDS = new Set<string>([ORGANIZATION_APPROVAL_FIXTURE.inactiveCandidateId, 'inactive-1'])
+
+function asRequestStatus(status: string): RequestStatus {
+  return status as RequestStatus
+}
+
+export interface FakeTransactionalApprovalDb extends ApprovalTransactionDb {
+  statusTransitionCount(requestId: string): number
+  /** Test-only: competing cancellation committed between load and CAS. */
+  cancelRequest(): void
+  /** Test-only hook: runs after each loadApprovalForUpdate read. */
+  afterLoad?: () => void
+  readonly activities: ReadonlyArray<{ approvalId: string; actorId: string; comments?: string }>
+}
+
+/**
+ * In-memory SNAPSHOT_GROUP transaction db. The conditional pending-row update
+ * succeeds exactly once; status-transition count is recorded; no I/O.
+ */
+export function fakeTransactionalApprovalDb(input: {
+  approval: {
+    id: string
+    requestId: string
+    routingMode: 'SNAPSHOT_GROUP'
+    candidateUserIds: string[]
+    status: 'pending'
+    order: number
+  }
+  requestStatus: string
+}): FakeTransactionalApprovalDb {
+  const row: ApprovalRowForTransaction = {
+    id: input.approval.id,
+    requestId: input.approval.requestId,
+    solutionId: null,
+    instanceId: 'instance-1',
+    requestStatus: asRequestStatus(input.requestStatus),
+    instanceIsCurrent: true,
+    routingMode: 'SNAPSHOT_GROUP',
+    candidateUserIds: [...input.approval.candidateUserIds],
+    requiredLevel: null,
+    requiredApproverId: null,
+    status: input.approval.status,
+    order: input.approval.order,
+  }
+  const activities: Array<{ approvalId: string; actorId: string; comments?: string }> = []
+  const statusTransitions: string[] = []
+  let cancelled = false
+
+  const db: FakeTransactionalApprovalDb = {
+    activities,
+    statusTransitionCount(requestId: string) {
+      return statusTransitions.filter((id) => id === requestId).length
+    },
+    cancelRequest() {
+      cancelled = true
+      row.requestStatus = 'Cancelled'
+      row.instanceIsCurrent = false
+    },
+    async loadApprovalForUpdate(query) {
+      db.afterLoad?.()
+      if (query.approvalId !== row.id) return null
+      if (cancelled) return null
+      if (!row.instanceIsCurrent) return null
+      return { ...row, candidateUserIds: [...row.candidateUserIds] }
+    },
+    async isActiveUser(userId) {
+      return !INACTIVE_SNAPSHOT_IDS.has(userId)
+    },
+    async hasEarlierPendingRow() {
+      return false
+    },
+    async evaluateLegacyEligibility() {
+      return false
+    },
+    async updatePendingApproval(query) {
+      if (query.approvalId !== row.id) return { count: 0 }
+      if (row.status !== 'pending') return { count: 0 }
+      if (cancelled) return { count: 0 }
+      if (row.requestStatus !== query.expectedRequestStatus) return { count: 0 }
+      if (row.instanceId !== query.instanceId) return { count: 0 }
+      row.status = 'approved'
+      return { count: 1 }
+    },
+    async recordApprovalActivity(query) {
+      activities.push({ approvalId: query.approvalId, actorId: query.actorId, comments: query.comments })
+    },
+    async countPendingApprovals() {
+      return row.status === 'pending' ? 1 : 0
+    },
+    async advanceRequestStatus(query) {
+      row.requestStatus = query.to
+      statusTransitions.push(query.requestId)
+    },
+    async setInstanceOutcome() {
+      /* instance outcome is recorded by the core; fake stores no extra I/O */
+    },
+  }
+  return db
+}
+
+/**
+ * In-memory LEGACY_LEVEL transaction db. Eligibility is a live level lookup
+ * (`userLevel` vs persisted `requiredLevel`), never a snapshot membership
+ * test. No I/O.
+ */
+export function fakeLegacyApprovalDb(input: {
+  requiredLevel: number
+  userLevel: number
+  status: 'pending'
+}): ApprovalTransactionDb {
+  const row: ApprovalRowForTransaction = {
+    id: 'legacy-a1',
+    requestId: 'legacy-r1',
+    solutionId: null,
+    instanceId: null,
+    requestStatus: 'ImprovementRequest',
+    instanceIsCurrent: true,
+    routingMode: 'LEGACY_LEVEL',
+    candidateUserIds: [],
+    requiredLevel: input.requiredLevel,
+    requiredApproverId: null,
+    status: input.status,
+    order: 1,
+  }
+  const activities: Array<{ approvalId: string; actorId: string }> = []
+  let liveUserLevel = input.userLevel
+
+  const db: ApprovalTransactionDb & { setLiveUserLevel(level: number): void } = {
+    setLiveUserLevel(level: number) {
+      liveUserLevel = level
+    },
+    async loadApprovalForUpdate(query) {
+      if (query.approvalId !== row.id) return null
+      return { ...row }
+    },
+    async isActiveUser() {
+      return true
+    },
+    async hasEarlierPendingRow() {
+      return false
+    },
+    async evaluateLegacyEligibility(query) {
+      if (query.approvalId !== row.id) return false
+      if (query.actorId !== 'legacy-user') return false
+      if (row.status !== 'pending') return false
+      return liveUserLevel === row.requiredLevel
+    },
+    async updatePendingApproval(query) {
+      if (query.approvalId !== row.id) return { count: 0 }
+      if (row.status !== 'pending') return { count: 0 }
+      if (row.requestStatus !== query.expectedRequestStatus) return { count: 0 }
+      row.status = 'approved'
+      return { count: 1 }
+    },
+    async recordApprovalActivity(query) {
+      activities.push({ approvalId: query.approvalId, actorId: query.actorId })
+    },
+    async countPendingApprovals() {
+      return row.status === 'pending' ? 1 : 0
+    },
+    async advanceRequestStatus(query) {
+      row.requestStatus = query.to
+    },
+    async setInstanceOutcome() {},
+  }
+  return db
+}
+
+/** Exact-person CUSTOM_PERSON transaction db. No I/O. */
+export function fakeCustomPersonApprovalDb(input: {
+  approvalId?: string
+  requestId?: string
+  requiredApproverId: string
+  status?: 'pending'
+  order?: number
+  requestStatus?: string
+}): ApprovalTransactionDb {
+  const row: ApprovalRowForTransaction = {
+    id: input.approvalId ?? 'custom-a1',
+    requestId: input.requestId ?? 'custom-r1',
+    solutionId: null,
+    instanceId: 'instance-custom-1',
+    requestStatus: asRequestStatus(input.requestStatus ?? 'ImprovementRequest'),
+    instanceIsCurrent: true,
+    routingMode: 'CUSTOM_PERSON',
+    candidateUserIds: [],
+    requiredLevel: null,
+    requiredApproverId: input.requiredApproverId,
+    status: input.status ?? 'pending',
+    order: input.order ?? 1,
+  }
+  return {
+    async loadApprovalForUpdate(query) {
+      if (query.approvalId !== row.id) return null
+      return { ...row }
+    },
+    async isActiveUser() {
+      return true
+    },
+    async hasEarlierPendingRow() {
+      return false
+    },
+    async evaluateLegacyEligibility() {
+      return false
+    },
+    async updatePendingApproval(query) {
+      if (query.approvalId !== row.id) return { count: 0 }
+      if (row.status !== 'pending') return { count: 0 }
+      if (row.requestStatus !== query.expectedRequestStatus) return { count: 0 }
+      row.status = 'approved'
+      return { count: 1 }
+    },
+    async recordApprovalActivity() {},
+    async countPendingApprovals() {
+      return row.status === 'pending' ? 1 : 0
+    },
+    async advanceRequestStatus(query) {
+      row.requestStatus = query.to
+    },
+    async setInstanceOutcome() {},
   }
 }

@@ -6,6 +6,8 @@ import {
   approveRequestApproval,
   type RequestApprovalTransactionDb,
 } from '@/lib/request-approval-transaction'
+import { advanceApprovalAtomically } from '@/lib/approval-engine/transactions'
+import { fakeTransactionalApprovalDb } from '../fixtures/organization-approval-fixtures'
 
 /**
  * Atomic request-approval core used by approveRequest().
@@ -489,5 +491,30 @@ describe('request approval transaction core', () => {
     assert.equal(db.request_approvals.rows.get('a2')?.status, 'pending')
     assert.deepEqual(db.request_activities.rows, [])
     assert.equal(db.requests.rows.get(REQUEST.id)?.status, 'Cancelled')
+  })
+})
+
+describe('request approval transaction core plus NEW atomic advancement', () => {
+  it('keeps the existing cancellation race rollback and refuses a cancelled SNAPSHOT row', async () => {
+    const db = fakeTransactionalApprovalDb({
+      approval: {
+        id: 'a1',
+        requestId: 'r1',
+        routingMode: 'SNAPSHOT_GROUP',
+        candidateUserIds: ['u1', 'u2'],
+        status: 'pending',
+        order: 1,
+      },
+      requestStatus: 'ImprovementRequest',
+    })
+    db.afterLoad = () => {
+      db.cancelRequest()
+    }
+    await assert.rejects(
+      advanceApprovalAtomically(db, { approvalId: 'a1', actorId: 'u1', phase: 'REQUEST' }),
+      /pending|already|conflict/i,
+    )
+    assert.equal(db.statusTransitionCount('r1'), 0)
+    assert.equal(db.activities.length, 0)
   })
 })

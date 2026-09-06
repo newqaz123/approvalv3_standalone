@@ -5,6 +5,22 @@ import {
   updateRequestStatusExpecting,
 } from './request-status-transition'
 
+export {
+  advanceApprovalAtomically,
+  canUserApproveFinal,
+  canUserApproveRequest,
+  canUserApproveSolution,
+  createPrismaApprovalTransactionDb,
+  snapshotGroupActionWhere,
+} from './approval-engine/transactions'
+export type {
+  AdvanceApprovalInput,
+  ApprovalAdvanceResult,
+  ApprovalEligibility,
+  ApprovalRowForTransaction,
+  ApprovalTransactionDb,
+} from './approval-engine/transactions'
+
 /**
  * Atomic request-approval core used by `approveRequest()`.
  *

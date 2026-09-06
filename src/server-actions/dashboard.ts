@@ -5,6 +5,8 @@ import prisma from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/cache/user-cache";
 import { getMyRequests } from "@/server-actions/requests";
 import { buildFollowUpDashboard } from "@/lib/follow-up-dashboard";
+import { CURRENT_INSTANCE_ROW_FILTER } from "@/lib/approval-engine/current-instance";
+import { snapshotGroupActionWhere } from "@/lib/approval-engine/transactions";
 export type {
 	FollowUpActivity,
 	FollowUpDashboardData,
@@ -48,15 +50,16 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
 		return [];
 	}
 
-	// Build OR conditions for request_approvals (department-aware)
+	// Build OR conditions for request_approvals (discriminator-aware)
 	const requestOrConditions: any[] = [
-		// Custom chain approvals (always include)
 		{ requiredApproverId: user.id },
+		snapshotGroupActionWhere(user.id),
 	];
 
-	// Add hierarchy-based approvals scoped to user's own department
+	// Add hierarchy-based approvals scoped to user's own department (LEGACY_LEVEL)
 	if (user.level && user.departmentId) {
 		requestOrConditions.push({
+			routingMode: "LEGACY_LEVEL",
 			requiredLevel: user.level,
 			request: { departmentId: user.departmentId },
 		});
@@ -69,16 +72,20 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
 	});
 	for (const cda of crossDeptApprovals) {
 		requestOrConditions.push({
+			routingMode: "LEGACY_LEVEL",
 			requiredLevel: cda.approverLevel,
 			request: { departmentId: cda.departmentId },
 		});
 	}
 
-	// Build OR conditions for solution_approvals (engineering-role-aware)
-	const solutionOrConditions: any[] = [{ requiredApproverId: user.id }];
+	// Build OR conditions for solution_approvals (discriminator-aware)
+	const solutionOrConditions: any[] = [
+		{ requiredApproverId: user.id },
+		snapshotGroupActionWhere(user.id),
+	];
 	// Only match by level for engineering users (matches canUserApproveSolution logic)
 	if (user.level && user.role === "engineering") {
-		solutionOrConditions.push({ requiredLevel: user.level });
+		solutionOrConditions.push({ routingMode: "LEGACY_LEVEL", requiredLevel: user.level });
 	}
 
 	// Find all pending approvals for user's level OR custom approver ID
@@ -86,6 +93,7 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
 		where: {
 			OR: requestOrConditions,
 			status: "pending",
+			AND: [{ OR: [...CURRENT_INSTANCE_ROW_FILTER] }],
 			request: {
 				isDeleted: false,
 				isArchived: false,
@@ -277,6 +285,7 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
 		where: {
 			OR: solutionOrConditions,
 			status: "pending",
+			AND: [{ OR: [...CURRENT_INSTANCE_ROW_FILTER] }],
 			solution: {
 				request: {
 					isDeleted: false,

@@ -12,10 +12,15 @@ import prisma from '@/lib/prisma'
 import type { Prisma } from '@prisma/client'
 import { revalidateRequestViews } from './request-view-invalidation'
 import {
-  approveRequestApproval,
   type RequestStatusChangeResult,
 } from '@/lib/request-approval-transaction'
+import { RequestStatusConflictError } from '@/lib/request-status-transition'
 import { markCurrentInstanceOutcome, CURRENT_INSTANCE_ROW_FILTER } from '@/lib/approval-engine/phase-adapters'
+import {
+  advanceApprovalAtomically,
+  canUserApproveRequest,
+  createPrismaApprovalTransactionDb,
+} from '@/lib/approval-engine/transactions'
 
 /**
  * Check if data is stale based on updatedAt timestamp
@@ -199,6 +204,10 @@ export async function getApproversAtLevel(
  * Check if current user can approve a specific approval
  * Considers both internal (User.level) and external (DepartmentApprover) roles
  */
+function approvalTx(db: Prisma.TransactionClient | typeof prisma): Prisma.TransactionClient {
+  return db as Prisma.TransactionClient
+}
+
 export async function canUserApprove(
   requestId: string
 ): Promise<{ canApprove: boolean; approval?: any }> {
@@ -207,65 +216,15 @@ export async function canUserApprove(
     return { canApprove: false }
   }
 
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { level: true, departmentId: true },
-  })
-
-  if (!user) {
-    return { canApprove: false }
-  }
-
-  // Get the request to check department
-  const request = await prisma.requests.findUnique({
-    where: { id: requestId },
-    select: { departmentId: true, status: true },
-  })
-
-  if (!request) {
-    return { canApprove: false }
-  }
-
-  // Organization-owned requests have no legacy department; the legacy approval
-  // boundary does not support them yet and must fail closed instead of treating
-  // a null actor department as the same membership.
-  const requestDepartmentId = request.departmentId
-  if (requestDepartmentId === null) {
-    return { canApprove: false }
-  }
-
-  // Determine effective level for this user in this department
-  // Check if user is an internal approver for the request's department
-  let effectiveLevel =
-    user.departmentId !== null && user.departmentId === requestDepartmentId
-      ? user.level
-      : null
-
-  // Also check if user is a cross-department approver (DepartmentApprover)
-  if (!effectiveLevel) {
-    const deptApprover = await prisma.department_approvers.findFirst({
-      where: { departmentId: requestDepartmentId, approverId: userId },
-      select: { approverLevel: true },
-    })
-    if (deptApprover) {
-      effectiveLevel = deptApprover.approverLevel
-    }
-  }
-
-  if (!effectiveLevel) {
-    return { canApprove: false }
-  }
-
-  // Find pending approval for this user's effective level (current attempts
-  // only: superseded history is never actionable)
+  // Current pending REQUEST step only: superseded history is never actionable.
   const approval = await prisma.request_approvals.findFirst({
     where: {
       requestId,
-      requiredLevel: effectiveLevel,
       status: 'pending',
       isFinalApproval: false,
       OR: [...CURRENT_INSTANCE_ROW_FILTER],
     },
+    orderBy: { order: 'asc' },
     include: {
       request: {
         select: {
@@ -280,21 +239,12 @@ export async function canUserApprove(
     return { canApprove: false }
   }
 
-  // Check if this is the current approval in sequence (current attempts only)
-  const previousApprovals = await prisma.request_approvals.findMany({
-    where: {
-      requestId,
-      order: { lt: approval.order },
-      status: 'pending',
-      isFinalApproval: false,
-      OR: [...CURRENT_INSTANCE_ROW_FILTER],
-    },
-  })
+  const eligibility = await canUserApproveRequest(
+    createPrismaApprovalTransactionDb(approvalTx(prisma)),
+    { approvalId: approval.id, actorId: userId },
+  )
 
-  // Can only approve if all previous approvals are done
-  const canApprove = previousApprovals.length === 0
-
-  return { canApprove, approval }
+  return { canApprove: eligibility.canApprove, approval: eligibility.canApprove ? approval : undefined }
 }
 
 /**
@@ -327,23 +277,15 @@ export async function approveRequest(
     }
   }
 
-  // Approve atomically: the approval mutation, its audit activity, the
-  // remaining-pending count, the guarded status transition, and the
-  // status-change activity all commit together (see
-  // approveRequestApproval). The core reads and validates the request
-  // before writing anything, so an already-cancelled or otherwise
-  // out-of-ladder request (or a missing request row) throws the same
-  // conflict and commits nothing. If the requester's cancellation committed
-  // between that read and the guarded status write, the guarded update
-  // matches zero rows and throws, so this whole transaction - including the
-  // approval itself - rolls back instead of leaving a cancelled request
-  // with an approved approval row.
+  // Approve atomically through the race-safe transaction core: the
+  // conditional pending update, activity, remaining-pending count, guarded
+  // status transition, and instance outcome commit together. Notifications
+  // are planned only by the winner and dispatched after commit.
   const result = await prisma.$transaction((tx) =>
-    approveRequestApproval(tx, {
-      requestId,
+    advanceApprovalAtomically(createPrismaApprovalTransactionDb(tx), {
       approvalId: approval.id,
-      approverId: userId,
-      requiredLevel: approval.requiredLevel,
+      actorId: userId,
+      phase: 'REQUEST',
       comments,
     }),
   )
@@ -351,7 +293,19 @@ export async function approveRequest(
   // Notifications stay outside the transaction: they fire only on the
   // committed result, so a rolled-back approval never notifies anyone.
   if (result.statusChange) {
-    await notifyRequestStatusChange(requestId, result.statusChange)
+    const request = await prisma.requests.findUnique({
+      where: { id: requestId },
+      select: { requesterId: true, title: true },
+    })
+    if (request) {
+      const statusChange: RequestStatusChangeResult = {
+        fromStatus: result.statusChange.from,
+        toStatus: result.statusChange.to,
+        requesterId: request.requesterId,
+        title: request.title,
+      }
+      await notifyRequestStatusChange(requestId, statusChange)
+    }
   } else if (result.pendingApprovals > 0) {
     await notifyNextApprover(requestId)
   }
@@ -398,8 +352,12 @@ export async function rejectRequest(
   // current pending rows, and the current instance's REJECTED outcome commit
   // together; a failure rolls all of it back.
   await prisma.$transaction(async (tx) => {
-    await tx.request_approvals.update({
-      where: { id: approval.id },
+    const rejected = await tx.request_approvals.updateMany({
+      where: {
+        id: approval.id,
+        status: 'pending',
+        OR: [...CURRENT_INSTANCE_ROW_FILTER],
+      },
       data: {
         approverId: userId,
         status: 'rejected',
@@ -407,6 +365,11 @@ export async function rejectRequest(
         approvedAt: new Date(),
       },
     })
+    if (rejected.count !== 1) {
+      throw new RequestStatusConflictError(
+        'Cannot reject this request - it was changed by someone else. Please refresh and try again.',
+      )
+    }
 
     await tx.request_activities.create({
       data: {

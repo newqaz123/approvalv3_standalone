@@ -64,6 +64,8 @@ const MODEL_FIELDS: Record<string, readonly string[]> = {
   reporting_group_members: ['id', 'reportingGroupId', 'userId', 'createdAt'],
   approval_route_versions: ['id', 'scopeUnitId', 'phase', 'version', 'maximumPositionLevel', 'status', 'createdById', 'createdAt', 'publishedAt'],
   approval_route_steps: ['id', 'routeVersionId', 'stepOrder', 'positionCode', 'createdAt'],
+  approval_candidate_groups: ['id', 'approvalInstanceId', 'requiredPosition', 'scopeUnitId', 'capturedAt'],
+  approval_candidate_group_members: ['candidateGroupId', 'userId', 'capturedAt', 'capturedDisplayName'],
 }
 
 /** JSON-valued columns the field write-shape guard must not reject. */
@@ -100,6 +102,7 @@ const MODEL_RELATIONS: Record<
     approver: { kind: 'one', model: 'user', foreignKey: 'approverId' },
     requiredApprover: { kind: 'one', model: 'user', foreignKey: 'requiredApproverId' },
     instance: { kind: 'one', model: 'approval_instances', foreignKey: 'instanceId' },
+    candidateGroup: { kind: 'one', model: 'approval_candidate_groups', foreignKey: 'candidateGroupId' },
   },
   solutions: {
     request: { kind: 'one', model: 'requests', foreignKey: 'requestId' },
@@ -110,6 +113,10 @@ const MODEL_RELATIONS: Record<
   solution_approvals: {
     solution: { kind: 'one', model: 'solutions', foreignKey: 'solutionId' },
     instance: { kind: 'one', model: 'approval_instances', foreignKey: 'instanceId' },
+    candidateGroup: { kind: 'one', model: 'approval_candidate_groups', foreignKey: 'candidateGroupId' },
+  },
+  approval_candidate_groups: {
+    members: { kind: 'many', model: 'approval_candidate_group_members', foreignKey: 'candidateGroupId' },
   },
   approval_instances: {
     request: { kind: 'one', model: 'requests', foreignKey: 'requestId' },
@@ -809,6 +816,9 @@ export function createHarness(seed: HarnessSeed = {}): Harness {
   dependencies['./instances'] = dependencies['@/lib/approval-engine/instances']
   dependencies['@/lib/approval-engine/current-instance'] = load('lib/approval-engine/current-instance.ts')
   dependencies['./current-instance'] = dependencies['@/lib/approval-engine/current-instance']
+  dependencies['@/lib/approval-engine/legacy'] = load('lib/approval-engine/legacy.ts')
+  dependencies['./legacy'] = dependencies['@/lib/approval-engine/legacy']
+  dependencies['@/lib/approval-engine/transactions'] = load('lib/approval-engine/transactions.ts')
   dependencies['@/lib/approval-engine/phase-adapters'] = load('lib/approval-engine/phase-adapters.ts')
   dependencies['@/lib/approval-rollout'] = load('lib/approval-rollout.ts')
   dependencies['./notifications'] = load('server-actions/notifications.ts')
