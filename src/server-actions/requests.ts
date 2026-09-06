@@ -41,6 +41,7 @@ import {
   createRequestApprovalAttempt,
   markCurrentInstanceOutcome,
 } from '@/lib/approval-engine/phase-adapters'
+import { ApprovalRouteConfigurationError } from '@/lib/approval-routes/validation'
 import { snapshotGroupActionWhere } from '@/lib/approval-engine/transactions'
 import {
   createPrismaNotificationRecipientDb,
@@ -101,8 +102,15 @@ export interface CreateRequestInput {
  */
 export async function createRequest(input: CreateRequestInput) {
   const user = await getCurrentUser()
+  const rolloutMode = getApprovalRolloutMode(process.env)
 
-  if (!user || !user.departmentId) {
+  if (!user) {
+    return {
+      success: false,
+      error: 'User must belong to a department to create requests',
+    }
+  }
+  if (rolloutMode !== 'new' && !user.departmentId) {
     return {
       success: false,
       error: 'User must belong to a department to create requests',
@@ -155,7 +163,6 @@ export async function createRequest(input: CreateRequestInput) {
   let approvals: Awaited<ReturnType<typeof createApprovalChain>>
   // Rollout gate: creation only. Legacy (the default) and shadow keep the
   // existing builder exactly; new mode requires a completed import digest and origin coverage.
-  const rolloutMode = getApprovalRolloutMode(process.env)
 
   try {
     const txResult = await prisma.$transaction(async (tx) => {
@@ -164,7 +171,8 @@ export async function createRequest(input: CreateRequestInput) {
           title: validatedFields.data.title,
           description: prepared.html,
           requesterId: user.id,
-          departmentId: user.departmentId!, // checked above
+          departmentId: rolloutMode === 'new' ? user.departmentId ?? null : user.departmentId!,
+          organizationUnitId: null,
           status: 'ImprovementRequest',
         },
       })
@@ -277,7 +285,7 @@ export async function createRequest(input: CreateRequestInput) {
     if (error instanceof Error && error.message === ATTACHMENT_ADOPTION_ERROR) {
       return { success: false, error: ATTACHMENT_ADOPTION_ERROR }
     }
-    if (error instanceof ApprovalCreationDisabledError) {
+    if (error instanceof ApprovalCreationDisabledError || error instanceof ApprovalRouteConfigurationError) {
       return { success: false, error: error.message }
     }
     return { success: false, error: 'Failed to create request — please try again' }
@@ -285,7 +293,7 @@ export async function createRequest(input: CreateRequestInput) {
 
   // Notify department approvers if there are pending approvals (not auto-approved)
   const pendingApprovals = approvals.filter(a => a.status === 'pending')
-  if (pendingApprovals.length > 0) {
+  if (pendingApprovals.length > 0 && user.departmentId) {
     const firstLevel = pendingApprovals[0].requiredLevel
     const { getApproversAtLevel } = await import('./approvals')
     const approvers = await getApproversAtLevel(user.departmentId, firstLevel)

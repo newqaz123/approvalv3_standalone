@@ -116,7 +116,7 @@ async function createPrismaVerificationDb(): Promise<RolloutVerificationDb & { c
       return countOf`
         SELECT COUNT(*)::bigint AS count
         FROM approval_candidate_group_members m
-        JOIN "User" u ON u.id = m."userId"
+        JOIN "users" u ON u.id = m."userId"
         WHERE u."isActive" = false
           AND (
             EXISTS (

@@ -10,6 +10,11 @@ import { ApprovalRouteConfigurationError } from '@/lib/approval-routes/validatio
 import {
   runApplyReviewedOrganizationMapping,
 } from '../../scripts/apply-reviewed-organization-mapping'
+import {
+  createHarness,
+  departmentRows,
+  workflowUsers,
+} from '../fixtures/organization-approval-harness'
 
 const ids = {
   factory: '10000000-0000-4000-8000-000000000001',
@@ -548,12 +553,47 @@ describe('assertNewCreationEnabled', () => {
     Object.assign(process.env, originalEnv)
   }
 
+  const gateInput = {
+    phase: 'REQUEST' as const,
+    originUserId: ids.mappedUser,
+    requestId: ids.request,
+  }
+
   it('denies NEW creation when the mapping digest is missing', async () => {
     process.env.APPROVAL_ROUTING_MODE = 'new'
     delete process.env.APPROVAL_ORG_MAPPING_DIGEST
     try {
       await assert.rejects(
-        () => assertNewCreationEnabled(createFakeMappingTx() as never),
+        () => assertNewCreationEnabled(createFakeMappingTx() as never, gateInput),
+        (error: unknown) => {
+          assert.ok(error instanceof ApprovalCreationDisabledError)
+          assert.match(error.message, /not enabled|APPROVAL_ROUTING_MODE/i)
+          return true
+        },
+      )
+    } finally {
+      restoreEnv()
+    }
+  })
+
+  it('denies when rollout mode is not new even if a matching digest exists', async () => {
+    const mapping = staffMapping()
+    const digest = computeReviewedOrganizationMappingDigest(mapping)
+    process.env.APPROVAL_ROUTING_MODE = 'legacy'
+    process.env.APPROVAL_ORG_MAPPING_DIGEST = digest
+    const tx = createFakeMappingTx({
+      importRuns: [{
+        id: 'run-1',
+        mappingDigest: digest,
+        appliedAt: new Date(),
+        appliedBy: 'op',
+        targetIdentity: 'ci-copy',
+        counts: {},
+      }],
+    })
+    try {
+      await assert.rejects(
+        () => assertNewCreationEnabled(tx as never, gateInput),
         (error: unknown) => {
           assert.ok(error instanceof ApprovalCreationDisabledError)
           assert.match(error.message, /not enabled|APPROVAL_ROUTING_MODE/i)
@@ -667,5 +707,161 @@ describe('assertNewCreationEnabled', () => {
     } finally {
       restoreEnv()
     }
+  })
+
+  it('allows NEW creation when mode, digest, primary assignment, and published route match', async () => {
+    const mapping = staffMapping()
+    const digest = computeReviewedOrganizationMappingDigest(mapping)
+    process.env.APPROVAL_ROUTING_MODE = 'new'
+    process.env.APPROVAL_ORG_MAPPING_DIGEST = digest
+    const tx = createFakeMappingTx({
+      importRuns: [{
+        id: 'run-1',
+        mappingDigest: digest,
+        appliedAt: new Date(),
+        appliedBy: 'op',
+        targetIdentity: 'ci-copy',
+        counts: {},
+      }],
+      units: [
+        { id: ids.factory, name: 'Factory', unitType: 'FACTORY', parentId: null, legacyDepartmentId: null, isActive: true, operationalType: 'GENERAL' },
+        { id: ids.division, name: 'Division', unitType: 'DIVISION', parentId: ids.factory, legacyDepartmentId: null, isActive: true, operationalType: 'GENERAL' },
+        { id: ids.department, name: 'Department', unitType: 'DEPARTMENT', parentId: ids.division, legacyDepartmentId: null, isActive: true, operationalType: 'GENERAL' },
+        { id: ids.section, name: 'PD1', unitType: 'SECTION', parentId: ids.department, legacyDepartmentId: ids.legacyDepartment, isActive: true, operationalType: 'GENERAL' },
+      ],
+      assignments: [{
+        id: 'a-primary',
+        userId: ids.mappedUser,
+        unitId: ids.section,
+        positionCode: 'STAFF',
+        reportingGroupId: null,
+        isPrimary: true,
+        isActive: true,
+      }],
+      routeVersions: [{
+        id: 'route-1',
+        scopeUnitId: ids.section,
+        phase: 'REQUEST',
+        version: 1,
+        maximumPositionLevel: 4,
+        status: 'PUBLISHED',
+      }],
+      routeSteps: [{
+        routeVersionId: 'route-1',
+        stepOrder: 1,
+        positionCode: 'SUPERVISOR',
+      }],
+    })
+    try {
+      await assertNewCreationEnabled(tx as never, gateInput)
+    } finally {
+      restoreEnv()
+    }
+  })
+})
+
+const parentCreateInput = {
+  title: 'Parent-owned request',
+  description: '<p>Parent unit</p>',
+  inlineImageSessionId: '00000000-0000-4000-8000-000000000097',
+  stagedAttachmentIds: [] as string[],
+}
+
+function parentManagerUser(id: string, name: string) {
+  return {
+    id,
+    departmentId: null,
+    level: null,
+    isActive: true,
+    role: 'general',
+    name,
+    email: `${id}@example.test`,
+  }
+}
+
+describe('NEW-mode parent-unit request creation', () => {
+  it('blocks Factory Manager and department-manager without a department in legacy mode', async () => {
+    for (const id of ['factory-manager-1', 'department-manager-parent']) {
+      const harness = createHarness({
+        departments: departmentRows(),
+        users: [...workflowUsers(), parentManagerUser(id, id)],
+      })
+      harness.state.currentUser = { ...parentManagerUser(id, id), department: null }
+      harness.state.env.APPROVAL_ROUTING_MODE = 'legacy'
+      const result = (await harness.requests.createRequest(parentCreateInput)) as { success: boolean; error?: string }
+      assert.equal(result.success, false)
+      assert.match(result.error ?? '', /department/i)
+      assert.equal(harness.db.requests.rows.size, 0)
+    }
+  })
+
+  it('does not require departmentId in NEW mode and surfaces configuration errors', async () => {
+    const harness = createHarness({
+      departments: departmentRows(),
+      users: [...workflowUsers(), parentManagerUser('factory-manager-1', 'Factory Manager')],
+    })
+    harness.state.currentUser = { ...parentManagerUser('factory-manager-1', 'Factory Manager'), department: null }
+    harness.state.env.APPROVAL_ROUTING_MODE = 'new'
+    harness.state.env.APPROVAL_ORG_MAPPING_DIGEST = 'stale-digest'
+    const result = (await harness.requests.createRequest(parentCreateInput)) as { success: boolean; error?: string }
+    assert.equal(result.success, false)
+    assert.match(result.error ?? '', /stale|corrupt|digest|not enabled|APPROVAL_ROUTING_MODE|primary|configuration/i)
+    assert.doesNotMatch(result.error ?? '', /Failed to create request/i)
+    assert.doesNotMatch(result.error ?? '', /must belong to a department/i)
+    assert.equal(harness.db.requests.rows.size, 0)
+  })
+
+  it('persists organizationUnitId from a Factory Manager primary assignment without inventing a section', async () => {
+    const digest = 'completed-mapping-digest'
+    const harness = createHarness({
+      departments: departmentRows(),
+      users: [...workflowUsers(), parentManagerUser('factory-manager-1', 'Factory Manager')],
+      organization_units: [
+        { id: 'factory-1', name: 'Factory', unitType: 'FACTORY', parentId: null, isActive: true, operationalType: 'GENERAL' },
+        { id: 'division-1', name: 'Division', unitType: 'DIVISION', parentId: 'factory-1', isActive: true, operationalType: 'GENERAL' },
+        { id: 'department-1', name: 'Department', unitType: 'DEPARTMENT', parentId: 'division-1', isActive: true, operationalType: 'GENERAL' },
+      ],
+      organization_position_assignments: [{
+        id: 'fm-primary',
+        userId: 'factory-manager-1',
+        unitId: 'factory-1',
+        positionCode: 'FACTORY_MANAGER',
+        reportingGroupId: null,
+        isPrimary: true,
+        isActive: true,
+      }],
+      approval_route_versions: [{
+        id: 'route-factory-request',
+        scopeUnitId: 'factory-1',
+        phase: 'REQUEST',
+        version: 1,
+        maximumPositionLevel: 6,
+        status: 'PUBLISHED',
+        createdById: 'factory-manager-1',
+      }],
+      approval_route_steps: [{
+        id: 'step-1',
+        routeVersionId: 'route-factory-request',
+        stepOrder: 1,
+        positionCode: 'FACTORY_MANAGER',
+      }],
+      organization_import_runs: [{
+        id: 'import-1',
+        mappingDigest: digest,
+        appliedAt: new Date(),
+        appliedBy: 'op',
+        targetIdentity: 'ci-copy',
+        counts: { units: 3 },
+      }],
+    })
+    harness.state.currentUser = { ...parentManagerUser('factory-manager-1', 'Factory Manager'), department: null }
+    harness.state.env.APPROVAL_ROUTING_MODE = 'new'
+    harness.state.env.APPROVAL_ORG_MAPPING_DIGEST = digest
+    const result = (await harness.requests.createRequest(parentCreateInput)) as { success: boolean; requestId?: string; error?: string }
+    assert.equal(result.success, true, result.error)
+    const created = [...harness.db.requests.rows.values()][0]
+    assert.equal(created?.departmentId, null)
+    assert.equal(created?.organizationUnitId, 'factory-1')
+    assert.equal([...harness.db.organization_units.rows.values()].some((unit) => unit.unitType === 'SECTION'), false)
   })
 })

@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { getApprovalRolloutMode, verifyOrganizationRollout } from '@/lib/approval-rollout'
 import { fakeRolloutDb } from '../fixtures/organization-approval-fixtures'
 import {
@@ -22,6 +23,10 @@ describe('organization approval rollout', () => {
     assert.equal(
       getApprovalRolloutMode({ APPROVAL_ROUTING_MODE: 'shadow', APPROVAL_ORG_ROUTING_MODE: 'shadow' }),
       'shadow',
+    )
+    assert.equal(
+      getApprovalRolloutMode({ APPROVAL_ROUTING_MODE: 'new', APPROVAL_ORG_ROUTING_MODE: 'shadow' }),
+      'legacy',
     )
   })
 
@@ -83,4 +88,14 @@ describe('organization rollout verification CLI', () => {
     assert.equal(constructed, 0)
     assert.ok(prints.some((line) => /usage|--mapping-report/i.test(line)))
   })
+
+  it('joins the Prisma-mapped users table in verification SQL, never User',
+    () => {
+      const source = readFileSync('scripts/verify-organization-rollout.ts', 'utf8')
+      const schema = readFileSync('prisma/schema.prisma', 'utf8')
+      assert.match(schema, /model User \{[\s\S]*?@@map\("users"\)/)
+      assert.match(source, /JOIN "users" u ON u\.id = m\."userId"/)
+      assert.equal((source.match(/JOIN "User"/g) ?? []).length, 0)
+    },
+  )
 })

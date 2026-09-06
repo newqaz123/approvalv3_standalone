@@ -26,6 +26,7 @@ import { resolvePublishedApprovalRoute } from '@/lib/approval-routes/resolver'
 import { ApprovalRouteConfigurationError } from '@/lib/approval-routes/validation'
 import { RequestStatusConflictError } from '@/lib/request-status-transition'
 import { resolveReportingBranch } from '@/lib/organization/repository'
+import { getApprovalRolloutMode } from '@/lib/approval-rollout'
 import { buildNormalApprovalInstance, createApprovalEngineDb, persistApprovalInstance, type ApprovalInstanceTx } from './instances'
 import { resolvePhaseOrigin } from './phase-origin'
 import type {
@@ -514,8 +515,11 @@ async function assertOriginRouteCoverage(tx: NewCreationGateTx, input: NewCreati
  */
 export async function assertNewCreationEnabled(
   tx: Prisma.TransactionClient,
-  input?: NewCreationGateInput,
+  input: NewCreationGateInput,
 ): Promise<void> {
+  if (getApprovalRolloutMode(process.env) !== 'new') {
+    throw new ApprovalCreationDisabledError()
+  }
   const digest = process.env.APPROVAL_ORG_MAPPING_DIGEST
   if (!digest) {
     throw new ApprovalCreationDisabledError()
@@ -528,9 +532,7 @@ export async function assertNewCreationEnabled(
       `Stale or corrupt organization mapping digest: no completed import run for ${digest}`,
     )
   }
-  if (input) {
-    await assertOriginRouteCoverage(tx as unknown as NewCreationGateTx, input)
-  }
+  await assertOriginRouteCoverage(tx as unknown as NewCreationGateTx, input)
 }
 
 /**

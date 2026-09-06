@@ -61,6 +61,7 @@ const MODEL_FIELDS: Record<string, readonly string[]> = {
   approval_instances: ['id', 'requestId', 'solutionId', 'phase', 'routeVersionId', 'originUserId', 'originUnitId', 'originContext', 'routingMode', 'state', 'attempt', 'completionReason', 'supersededAt', 'createdAt'],
   organization_units: ['id', 'name', 'unitType', 'parentId', 'legacyDepartmentId', 'isActive', 'operationalType', 'createdAt', 'updatedAt'],
   organization_position_assignments: ['id', 'userId', 'unitId', 'positionCode', 'reportingGroupId', 'isPrimary', 'isActive', 'createdAt', 'updatedAt'],
+  organization_import_runs: ['id', 'mappingDigest', 'appliedAt', 'appliedBy', 'targetIdentity', 'counts', 'createdAt'],
   reporting_groups: ['id', 'unitId', 'parentGroupId', 'name', 'isActive', 'createdAt'],
   reporting_group_members: ['id', 'reportingGroupId', 'userId', 'createdAt'],
   approval_route_versions: ['id', 'scopeUnitId', 'phase', 'version', 'maximumPositionLevel', 'status', 'createdById', 'createdAt', 'publishedAt'],
@@ -71,7 +72,7 @@ const MODEL_FIELDS: Record<string, readonly string[]> = {
 }
 
 /** JSON-valued columns the field write-shape guard must not reject. */
-const JSON_FIELDS = new Set(['approval_instances.originContext'])
+const JSON_FIELDS = new Set(['approval_instances.originContext', 'organization_import_runs.counts'])
 
 /**
  * Task 2 column defaults the database applies but bare test seeds omit. The
@@ -470,6 +471,11 @@ export class ApprovalWorkflowDb {
   readonly request_engineer_assignments: ModelTable
   readonly organization_units: ModelTable
   readonly organization_position_assignments: ModelTable
+  readonly organization_import_runs: ModelTable
+  readonly reporting_groups: ModelTable
+  readonly reporting_group_members: ModelTable
+  readonly approval_route_versions: ModelTable
+  readonly approval_route_steps: ModelTable
 
   constructor() {
     for (const model of Object.keys(MODEL_FIELDS)) {
@@ -492,6 +498,11 @@ export class ApprovalWorkflowDb {
     this.request_engineer_assignments = this.table('request_engineer_assignments') as ModelTable
     this.organization_units = this.table('organization_units') as ModelTable
     this.organization_position_assignments = this.table('organization_position_assignments') as ModelTable
+    this.organization_import_runs = this.table('organization_import_runs') as ModelTable
+    this.reporting_groups = this.table('reporting_groups') as ModelTable
+    this.reporting_group_members = this.table('reporting_group_members') as ModelTable
+    this.approval_route_versions = this.table('approval_route_versions') as ModelTable
+    this.approval_route_steps = this.table('approval_route_steps') as ModelTable
   }
 
   tableRows(model: string): Map<string, Row> {
@@ -529,7 +540,7 @@ export class ApprovalWorkflowDb {
         if (model === 'requests') db.onRequestsRead?.()
         return row ? projectRow(db, model, row, args.select, args.include) : null
       },
-      async findMany(args) {
+      async findMany(args = {}) {
         assertExactKeys(args, ['where', 'orderBy', 'select', 'include', 'take'], `${model}.findMany args`)
         let candidates = [...rows.values()]
         if (args.where) candidates = candidates.filter((row) => matchWhere(db, model, row, args.where!))
@@ -693,6 +704,7 @@ export interface HarnessSeed {
   organization_position_assignments?: Row[]
   reporting_groups?: Row[]
   reporting_group_members?: Row[]
+  organization_import_runs?: Row[]
   approval_route_versions?: Row[]
   approval_route_steps?: Row[]
   approval_candidate_groups?: Row[]
@@ -739,6 +751,7 @@ export function createHarness(seed: HarnessSeed = {}): Harness {
   db.seed('organization_position_assignments', seed.organization_position_assignments ?? [])
   db.seed('reporting_groups', seed.reporting_groups ?? [])
   db.seed('reporting_group_members', seed.reporting_group_members ?? [])
+  db.seed('organization_import_runs', seed.organization_import_runs ?? [])
   db.seed('approval_route_versions', seed.approval_route_versions ?? [])
   db.seed('approval_route_steps', seed.approval_route_steps ?? [])
   db.seed('approval_candidate_groups', seed.approval_candidate_groups ?? [])
@@ -853,8 +866,8 @@ export function createHarness(seed: HarnessSeed = {}): Harness {
   dependencies['@/lib/approval-engine/legacy'] = load('lib/approval-engine/legacy.ts')
   dependencies['./legacy'] = dependencies['@/lib/approval-engine/legacy']
   dependencies['@/lib/approval-engine/transactions'] = load('lib/approval-engine/transactions.ts')
-  dependencies['@/lib/approval-engine/phase-adapters'] = load('lib/approval-engine/phase-adapters.ts')
   dependencies['@/lib/approval-rollout'] = load('lib/approval-rollout.ts')
+  dependencies['@/lib/approval-engine/phase-adapters'] = load('lib/approval-engine/phase-adapters.ts')
   dependencies['@/lib/notification-recipients'] = load('lib/notification-recipients.ts')
   dependencies['@/lib/request-visibility/types'] = load('lib/request-visibility/types.ts')
   dependencies['@/lib/request-visibility/predicate'] = load('lib/request-visibility/predicate.ts')
