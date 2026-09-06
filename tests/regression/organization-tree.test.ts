@@ -74,12 +74,16 @@ describe('organization repository validation', () => {
 
   it('rejects missing or inactive origin and ancestor units and wrong position-unit pairs', async () => {
     await assert.rejects(resolve({ units: baseUnits.filter((unit) => unit.id !== 's1') }), /inactive or missing unit/i)
+    await assert.rejects(resolve({ units: baseUnits.map((unit) => unit.id === 's1' ? { ...unit, isActive: false } : unit) }), /inactive or missing unit/i)
     await assert.rejects(resolve({ units: baseUnits.map((unit) => unit.id === 'de1' ? { ...unit, isActive: false } : unit) }), /ancestor.*inactive/i)
+    await assert.rejects(resolve({ units: baseUnits.filter((unit) => unit.id !== 'de1') }), /missing/i)
     await assert.rejects(resolve({ assignments: [{ ...baseAssignments[0], positionCode: 'DEPARTMENT_MANAGER' }] }), /does not match unit/i)
   })
 
   it('rejects malformed group parents and validates selected membership', async () => {
     await assert.rejects(resolve({ groups: [{ ...baseGroups[0], parentGroupId: 'missing' }] }), /group parent/i)
+    await assert.rejects(resolve({ groups: [{ ...baseGroups[0], parentGroupId: 'g0' }, { id: 'g0', unitId: 's1', parentGroupId: 'g1', name: 'G0', isActive: true }] }), /cycle/i)
+    await assert.rejects(resolve({ units: baseUnits.map((unit) => unit.id === 's1' ? { ...unit, parentId: 'f1' } : unit) }), /invalid parent type/i)
     await assert.rejects(resolve({ groups: [{ id: 'g2', unitId: 's2', parentGroupId: null, name: 'G2', isActive: true }, { ...baseGroups[0], parentGroupId: 'g2' }] }), /crosses sections/i)
     await assert.rejects(resolve({ groups: [{ ...baseGroups[0], unitId: 's2' }] }), /membership|outside/i)
     await assert.rejects(resolve({ members: [] }), /membership/i)
@@ -90,7 +94,11 @@ describe('organization repository validation', () => {
     await assert.rejects(resolve({ groups: [...baseGroups, foreignGroup], members: [{ reportingGroupId: 'g1', userId: 'u1' }, { reportingGroupId: 'g2', userId: 'u1' }] }), /membership/i)
     assert.deepEqual(await resolve({ assignments: [{ ...baseAssignments[0], reportingGroupId: null }, { id: 'a2', userId: 'u1', unitId: 's2', positionCode: 'SUPERVISOR', reportingGroupId: null, isPrimary: false, isActive: true }], groups: [...baseGroups, foreignGroup], members: [{ reportingGroupId: 'g2', userId: 'u1' }] }), { originUserId: 'u1', primaryUnitId: 's1', primaryAssignmentId: 'a1', primaryPosition: 'STAFF', unitPath: ['s1', 'de1', 'd1', 'f1'], groupPath: [] })
     await assert.rejects(resolve({ assignments: [{ ...baseAssignments[0], reportingGroupId: null }, { id: 'a2', userId: 'u1', unitId: 's2', positionCode: 'DEPARTMENT_MANAGER', reportingGroupId: null, isPrimary: false, isActive: true }], groups: [...baseGroups, foreignGroup], members: [{ reportingGroupId: 'g2', userId: 'u1' }] }), /membership/i)
-    await assert.rejects(resolve({ assignments: [{ ...baseAssignments[0], reportingGroupId: null }, { id: 'a2', userId: 'u1', unitId: 's2', positionCode: 'SUPERVISOR', reportingGroupId: null, isPrimary: false, isActive: true }], units: baseUnits.map((unit) => unit.id === 'de1' ? { ...unit, isActive: false } : unit), groups: [...baseGroups, foreignGroup], members: [{ reportingGroupId: 'g2', userId: 'u1' }] }), /ancestor|membership/i)
+    const secondaryUnits = [...baseUnits.filter((unit) => unit.id !== 's2'), { id: 'de2', name: 'De2', unitType: 'DEPARTMENT', parentId: 'd1', isActive: true }, { id: 's2', name: 'S2', unitType: 'SECTION', parentId: 'de2', isActive: true }]
+    const secondaryAssignment = { id: 'a2', userId: 'u1', unitId: 's2', positionCode: 'SUPERVISOR', reportingGroupId: null, isPrimary: false, isActive: true }
+    const secondaryOptions = { assignments: [{ ...baseAssignments[0], reportingGroupId: null }, secondaryAssignment], units: secondaryUnits, groups: [...baseGroups, foreignGroup], members: [{ reportingGroupId: 'g2', userId: 'u1' }] }
+    assert.deepEqual(await resolve(secondaryOptions), { originUserId: 'u1', primaryUnitId: 's1', primaryAssignmentId: 'a1', primaryPosition: 'STAFF', unitPath: ['s1', 'de1', 'd1', 'f1'], groupPath: [] })
+    await assert.rejects(resolve({ ...secondaryOptions, units: secondaryUnits.map((unit) => unit.id === 'de2' ? { ...unit, isActive: false } : unit) }), /membership/i)
     await assert.rejects(resolve({ assignments: [{ ...baseAssignments[0], reportingGroupId: null }], groups: [...baseGroups, foreignGroup], members: [{ reportingGroupId: 'g2', userId: 'u1' }] }), /membership/i)
   })
 
