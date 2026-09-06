@@ -369,6 +369,34 @@ describe('NEW approval instance resolution', () => {
     await assert.rejects(() => buildNormalApprovalInstance(failingDb, staffInput()), ApprovalRouteConfigurationError)
   })
 
+  it('skips a step whose candidate group is only inactive users, distinct from an empty group', async () => {
+    const base = staffDb({ SUPERVISOR: ['supervisor-1'], DEPARTMENT_MANAGER: ['department-manager-1'] })
+    const inactiveOnlyDb: ApprovalEngineDb = {
+      ...base,
+      findCandidates: async (query) =>
+        query.requiredPosition === 'SECTION_MANAGER'
+          ? [{ id: 'ghost-manager-1', isActive: false }]
+          : base.findCandidates(query),
+    }
+    const plan = await buildNormalApprovalInstance(inactiveOnlyDb, staffInput())
+    assert.equal(plan.state, 'PENDING')
+    assert.deepEqual(plan.steps.map((step) => step.requiredPosition), ['SUPERVISOR', 'DEPARTMENT_MANAGER'])
+    assert.deepEqual(plan.skipped, [{ requiredPosition: 'SECTION_MANAGER', reason: 'VACANT_POSITION' }])
+  })
+
+  it('completes NO_ELIGIBLE_APPROVAL_STEPS when the sole step holds only inactive users', async () => {
+    const base = staffDb({}, { steps: [{ order: 1, position: 'SECTION_MANAGER' }], maximumPositionLevel: 3 })
+    const inactiveOnlyDb: ApprovalEngineDb = {
+      ...base,
+      findCandidates: async () => [{ id: 'ghost-manager-1', isActive: false }],
+    }
+    const plan = await buildNormalApprovalInstance(inactiveOnlyDb, staffInput())
+    assert.equal(plan.state, 'COMPLETED_NO_ELIGIBLE_STEPS')
+    assert.equal(plan.completionReason, 'NO_ELIGIBLE_APPROVAL_STEPS')
+    assert.deepEqual(plan.steps, [])
+    assert.deepEqual(plan.skipped, [{ requiredPosition: 'SECTION_MANAGER', reason: 'VACANT_POSITION' }])
+  })
+
   it('resolves supervisor candidates only from the origin reporting-group path and managers from their unit scope', async () => {
     const requested: Array<{ requiredPosition: OrganizationPositionCode; scopeUnitId: string; groupPath: readonly string[] }> = []
     const universe = {
@@ -686,6 +714,86 @@ describe('approval instance persistence', () => {
     assert.equal((calls.approval_instances[0] as Record<string, unknown>).attempt, 4)
   })
 
+  it('persists an all-vacant completed instance with skips and no approval rows', async () => {
+    const plan = await buildNormalApprovalInstance(
+      staffDb({}, { steps: [{ order: 1, position: 'SECTION_MANAGER' }], maximumPositionLevel: 3 }),
+      staffInput(),
+    )
+    assert.equal(plan.state, 'COMPLETED_NO_ELIGIBLE_STEPS')
+    const { tx, calls } = createRecordingTx({ users: labelUsers })
+
+    const persisted = await persistApprovalInstance(tx, plan)
+
+    assert.equal(persisted.id, 'instance-1')
+    const instanceRow = calls.approval_instances[0] as Record<string, unknown>
+    assert.equal(instanceRow.state, 'COMPLETED_NO_ELIGIBLE_STEPS')
+    assert.equal(instanceRow.completionReason, 'NO_ELIGIBLE_APPROVAL_STEPS')
+    assert.deepEqual(calls.approval_instance_skips, [{
+      approvalInstanceId: 'instance-1',
+      requiredPosition: 'SECTION_MANAGER',
+      reason: 'VACANT_POSITION',
+    }])
+    assert.deepEqual(calls.request_approvals, [])
+    assert.deepEqual(calls.solution_approvals, [])
+    assert.deepEqual(calls.approval_candidate_groups, [])
+    assert.deepEqual(calls.approval_candidate_group_members, [])
+  })
+
+  it('persists a SOLUTION AUTO_APPROVED instance with the approved solution self-row and null requestId', async () => {
+    const solutionAutoDb = createFakeApprovalEngineDb({
+      origin: { userId: 'fm', unitId: 'factory-1', position: 'FACTORY_MANAGER' },
+      route: {
+        id: 'factory-solution-v1', scopeUnitId: 'factory-1', phase: 'SOLUTION',
+        version: 1, status: 'PUBLISHED', maximumPositionLevel: 6,
+        ancestorScopeIds: ['factory-1'],
+        steps: [{ order: 1, position: 'FACTORY_MANAGER' }],
+      },
+      candidates: {},
+    })
+    const plan = await buildNormalApprovalInstance(solutionAutoDb, {
+      requestId: 'request-1',
+      solutionId: 'solution-9',
+      phase: 'SOLUTION',
+      originUserId: 'fm',
+      originalRequestId: 'request-1',
+      requestDepartmentId: null,
+    })
+    assert.equal(plan.state, 'AUTO_APPROVED')
+    const { tx, calls } = createRecordingTx({ users: [{ id: 'fm', name: 'Factory Manager' }] })
+
+    const persisted = await persistApprovalInstance(tx, plan)
+
+    assert.equal(persisted.id, 'instance-1')
+    const instanceRow = calls.approval_instances[0] as Record<string, unknown>
+    assert.equal(instanceRow.requestId, null)
+    assert.equal(instanceRow.solutionId, 'solution-9')
+    assert.equal(instanceRow.phase, 'SOLUTION')
+    assert.equal(instanceRow.state, 'AUTO_APPROVED')
+    assert.deepEqual(calls.request_approvals, [])
+    assert.equal(calls.solution_approvals.length, 1)
+    const selfRow = calls.solution_approvals[0] as Record<string, unknown>
+    assert.deepEqual(selfRow, {
+      solutionId: 'solution-9',
+      approverId: 'fm',
+      requiredLevel: null,
+      order: 1,
+      status: 'approved',
+      comments: null,
+      approvedAt: selfRow.approvedAt,
+      isCustomChain: false,
+      requiredApproverId: null,
+      instanceId: 'instance-1',
+      requiredPosition: 'FACTORY_MANAGER',
+      candidateGroupId: null,
+      routingMode: 'SNAPSHOT_GROUP',
+      integrityVersion: 1,
+    })
+    assert.ok(selfRow.approvedAt instanceof Date)
+    assert.deepEqual(calls.approval_candidate_groups, [])
+    assert.deepEqual(calls.approval_candidate_group_members, [])
+    assert.deepEqual(calls.approval_instance_skips, [])
+  })
+
   it('surfaces serialization conflicts as a retryable error without retrying', async () => {
     const plan = await buildPendingPlan()
     const prismaConflict = Object.assign(new Error('Transaction failed due to a write conflict or a deadlock'), { code: 'P2034' })
@@ -727,12 +835,16 @@ describe('production approval engine adapter', () => {
     { id: 'dm-1', name: 'Manager One', isActive: true },
     { id: 'dm-2', name: 'Manager Two', isActive: true },
     { id: 'dm-3', name: 'Manager Three', isActive: true },
+    { id: 'staff-peer-1', name: 'Peer Staff One', isActive: true },
     { id: 'ghost', name: 'Ghost', isActive: true },
   ]
   const assignmentRows = [
-    { id: 'asg-1', userId: 'requester-1', unitId: 'section-1', positionCode: 'STAFF', reportingGroupId: null, isPrimary: true, isActive: true },
+    { id: 'asg-1', userId: 'requester-1', unitId: 'section-1', positionCode: 'STAFF', reportingGroupId: 'group-a', isPrimary: true, isActive: true },
     { id: 'asg-eng', userId: 'engineer-1', unitId: 'section-1', positionCode: 'STAFF', reportingGroupId: null, isPrimary: true, isActive: true },
     { id: 'asg-fin', userId: 'final-initiator-1', unitId: 'section-1', positionCode: 'STAFF', reportingGroupId: null, isPrimary: true, isActive: true },
+    { id: 'asg-sup-1', userId: 'supervisor-1', unitId: 'section-1', positionCode: 'SUPERVISOR', reportingGroupId: 'group-a', isPrimary: true, isActive: true },
+    { id: 'asg-sup-inactive', userId: 'inactive-1', unitId: 'section-1', positionCode: 'SUPERVISOR', reportingGroupId: 'group-a', isPrimary: true, isActive: true },
+    { id: 'asg-sup-b', userId: 'supervisor-sibling', unitId: 'section-1', positionCode: 'SUPERVISOR', reportingGroupId: 'group-b', isPrimary: true, isActive: true },
     { id: 'asg-dm', userId: 'dm-1', unitId: 'department-1', positionCode: 'DEPARTMENT_MANAGER', reportingGroupId: null, isPrimary: true, isActive: true },
     { id: 'asg-dm-secondary', userId: 'dm-2', unitId: 'department-1', positionCode: 'DEPARTMENT_MANAGER', reportingGroupId: null, isPrimary: false, isActive: true },
     { id: 'asg-dm-sibling', userId: 'dm-3', unitId: 'department-2', positionCode: 'DEPARTMENT_MANAGER', reportingGroupId: null, isPrimary: true, isActive: true },
@@ -742,8 +854,10 @@ describe('production approval engine adapter', () => {
     { id: 'group-b', unitId: 'section-1', parentGroupId: null, name: 'Group B', isActive: true },
   ]
   const memberRows = [
+    { reportingGroupId: 'group-a', userId: 'requester-1' },
     { reportingGroupId: 'group-a', userId: 'supervisor-1' },
     { reportingGroupId: 'group-a', userId: 'inactive-1' },
+    { reportingGroupId: 'group-a', userId: 'staff-peer-1' },
     { reportingGroupId: 'group-b', userId: 'supervisor-sibling' },
   ]
   const requestRows: Record<string, { requesterId: string; departmentId: string | null }> = {
@@ -782,6 +896,7 @@ describe('production approval engine adapter', () => {
           (args.where.userId === undefined || row.userId === args.where.userId) &&
           (args.where.positionCode === undefined || row.positionCode === args.where.positionCode) &&
           (args.where.unitId === undefined || row.unitId === args.where.unitId) &&
+          (args.where.reportingGroupId === undefined || (row.reportingGroupId !== null && (args.where.reportingGroupId as { in: string[] }).in.includes(row.reportingGroupId))) &&
           (args.where.isPrimary === undefined || row.isPrimary === args.where.isPrimary) &&
           (args.where.isActive === undefined || row.isActive === args.where.isActive))
       },
@@ -858,22 +973,59 @@ describe('production approval engine adapter', () => {
     await assert.rejects(() => engine().resolvePhaseOrigin({ phase: 'FINAL', requestId: 'request-9' }), ApprovalRouteConfigurationError)
   })
 
-  it('queries supervisor candidates from the branch group path and managers from active primary assignments', async () => {
+  it('queries supervisor candidates as requiredPosition holders in the branch group path and managers from active primary assignments', async () => {
     const supervisors = await engine().findCandidates({ branch: staffBranch, requiredPosition: 'SUPERVISOR', scopeUnitId: 'section-1' })
+    // Pool = active primary SUPERVISOR assignments scoped to the group path,
+    // intersected with path membership; user activity stays in the result so
+    // the builder can treat an all-inactive group as vacant.
     assert.deepEqual(supervisors, [
       { id: 'supervisor-1', isActive: true },
       { id: 'inactive-1', isActive: false },
     ])
+    const supervisorAssignmentWhere = capturedWheres.organization_position_assignments.at(-1) as Record<string, unknown>
+    assert.equal(supervisorAssignmentWhere.positionCode, 'SUPERVISOR')
+    assert.deepEqual((supervisorAssignmentWhere.reportingGroupId as { in: string[] }).in, ['group-a'])
+    assert.equal(supervisorAssignmentWhere.isPrimary, true)
+    assert.equal(supervisorAssignmentWhere.isActive, true)
     const memberWhere = capturedWheres.reporting_group_members.at(-1) as { reportingGroupId: { in: string[] } }
     assert.deepEqual(memberWhere.reportingGroupId.in, ['group-a'])
 
     const managers = await engine().findCandidates({ branch: staffBranch, requiredPosition: 'DEPARTMENT_MANAGER', scopeUnitId: 'department-1' })
     assert.deepEqual(managers, [{ id: 'dm-1', isActive: true }])
-    const assignmentWhere = capturedWheres.organization_position_assignments.at(-1) as Record<string, unknown>
-    assert.equal(assignmentWhere.positionCode, 'DEPARTMENT_MANAGER')
-    assert.equal(assignmentWhere.unitId, 'department-1')
-    assert.equal(assignmentWhere.isPrimary, true)
-    assert.equal(assignmentWhere.isActive, true)
+    const managerWhere = capturedWheres.organization_position_assignments.at(-1) as Record<string, unknown>
+    assert.equal(managerWhere.positionCode, 'DEPARTMENT_MANAGER')
+    assert.equal(managerWhere.unitId, 'department-1')
+    assert.equal(managerWhere.isPrimary, true)
+    assert.equal(managerWhere.isActive, true)
+  })
+
+  it('never snapshots a staff origin or peer staff as SUPERVISOR candidates through the real adapter', async () => {
+    const realEngine = engine()
+    const staffMemberBranch: ReportingBranch = {
+      originUserId: 'requester-1', primaryUnitId: 'section-1', primaryAssignmentId: 'asg-1',
+      primaryPosition: 'STAFF', unitPath: [...SECTION_PATH], groupPath: ['group-a'],
+    }
+    const db: ApprovalEngineDb = {
+      resolvePhaseOrigin: async (query) => ({
+        phase: query.phase,
+        originUserId: 'requester-1',
+        originUnitId: 'section-1',
+        branch: staffMemberBranch,
+        originalRequestId: query.requestId,
+        requestDepartmentId: null,
+        source: 'REQUESTER',
+      }),
+      resolvePublishedRoute: (context) => realEngine.resolvePublishedRoute(context),
+      findCandidates: (input) => realEngine.findCandidates(input),
+    }
+    const plan = await buildNormalApprovalInstance(db, staffInput({ requestId: 'request-9', originUserId: 'requester-1' }))
+    const supervisorStep = plan.steps.find((step) => step.requiredPosition === 'SUPERVISOR')
+    assert.ok(supervisorStep)
+    // requester-1 and staff-peer-1 are group-a members without a SUPERVISOR
+    // assignment; inactive-1 holds the position but is inactive. Only the
+    // active position holder survives into the immutable snapshot.
+    assert.deepEqual([...supervisorStep.candidateUserIds], ['supervisor-1'])
+    assert.equal(supervisorStep.scopeUnitId, 'section-1')
   })
 
   it('loads published routes for the origin branch path through the route resolver', async () => {

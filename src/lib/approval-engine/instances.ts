@@ -481,7 +481,13 @@ interface ApprovalCandidateTx {
   }
   organization_position_assignments: {
     findMany(args: {
-      where: { positionCode: OrganizationPositionCode; unitId: string; isActive: true; isPrimary: true }
+      where: {
+        positionCode: OrganizationPositionCode
+        unitId?: string
+        reportingGroupId?: { in: string[] }
+        isActive: true
+        isPrimary: true
+      }
       select: { userId: true }
     }): Promise<Array<{ userId: string }>>
   }
@@ -512,11 +518,18 @@ function toPositionLevel(value: number, routeId: string): OrganizationPositionLe
 }
 
 /**
- * Supervisor/staff reporting positions (levels 1-2) draw candidates from the
- * members of the origin branch's reporting-group path; manager positions
- * (3-6) draw holders with an active primary assignment of the position at
- * the resolved scope unit. Inactive users are returned with
- * `isActive: false` so the builder can exclude them.
+ * Candidate pools are holders of the required position only:
+ * - Reporting positions (levels 1-2: STAFF/SUPERVISOR) resolve to ACTIVE
+ *   primary assignments of `requiredPosition` whose `reportingGroupId` is on
+ *   the origin branch's reporting-group path, intersected with membership of
+ *   those groups. Group members without the position (including peer staff
+ *   and the origin) are never candidates, and sibling groups are never
+ *   queried.
+ * - Manager positions (3-6) draw holders with an active primary assignment of
+ *   the position at the resolved scope unit.
+ * User accounts are looked up afterwards and returned with their
+ * `isActive` flag so the builder can exclude inactive users and treat an
+ * all-inactive group as vacant.
  */
 async function findCandidates(
   tx: ApprovalCandidateTx,
@@ -524,22 +537,50 @@ async function findCandidates(
 ): Promise<Array<{ id: string; isActive: boolean }>> {
   const level = ORGANIZATION_POSITION_LEVEL[input.requiredPosition]
   const userIds = level <= 2
-    ? (await tx.reporting_group_members.findMany({
-        where: { reportingGroupId: { in: [...input.branch.groupPath] } },
-        select: { userId: true },
-      })).map((member) => member.userId)
-    : (await tx.organization_position_assignments.findMany({
-        where: {
-          positionCode: input.requiredPosition,
-          unitId: input.scopeUnitId,
-          isActive: true,
-          isPrimary: true,
-        },
-        select: { userId: true },
-      })).map((assignment) => assignment.userId)
+    ? await reportingGroupPositionHolderIds(tx, input)
+    : await unitScopedPositionHolderIds(tx, input)
   if (userIds.length === 0) return []
   const users = await tx.user.findMany({ where: { id: { in: userIds } }, select: { id: true, isActive: true } })
   return users.map((user) => ({ id: user.id, isActive: user.isActive }))
+}
+
+async function reportingGroupPositionHolderIds(
+  tx: ApprovalCandidateTx,
+  input: { branch: ReportingBranch; requiredPosition: OrganizationPositionCode },
+): Promise<string[]> {
+  const groupIds = [...input.branch.groupPath]
+  const assignments = await tx.organization_position_assignments.findMany({
+    where: {
+      positionCode: input.requiredPosition,
+      reportingGroupId: { in: groupIds },
+      isActive: true,
+      isPrimary: true,
+    },
+    select: { userId: true },
+  })
+  if (assignments.length === 0) return []
+  const members = await tx.reporting_group_members.findMany({
+    where: { reportingGroupId: { in: groupIds } },
+    select: { userId: true },
+  })
+  const memberIds = new Set(members.map((member) => member.userId))
+  return assignments.map((assignment) => assignment.userId).filter((userId) => memberIds.has(userId))
+}
+
+async function unitScopedPositionHolderIds(
+  tx: ApprovalCandidateTx,
+  input: { requiredPosition: OrganizationPositionCode; scopeUnitId: string },
+): Promise<string[]> {
+  const assignments = await tx.organization_position_assignments.findMany({
+    where: {
+      positionCode: input.requiredPosition,
+      unitId: input.scopeUnitId,
+      isActive: true,
+      isPrimary: true,
+    },
+    select: { userId: true },
+  })
+  return assignments.map((assignment) => assignment.userId)
 }
 
 function loadPublishedRoutes(
