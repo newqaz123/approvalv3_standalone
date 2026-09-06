@@ -251,6 +251,34 @@ describe('organization edits do not mutate pending rows', () => {
   })
 })
 
+describe('explicit assignment deactivation', () => {
+  it('deactivates the last active primary without promoting a replacement or touching pending rows', async () => {
+    const harness = createOrganizationAdminHarness()
+    const beforePending = snapshotPending(harness)
+    const assignmentCountBefore = harness.db.snapshot('organization_position_assignments').length
+
+    await harness.actions.savePositionAssignment({
+      userId: ADMIN_SCENARIO.staffOneId,
+      unitId: ADMIN_SCENARIO.sectionOneId,
+      positionCode: 'STAFF',
+      reportingGroupId: ADMIN_SCENARIO.groupOneId,
+      isPrimary: true,
+      isActive: false,
+    })
+
+    const staffAssignments = harness.db.snapshot('organization_position_assignments').filter((row) => row.userId === ADMIN_SCENARIO.staffOneId)
+    assert.equal(staffAssignments.length, 1)
+    assert.equal(staffAssignments[0].isActive, false)
+    assert.equal(staffAssignments[0].isPrimary, true)
+    const promoted = harness.db.snapshot('organization_position_assignments').filter((row) => (
+      row.userId === ADMIN_SCENARIO.staffOneId && row.isActive === true && row.isPrimary === true
+    ))
+    assert.equal(promoted.length, 0)
+    assert.equal(harness.db.snapshot('organization_position_assignments').length, assignmentCountBefore)
+    assert.deepEqual(snapshotPending(harness), beforePending)
+  })
+})
+
 describe('Factory Manager create', () => {
   it('creates a Factory Manager with departmentId=null and no main/additional section selection', async () => {
     const harness = createOrganizationAdminHarness()
@@ -280,5 +308,94 @@ describe('Factory Manager create', () => {
     assert.equal(assignments[0].isPrimary, true)
     assert.equal(harness.db.snapshot('department_approvers').length, 0)
     assert.deepEqual(snapshotPending(harness), beforePending)
+  })
+
+  it('rolls back the user insert when the position assignment fails', async () => {
+    const harness = createOrganizationAdminHarness()
+    const userCountBefore = harness.db.snapshot('user').length
+
+    await assert.rejects(
+      () => harness.userActions.createUser({
+        name: 'Broken Manager',
+        email: 'broken-manager@example.test',
+        departmentId: null,
+        role: 'general_dept',
+        positionAssignment: {
+          unitId: 'unit-unknown',
+          positionCode: 'FACTORY_MANAGER',
+          reportingGroupId: null,
+          isPrimary: true,
+        },
+      }),
+      /missing|does not match unit/i,
+    )
+
+    assert.equal(harness.db.snapshot('user').length, userCountBefore)
+    assert.equal(
+      harness.db.snapshot('user').filter((row) => row.email === 'broken-manager@example.test').length,
+      0,
+    )
+    assert.equal(
+      harness.db.snapshot('organization_position_assignments').filter((row) => row.positionCode === 'FACTORY_MANAGER').length,
+      0,
+    )
+  })
+
+  it('rejects non-admin Factory Manager create before any write', async () => {
+    const harness = createOrganizationAdminHarness()
+    harness.state.adminId = null
+    const userCountBefore = harness.db.snapshot('user').length
+    const writeCountBefore = harness.db.writes.length
+
+    await assert.rejects(
+      () => harness.userActions.createUser({
+        name: 'Denied Manager',
+        email: 'denied-manager@example.test',
+        departmentId: null,
+        role: 'general_dept',
+        positionAssignment: {
+          unitId: ADMIN_SCENARIO.factoryId,
+          positionCode: 'FACTORY_MANAGER',
+          reportingGroupId: null,
+          isPrimary: true,
+        },
+      }),
+      /admin/i,
+    )
+
+    assert.equal(harness.db.writes.length, writeCountBefore)
+    assert.equal(harness.db.snapshot('user').length, userCountBefore)
+    assert.equal(
+      harness.db.snapshot('user').filter((row) => row.email === 'denied-manager@example.test').length,
+      0,
+    )
+  })
+})
+
+describe('updateUser legacy field preservation', () => {
+  it('keeps existing department and level when those keys are omitted', async () => {
+    const harness = createOrganizationAdminHarness()
+    harness.db.seed('departments', [{ id: 'dept-legacy', name: 'Legacy Department', type: 'GENERAL' }])
+    harness.db.seed('user', [{
+      id: 'legacy-user-1',
+      name: 'Legacy User',
+      email: 'legacy-user@example.test',
+      isActive: true,
+      role: 'general_dept',
+      departmentId: 'dept-legacy',
+      level: 7,
+    }])
+
+    await harness.userActions.updateUser({
+      id: 'legacy-user-1',
+      name: 'Legacy User Renamed',
+      email: 'legacy-user@example.test',
+      role: 'general_dept',
+    })
+
+    const row = harness.db.snapshot('user').find((user) => user.id === 'legacy-user-1')
+    assert.equal(row?.name, 'Legacy User Renamed')
+    assert.equal(row?.departmentId, 'dept-legacy')
+    assert.equal(row?.level, 7)
   })
 })

@@ -135,6 +135,9 @@ export async function getUser(id: string) {
  */
 export async function createUser(input: CreateUserInput) {
   const adminUserId = await requireAdmin()
+  if (!adminUserId) {
+    throw new Error('Admin authorization is required for user actions')
+  }
   const level = validateApprovalLevel(input.level, { allowNull: true })
   const departmentId = input.departmentId ?? null
 
@@ -168,30 +171,44 @@ export async function createUser(input: CreateUserInput) {
   const password = input.password || 'changeme'
   const passwordHash = await hash(password, 12)
 
-  const user = await prisma.user.create({
-    data: {
-      email: input.email,
-      name: input.name,
-      passwordHash,
-      departmentId,
-      role: finalRole,
-      level,
-      isActive: true,
-      forcePasswordChange: true,
-      updatedAt: new Date(),
-    },
-  })
-
-  if (input.positionAssignment) {
-    await savePositionAssignment({
-      userId: user.id,
-      unitId: input.positionAssignment.unitId,
-      positionCode: input.positionAssignment.positionCode,
-      reportingGroupId: input.positionAssignment.reportingGroupId ?? null,
-      isPrimary: input.positionAssignment.isPrimary ?? true,
-      isActive: true,
-    })
-  }
+  const user = input.positionAssignment
+    ? await prisma.$transaction(async (tx) => {
+        const created = await tx.user.create({
+          data: {
+            email: input.email,
+            name: input.name,
+            passwordHash,
+            departmentId,
+            role: finalRole,
+            level,
+            isActive: true,
+            forcePasswordChange: true,
+            updatedAt: new Date(),
+          },
+        })
+        await savePositionAssignment({
+          userId: created.id,
+          unitId: input.positionAssignment!.unitId,
+          positionCode: input.positionAssignment!.positionCode,
+          reportingGroupId: input.positionAssignment!.reportingGroupId ?? null,
+          isPrimary: input.positionAssignment!.isPrimary ?? true,
+          isActive: true,
+        }, tx)
+        return created
+      })
+    : await prisma.user.create({
+        data: {
+          email: input.email,
+          name: input.name,
+          passwordHash,
+          departmentId,
+          role: finalRole,
+          level,
+          isActive: true,
+          forcePasswordChange: true,
+          updatedAt: new Date(),
+        },
+      })
 
   console.log(`User created: ${input.email} (password must be changed on first login)`)
 
@@ -272,30 +289,6 @@ export async function updateUser(input: UpdateUserInput) {
     }
   }
 
-  const user = await prisma.user.update({
-    where: { id: input.id },
-    data: {
-      name: input.name,
-      email: input.email,
-      departmentId: nextDepartmentId,
-      role: finalRole,
-      level,
-      updatedAt: new Date(),
-    },
-  })
-
-  if (input.positionAssignment) {
-    await savePositionAssignment({
-      userId: input.id,
-      unitId: input.positionAssignment.unitId,
-      positionCode: input.positionAssignment.positionCode,
-      reportingGroupId: input.positionAssignment.reportingGroupId ?? null,
-      isPrimary: input.positionAssignment.isPrimary ?? true,
-      isActive: true,
-    })
-  }
-
-  // Audit logging: Track all admin changes
   const changes: string[] = []
   if (input.name !== originalName) changes.push(`name: "${originalName}" → "${input.name}"`)
   if (input.email !== originalEmail) changes.push(`email: "${originalEmail}" → "${input.email}"`)
@@ -303,7 +296,52 @@ export async function updateUser(input: UpdateUserInput) {
   if (nextDepartmentId !== originalDepartmentId) changes.push(`departmentId: "${originalDepartmentId}" → "${nextDepartmentId}"`)
   if (level !== originalLevel) changes.push(`level: "${String(originalLevel ?? 'null')}" → "${String(level ?? 'null')}"`)
 
-  if (changes.length > 0) {
+  const user = input.positionAssignment
+    ? await prisma.$transaction(async (tx) => {
+        const updated = await tx.user.update({
+          where: { id: input.id },
+          data: {
+            name: input.name,
+            email: input.email,
+            departmentId: nextDepartmentId,
+            role: finalRole,
+            level,
+            updatedAt: new Date(),
+          },
+        })
+        await savePositionAssignment({
+          userId: input.id,
+          unitId: input.positionAssignment!.unitId,
+          positionCode: input.positionAssignment!.positionCode,
+          reportingGroupId: input.positionAssignment!.reportingGroupId ?? null,
+          isPrimary: input.positionAssignment!.isPrimary ?? true,
+          isActive: true,
+        }, tx)
+        if (changes.length > 0) {
+          await tx.request_activities.create({
+            data: {
+              action: 'user_admin_changed',
+              comments: `Updated user ${input.id}: ${changes.join(', ')}`,
+              userId: adminUserId,
+              createdAt: new Date(),
+            },
+          })
+        }
+        return updated
+      })
+    : await prisma.user.update({
+        where: { id: input.id },
+        data: {
+          name: input.name,
+          email: input.email,
+          departmentId: nextDepartmentId,
+          role: finalRole,
+          level,
+          updatedAt: new Date(),
+        },
+      })
+
+  if (!input.positionAssignment && changes.length > 0) {
     await prisma.request_activities.create({
       data: {
         action: 'user_admin_changed',

@@ -55,8 +55,24 @@ async function requireOrganizationAdmin(): Promise<string> {
   return adminId
 }
 
-async function writeOrganizationAudit(adminId: string, comments: string): Promise<void> {
-  await prisma.request_activities.create({
+type OrganizationActionDb = {
+  user: { findUnique: (args: object) => Promise<{ id: string } | null> }
+  organization_units: { findMany: (args?: object) => Promise<Array<{ id: string; name: string; unitType: string; parentId: string | null; isActive: boolean }>> }
+  organization_position_assignments: {
+    findMany: (args?: object) => Promise<Array<{ id: string; userId: string; unitId: string; positionCode: string; reportingGroupId: string | null; isPrimary: boolean; isActive: boolean }>>
+    create: (args: object) => Promise<unknown>
+    update: (args: object) => Promise<unknown>
+  }
+  reporting_groups: { findUnique: (args: object) => Promise<{ id: string; unitId: string } | null> }
+  request_activities: { create: (args: object) => Promise<unknown> }
+}
+
+function organizationDb(db?: object): OrganizationActionDb {
+  return (db ?? prisma) as OrganizationActionDb
+}
+
+async function writeOrganizationAudit(adminId: string, comments: string, db?: object): Promise<void> {
+  await organizationDb(db).request_activities.create({
     data: {
       action: 'organization_admin_changed',
       comments,
@@ -101,8 +117,8 @@ function assertValidParentType(unit: OrganizationUnitNode, byId: Map<string, Org
   }
 }
 
-async function loadUnitNodes(): Promise<OrganizationUnitNode[]> {
-  const rows = await prisma.organization_units.findMany()
+async function loadUnitNodes(db?: object): Promise<OrganizationUnitNode[]> {
+  const rows = await organizationDb(db).organization_units.findMany()
   return rows.map((row) => asUnitNode({
     id: row.id,
     name: row.name,
@@ -133,13 +149,13 @@ function emptyMappingCoverage(): OrganizationImportReport {
   }
 }
 
-function assertExactlyOneActivePrimary(
+function assertAtMostOneActivePrimary(
   assignments: Array<{ isActive: boolean; isPrimary: boolean }>,
   userId: string,
 ): void {
   const activePrimaries = assignments.filter((assignment) => assignment.isActive && assignment.isPrimary)
-  if (activePrimaries.length !== 1) {
-    throw new Error(`User ${userId} must have exactly one active primary assignment`)
+  if (activePrimaries.length > 1) {
+    throw new Error(`User ${userId} must not have more than one active primary assignment`)
   }
 }
 
@@ -279,15 +295,16 @@ export async function savePositionAssignment(input: {
   reportingGroupId: string | null
   isPrimary: boolean
   isActive: boolean
-}): Promise<{ success: true }> {
+}, db?: object): Promise<{ success: true }> {
   const adminId = await requireOrganizationAdmin()
   if (!input.userId) throw new Error('User is required')
   if (!isPositionCode(input.positionCode)) throw new Error('Position code is invalid')
+  const client = organizationDb(db)
 
-  const user = await prisma.user.findUnique({ where: { id: input.userId }, select: { id: true } })
+  const user = await client.user.findUnique({ where: { id: input.userId }, select: { id: true } })
   if (!user) throw new Error('User not found')
 
-  const units = await loadUnitNodes()
+  const units = await loadUnitNodes(client)
   validateProposedUnits(units)
   const unit = units.find((candidate) => candidate.id === input.unitId)
   if (!unit) throw new Error(`Organization unit ${input.unitId} is missing`)
@@ -302,13 +319,13 @@ export async function savePositionAssignment(input: {
     if (unit.unitType !== 'SECTION') {
       throw new Error(`Reporting-group section membership is only valid on a section`)
     }
-    const group = await prisma.reporting_groups.findUnique({ where: { id: input.reportingGroupId } })
+    const group = await client.reporting_groups.findUnique({ where: { id: input.reportingGroupId } })
     if (!group || group.unitId !== unit.id) {
       throw new Error(`Reporting group ${input.reportingGroupId} is outside the assigned section`)
     }
   }
 
-  const existing = await prisma.organization_position_assignments.findMany({ where: { userId: input.userId } })
+  const existing = await client.organization_position_assignments.findMany({ where: { userId: input.userId } })
   const match = existing.find(
     (assignment) => assignment.unitId === input.unitId && assignment.positionCode === input.positionCode,
   )
@@ -319,10 +336,10 @@ export async function savePositionAssignment(input: {
       isPrimary: assignment.isPrimary,
     }))
   next.push({ isActive: input.isActive, isPrimary: input.isPrimary })
-  assertExactlyOneActivePrimary(next, input.userId)
+  assertAtMostOneActivePrimary(next, input.userId)
 
   if (match) {
-    await prisma.organization_position_assignments.update({
+    await client.organization_position_assignments.update({
       where: { id: match.id },
       data: {
         reportingGroupId: input.reportingGroupId,
@@ -332,7 +349,7 @@ export async function savePositionAssignment(input: {
       },
     })
   } else {
-    await prisma.organization_position_assignments.create({
+    await client.organization_position_assignments.create({
       data: {
         userId: input.userId,
         unitId: input.unitId,
@@ -348,9 +365,12 @@ export async function savePositionAssignment(input: {
   await writeOrganizationAudit(
     adminId,
     `Saved position assignment user=${input.userId} unit=${input.unitId} position=${input.positionCode} primary=${input.isPrimary} active=${input.isActive}`,
+    client,
   )
-  revalidatePath('/admin/organization')
-  revalidatePath('/admin/users')
+  if (!db) {
+    revalidatePath('/admin/organization')
+    revalidatePath('/admin/users')
+  }
   return { success: true }
 }
 

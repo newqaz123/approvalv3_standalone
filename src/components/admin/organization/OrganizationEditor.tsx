@@ -134,10 +134,7 @@ export function OrganizationEditor({
         )}
         <div className="flex flex-wrap gap-3 text-sm">
           <Link href="/admin/routes" className="text-primary underline">
-            Edit approval routes
-          </Link>
-          <Link href="/admin/routes" className="text-primary underline">
-            Preview routes
+            Edit approval routes and preview
           </Link>
         </div>
       </section>
