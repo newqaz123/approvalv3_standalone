@@ -8,6 +8,10 @@
  * exports; earlier behavioral assertions stay green.
  */
 
+import type { OrganizationPositionCode, ReportingBranch } from '@/lib/organization/types'
+import type { ResolvedApprovalRoute } from '@/lib/approval-routes/types'
+import type { ApprovalEngineDb, PhaseOrigin } from '@/lib/approval-engine/types'
+
 export const ORGANIZATION_APPROVAL_FIXTURE = {
   factoryId: 'factory-1',
   divisionId: 'division-1',
@@ -293,3 +297,82 @@ export const LEGACY_NOTIFICATION_EXPECTATIONS: readonly LegacyNotificationExpect
     assertedVia: 'recorded production delivery (real action + notifications module, mocked SMTP/DB)',
   },
 ]
+
+// ---------------------------------------------------------------------------
+// Task 7 NEW approval-engine boundary fake
+// ---------------------------------------------------------------------------
+
+/** Positions whose candidate pools resolve through reporting-group paths. */
+const GROUP_PATH_POSITIONS: readonly OrganizationPositionCode[] = ['STAFF', 'SUPERVISOR']
+
+const PHASE_ORIGIN_SOURCES: Record<PhaseOrigin['phase'], PhaseOrigin['source']> = {
+  REQUEST: 'REQUESTER',
+  SOLUTION: 'SOLUTION_SUBMITTER',
+  FINAL: 'FINAL_INITIATOR',
+}
+
+export interface FakeApprovalEngineDbInput {
+  origin: { userId: string; unitId: string; position: OrganizationPositionCode }
+  route: ResolvedApprovalRoute
+  candidates: Partial<Record<OrganizationPositionCode, string[]>>
+}
+
+/**
+ * Task 7 engine-boundary fake. Its three repository methods resolve the
+ * supplied origin/route and return `{ id, isActive: true }` records from an
+ * internal Map keyed by required position; `replaceCandidates` changes only
+ * that Map after a plan has been built, proving the returned snapshot is
+ * immutable. The full branch/context is derived from the supplied origin and
+ * route path. It must never call Prisma.
+ */
+export function createFakeApprovalEngineDb(
+  input: FakeApprovalEngineDbInput,
+): ApprovalEngineDb & { replaceCandidates(position: OrganizationPositionCode, ids: string[]): void } {
+  if (input.route.ancestorScopeIds.length === 0 || input.route.ancestorScopeIds[0] !== input.origin.unitId) {
+    throw new Error(`Fake route ancestorScopeIds must start at the origin unit ${input.origin.unitId}`)
+  }
+  const candidateMap = new Map<OrganizationPositionCode, string[]>(
+    (Object.entries(input.candidates) as Array<[OrganizationPositionCode, string[]]>).map(([position, ids]) => [
+      position,
+      [...ids],
+    ]),
+  )
+  const branch: ReportingBranch = {
+    originUserId: input.origin.userId,
+    primaryUnitId: input.origin.unitId,
+    primaryAssignmentId: `assignment-${input.origin.userId}`,
+    primaryPosition: input.origin.position,
+    unitPath: [...input.route.ancestorScopeIds],
+    groupPath: GROUP_PATH_POSITIONS.includes(input.origin.position) ? [`${input.origin.unitId}-group-a`] : [],
+  }
+  const db: ApprovalEngineDb = {
+    resolvePhaseOrigin: async (query) => {
+      if (query.originUserId && query.originUserId !== input.origin.userId) {
+        throw new Error('Fake engine origin user does not match the requested actor')
+      }
+      const phaseOrigin: PhaseOrigin = {
+        phase: query.phase,
+        originUserId: input.origin.userId,
+        originUnitId: input.origin.unitId,
+        branch,
+        originalRequestId: query.requestId,
+        requestDepartmentId: null,
+        source: PHASE_ORIGIN_SOURCES[query.phase],
+      }
+      return phaseOrigin
+    },
+    resolvePublishedRoute: async () => ({
+      ...input.route,
+      steps: input.route.steps.map((step) => ({ ...step })),
+      ancestorScopeIds: [...input.route.ancestorScopeIds],
+    }),
+    findCandidates: async (query) =>
+      (candidateMap.get(query.requiredPosition) ?? []).map((id) => ({ id, isActive: true })),
+  }
+  return {
+    ...db,
+    replaceCandidates: (position, ids) => {
+      candidateMap.set(position, [...ids])
+    },
+  }
+}
