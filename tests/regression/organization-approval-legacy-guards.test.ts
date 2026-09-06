@@ -184,12 +184,25 @@ describe('final approval boundary: organization-owned request', () => {
 })
 
 describe('department notification boundary', () => {
-  it('notifyUsersInDepartment rejects a missing legacy department before any query, in-app row, or SMTP send', async () => {
+  it('notifyUsersInDepartment rejects a missing legacy department before any audience query, in-app row, or SMTP send', async () => {
     const harness = createHarness({
       departments: departmentRows(),
       users: workflowUsers(),
     })
     enableTestSmtp(harness.state)
+
+    // Focused instrumentation of the fake's real audience read: every
+    // prisma.user.findMany the production notification path performs must be
+    // observable, so "zero reads" is an observed fact, not an inference from
+    // missing side effects.
+    const originalUserFindMany = harness.db.user.findMany.bind(harness.db.user)
+    let userAudienceReads = 0
+    ;(harness.db.user as unknown as { findMany: typeof originalUserFindMany }).findMany = (
+      ...args: Parameters<typeof originalUserFindMany>
+    ) => {
+      userAudienceReads += 1
+      return originalUserFindMany(...args)
+    }
 
     await assert.rejects(
       () =>
@@ -201,6 +214,7 @@ describe('department notification boundary', () => {
       /without a legacy department/,
     )
 
+    assert.equal(userAudienceReads, 0, 'no user audience query may run before the null-department rejection')
     assert.equal(harness.db.rows.notifications.size, 0, 'departmentless users must never be queried as an audience')
     assert.equal(harness.state.smtpMessages.length, 0)
     assert.equal(harness.db.rows.user.size, workflowUsers().length, 'no user rows were touched')

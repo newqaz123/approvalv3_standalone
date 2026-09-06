@@ -496,9 +496,20 @@ BEGIN
     RETURN false;
   END IF;
 
+  -- Locking parent read: FOR SHARE is held to the end of the transaction, so
+  -- both mutation paths (approval-row writes and guarded instance updates)
+  -- serialize per instance BEFORE validating, and whichever transaction
+  -- commits second re-validates after the first one's commit under the same
+  -- lock. Under READ COMMITTED the lock wait returns the newest committed
+  -- instance version, so the check always evaluates the latest persisted
+  -- state; an audit-row insert can therefore never commit interleaved with a
+  -- concurrent instance AUTO_APPROVED -> PENDING transition. No higher
+  -- isolation mode and no application-wide setting is required. Read-only
+  -- triggers: the locking select fires no triggers, so there is no recursion.
   SELECT "state", "originUserId", "routingMode", "requestId", "solutionId", "phase"
     INTO v_instance_state, v_instance_origin, v_instance_mode, v_instance_request, v_instance_solution, v_instance_phase
-    FROM "approval_instances" WHERE "id" = v_instance_id;
+    FROM "approval_instances" WHERE "id" = v_instance_id
+    FOR SHARE;
 
   IF v_instance_state IS NULL THEN
     RETURN false;
@@ -525,11 +536,28 @@ END;
 $$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION "enforce_request_approvals_groupless_snapshot_audit"() RETURNS trigger AS $$
+DECLARE
+  v_integrity_version integer;
+  v_routing_mode text;
+  v_candidate_group_id text;
 BEGIN
-  IF NEW."integrityVersion" = 1
-     AND NEW."routingMode" = 'SNAPSHOT_GROUP'
-     AND NEW."candidateGroupId" IS NULL
-     AND NOT "approval_groupless_snapshot_audit_ok"('request', NEW."id") THEN
+  -- Applicability is decided from the LATEST persisted row, never the stale
+  -- queued event payload: later statements of the same transaction may have
+  -- attached a candidate group (or the row may have been deleted) after this
+  -- trigger was queued. Deleted rows and rows that are no longer group-less
+  -- version-1 snapshot rows succeed without the group-less audit check.
+  SELECT "integrityVersion", "routingMode", "candidateGroupId"
+    INTO v_integrity_version, v_routing_mode, v_candidate_group_id
+    FROM "request_approvals" WHERE "id" = NEW."id";
+
+  IF v_integrity_version IS NULL
+     OR v_integrity_version <> 1
+     OR v_routing_mode <> 'SNAPSHOT_GROUP'
+     OR v_candidate_group_id IS NOT NULL THEN
+    RETURN NULL;
+  END IF;
+
+  IF NOT "approval_groupless_snapshot_audit_ok"('request', NEW."id") THEN
     RAISE EXCEPTION 'group-less snapshot approval row % is not an approved auto self-audit row of its instance', NEW."id";
   END IF;
   RETURN NULL;
@@ -537,11 +565,25 @@ END;
 $$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION "enforce_solution_approvals_groupless_snapshot_audit"() RETURNS trigger AS $$
+DECLARE
+  v_integrity_version integer;
+  v_routing_mode text;
+  v_candidate_group_id text;
 BEGIN
-  IF NEW."integrityVersion" = 1
-     AND NEW."routingMode" = 'SNAPSHOT_GROUP'
-     AND NEW."candidateGroupId" IS NULL
-     AND NOT "approval_groupless_snapshot_audit_ok"('solution', NEW."id") THEN
+  -- See the request-side function: applicability always comes from the
+  -- latest persisted row, not from the queued event payload.
+  SELECT "integrityVersion", "routingMode", "candidateGroupId"
+    INTO v_integrity_version, v_routing_mode, v_candidate_group_id
+    FROM "solution_approvals" WHERE "id" = NEW."id";
+
+  IF v_integrity_version IS NULL
+     OR v_integrity_version <> 1
+     OR v_routing_mode <> 'SNAPSHOT_GROUP'
+     OR v_candidate_group_id IS NOT NULL THEN
+    RETURN NULL;
+  END IF;
+
+  IF NOT "approval_groupless_snapshot_audit_ok"('solution', NEW."id") THEN
     RAISE EXCEPTION 'group-less snapshot approval row % is not an approved auto self-audit row of its instance', NEW."id";
   END IF;
   RETURN NULL;

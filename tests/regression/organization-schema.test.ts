@@ -373,8 +373,12 @@ describe('organization approval migration SQL contract', () => {
     // The exception is narrow: an approved audit row whose actual approver is
     // the linked instance's origin user, on an AUTO_APPROVED SNAPSHOT_GROUP
     // instance matching owner and phase. Grouped snapshot rows keep their
-    // mandatory candidate group. A later instance mutation re-validates the
-    // latest persisted rows, so no stale event snapshot can pass.
+    // mandatory candidate group. Applicability is decided from the LATEST
+    // persisted row (a queued event's stale NEW fields never reject a row
+    // that was grouped or deleted later in the same transaction), and the
+    // instance is validated through a locking parent read (FOR SHARE, held to
+    // commit) so an audit insert can never commit interleaved with a
+    // concurrent instance state demotion.
     assert.match(sql, /CREATE OR REPLACE FUNCTION "approval_groupless_snapshot_audit_ok"/)
     for (const fragment of [
       normalized(`v_status = 'approved'`),
@@ -388,6 +392,13 @@ describe('organization approval migration SQL contract', () => {
     ]) {
       assert.ok(sql.includes(fragment), `audit predicate must include ${fragment}`)
     }
+    // Per-instance serialization: the helper's instance read is a locking
+    // parent read held to commit, shared by both mutation paths.
+    assert.match(
+      sql,
+      /FROM "approval_instances" WHERE "id" = v_instance_id FOR SHARE;/,
+      'audit validation must take a per-instance locking parent read (FOR SHARE) held to commit',
+    )
     for (const table of ['request_approvals', 'solution_approvals']) {
       assert.ok(
         sql.includes(
@@ -400,15 +411,38 @@ describe('organization approval migration SQL contract', () => {
         ),
         `${table} must carry a deferred row-level group-less snapshot audit trigger`,
       )
+      const fnStart = sql.indexOf(
+        `CREATE OR REPLACE FUNCTION "enforce_${table}_groupless_snapshot_audit"()`,
+      )
+      assert.ok(fnStart >= 0, `${table} trigger function must exist`)
+      const fnEnd = sql.indexOf('$$ LANGUAGE plpgsql;', fnStart)
+      const triggerFn = sql.slice(fnStart, fnEnd)
+      // Applicability must be decided from the LATEST persisted row, never
+      // the stale queued event payload.
+      assert.match(
+        triggerFn,
+        new RegExp(
+          `SELECT "integrityVersion", "routingMode", "candidateGroupId" INTO [^;]* FROM "${table}" WHERE "id" = NEW."id"`,
+        ),
+        `${table} trigger must re-read the latest persisted row before deciding applicability`,
+      )
       assert.ok(
-        sql.includes(
+        normalized(triggerFn).includes(
           normalized(`
-            IF NEW."integrityVersion" = 1
-              AND NEW."routingMode" = 'SNAPSHOT_GROUP'
-              AND NEW."candidateGroupId" IS NULL
+            IF v_integrity_version IS NULL
+              OR v_integrity_version <> 1
+              OR v_routing_mode <> 'SNAPSHOT_GROUP'
+              OR v_candidate_group_id IS NOT NULL THEN
+              RETURN NULL;
+            END IF;
           `),
         ),
-        `${table} trigger must gate only group-less version-1 snapshot rows`,
+        `${table} trigger must succeed for deleted rows and rows that are no longer group-less version-1 snapshots`,
+      )
+      assert.doesNotMatch(
+        triggerFn,
+        /NEW\."(integrityVersion|candidateGroupId|routingMode)"/,
+        `${table} trigger must never decide applicability from stale queued NEW fields`,
       )
     }
     assert.ok(
