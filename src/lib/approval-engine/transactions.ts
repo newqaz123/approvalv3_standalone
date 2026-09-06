@@ -346,6 +346,7 @@ export function createPrismaApprovalTransactionDb(tx: Prisma.TransactionClient):
                 id: input.approvalId,
                 status: 'pending',
                 instanceId: input.instanceId,
+                solution: { request: { status: input.expectedRequestStatus } },
               },
               data,
             })
@@ -360,18 +361,6 @@ export function createPrismaApprovalTransactionDb(tx: Prisma.TransactionClient):
               data,
             })
       if (updated.count !== 1) return { count: 0 }
-      if (input.phase === 'SOLUTION') {
-        // Nested solution.request.status filters are not used: the owning
-        // request is already locked, and a post-update status mismatch
-        // returns count 0 so the caller throws and the transaction rolls back.
-        const requestId = loaded?.requestId
-        if (!requestId) return { count: 0 }
-        const request = await tx.requests.findUnique({
-          where: { id: requestId },
-          select: { status: true },
-        })
-        if (request?.status !== input.expectedRequestStatus) return { count: 0 }
-      }
       return { count: 1 }
     },
     async recordApprovalActivity(input) {

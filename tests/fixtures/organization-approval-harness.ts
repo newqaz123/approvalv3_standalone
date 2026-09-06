@@ -34,6 +34,7 @@ import * as storage from '@/lib/attachments/storage'
 import * as emailCrypto from '@/lib/email-crypto'
 import * as emailSettings from '@/lib/email-settings'
 import * as formattedText from '@/lib/formatted-text'
+import * as followUpDashboard from '@/lib/follow-up-dashboard'
 
 // ---------------------------------------------------------------------------
 // Strict in-memory Prisma fake
@@ -65,7 +66,8 @@ const MODEL_FIELDS: Record<string, readonly string[]> = {
   approval_route_versions: ['id', 'scopeUnitId', 'phase', 'version', 'maximumPositionLevel', 'status', 'createdById', 'createdAt', 'publishedAt'],
   approval_route_steps: ['id', 'routeVersionId', 'stepOrder', 'positionCode', 'createdAt'],
   approval_candidate_groups: ['id', 'approvalInstanceId', 'requiredPosition', 'scopeUnitId', 'capturedAt'],
-  approval_candidate_group_members: ['candidateGroupId', 'userId', 'capturedAt', 'capturedDisplayName'],
+  approval_candidate_group_members: ['id', 'candidateGroupId', 'userId', 'capturedAt', 'capturedDisplayName'],
+  request_engineer_assignments: ['id', 'requestId', 'engineerId', 'assignedAt', 'assignedById'],
 }
 
 /** JSON-valued columns the field write-shape guard must not reject. */
@@ -96,6 +98,8 @@ const MODEL_RELATIONS: Record<
     requester: { kind: 'one', model: 'user', localKey: 'requesterId' },
     department: { kind: 'one', model: 'departments', foreignKey: 'departmentId' },
     fileAttachments: { kind: 'many', model: 'file_attachments', foreignKey: 'requestId' },
+    activities: { kind: 'many', model: 'request_activities', foreignKey: 'requestId' },
+    engineerAssignments: { kind: 'many', model: 'request_engineer_assignments', foreignKey: 'requestId' },
   },
   request_approvals: {
     request: { kind: 'one', model: 'requests', foreignKey: 'requestId' },
@@ -114,6 +118,12 @@ const MODEL_RELATIONS: Record<
     solution: { kind: 'one', model: 'solutions', foreignKey: 'solutionId' },
     instance: { kind: 'one', model: 'approval_instances', foreignKey: 'instanceId' },
     candidateGroup: { kind: 'one', model: 'approval_candidate_groups', foreignKey: 'candidateGroupId' },
+    approver: { kind: 'one', model: 'user', foreignKey: 'approverId' },
+    requiredApprover: { kind: 'one', model: 'user', foreignKey: 'requiredApproverId' },
+  },
+  request_engineer_assignments: {
+    engineer: { kind: 'one', model: 'user', foreignKey: 'engineerId' },
+    request: { kind: 'one', model: 'requests', foreignKey: 'requestId' },
   },
   approval_candidate_groups: {
     members: { kind: 'many', model: 'approval_candidate_group_members', foreignKey: 'candidateGroupId' },
@@ -255,8 +265,12 @@ function matchRelationCondition(
       }
       continue
     }
-    if (!supported.includes(op) && !MODEL_FIELDS[relation.model].includes(op)) {
-      throw new UnexpectedQueryError(`Unsupported relation operator '${op}' for ${model}.${key} (supported: 'is' or related-model fields)`)
+    if (
+      !supported.includes(op) &&
+      !MODEL_FIELDS[relation.model].includes(op) &&
+      !MODEL_RELATIONS[relation.model]?.[op]
+    ) {
+      throw new UnexpectedQueryError(`Unsupported relation operator '${op}' for ${model}.${key} (supported: 'is', related-model fields, or nested to-one relations)`)
     }
   }
   const related = resolveRelation(db, model, row, key, relation)
@@ -449,6 +463,9 @@ export class ApprovalWorkflowDb {
   readonly file_attachments: ModelTable
   readonly email_settings: ModelTable
   readonly approval_instances: ModelTable
+  readonly approval_candidate_groups: ModelTable
+  readonly approval_candidate_group_members: ModelTable
+  readonly request_engineer_assignments: ModelTable
 
   constructor() {
     for (const model of Object.keys(MODEL_FIELDS)) {
@@ -466,6 +483,9 @@ export class ApprovalWorkflowDb {
     this.file_attachments = this.table('file_attachments') as ModelTable
     this.email_settings = this.table('email_settings') as ModelTable
     this.approval_instances = this.table('approval_instances') as ModelTable
+    this.approval_candidate_groups = this.table('approval_candidate_groups') as ModelTable
+    this.approval_candidate_group_members = this.table('approval_candidate_group_members') as ModelTable
+    this.request_engineer_assignments = this.table('request_engineer_assignments') as ModelTable
   }
 
   tableRows(model: string): Map<string, Row> {
@@ -669,6 +689,9 @@ export interface HarnessSeed {
   reporting_group_members?: Row[]
   approval_route_versions?: Row[]
   approval_route_steps?: Row[]
+  approval_candidate_groups?: Row[]
+  approval_candidate_group_members?: Row[]
+  request_engineer_assignments?: Row[]
 }
 
 export interface Harness {
@@ -677,6 +700,7 @@ export interface Harness {
   requests: Record<string, (...args: unknown[]) => Promise<unknown>>
   solutions: Record<string, (...args: unknown[]) => Promise<unknown>>
   approvals: Record<string, (...args: unknown[]) => Promise<unknown>>
+  dashboard: Record<string, (...args: unknown[]) => Promise<unknown>>
   notifications: Record<string, (...args: unknown[]) => Promise<unknown>>
   requestAccess: Record<string, (...args: unknown[]) => Promise<unknown>>
 }
@@ -711,6 +735,9 @@ export function createHarness(seed: HarnessSeed = {}): Harness {
   db.seed('reporting_group_members', seed.reporting_group_members ?? [])
   db.seed('approval_route_versions', seed.approval_route_versions ?? [])
   db.seed('approval_route_steps', seed.approval_route_steps ?? [])
+  db.seed('approval_candidate_groups', seed.approval_candidate_groups ?? [])
+  db.seed('approval_candidate_group_members', seed.approval_candidate_group_members ?? [])
+  db.seed('request_engineer_assignments', seed.request_engineer_assignments ?? [])
 
   const dependencies: Record<string, unknown> = {
     '@/lib/prisma': { default: db.asPrisma() },
@@ -772,6 +799,7 @@ export function createHarness(seed: HarnessSeed = {}): Harness {
     '@/lib/email-crypto': emailCrypto,
     '@/lib/email-settings': emailSettings,
     '@/lib/formatted-text': formattedText,
+    '@/lib/follow-up-dashboard': followUpDashboard,
   }
 
   const load = (modulePath: string): Record<string, (...args: unknown[]) => Promise<unknown>> => {
@@ -825,8 +853,10 @@ export function createHarness(seed: HarnessSeed = {}): Harness {
   const approvals = load('server-actions/approvals.ts')
   dependencies['./approvals'] = approvals
   const requests = load('server-actions/requests.ts')
+  dependencies['@/server-actions/requests'] = requests
   const solutions = load('server-actions/solutions.ts')
   const requestAccess = load('lib/request-access.ts')
+  const dashboard = load('server-actions/dashboard.ts')
 
   return {
     db,
@@ -834,6 +864,7 @@ export function createHarness(seed: HarnessSeed = {}): Harness {
     requests,
     solutions,
     approvals,
+    dashboard,
     notifications: dependencies['./notifications'] as Harness['notifications'],
     requestAccess,
   }

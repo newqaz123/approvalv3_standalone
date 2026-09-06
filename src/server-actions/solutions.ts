@@ -998,10 +998,7 @@ export async function approveSolution(solutionId: string, comments?: string, exp
         where: { id: solutionData.requestId },
         select: { title: true, departmentId: true },
       })
-      if (request) {
-        if (request.departmentId === null) {
-          throw new Error('Cannot notify requester department: organization-owned requests are not supported by legacy notifications yet')
-        }
+      if (request?.departmentId) {
         notifications.department(request.departmentId, {
           type: 'solution_ready',
           title: 'Solution Ready for Review',
@@ -1873,30 +1870,29 @@ export async function approveFinalApproval(requestId: string, comments?: string,
       if (!request) {
         throw new Error('Request not found')
       }
-      if (request.departmentId === null) {
-        throw new Error('Cannot notify requester department: organization-owned requests are not supported by legacy notifications yet')
+      if (request.departmentId) {
+        const engineeringDept = await tx.departments.findFirst({
+          where: { type: 'ENGINEERING' },
+          select: { id: true },
+        })
+        const engineeringUsers = engineeringDept
+          ? await tx.user.findMany({
+              where: { departmentId: engineeringDept.id },
+              select: { id: true },
+            })
+          : []
+        const engineeringUserIds = engineeringUsers.map((u) => u.id)
+        notifications.department(
+          request.departmentId,
+          {
+            type: 'approval_granted',
+            title: 'Request Completed',
+            message: `✅ Request Completed: "${request.title}" has been fully approved and completed.`,
+            requestId,
+          },
+          engineeringUserIds,
+        )
       }
-      const engineeringDept = await tx.departments.findFirst({
-        where: { type: 'ENGINEERING' },
-        select: { id: true },
-      })
-      const engineeringUsers = engineeringDept
-        ? await tx.user.findMany({
-            where: { departmentId: engineeringDept.id },
-            select: { id: true },
-          })
-        : []
-      const engineeringUserIds = engineeringUsers.map((u) => u.id)
-      notifications.department(
-        request.departmentId,
-        {
-          type: 'approval_granted',
-          title: 'Request Completed',
-          message: `✅ Request Completed: "${request.title}" has been fully approved and completed.`,
-          requestId,
-        },
-        engineeringUserIds,
-      )
     } else {
       await queueNextFinalApproverNotifications(tx, requestId, notifications)
     }

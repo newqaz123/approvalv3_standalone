@@ -209,6 +209,7 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
 				requestId: approval.requestId,
 				order: { lt: approval.order },
 				status: "pending",
+				OR: [...CURRENT_INSTANCE_ROW_FILTER],
 			},
 		});
 
@@ -370,6 +371,7 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
 				solutionId: approval.solutionId,
 				order: { lt: approval.order },
 				status: "pending",
+				OR: [...CURRENT_INSTANCE_ROW_FILTER],
 			},
 		});
 

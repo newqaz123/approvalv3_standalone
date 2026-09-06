@@ -384,3 +384,250 @@ describe('historical version-0 row shapes remain readable', () => {
     )
   })
 })
+
+function snapshotGroupSeed(input: {
+  phase: 'SOLUTION' | 'FINAL'
+  actorId: string
+  instanceId: string
+  groupId: string
+  approvalId: string
+}): {
+  organization_units: Array<Record<string, unknown>>
+  approval_instances: Array<Record<string, unknown>>
+  approval_candidate_groups: Array<Record<string, unknown>>
+  approval_candidate_group_members: Array<Record<string, unknown>>
+} {
+  return {
+    organization_units: [
+      { id: 'section-pd1', name: 'PD1', unitType: 'SECTION', operationalType: 'GENERAL', isActive: true },
+    ],
+    approval_instances: [
+      {
+        id: input.instanceId,
+        requestId: input.phase === 'SOLUTION' ? null : REQUEST_ID,
+        solutionId: input.phase === 'SOLUTION' ? SOLUTION_ID : null,
+        phase: input.phase,
+        originUserId: input.phase === 'SOLUTION' ? 'engineer-1' : 'staff-1',
+        originUnitId: 'section-pd1',
+        originContext: {},
+        routingMode: 'SNAPSHOT_GROUP',
+        state: 'PENDING',
+        attempt: 1,
+        supersededAt: null,
+      },
+    ],
+    approval_candidate_groups: [
+      {
+        id: input.groupId,
+        approvalInstanceId: input.instanceId,
+        requiredPosition: 'SUPERVISOR',
+        scopeUnitId: 'section-pd1',
+      },
+    ],
+    approval_candidate_group_members: [
+      {
+        id: `${input.groupId}-member-1`,
+        candidateGroupId: input.groupId,
+        userId: input.actorId,
+        capturedDisplayName: input.actorId,
+      },
+    ],
+  }
+}
+
+describe('NEW SNAPSHOT last-row on organization-owned requests (Task 9 fix 1 P0)', () => {
+  it('approves the last SNAPSHOT SOLUTION row without department notify or rollback', async () => {
+    const actorId = SCENARIO.engineeringSupervisorId
+    const snapshot = snapshotGroupSeed({
+      phase: 'SOLUTION',
+      actorId,
+      instanceId: 'instance-sol-snap-1',
+      groupId: 'group-sol-snap-1',
+      approvalId: 'sa-snap-1',
+    })
+    const harness = createHarness({
+      departments: departmentRows(),
+      users: workflowUsers(),
+      requests: [baselineRequest({ departmentId: null, status: 'DesignCostEstimationApproval' })],
+      solutions: [baselineSolution()],
+      solution_approvals: [
+        {
+          id: 'sa-snap-1',
+          solutionId: SOLUTION_ID,
+          order: 1,
+          status: 'pending',
+          routingMode: 'SNAPSHOT_GROUP',
+          integrityVersion: 1,
+          instanceId: 'instance-sol-snap-1',
+          candidateGroupId: 'group-sol-snap-1',
+          requiredPosition: 'SUPERVISOR',
+          requiredLevel: null,
+          isCustomChain: false,
+        },
+      ],
+      ...snapshot,
+    })
+    enableTestSmtp(harness.state)
+    harness.state.authUserId = actorId
+
+    const result = (await harness.solutions.approveSolution(SOLUTION_ID)) as { success: boolean }
+    assert.equal(result.success, true)
+    assert.equal(harness.db.requests.rows.get(REQUEST_ID)?.status, 'SendBackToRequester')
+    assert.equal(harness.db.rows.solution_approvals.get('sa-snap-1')?.status, 'approved')
+    assert.equal(harness.db.rows.approval_instances.get('instance-sol-snap-1')?.state, 'APPROVED')
+    assert.equal(harness.db.rows.notifications.size, 0, 'notifications.department must not run for a null department')
+    assert.equal(harness.state.smtpMessages.length, 0)
+  })
+
+  it('approves the last SNAPSHOT FINAL row without department notify or rollback', async () => {
+    const actorId = 'supervisor-1'
+    const snapshot = snapshotGroupSeed({
+      phase: 'FINAL',
+      actorId,
+      instanceId: 'instance-final-snap-1',
+      groupId: 'group-final-snap-1',
+      approvalId: 'fa-snap-1',
+    })
+    const harness = createHarness({
+      departments: departmentRows(),
+      users: workflowUsers(),
+      requests: [baselineRequest({ departmentId: null, status: 'FinalApproval' })],
+      request_approvals: [
+        {
+          id: 'fa-snap-1',
+          requestId: REQUEST_ID,
+          order: 1,
+          status: 'pending',
+          isFinalApproval: true,
+          routingMode: 'SNAPSHOT_GROUP',
+          integrityVersion: 1,
+          instanceId: 'instance-final-snap-1',
+          candidateGroupId: 'group-final-snap-1',
+          requiredPosition: 'SUPERVISOR',
+          requiredLevel: null,
+          isCustomChain: false,
+        },
+      ],
+      ...snapshot,
+    })
+    enableTestSmtp(harness.state)
+    harness.state.authUserId = actorId
+
+    const result = (await harness.solutions.approveFinalApproval(REQUEST_ID)) as { success: boolean }
+    assert.equal(result.success, true)
+    assert.equal(harness.db.requests.rows.get(REQUEST_ID)?.status, 'Completed')
+    assert.equal(harness.db.requestApprovalsForRequest(REQUEST_ID)[0]?.status, 'approved')
+    assert.equal(harness.db.rows.approval_instances.get('instance-final-snap-1')?.state, 'APPROVED')
+    assert.equal(harness.db.rows.notifications.size, 0, 'notifications.department must not run for a null department')
+    assert.equal(harness.state.smtpMessages.length, 0)
+  })
+})
+
+describe('dashboard blocking counts filter current-instance identity (Task 9 fix 1 P1)', () => {
+  it('includes a current SNAPSHOT step when superseded history has a lower pending order', async () => {
+    const actorId = 'supervisor-1'
+    const author = workflowUsers().find((user) => user.id === actorId)!
+    const harness = createHarness({
+      departments: departmentRows(),
+      users: workflowUsers(),
+      requests: [baselineRequest({ status: 'ImprovementRequest' })],
+      organization_units: [
+        { id: 'section-pd1', name: 'PD1', unitType: 'SECTION', operationalType: 'GENERAL', isActive: true },
+      ],
+      approval_instances: [
+        {
+          id: 'instance-superseded-dash',
+          requestId: REQUEST_ID,
+          phase: 'REQUEST',
+          originUserId: 'staff-1',
+          originUnitId: 'section-pd1',
+          originContext: {},
+          routingMode: 'SNAPSHOT_GROUP',
+          state: 'PENDING',
+          attempt: 1,
+          supersededAt: new Date('2026-01-01T00:00:00Z'),
+        },
+        {
+          id: 'instance-current-dash',
+          requestId: REQUEST_ID,
+          phase: 'REQUEST',
+          originUserId: 'staff-1',
+          originUnitId: 'section-pd1',
+          originContext: {},
+          routingMode: 'SNAPSHOT_GROUP',
+          state: 'PENDING',
+          attempt: 2,
+          supersededAt: null,
+        },
+      ],
+      approval_candidate_groups: [
+        {
+          id: 'group-superseded-dash',
+          approvalInstanceId: 'instance-superseded-dash',
+          requiredPosition: 'SUPERVISOR',
+          scopeUnitId: 'section-pd1',
+        },
+        {
+          id: 'group-current-dash',
+          approvalInstanceId: 'instance-current-dash',
+          requiredPosition: 'SUPERVISOR',
+          scopeUnitId: 'section-pd1',
+        },
+      ],
+      approval_candidate_group_members: [
+        {
+          id: 'member-superseded-dash',
+          candidateGroupId: 'group-superseded-dash',
+          userId: actorId,
+          capturedDisplayName: 'Supervisor',
+        },
+        {
+          id: 'member-current-dash',
+          candidateGroupId: 'group-current-dash',
+          userId: actorId,
+          capturedDisplayName: 'Supervisor',
+        },
+      ],
+      request_approvals: [
+        {
+          id: 'a-superseded-order-0',
+          requestId: REQUEST_ID,
+          order: 0,
+          status: 'pending',
+          isFinalApproval: false,
+          routingMode: 'SNAPSHOT_GROUP',
+          integrityVersion: 1,
+          instanceId: 'instance-superseded-dash',
+          candidateGroupId: 'group-superseded-dash',
+          requiredPosition: 'SUPERVISOR',
+          requiredLevel: null,
+        },
+        {
+          id: 'a-current-order-1',
+          requestId: REQUEST_ID,
+          order: 1,
+          status: 'pending',
+          isFinalApproval: false,
+          routingMode: 'SNAPSHOT_GROUP',
+          integrityVersion: 1,
+          instanceId: 'instance-current-dash',
+          candidateGroupId: 'group-current-dash',
+          requiredPosition: 'SUPERVISOR',
+          requiredLevel: null,
+        },
+      ],
+    })
+    harness.state.authUserId = actorId
+    harness.state.currentUser = {
+      ...author,
+      department: { id: 'department-pd', type: 'PRODUCTION', name: 'Production PD' },
+    }
+
+    const pending = (await harness.dashboard.getPendingMyApprovals()) as Array<{ id: string }>
+    assert.equal(
+      pending.filter((row) => row.id === REQUEST_ID).length,
+      1,
+      'superseded pending order=0 must not hide the current SNAPSHOT order=1 step',
+    )
+  })
+})
