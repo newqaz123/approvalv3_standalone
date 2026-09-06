@@ -10,7 +10,7 @@
 
 import type { OrganizationPositionCode, ReportingBranch } from '@/lib/organization/types'
 import type { ResolvedApprovalRoute } from '@/lib/approval-routes/types'
-import type { RequestStatus } from '@prisma/client'
+import type { Prisma, RequestStatus } from '@prisma/client'
 import type { ApprovalInstancePlan, ApprovalStepPlan } from '@/lib/approval-engine/types'
 import type { ApprovalEngineDb, PhaseOrigin } from '@/lib/approval-engine/types'
 import type { PhaseAdapterDb } from '@/lib/approval-engine/phase-adapters'
@@ -19,6 +19,8 @@ import type {
   ApprovalTransactionDb,
 } from '@/lib/approval-engine/transactions'
 import type { NotificationRecipientDb } from '@/lib/notification-recipients'
+import type { RequestVisibilityActor, RequestVisibilityDb } from '@/lib/request-visibility/types'
+import { canViewRequestByPredicate } from '@/lib/request-visibility/predicate'
 
 export const ORGANIZATION_APPROVAL_FIXTURE = {
   factoryId: 'factory-1',
@@ -1177,4 +1179,264 @@ export function fakeNotificationDb(input: FakeNotificationDbInput): Notification
       return input.reviewedSectionRecipientIds ?? []
     },
   }
+}
+
+// ---------------------------------------------------------------------------
+// Task 11 request-visibility fake
+// ---------------------------------------------------------------------------
+
+type VisibilityApproval = {
+  approverId: string | null
+  requiredApproverId: string | null
+  candidateGroup: { members: Array<{ userId: string }> } | null
+}
+
+type VisibilityRequest = {
+  id: string
+  isDeleted: boolean
+  isArchived: boolean
+  requesterId: string
+  organizationUnitId: string | null
+  approvals: VisibilityApproval[]
+  solutions: Array<{ approvals: VisibilityApproval[] }>
+}
+
+function matchesVisibilityWhere(row: unknown, where: unknown): boolean {
+  if (where == null || typeof where !== 'object') return false
+  const clause = where as Record<string, unknown>
+  const record = row as Record<string, unknown>
+  for (const [key, value] of Object.entries(clause)) {
+    if (key === 'AND') {
+      if (!Array.isArray(value) || !value.every((part) => matchesVisibilityWhere(row, part))) return false
+      continue
+    }
+    if (key === 'OR') {
+      if (!Array.isArray(value) || !value.some((part) => matchesVisibilityWhere(row, part))) return false
+      continue
+    }
+    if (key === 'NOT') {
+      if (matchesVisibilityWhere(row, value)) return false
+      continue
+    }
+    const current = record[key]
+    if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+      const ops = value as Record<string, unknown>
+      if ('in' in ops) {
+        const list = ops.in
+        if (!Array.isArray(list) || !list.some((item) => item === current)) return false
+        continue
+      }
+      if ('equals' in ops) {
+        if (current !== ops.equals) return false
+        continue
+      }
+      if ('some' in ops) {
+        if (!Array.isArray(current) || !current.some((item) => matchesVisibilityWhere(item, ops.some))) return false
+        continue
+      }
+      if (current == null || !matchesVisibilityWhere(current, value)) return false
+      continue
+    }
+    if (current !== value) return false
+  }
+  return true
+}
+
+/**
+ * In-memory `RequestVisibilityDb` for the Task 11 matrix. Access is decided by
+ * actor records and the production where predicate, never by department name.
+ */
+export function fakeVisibilityDb(): RequestVisibilityDb {
+  const actors: Record<string, RequestVisibilityActor> = {
+    'staff-pd1': {
+      id: 'staff-pd1',
+      role: 'general_dept',
+      isActive: true,
+      departmentId: 'department-pd',
+      departmentType: 'GENERAL',
+      managedUnitIds: ['section-pd1'],
+    },
+    'staff-pd2': {
+      id: 'staff-pd2',
+      role: 'general_dept',
+      isActive: true,
+      departmentId: 'department-pd',
+      departmentType: 'GENERAL',
+      managedUnitIds: ['section-pd2'],
+    },
+    'department-manager': {
+      id: 'department-manager',
+      role: 'general_dept',
+      isActive: true,
+      departmentId: 'department-pd',
+      departmentType: 'GENERAL',
+      managedUnitIds: ['department-pd', 'section-pd1', 'section-pd2'],
+    },
+    'pd1-general': {
+      id: 'pd1-general',
+      role: 'general_dept',
+      isActive: true,
+      departmentId: 'department-pd',
+      departmentType: 'GENERAL',
+      managedUnitIds: ['section-pd1'],
+    },
+    'inactive-general': {
+      id: 'inactive-general',
+      role: 'general_dept',
+      isActive: false,
+      departmentId: 'department-pd',
+      departmentType: 'GENERAL',
+      managedUnitIds: ['section-pd1'],
+    },
+    'null-org-general': {
+      id: 'null-org-general',
+      role: 'general_dept',
+      isActive: true,
+      departmentId: null,
+      departmentType: null,
+      managedUnitIds: [],
+    },
+    'candidate-u1': {
+      id: 'candidate-u1',
+      role: 'general_dept',
+      isActive: true,
+      departmentId: 'department-other',
+      departmentType: 'GENERAL',
+      managedUnitIds: ['section-other'],
+    },
+    'historical-u2': {
+      id: 'historical-u2',
+      role: 'general_dept',
+      isActive: true,
+      departmentId: 'department-other',
+      departmentType: 'GENERAL',
+      managedUnitIds: ['section-other'],
+    },
+    'admin-u1': {
+      id: 'admin-u1',
+      role: 'admin',
+      isActive: true,
+      departmentId: null,
+      departmentType: null,
+      managedUnitIds: [],
+    },
+    'engineering-u1': {
+      id: 'engineering-u1',
+      role: 'engineering',
+      isActive: true,
+      departmentId: 'department-engineering',
+      departmentType: 'ENGINEERING',
+      managedUnitIds: [],
+    },
+    'unmapped-requester': {
+      id: 'unmapped-requester',
+      role: 'general_dept',
+      isActive: true,
+      departmentId: null,
+      departmentType: null,
+      managedUnitIds: [],
+    },
+    'named-engineering-general': {
+      id: 'named-engineering-general',
+      role: 'general_dept',
+      isActive: true,
+      departmentId: 'department-named-engineering',
+      departmentType: 'GENERAL',
+      managedUnitIds: ['section-named'],
+    },
+    'engineering-type-general': {
+      id: 'engineering-type-general',
+      role: 'general_dept',
+      isActive: true,
+      departmentId: 'department-engineering',
+      departmentType: 'ENGINEERING',
+      managedUnitIds: [],
+    },
+  }
+
+  const requests: VisibilityRequest[] = [
+    {
+      id: 'r1',
+      isDeleted: false,
+      isArchived: false,
+      requesterId: 'staff-pd1',
+      organizationUnitId: 'section-pd1',
+      approvals: [],
+      solutions: [],
+    },
+    {
+      id: 'pd1-r1',
+      isDeleted: false,
+      isArchived: false,
+      requesterId: 'other-pd1',
+      organizationUnitId: 'section-pd1',
+      approvals: [],
+      solutions: [],
+    },
+    {
+      id: 'pd2-r1',
+      isDeleted: false,
+      isArchived: false,
+      requesterId: 'staff-pd2',
+      organizationUnitId: 'section-pd2',
+      approvals: [
+        {
+          approverId: 'historical-u2',
+          requiredApproverId: null,
+          candidateGroup: { members: [{ userId: 'candidate-u1' }] },
+        },
+      ],
+      solutions: [],
+    },
+    {
+      id: 'r-null-org',
+      isDeleted: false,
+      isArchived: false,
+      requesterId: 'staff-pd1',
+      organizationUnitId: null,
+      approvals: [],
+      solutions: [],
+    },
+    {
+      id: 'deleted-r1',
+      isDeleted: true,
+      isArchived: false,
+      requesterId: 'pd1-general',
+      organizationUnitId: 'section-pd1',
+      approvals: [],
+      solutions: [],
+    },
+    {
+      id: 'unmapped-r1',
+      isDeleted: false,
+      isArchived: false,
+      requesterId: 'unmapped-requester',
+      organizationUnitId: null,
+      approvals: [],
+      solutions: [],
+    },
+    {
+      id: 'archived-r1',
+      isDeleted: false,
+      isArchived: true,
+      requesterId: 'other-pd1',
+      organizationUnitId: 'section-pd1',
+      approvals: [],
+      solutions: [],
+    },
+  ]
+
+  return {
+    async findActor(userId) {
+      return actors[userId] ?? null
+    },
+    async findRequest(where: Prisma.requestsWhereInput) {
+      const found = requests.find((row) => matchesVisibilityWhere(row, where))
+      return found ? { id: found.id } : null
+    },
+  }
+}
+
+export async function canViewWithFake(input: { userId: string; requestId: string }): Promise<boolean> {
+  return canViewRequestByPredicate(fakeVisibilityDb(), input.userId, input.requestId)
 }

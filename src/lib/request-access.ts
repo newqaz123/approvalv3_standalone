@@ -1,64 +1,105 @@
 import prisma from '@/lib/prisma'
+import { descendantUnitIds } from '@/lib/organization/tree'
+import type { OrganizationUnitNode } from '@/lib/organization/types'
+import {
+  canViewRequestByPredicate,
+  type RequestVisibilityActor,
+  type RequestVisibilityDb,
+} from '@/lib/request-visibility/predicate'
 
 /**
  * Request-visibility authorization for private attachment downloads.
  *
  * Rule (exact):
  *  - Missing / inactive user, missing request, or soft-deleted request → false.
- *  - Admin and engineering users (role `admin`/`engineering`, or a department of
- *    type `ENGINEERING`) may view any non-deleted request.
- *  - Everyone else (general users) must have an explicit relationship to the
- *    request: the same department, a direct request-approval assignment, or a
- *    direct solution-approval assignment.
+ *  - Admin and engineering users (role `admin`/`engineering`, or a department /
+ *    primary unit of type `ENGINEERING`) may view any non-deleted request.
+ *  - Everyone else must have an explicit relationship: requester, originating
+ *    organization unit in managedUnitIds (assigned units UNION descendants),
+ *    actual/required approver history, or SNAPSHOT candidate-group membership.
  *
- * Archived requests are NOT blanket-denied: the existing detail accessor
- * (`getRequest`) returns them via `findUnique` and the list view exposes an
- * explicit `showArchived` toggle, i.e. existing listings include archived data,
- * satisfying the brief's "unless existing request listings explicitly include
- * archived data" carve-out. Soft-deleted requests are always denied.
+ * Archived requests are NOT blanket-denied: archive hiding is a list filter
+ * only. Soft-deleted requests are always denied. Visibility is not action
+ * eligibility.
  */
+function asActorRole(role: string): RequestVisibilityActor['role'] {
+  if (role === 'admin' || role === 'engineering') return role
+  return 'general_dept'
+}
+
+function asDepartmentType(value: string | null | undefined): RequestVisibilityActor['departmentType'] {
+  if (value === 'GENERAL' || value === 'ENGINEERING') return value
+  return null
+}
+
+export function createPrismaRequestVisibilityDb(client = prisma): RequestVisibilityDb {
+  return {
+    async findActor(userId) {
+      const user = await client.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          isActive: true,
+          role: true,
+          departmentId: true,
+          department: { select: { type: true } },
+        },
+      })
+      if (!user) return null
+
+      const assignments = await client.organization_position_assignments.findMany({
+        where: { userId, isActive: true },
+        select: { unitId: true, isPrimary: true },
+      })
+      const units = await client.organization_units.findMany({
+        select: {
+          id: true,
+          name: true,
+          unitType: true,
+          parentId: true,
+          isActive: true,
+          operationalType: true,
+        },
+      })
+      const nodes: OrganizationUnitNode[] = units.map((unit) => ({
+        id: unit.id,
+        name: unit.name,
+        unitType: unit.unitType,
+        parentId: unit.parentId,
+        isActive: unit.isActive,
+      }))
+      const primary = assignments.find((assignment) => assignment.isPrimary)
+      const primaryUnit = primary ? units.find((unit) => unit.id === primary.unitId) : undefined
+      const departmentType =
+        asDepartmentType(primaryUnit?.operationalType) ?? asDepartmentType(user.department?.type)
+
+      const managed = new Set<string>()
+      for (const assignment of assignments) {
+        try {
+          for (const id of descendantUnitIds(nodes, assignment.unitId)) managed.add(id)
+        } catch {
+          managed.add(assignment.unitId)
+        }
+      }
+
+      return {
+        id: user.id,
+        role: asActorRole(user.role),
+        isActive: user.isActive,
+        departmentId: user.departmentId,
+        departmentType,
+        managedUnitIds: [...managed],
+      }
+    },
+    async findRequest(where) {
+      return client.requests.findFirst({
+        where,
+        select: { id: true },
+      })
+    },
+  }
+}
+
 export async function canUserViewRequest(userId: string, requestId: string): Promise<boolean> {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: {
-      id: true,
-      isActive: true,
-      role: true,
-      departmentId: true,
-      department: { select: { type: true } },
-    },
-  })
-  if (!user || !user.isActive) return false
-
-  const request = await prisma.requests.findUnique({
-    where: { id: requestId },
-    select: { isDeleted: true, departmentId: true },
-  })
-  if (!request || request.isDeleted) return false
-
-  if (user.role === 'admin' || user.role === 'engineering' || user.department?.type === 'ENGINEERING') {
-    return true
-  }
-
-  // General users: same department.
-  if (user.departmentId && request.departmentId === user.departmentId) {
-    return true
-  }
-
-  // General users: direct request approver (designated or actual).
-  const requestApproval = await prisma.request_approvals.findFirst({
-    where: { requestId, OR: [{ approverId: userId }, { requiredApproverId: userId }] },
-    select: { id: true },
-  })
-  if (requestApproval) return true
-
-  // General users: direct solution approver for one of the request's solutions.
-  const solutionApproval = await prisma.solution_approvals.findFirst({
-    where: {
-      solution: { requestId },
-      OR: [{ approverId: userId }, { requiredApproverId: userId }],
-    },
-    select: { id: true },
-  })
-  return Boolean(solutionApproval)
+  return canViewRequestByPredicate(createPrismaRequestVisibilityDb(), userId, requestId)
 }

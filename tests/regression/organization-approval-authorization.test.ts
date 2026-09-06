@@ -1,6 +1,6 @@
 /**
  * Read- and action-authorization characterization with real actor identities:
- * canUserViewRequest (request-access.ts) for same-section and unrelated
+ * canUserViewRequest (request-access.ts) for requester, unmapped, and unrelated
  * viewers, plus the action assignment guards canUserApprove,
  * canUserApproveSolution, and canUserApproveFinalApproval executed through the
  * transpile+vm harness.
@@ -17,7 +17,7 @@ import {
 } from '../fixtures/organization-approval-harness'
 
 describe('canUserViewRequest: same-section, unrelated, and privileged viewers', () => {
-  it('grants same-department members and denies unrelated general users', async () => {
+  it('grants the requester and denies unmapped ordinary non-requesters', async () => {
     const harness = createHarness({
       departments: departmentRows(),
       users: workflowUsers(),
@@ -26,7 +26,8 @@ describe('canUserViewRequest: same-section, unrelated, and privileged viewers', 
     harness.state.authUserId = null // read helper takes userId, not auth()
 
     assert.equal(await harness.requestAccess.canUserViewRequest('staff-1', SCENARIO.requestId), true)
-    assert.equal(await harness.requestAccess.canUserViewRequest('supervisor-1', SCENARIO.requestId), true)
+    // Same-department non-requester on an unmapped request is fail-closed.
+    assert.equal(await harness.requestAccess.canUserViewRequest('supervisor-1', SCENARIO.requestId), false)
     // Unrelated general user: different department, no assignment.
     assert.equal(await harness.requestAccess.canUserViewRequest('null-org-1', SCENARIO.requestId), false)
   })
@@ -49,23 +50,23 @@ describe('canUserViewRequest: same-section, unrelated, and privileged viewers', 
   })
 
   it('denies inactive users, missing requests, and soft-deleted requests', async () => {
-    // Active vs inactive comparison uses the SAME live same-department request
+    // Active vs inactive comparison uses the SAME live requester-owned request
     // so inactivity is the only differing condition (review round 2 P2).
     const activeView = createHarness({
       departments: departmentRows(),
-      users: [...workflowUsers(), { id: 'dept-viewer', departmentId: 'department-pd', level: 2, isActive: true, role: 'general', name: 'Dept Viewer', email: null }],
+      users: workflowUsers(),
       requests: [baselineRequest()],
     })
     activeView.state.authUserId = null
-    assert.equal(await activeView.requestAccess.canUserViewRequest('dept-viewer', SCENARIO.requestId), true)
+    assert.equal(await activeView.requestAccess.canUserViewRequest('staff-1', SCENARIO.requestId), true)
 
     const inactiveView = createHarness({
       departments: departmentRows(),
-      users: [...workflowUsers(), { id: 'dept-viewer', departmentId: 'department-pd', level: 2, isActive: false, role: 'general', name: 'Dept Viewer', email: null }],
+      users: workflowUsers().map((user) => user.id === 'staff-1' ? { ...user, isActive: false } : user),
       requests: [baselineRequest()],
     })
     inactiveView.state.authUserId = null
-    assert.equal(await inactiveView.requestAccess.canUserViewRequest('dept-viewer', SCENARIO.requestId), false)
+    assert.equal(await inactiveView.requestAccess.canUserViewRequest('staff-1', SCENARIO.requestId), false)
 
     const harness = createHarness({
       departments: departmentRows(),
