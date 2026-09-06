@@ -50,8 +50,8 @@ export async function resolveReportingBranch(userId: string, db: OrganizationRep
   if (!user || !user.isActive) return null
   const rawAssignments = await db.organization_position_assignments.findMany({ where: { userId } })
   const assignments = rawAssignments.map((a) => ({ id: a.id, userId: a.userId, unitId: a.unitId, positionCode: a.positionCode, reportingGroupId: a.reportingGroupId, isPrimary: a.isPrimary, isActive: a.isActive })) as OrganizationPositionAssignment[]
+  if (assignments.length === 0) return null
   const active = assignments.filter((assignment) => assignment.isActive)
-  if (!active.length) return null
   const primary = active.filter((assignment) => assignment.isPrimary)
   if (primary.length !== 1) throw new Error(`User ${userId} must have exactly one active primary assignment`)
   const units = (await db.organization_units.findMany()).map((u) => ({ id: u.id, name: u.name, unitType: u.unitType, parentId: u.parentId, isActive: u.isActive })) as OrganizationUnitNode[]
@@ -67,6 +67,18 @@ export async function resolveReportingBranch(userId: string, db: OrganizationRep
   const byGroup = validateGroups(groups, byUnit)
   const members = await db.reporting_group_members.findMany() as Member[]
   const memberKeys = new Set(members.map((member) => `${member.reportingGroupId}:${member.userId}`))
+  const validSectionUnitIds = new Set<string>()
+  for (const candidate of active) {
+    const candidateUnit = byUnit.get(candidate.unitId)
+    if (!candidateUnit || !candidateUnit.isActive || candidateUnit.unitType !== 'SECTION') continue
+    if (positionUnit[candidate.positionCode] !== 'SECTION') continue
+    const candidatePath = ancestorUnitIds(units, candidate.unitId)
+    if (candidatePath.every((unitId) => byUnit.get(unitId)?.isActive)) validSectionUnitIds.add(candidate.unitId)
+  }
+  for (const member of members.filter((candidate) => candidate.userId === userId)) {
+    const group = byGroup.get(member.reportingGroupId)
+    if (!group || !group.isActive || !validSectionUnitIds.has(group.unitId)) throw new Error(`User ${userId} has inconsistent reporting-group membership`)
+  }
   if (assignment.reportingGroupId) {
     const group = byGroup.get(assignment.reportingGroupId)
     if (!group || !memberKeys.has(`${group.id}:${userId}`)) throw new Error(`Assignment ${assignment.id} has inconsistent reporting-group membership`)
