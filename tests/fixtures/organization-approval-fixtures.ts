@@ -432,6 +432,33 @@ export interface PhaseAdapterFixtureDb extends PhaseAdapterDb {
   priorAttemptRowsRemain(requestId: string): boolean
 }
 
+/** Activity records captured by the persisted-attempt transaction view. */
+export interface PersistedAttemptActivity {
+  approvalId: string
+  actorId: string
+  comments?: string
+}
+
+/**
+ * `ApprovalTransactionDb` view over the SAME store the phase adapter persisted
+ * into: rows, instance currency, document status, and snapshot group membership
+ * are read from the fixture's Maps, so eligibility and advancement consume
+ * exactly what `createXApprovalAttempt` persisted (never caller-seeded rows).
+ * Live user activity is the module's inactive snapshot set, modeling a member
+ * who deactivated after the snapshot was captured.
+ */
+export interface PersistedAttemptTransactionView extends ApprovalTransactionDb {
+  activities(): ReadonlyArray<PersistedAttemptActivity>
+  instanceOutcome(instanceId: string): 'APPROVED' | 'REJECTED' | 'CANCELLED' | undefined
+}
+
+export interface PhaseAdapterFixtureDbWithViews extends PhaseAdapterFixtureDb {
+  /** Persisted snapshot membership: candidate group id -> member user ids. */
+  candidateGroupMembers(): Record<string, string[]>
+  /** Transaction-core view over the persisted rows/groups/status. */
+  approvalTransactionView(): PersistedAttemptTransactionView
+}
+
 const PHASE_INITIAL_STATUS: Record<'REQUEST' | 'SOLUTION' | 'FINAL', string> = {
   REQUEST: 'ImprovementRequest',
   SOLUTION: 'SentToEngineer',
@@ -503,7 +530,7 @@ function normalizeAdapterRow(row: FakeAdapterApprovalRow): FakeAdapterApprovalRo
  * persistence the Prisma transaction client would perform. It never calls
  * Prisma.
  */
-export function createPhaseAdapterFixture(options: PhaseAdapterFixtureOptions): PhaseAdapterFixtureDb {
+export function createPhaseAdapterFixture(options: PhaseAdapterFixtureOptions): PhaseAdapterFixtureDbWithViews {
   const phase = options.phase
   const requestId = options.requestId ?? 'r1'
   const solutionId = options.solutionId ?? 's1'
@@ -526,6 +553,7 @@ export function createPhaseAdapterFixture(options: PhaseAdapterFixtureOptions): 
 
   const instances = new Map<string, FakeAdapterInstanceRow>()
   const rows = new Map<string, FakeAdapterApprovalRow>()
+  const groupMembers = new Map<string, string[]>()
   let instanceSeq = 0
   let rowSeq = 0
 
@@ -671,6 +699,7 @@ export function createPhaseAdapterFixture(options: PhaseAdapterFixtureOptions): 
     }
     for (const step of plan.steps as readonly ApprovalStepPlan[]) {
       rowSeq += 1
+      const candidateGroupId = `group-${id}-${step.order}`
       const base: FakeAdapterApprovalRow = {
         id: `row-${id}-${step.order}`,
         order: step.order,
@@ -685,8 +714,12 @@ export function createPhaseAdapterFixture(options: PhaseAdapterFixtureOptions): 
         integrityVersion: 1,
         instanceId: id,
         requiredPosition: step.requiredPosition ?? null,
-        candidateGroupId: `group-${id}-${step.order}`,
+        candidateGroupId,
       }
+      // Membership snapshot the adapter persisted for this step, taken from the
+      // plan the real builder produced (already deduped and activity-filtered
+      // at capture time).
+      groupMembers.set(candidateGroupId, [...step.candidateUserIds])
       if (plan.phase === 'SOLUTION') {
         rows.set(base.id, { ...base, solutionId })
       } else {
@@ -783,12 +816,163 @@ export function createPhaseAdapterFixture(options: PhaseAdapterFixtureOptions): 
       return [...rows.values()].some((row) => row.instanceId === prior.id)
     },
   }
-  return fixture
+
+  const attemptActivities: PersistedAttemptActivity[] = []
+  const instanceOutcomes = new Map<string, 'APPROVED' | 'REJECTED' | 'CANCELLED'>()
+
+  const rowForTransaction = (
+    row: FakeAdapterApprovalRow,
+    transactionPhase: 'REQUEST' | 'SOLUTION' | 'FINAL',
+  ): ApprovalRowForTransaction | null => {
+    // Phase/table identity mirrors the production loaders: solution rows carry
+    // only solutionId; final rows are request rows with isFinalApproval true.
+    if (transactionPhase === 'SOLUTION' && row.solutionId === undefined) return null
+    if (transactionPhase !== 'SOLUTION' && row.solutionId !== undefined) return null
+    if (transactionPhase === 'FINAL' && row.isFinalApproval !== true) return null
+    if (transactionPhase === 'REQUEST' && row.isFinalApproval === true) return null
+    const instance = row.instanceId ? instances.get(row.instanceId) : null
+    return {
+      id: row.id,
+      requestId: row.requestId ?? requestId,
+      solutionId: row.solutionId ?? null,
+      instanceId: row.instanceId ?? null,
+      requestStatus: asRequestStatus(docStatus),
+      instanceIsCurrent: instance ? instance.supersededAt === null : true,
+      routingMode: row.routingMode as ApprovalRowForTransaction['routingMode'],
+      candidateUserIds: row.candidateGroupId ? [...(groupMembers.get(row.candidateGroupId) ?? [])] : [],
+      requiredLevel: row.requiredLevel ?? null,
+      requiredApproverId: row.requiredApproverId ?? null,
+      status: row.status,
+      order: row.order,
+    }
+  }
+
+  const approvalTransactionView = (): PersistedAttemptTransactionView => ({
+    async loadApprovalForUpdate(input) {
+      const row = rows.get(input.approvalId)
+      return row ? rowForTransaction(row, input.phase) : null
+    },
+    async isActiveUser(userId) {
+      return !INACTIVE_SNAPSHOT_IDS.has(userId)
+    },
+    async hasEarlierPendingRow(input) {
+      // Instance-scoped identity, like the production current-instance filter.
+      if (input.instanceId === null) return false
+      return [...rows.values()].some(
+        (row) => row.instanceId === input.instanceId && row.order < input.order && row.status === 'pending',
+      )
+    },
+    async evaluateLegacyEligibility() {
+      // The persisted NEW attempt store holds no legacy level rows.
+      return false
+    },
+    async updatePendingApproval(query) {
+      const row = rows.get(query.approvalId)
+      if (!row || row.instanceId !== query.instanceId) return { count: 0 }
+      if (row.status !== 'pending') return { count: 0 }
+      if (asRequestStatus(docStatus) !== query.expectedRequestStatus) return { count: 0 }
+      row.status = 'approved'
+      row.approverId = query.actorId
+      row.approvedAt = new Date()
+      return { count: 1 }
+    },
+    async recordApprovalActivity(query) {
+      attemptActivities.push({ approvalId: query.approvalId, actorId: query.actorId, comments: query.comments })
+    },
+    async countPendingApprovals(query) {
+      if (query.instanceId === null) return 0
+      return [...rows.values()].filter(
+        (row) => row.instanceId === query.instanceId && row.status === 'pending',
+      ).length
+    },
+    async advanceRequestStatus(query) {
+      // CAS through the fixture's guarded writer so the stored document status
+      // stays the single source of truth.
+      await fixture.updateRequestStatus({ requestId: query.requestId, from: query.from, to: query.to })
+    },
+    async setInstanceOutcome(query) {
+      instanceOutcomes.set(query.instanceId, query.outcome)
+    },
+    activities: () => [...attemptActivities],
+    instanceOutcome: (instanceId) => instanceOutcomes.get(instanceId),
+  })
+
+  return {
+    ...fixture,
+    candidateGroupMembers: () => Object.fromEntries([...groupMembers].map(([groupId, ids]) => [groupId, [...ids]])),
+    approvalTransactionView,
+  }
 }
 
 /** Brief contract: an AUTO_APPROVED plan for the phase initiator. */
 export function createPhaseAdapterDb(input: { phase: 'REQUEST' | 'SOLUTION' | 'FINAL' }): PhaseAdapterDb {
   return createPhaseAdapterFixture({ phase: input.phase, planOutcome: 'AUTO_APPROVED' })
+}
+
+/**
+ * Task 16 fix: `NotificationRecipientDb` view over the SAME persisted attempt
+ * store the phase adapter wrote: the approval row, its candidate-group
+ * membership, instance currency, and exact-person recipients are read back
+ * from the fixture, never from caller-supplied parallel data. Live activity is
+ * the module's inactive snapshot set, so a persisted member who deactivated
+ * after the snapshot is dropped. Queries for data outside the attempt store
+ * return empty, like a database with no matching rows.
+ */
+export function notificationRecipientDbForPersisted(
+  fixture: PhaseAdapterFixtureDbWithViews,
+): NotificationRecipientDb {
+  const groupMembers = fixture.candidateGroupMembers()
+  const findRow = (approvalId: string) => fixture.approvalRows().find((row) => row.id === approvalId)
+  const phaseMatches = (row: FakeAdapterApprovalRow, phase: 'REQUEST' | 'SOLUTION' | 'FINAL'): boolean => {
+    if (phase === 'SOLUTION') return row.solutionId !== undefined
+    if (row.solutionId !== undefined) return false
+    if (phase === 'FINAL') return row.isFinalApproval === true
+    return row.isFinalApproval !== true
+  }
+  return {
+    async findApprovalRow(query) {
+      const row = findRow(query.approvalId)
+      if (!row || !phaseMatches(row, query.phase)) return null
+      const instance = row.instanceId
+        ? fixture.instances().find((candidate) => candidate.id === row.instanceId)
+        : null
+      return {
+        routingMode: row.routingMode as 'LEGACY_LEVEL' | 'SNAPSHOT_GROUP' | 'CUSTOM_PERSON',
+        candidateGroupId: row.candidateGroupId ?? null,
+        requiredLevel: row.requiredLevel ?? null,
+        requiredApproverId: row.requiredApproverId ?? null,
+        requestId: row.requestId ?? 'r1',
+        isCurrentInstance: instance ? instance.supersededAt === null : true,
+        status: row.status,
+      }
+    },
+    async findCandidateGroupMemberIds(candidateGroupId) {
+      return groupMembers[candidateGroupId] ?? []
+    },
+    async findActiveUserIds(userIds) {
+      const seen = new Set<string>()
+      const ordered: string[] = []
+      for (const userId of userIds) {
+        if (seen.has(userId) || INACTIVE_SNAPSHOT_IDS.has(userId)) continue
+        seen.add(userId)
+        ordered.push(userId)
+      }
+      return ordered
+    },
+    async findLegacyApproverIds() {
+      // The persisted NEW attempt store holds no legacy level rows.
+      return []
+    },
+    async findCustomRecipientIds(approvalId) {
+      const row = findRow(approvalId)
+      return row?.requiredApproverId ? [row.requiredApproverId] : []
+    },
+    async findReviewedSectionRecipientIds() {
+      // Section/department broadcast audiences are organization queries, not
+      // attempt-store data; they stay with the dedicated Task 12 fakes.
+      return []
+    },
+  }
 }
 
 /** Brief contract: a rejected attempt-1 REQUEST instance awaiting resubmission. */
@@ -1440,6 +1624,57 @@ export function fakeVisibilityDb(): RequestVisibilityDb {
 
 export async function canViewWithFake(input: { userId: string; requestId: string }): Promise<boolean> {
   return canViewRequestByPredicate(fakeVisibilityDb(), input.userId, input.requestId)
+}
+
+/**
+ * Task 16 fix: `RequestVisibilityDb` world built FROM the persisted attempt
+ * store: the request row is the persisted document (requester and origin unit
+ * from the adapter's request context) and its approval rows are the rows the
+ * adapter persisted, including their candidate-group membership (solution rows
+ * map under `solutions`). Actors are supplied by the test; access decisions
+ * stay with the production predicate, so visibility is decided by the persisted
+ * request/unit/membership linkage instead of unrelated seeded records.
+ */
+export async function fakeVisibilityDbForPersistedAttempt(input: {
+  fixture: PhaseAdapterFixtureDbWithViews
+  actors: Record<string, RequestVisibilityActor>
+  requestId?: string
+}): Promise<RequestVisibilityDb> {
+  const requestId = input.requestId ?? 'r1'
+  const context = await input.fixture.loadRequestContext(requestId)
+  const groupMembers = input.fixture.candidateGroupMembers()
+  const toVisibilityApproval = (row: FakeAdapterApprovalRow) => ({
+    approverId: row.approverId ?? null,
+    requiredApproverId: row.requiredApproverId ?? null,
+    candidateGroup: row.candidateGroupId
+      ? { members: (groupMembers[row.candidateGroupId] ?? []).map((userId) => ({ userId })) }
+      : null,
+  })
+  const requestApprovals = input.fixture
+    .approvalRows()
+    .filter((row) => row.solutionId === undefined)
+    .map(toVisibilityApproval)
+  const solutionApprovals = input.fixture
+    .approvalRows()
+    .filter((row) => row.solutionId !== undefined)
+    .map(toVisibilityApproval)
+  const request = {
+    id: requestId,
+    isDeleted: false,
+    isArchived: false,
+    requesterId: context.requesterId,
+    organizationUnitId: context.organizationUnitId,
+    approvals: requestApprovals,
+    solutions: solutionApprovals.length > 0 ? [{ approvals: solutionApprovals }] : [],
+  }
+  return {
+    async findActor(userId) {
+      return input.actors[userId] ?? null
+    },
+    async findRequest(where: Prisma.requestsWhereInput) {
+      return matchesVisibilityWhere(request, where) ? { id: requestId } : null
+    },
+  }
 }
 
 // ---------------------------------------------------------------------------
