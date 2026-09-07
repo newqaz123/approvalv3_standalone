@@ -21,6 +21,7 @@ import {
   scenarioUuid,
   workflowUsers,
   type Harness,
+  type HarnessSeed,
 } from '../fixtures/organization-approval-harness'
 
 const REQUEST_ID = SCENARIO.requestId
@@ -506,6 +507,28 @@ describe('NEW mode solution resubmission', () => {
         message: '📤 Solution resubmitted for "New-mode fixture request". Please review the updated solution.',
       }],
     )
+
+    // T10 intermediate next-step: after approving the first step, the exact
+    // emitted next-recipient payload goes to the second step's candidate
+    // (parent-mgr) with the production wording — and to nobody else.
+    harness.db.rows.notifications.clear()
+    harness.state.authUserId = 'new-supervisor-1'
+    const firstApproval = (await harness.solutions.approveSolution(solutionId)) as { success: boolean }
+    assert.equal(firstApproval.success, true)
+    assert.deepEqual(
+      [...harness.db.rows.notifications.values()].map((row) => ({
+        userId: row.userId,
+        type: row.type,
+        title: row.title,
+        message: row.message,
+      })),
+      [{
+        userId: 'parent-mgr',
+        type: 'approval_needed',
+        title: 'Solution Approval Needed',
+        message: 'Solution "Fixture retrofit (revised)" needs your approval.',
+      }],
+    )
   })
 
   it('denies a second resubmission while the current attempt is pending, even though the superseded attempt was rejected', async () => {
@@ -544,5 +567,136 @@ describe('NEW mode solution resubmission', () => {
     const attempts = [...harness.db.rows.approval_instances.values()]
       .filter((row) => row.solutionId === solutionId)
     assert.equal(attempts.length, 2)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Gate validates the STORED routing origin, not the reviser (re-review P1)
+// ---------------------------------------------------------------------------
+
+/** newModeOrgSeed with the second engineer relocated to the PD2 branch: a
+ * valid organization branch whose unit path has NO published SOLUTION route
+ * (SOLUTION routes exist at section-pd1 and section-eng only). */
+function seedWithReviserOnRoutelessBranch(): HarnessSeed {
+  const seed = newModeOrgSeed()
+  seed.organization_position_assignments = seed.organization_position_assignments!.map((assignment) =>
+    assignment.userId === 'new-eng-2'
+      ? { ...assignment, unitId: 'section-pd2', positionCode: 'SECTION_MANAGER', reportingGroupId: null }
+      : assignment,
+  )
+  // Reporting-group membership must stay consistent with the new assignment.
+  seed.reporting_group_members = seed.reporting_group_members!.filter((member) => member.userId !== 'new-eng-2')
+  return seed
+}
+
+function sentToEngineerRequestRow(requestId: string): Record<string, unknown> {
+  return {
+    id: requestId,
+    status: 'SentToEngineer',
+    requesterId: 'new-staff-1',
+    title: 'Stored-origin gate request',
+    description: '<p>Body</p>',
+    departmentId: null,
+    organizationUnitId: 'section-pd1',
+    isDeleted: false,
+    isArchived: false,
+  }
+}
+
+describe('NEW resubmission gate uses the stored submitter origin (re-review P1)', () => {
+  it('succeeds when the reviser branch has no SOLUTION route but the stored submitter branch does; reviser stays actor, origin unchanged', async () => {
+    const REQUEST_ID = scenarioUuid(58)
+    const harness = createHarness({
+      ...seedWithReviserOnRoutelessBranch(),
+      departments: departmentRows(),
+      requests: [sentToEngineerRequestRow(REQUEST_ID)],
+      request_engineer_assignments: [
+        { id: 'asg-assign-eng1', requestId: REQUEST_ID, engineerId: 'new-eng-1', assignedAt: new Date(), assignedById: 'new-eng-2' },
+      ],
+    })
+    enableNewMode(harness.state)
+    harness.state.authUserId = 'new-eng-1'
+
+    const submitted = (await harness.solutions.submitSolution({
+      requestId: REQUEST_ID,
+      title: 'Fixture retrofit',
+      description: '<p>Retrofit the fixture assembly.</p>',
+      inlineImageSessionId: scenarioUuid(96),
+      costEstimate: 1200,
+      currency: 'THB',
+      timeline: '2 weeks',
+    })) as { success: boolean; solutionId?: string; error?: string }
+    assert.equal(submitted.success, true, submitted.error)
+    const solutionId = submitted.solutionId!
+
+    harness.state.authUserId = 'new-supervisor-1'
+    await harness.solutions.rejectSolution(solutionId, 'Needs revision')
+
+    // Authorized reviser new-eng-2 sits on the PD2 branch (no SOLUTION route
+    // coverage). The gate must validate the STORED submitter origin instead.
+    harness.db.rows.notifications.clear()
+    harness.state.authUserId = 'new-eng-2'
+    const resubmitted = (await harness.solutions.resubmitSolution(resubmissionInput(REQUEST_ID))) as { success: boolean; error?: string }
+    assert.equal(resubmitted.success, true, resubmitted.error)
+
+    assert.equal(harness.db.solutions.rows.get(solutionId)?.submittedById, 'new-eng-1')
+    const instances = [...harness.db.rows.approval_instances.values()]
+      .filter((row) => row.solutionId === solutionId)
+      .sort((a, b) => (a.attempt as number) - (b.attempt as number))
+    assert.equal(instances.length, 2)
+    assert.equal(instances[1]?.originUserId, 'new-eng-1')
+    const activities = [...harness.db.rows.request_activities.values()].filter((row) => row.action === 'solution_resubmitted')
+    assert.equal(activities.length, 1)
+    assert.equal(activities[0]?.userId, 'new-eng-2')
+  })
+
+  it('fails with a configuration error when the STORED submitter branch lacks SOLUTION coverage, even from a covered reviser', async () => {
+    const REQUEST_ID = scenarioUuid(59)
+    const SOLUTION_ID = scenarioUuid(60)
+    const seed = newModeOrgSeed()
+    // Move the ORIGINAL engineer (stored submitter) to the routeless PD2
+    // branch; the reviser stays on covered section-pd1.
+    seed.organization_position_assignments = seed.organization_position_assignments!.map((assignment) =>
+      assignment.userId === 'new-eng-1'
+        ? { ...assignment, unitId: 'section-pd2', positionCode: 'SECTION_MANAGER', reportingGroupId: null }
+        : assignment,
+    )
+    seed.reporting_group_members = seed.reporting_group_members!.filter((member) => member.userId !== 'new-eng-1')
+    const harness = createHarness({
+      ...seed,
+      departments: departmentRows(),
+      requests: [sentToEngineerRequestRow(REQUEST_ID)],
+      solutions: [{
+        id: SOLUTION_ID,
+        requestId: REQUEST_ID,
+        title: 'Orphaned-branch solution',
+        description: '<p>Body</p>',
+        costEstimate: 500,
+        currency: 'THB',
+        timeline: '1 week',
+        submittedById: 'new-eng-1',
+      }],
+      // Legacy rejection row (instanceId null counts as current) satisfies
+      // the rejection prerequisite without a full submission flow.
+      solution_approvals: [{
+        id: 'sa-orphan-rejected',
+        solutionId: SOLUTION_ID,
+        requiredLevel: 2,
+        order: 1,
+        status: 'rejected',
+        isCustomChain: false,
+      }],
+    })
+    enableNewMode(harness.state)
+    // Covered reviser (section-pd1) attempts the resubmission.
+    harness.state.authUserId = 'new-eng-2'
+
+    await assert.rejects(
+      harness.solutions.resubmitSolution(resubmissionInput(REQUEST_ID)),
+      /No published route for SOLUTION in the origin branch/,
+    )
+    // Nothing persisted: no new attempt, no activity.
+    assert.equal([...harness.db.rows.approval_instances.values()].filter((row) => row.solutionId === SOLUTION_ID).length, 0)
+    assert.equal([...harness.db.rows.request_activities.values()].filter((row) => row.action === 'solution_resubmitted').length, 0)
   })
 })

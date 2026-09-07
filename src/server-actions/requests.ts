@@ -290,7 +290,13 @@ export async function createRequest(input: CreateRequestInput) {
         },
         rolloutMode === 'new' ? { isolationLevel: APPROVAL_ENGINE_TRANSACTION_ISOLATION } : undefined,
       )
-      .catch((error: unknown) => translateTransactionConflict(error))
+      // Boundary translation is NEW-mode only: legacy/shadow serialization
+      // failures surface as the original error, matching the unchanged
+      // legacy error contract.
+      .catch((error: unknown) => {
+        if (rolloutMode !== 'new') throw error
+        translateTransactionConflict(error)
+      })
 
     request = txResult.request
     approvals = txResult.approvals
@@ -2525,7 +2531,13 @@ export async function resubmitRequest(input: {
     },
     rolloutMode === 'new' ? { isolationLevel: APPROVAL_ENGINE_TRANSACTION_ISOLATION } : undefined,
   )
-  .catch((error: unknown) => translateTransactionConflict(error))
+  // Boundary translation is NEW-mode only: legacy/shadow serialization
+  // failures surface as the original error, matching the unchanged legacy
+  // error contract.
+  .catch((error: unknown) => {
+    if (rolloutMode !== 'new') throw error
+    translateTransactionConflict(error)
+  })
 
   // Create fresh approval chain (legacy/shadow creation only; the new mode
   // created its attempt inside the transaction above).

@@ -706,7 +706,14 @@ export async function submitSolution(input: SubmitSolutionActionInput) {
       return solution
     },
     rolloutMode === 'new' ? { isolationLevel: APPROVAL_ENGINE_TRANSACTION_ISOLATION } : undefined,
-  ).catch((error: unknown) => translateTransactionConflict(error))
+  )
+  // Boundary translation is NEW-mode only: legacy/shadow serialization
+  // failures surface as the original error, matching the unchanged legacy
+  // error contract.
+  .catch((error: unknown) => {
+    if (rolloutMode !== 'new') throw error
+    translateTransactionConflict(error)
+  })
 
   if (pendingNotifications.length > 0) {
     const { createNotification } = await import('./notifications')
@@ -2636,9 +2643,13 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
     let firstPendingLevel: number | null = null
 
     if (rolloutMode === 'new') {
+      // The coverage gate validates the ROUTING origin: the STORED original
+      // solution submitter's branch, not the reviser's. The reviser's own
+      // branch may legitimately have no SOLUTION route coverage.
+      const storedSubmitterId: string = solution.submittedById
       await assertNewCreationEnabled(tx, {
         phase: 'SOLUTION',
-        originUserId: userId,
+        originUserId: storedSubmitterId,
         requestId: validated.requestId,
         solutionId: solution.id,
       })
@@ -2647,7 +2658,6 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
       // origin stays the STORED original solution submitter branch. The
       // revising engineer is recorded as the actor on activity/audit rows
       // below; authorship (solutions.submittedById) is never transferred.
-      const storedSubmitterId: string = solution.submittedById
       const phaseDb = createPrismaPhaseAdapterDb(tx)
       if (validated.useCustomHierarchy && validated.customApprovers.length > 0) {
         // Custom ordered-person chain: preserved validators, never

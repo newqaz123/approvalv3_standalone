@@ -448,6 +448,12 @@ export class ApprovalWorkflowDb {
   readonly writes: RecordedWrite[] = []
   /** Second argument of every prisma.$transaction call (options object). */
   readonly transactionOptions: unknown[] = []
+  /**
+   * When set, the next prisma.$transaction rejects with this error AFTER the
+   * work callback completes — modeling a commit-time failure (e.g. PostgreSQL
+   * 40001/P2034) that surfaces outside the transaction callback.
+   */
+  failNextTransaction?: { code?: string; message: string }
   /** Concurrency injection point: runs after every `requests.findUnique`. */
   onRequestsRead?: () => void
   private readonly concurrentCommits: Array<(db: ApprovalWorkflowDb) => void> = []
@@ -671,9 +677,18 @@ export class ApprovalWorkflowDb {
   /** The `prisma` default-export surface the real modules see. */
   asPrisma(): Record<string, unknown> {
     const prismaLike: Record<string, unknown> = {
-      $transaction: (fn: (tx: ApprovalWorkflowDb) => Promise<unknown>, options?: unknown) => {
+      $transaction: async (fn: (tx: ApprovalWorkflowDb) => Promise<unknown>, options?: unknown) => {
         this.transactionOptions.push(options)
-        return this.$transaction(fn)
+        const result = await this.$transaction(fn)
+        const injected = this.failNextTransaction
+        if (injected) {
+          this.failNextTransaction = undefined
+          // Shape the rejection like Prisma's known-request errors (code field).
+          const error = new Error(injected.message) as Error & { code?: string }
+          error.code = injected.code
+          throw error
+        }
+        return result
       },
     }
     for (const model of Object.keys(MODEL_FIELDS)) {

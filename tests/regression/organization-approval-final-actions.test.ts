@@ -558,6 +558,7 @@ describe('NEW mode lifecycle: parent-unit manager request through two-step FINAL
 
     // 5. First approval advances nothing terminal: the request stays in
     // FinalApproval and exactly one final step remains pending.
+    harness.db.rows.notifications.clear()
     harness.state.authUserId = 'division-mgr'
     const firstApproval = (await harness.solutions.approveFinalApproval(requestId)) as { success: boolean }
     assert.equal(firstApproval.success, true)
@@ -565,6 +566,24 @@ describe('NEW mode lifecycle: parent-unit manager request through two-step FINAL
     assert.equal(
       harness.db.requestApprovalsForRequest(requestId).filter((row) => row.status === 'pending' && row.isFinalApproval === true).length,
       1,
+    )
+
+    // T10 intermediate next-step: after approving the first step, the exact
+    // emitted next-recipient payload goes to the LAST step's candidate — and
+    // to nobody else.
+    assert.deepEqual(
+      [...harness.db.rows.notifications.values()].map((row) => ({
+        userId: row.userId,
+        type: row.type,
+        title: row.title,
+        message: row.message,
+      })),
+      [{
+        userId: 'factory-mgr',
+        type: 'final_approval_needed',
+        title: 'Final Approval Needed',
+        message: 'Request "Parent unit improvement" needs your final approval.',
+      }],
     )
 
     // 6. Only after the second (last) step approves does the request complete.

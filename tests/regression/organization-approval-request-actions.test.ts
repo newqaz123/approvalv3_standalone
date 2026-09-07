@@ -465,3 +465,59 @@ describe('NEW creation transactions request engine SERIALIZABLE isolation', () =
     assert.equal(options, undefined)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Conflict translation is NEW-mode only at the enclosing boundary (P2a)
+// ---------------------------------------------------------------------------
+
+const P2034_MESSAGE = 'Transaction failed due to a write conflict or a deadlock'
+const CONFLICT_MESSAGE = 'conflicted with a concurrent write'
+
+describe('legacy/shadow serialization failures keep the original error shape (P2a)', () => {
+  it('resubmitRequest propagates the raw P2034 rejection in legacy mode instead of ApprovalEngineConflictError', async () => {
+    const REQUEST_ID = SCENARIO.requestId
+    const harness = createHarness({
+      departments: departmentRows(),
+      users: workflowUsers(),
+      requests: [baselineRequest({
+        status: 'ImprovementRequest',
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      })],
+      request_approvals: [
+        { id: 'p2a-rejected', requestId: REQUEST_ID, requiredLevel: 2, order: 1, status: 'rejected', isFinalApproval: false },
+      ],
+    })
+    harness.state.authUserId = 'staff-1'
+    // Commit-time serialization failure: surfaces AFTER the transaction work.
+    harness.db.failNextTransaction = { code: 'P2034', message: P2034_MESSAGE }
+
+    await assert.rejects(
+      harness.requests.resubmitRequest({ requestId: REQUEST_ID }),
+      (error: unknown) => {
+        const message = (error as { message?: string })?.message ?? String(error)
+        return message.includes(P2034_MESSAGE) && !message.includes(CONFLICT_MESSAGE)
+      },
+    )
+  })
+
+  it('translateTime conflict-free NEW mode: creation surfaces ApprovalEngineConflictError for the same rejection', async () => {
+    const harness = createHarness({
+      ...newModeOrgSeed(),
+      departments: departmentRows(),
+    })
+    enableNewMode(harness.state)
+    const author = harness.db.user.rows.get('new-staff-1')
+    harness.state.currentUser = { ...author, department: null }
+    harness.db.failNextTransaction = { code: 'P2034', message: P2034_MESSAGE }
+
+    const created = (await harness.requests.createRequest({
+      title: 'New-mode conflict probe',
+      description: '<p>Body</p>',
+      inlineImageSessionId: scenarioUuid(97),
+      stagedAttachmentIds: [],
+    })) as { success: boolean; error?: string }
+    assert.equal(created.success, false)
+    assert.match(created.error ?? '', new RegExp(CONFLICT_MESSAGE))
+    assert.doesNotMatch(created.error ?? '', new RegExp(P2034_MESSAGE))
+  })
+})

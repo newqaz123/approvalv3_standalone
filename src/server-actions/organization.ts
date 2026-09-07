@@ -152,7 +152,7 @@ function assertAtMostOneActivePrimary(
  * explicitly unavailable instead of returning placeholder zeros that could
  * be mistaken for verification.
  */
-export const MAPPING_COVERAGE_UNAVAILABLE_NOTE =
+const MAPPING_COVERAGE_UNAVAILABLE_NOTE =
   'Mapping coverage is unavailable on this page and not verified here. Run the reviewed import dry-run report (CLI) to produce rollout evidence.'
 
 export async function getOrganizationAdminData(): Promise<{

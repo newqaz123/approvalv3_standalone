@@ -419,3 +419,20 @@ describe('mapping coverage is labeled unavailable, never presented as verificati
     assert.doesNotMatch(action, /emptyMappingCoverage/)
   })
 })
+
+describe("'use server' modules export only async functions (P0)", () => {
+  it('organization.ts keeps the coverage note module-local and exports no non-function values', () => {
+    const action = read('src/server-actions/organization.ts')
+    // Next's next-flight-loader/action-validate rejects non-function runtime
+    // exports from 'use server' modules (node_modules/next/dist/build/webpack/
+    // loaders/next-flight-loader/action-validate.js).
+    assert.doesNotMatch(action, /export const |export let |export class /)
+    assert.match(action, /const MAPPING_COVERAGE_UNAVAILABLE_NOTE =/)
+    // Every runtime export is an async function (server action).
+    const exports = [...action.matchAll(/^export (?!type)(.+)$/gm)].map((m) => m[1])
+    assert.ok(exports.length > 0)
+    for (const line of exports) {
+      assert.match(line, /^async function \w+/, `non-async-function export: ${line}`)
+    }
+  })
+})
