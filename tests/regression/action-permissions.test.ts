@@ -448,3 +448,110 @@ describe('server and UI wiring keep action policy separate from view', () => {
     assert.doesNotMatch(source, /candidate.?reassign/i)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Final-review fix wave: I1 typed-origin capability, I3 current-instance
+// capability aggregates
+// ---------------------------------------------------------------------------
+
+describe('INITIATE_FINAL_APPROVAL capability for typed-origin NEW requests (I1)', () => {
+  it('allows a direct origin-unit member on a typed request with a null legacy department', () => {
+    const decision = existingInitiateFinalApprovalDecision({
+      status: 'SendBackToRequester',
+      isTypedUnitRequest: true,
+      hasDirectOriginUnitMembership: true,
+      userDepartmentId: null,
+      requestDepartmentId: null,
+    })
+    assert.deepEqual(decision, { allowed: true, reason: 'ALLOWED' })
+  })
+
+  it('keeps denying untyped rows without a legacy department (preserved same-department rule)', () => {
+    const decision = existingInitiateFinalApprovalDecision({
+      status: 'SendBackToRequester',
+      isTypedUnitRequest: false,
+      hasDirectOriginUnitMembership: false,
+      userDepartmentId: 'department-pd',
+      requestDepartmentId: null,
+    })
+    // The preserved legacy same-department rule already denies this; the
+    // null-department fail-closed boundary below it stays defensive.
+    assert.equal(decision.allowed, false)
+    assert.equal(decision.reason, 'WRONG_ROLE')
+  })
+
+  it('still requires direct origin-unit membership for typed requests', () => {
+    const decision = existingInitiateFinalApprovalDecision({
+      status: 'SendBackToRequester',
+      isTypedUnitRequest: true,
+      hasDirectOriginUnitMembership: false,
+      userDepartmentId: null,
+      requestDepartmentId: null,
+    })
+    assert.equal(decision.allowed, false)
+    // Membership failure is the origin-role rule, not the status boundary.
+    assert.equal(decision.reason, 'WRONG_ROLE')
+  })
+
+  it('preserves the legacy same-department rule for untyped rows', () => {
+    const allowed = existingInitiateFinalApprovalDecision({
+      status: 'SendBackToRequester',
+      isTypedUnitRequest: false,
+      hasDirectOriginUnitMembership: false,
+      userDepartmentId: 'department-pd',
+      requestDepartmentId: 'department-pd',
+    })
+    assert.equal(allowed.allowed, true)
+    const otherDepartment = existingInitiateFinalApprovalDecision({
+      status: 'SendBackToRequester',
+      isTypedUnitRequest: false,
+      hasDirectOriginUnitMembership: false,
+      userDepartmentId: 'department-engineering',
+      requestDepartmentId: 'department-pd',
+    })
+    assert.equal(otherDepartment.allowed, false)
+    assert.equal(otherDepartment.reason, 'WRONG_ROLE')
+  })
+})
+
+describe('getRequestActionCapabilities read current-attempt rows only (I3)', () => {
+  it('denies RESUBMIT_REQUEST from a superseded rejection while the current attempt is pending, and keeps cancellation blocked by current pending rows', async () => {
+    const { createHarness, departmentRows, enableNewMode, newModeOrgSeed, scenarioUuid } = await import('../fixtures/organization-approval-harness')
+    const REQUEST_ID = scenarioUuid(71)
+    const harness = createHarness({
+      ...newModeOrgSeed(),
+      departments: departmentRows(),
+      requests: [{
+        id: REQUEST_ID,
+        status: 'ImprovementRequest',
+        requesterId: 'new-staff-1',
+        title: 'Capability window request',
+        description: '<p>Body</p>',
+        departmentId: null,
+        organizationUnitId: 'section-pd1',
+        isDeleted: false,
+        isArchived: false,
+      }],
+      approval_instances: [
+        { id: 'cap-inst-superseded', requestId: REQUEST_ID, phase: 'REQUEST', routeVersionId: 'route-req-pd', originUserId: 'new-staff-1', originUnitId: 'section-pd1', routingMode: 'SNAPSHOT_GROUP', state: 'REJECTED', attempt: 1, supersededAt: new Date('2026-02-03T00:00:00Z') },
+        { id: 'cap-inst-current', requestId: REQUEST_ID, phase: 'REQUEST', routeVersionId: 'route-req-pd', originUserId: 'new-staff-1', originUnitId: 'section-pd1', routingMode: 'SNAPSHOT_GROUP', state: 'PENDING', attempt: 2, supersededAt: null },
+      ],
+      approval_candidate_groups: [
+        { id: 'cap-cg-1', approvalInstanceId: 'cap-inst-superseded', requiredPosition: 'DIVISION_MANAGER', scopeUnitId: 'division-1', capturedAt: new Date() },
+        { id: 'cap-cg-2', approvalInstanceId: 'cap-inst-current', requiredPosition: 'DIVISION_MANAGER', scopeUnitId: 'division-1', capturedAt: new Date() },
+      ],
+      request_approvals: [
+        { id: 'cap-ra-rejected', requestId: REQUEST_ID, order: 1, status: 'rejected', isFinalApproval: false, routingMode: 'SNAPSHOT_GROUP', integrityVersion: 1, instanceId: 'cap-inst-superseded', requiredPosition: 'DIVISION_MANAGER', candidateGroupId: 'cap-cg-1' },
+        { id: 'cap-ra-pending', requestId: REQUEST_ID, order: 1, status: 'pending', isFinalApproval: false, routingMode: 'SNAPSHOT_GROUP', integrityVersion: 1, instanceId: 'cap-inst-current', requiredPosition: 'DIVISION_MANAGER', candidateGroupId: 'cap-cg-2' },
+      ],
+    })
+    enableNewMode(harness.state)
+    harness.state.authUserId = 'new-staff-1'
+
+    const capabilities = (await harness.actionPermissions.getRequestActionCapabilities(REQUEST_ID)) as Record<string, { allowed: boolean; reason: string }>
+    // Superseded rejection is display history: no resubmission authorization.
+    assert.equal(capabilities.RESUBMIT_REQUEST?.allowed, false)
+    // The current attempt's pending row still blocks cancellation.
+    assert.equal(capabilities.CANCEL_REQUEST?.allowed, false)
+  })
+})

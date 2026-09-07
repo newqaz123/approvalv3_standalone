@@ -31,7 +31,12 @@ import {
   updateRequestStatusExpecting,
 } from '@/lib/request-status-transition'
 import { getApprovalRolloutMode } from '@/lib/approval-rollout'
-import { createApprovalEngineDb } from '@/lib/approval-engine/instances'
+import {
+  APPROVAL_ENGINE_TRANSACTION_ISOLATION,
+  ApprovalEngineConflictError,
+  createApprovalEngineDb,
+  translateTransactionConflict,
+} from '@/lib/approval-engine/instances'
 import {
   ApprovalCreationDisabledError,
   CURRENT_INSTANCE_ROW_FILTER,
@@ -165,7 +170,13 @@ export async function createRequest(input: CreateRequestInput) {
   // existing builder exactly; new mode requires a completed import digest and origin coverage.
 
   try {
-    const txResult = await prisma.$transaction(async (tx) => {
+    // NEW creation transactions run under the engine's SERIALIZABLE isolation
+    // (the resolver and persistence must share one snapshot); legacy/shadow
+    // keep the default isolation and error behavior. Serialization failures —
+    // including commit-time ones outside persistApprovalInstance — translate
+    // to ApprovalEngineConflictError at this enclosing boundary; no retries.
+    const txResult = await prisma.$transaction(
+      async (tx) => {
       let newRequest = await tx.requests.create({
         data: {
           title: validatedFields.data.title,
@@ -276,7 +287,10 @@ export async function createRequest(input: CreateRequestInput) {
       }
 
       return { request: newRequest, approvals: chain }
-    })
+        },
+        rolloutMode === 'new' ? { isolationLevel: APPROVAL_ENGINE_TRANSACTION_ISOLATION } : undefined,
+      )
+      .catch((error: unknown) => translateTransactionConflict(error))
 
     request = txResult.request
     approvals = txResult.approvals
@@ -286,6 +300,9 @@ export async function createRequest(input: CreateRequestInput) {
       return { success: false, error: ATTACHMENT_ADOPTION_ERROR }
     }
     if (error instanceof ApprovalCreationDisabledError || error instanceof ApprovalRouteConfigurationError) {
+      return { success: false, error: error.message }
+    }
+    if (error instanceof ApprovalEngineConflictError) {
       return { success: false, error: error.message }
     }
     return { success: false, error: 'Failed to create request — please try again' }
@@ -1203,7 +1220,9 @@ export async function cancelRequest(input: { requestId: string; reason: string }
         where: { solution: { requestId }, status: 'pending', OR: [...CURRENT_INSTANCE_ROW_FILTER] },
       }),
       tx.request_approvals.count({
-        where: { requestId, status: 'rejected', isFinalApproval: false },
+        // Rejection history authorizes cancellation only while it belongs to
+        // the current attempt; superseded NEW rows are display history.
+        where: { requestId, status: 'rejected', isFinalApproval: false, OR: [...CURRENT_INSTANCE_ROW_FILTER] },
       }),
     ])
 
@@ -2326,11 +2345,15 @@ export async function resubmitRequest(input: {
     throw new Error('Unauthorized')
   }
 
-  // Get request with approvals
+  // Get request with approvals. Rejection history counts only while it
+  // belongs to the current attempt: superseded NEW rows are display history,
+  // never resubmission authorization (I3).
   const request = await prisma.requests.findUnique({
     where: { id: input.requestId },
     include: {
-      approvals: true,
+      approvals: {
+        where: { OR: [...CURRENT_INSTANCE_ROW_FILTER] },
+      },
       requester: {
         include: {
           department: true,
@@ -2423,9 +2446,13 @@ export async function resubmitRequest(input: {
     throw new Error('An inline image session id is only allowed when updating the description')
   }
 
-  // Perform resubmit in transaction
+  // Perform resubmit in transaction. NEW resubmission transactions run under
+  // the engine's SERIALIZABLE isolation; serialization failures (including
+  // commit-time ones) translate to ApprovalEngineConflictError at this
+  // boundary. Legacy/shadow keep default isolation and error behavior.
   const rolloutMode = getApprovalRolloutMode(process.env)
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(
+    async (tx) => {
     // The same-status guarded update locks the request row and requires the
     // rejected approval to still exist. If cancellation committed first, the
     // status no longer matches; if resubmission removed the rejection first,
@@ -2495,7 +2522,10 @@ export async function resubmitRequest(input: {
     return tx.requests.findUniqueOrThrow({
       where: { id: input.requestId },
     })
-  })
+    },
+    rolloutMode === 'new' ? { isolationLevel: APPROVAL_ENGINE_TRANSACTION_ISOLATION } : undefined,
+  )
+  .catch((error: unknown) => translateTransactionConflict(error))
 
   // Create fresh approval chain (legacy/shadow creation only; the new mode
   // created its attempt inside the transaction above).

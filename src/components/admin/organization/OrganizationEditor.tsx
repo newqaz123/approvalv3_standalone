@@ -50,7 +50,9 @@ export interface OrganizationEditorProps {
   reportingGroups: ReportingGroupNode[]
   members: ReportingGroupMember[]
   users: OrganizationAdminUser[]
-  mappingCoverage: MappingCoverage
+  /** Null means coverage was not verified here (never placeholder zeros). */
+  mappingCoverage: MappingCoverage | null
+  mappingCoverageNote: string
   pendingInstanceCounts: Record<string, number>
 }
 
@@ -61,6 +63,7 @@ export function OrganizationEditor({
   members,
   users,
   mappingCoverage,
+  mappingCoverageNote,
   pendingInstanceCounts,
 }: OrganizationEditorProps) {
   const router = useRouter()
@@ -73,8 +76,9 @@ export function OrganizationEditor({
   const parentOptions = expectedParent
     ? units.filter((unit) => unit.unitType === expectedParent && unit.isActive)
     : []
-  const hasMappingBlockers = mappingCoverage.blockingReasons.length > 0
+  const hasMappingBlockers = (mappingCoverage?.blockingReasons.length ?? 0) > 0
   const mappingEmpty =
+    mappingCoverage !== null &&
     mappingCoverage.mappedDepartmentCount === 0 &&
     mappingCoverage.mappedUserCount === 0 &&
     mappingCoverage.mappedExternalApproverCount === 0
@@ -104,33 +108,41 @@ export function OrganizationEditor({
     <div className="space-y-8">
       <section className="rounded-lg border bg-card p-6 space-y-3">
         <h2 className="text-lg font-semibold">Reviewed mapping coverage</h2>
-        <p className="text-sm text-muted-foreground">
-          Mapping status comes from the reviewed dry-run report type. Coverage may be empty or unmapped until ingest.
-        </p>
-        <dl className="grid gap-2 sm:grid-cols-3 text-sm">
-          <div>Mapped departments: {mappingCoverage.mappedDepartmentCount}</div>
-          <div>Mapped users: {mappingCoverage.mappedUserCount}</div>
-          <div>Mapped external approvers: {mappingCoverage.mappedExternalApproverCount}</div>
-          <div>Would create units: {mappingCoverage.wouldCreateUnits}</div>
-          <div>Would create assignments: {mappingCoverage.wouldCreateAssignments}</div>
-          <div>Would create reporting groups: {mappingCoverage.wouldCreateReportingGroups}</div>
-        </dl>
-        {mappingEmpty && (
-          <p className="text-sm text-muted-foreground">Mapping coverage is empty/unmapped until ingest.</p>
-        )}
-        {hasMappingBlockers ? (
-          <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
-            <p className="font-medium">NEW mode is blocked while the dry-run report has blockers.</p>
-            <ul className="mt-2 list-disc pl-5">
-              {mappingCoverage.blockingReasons.map((reason) => (
-                <li key={reason}>{reason}</li>
-              ))}
-            </ul>
+        {mappingCoverage === null ? (
+          <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
+            <p className="font-medium">Mapping coverage unavailable — not verified here.</p>
+            <p className="mt-1 text-muted-foreground">{mappingCoverageNote}</p>
+            <p className="mt-1 text-muted-foreground">
+              Do not treat this page as rollout verification.
+            </p>
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">
-            The rollout gate blocks NEW mode when the dry-run report has blockers.
-          </p>
+          <>
+            <p className="text-sm text-muted-foreground">
+              Mapping status comes from the reviewed dry-run report type. Coverage may be empty or unmapped until ingest.
+            </p>
+            <dl className="grid gap-2 sm:grid-cols-3 text-sm">
+              <div>Mapped departments: {mappingCoverage.mappedDepartmentCount}</div>
+              <div>Mapped users: {mappingCoverage.mappedUserCount}</div>
+              <div>Mapped external approvers: {mappingCoverage.mappedExternalApproverCount}</div>
+              <div>Would create units: {mappingCoverage.wouldCreateUnits}</div>
+              <div>Would create assignments: {mappingCoverage.wouldCreateAssignments}</div>
+              <div>Would create reporting groups: {mappingCoverage.wouldCreateReportingGroups}</div>
+            </dl>
+            {mappingEmpty && (
+              <p className="text-sm text-muted-foreground">Mapping coverage is empty/unmapped until ingest.</p>
+            )}
+            {hasMappingBlockers && (
+              <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
+                <p className="font-medium">NEW mode is blocked while the dry-run report has blockers.</p>
+                <ul className="mt-2 list-disc pl-5">
+                  {mappingCoverage.blockingReasons.map((reason) => (
+                    <li key={reason}>{reason}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </>
         )}
         <div className="flex flex-wrap gap-3 text-sm">
           <Link href="/admin/routes" className="text-primary underline">

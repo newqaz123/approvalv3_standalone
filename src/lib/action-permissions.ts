@@ -172,7 +172,11 @@ export function existingInitiateFinalApprovalDecision(input: {
   if (!canInitiateFinalApprovalByOrigin(input)) {
     return { allowed: false, reason: 'WRONG_ROLE' }
   }
-  if (input.requestDepartmentId == null) {
+  if (!input.isTypedUnitRequest && input.requestDepartmentId == null) {
+    // Legacy fail-closed boundary only: an untyped legacy row without a
+    // department has no final-approval audience. Typed NEW requests are
+    // gated by direct originating-unit membership instead and must not be
+    // denied for a null legacy department.
     return { allowed: false, reason: 'WRONG_STATUS' }
   }
   return { allowed: true, reason: 'ALLOWED' }
@@ -313,6 +317,10 @@ export async function getRequestActionCapabilities(requestId: string): Promise<R
       status: true,
       isDeleted: true,
       approvals: {
+        // Capability aggregates read current-attempt rows only: superseded
+        // rejection/pending history is preserved for display, never for
+        // authorization.
+        where: { OR: [...CURRENT_INSTANCE_ROW_FILTER] },
         select: { status: true, isFinalApproval: true },
       },
       solutions: {
@@ -320,7 +328,10 @@ export async function getRequestActionCapabilities(requestId: string): Promise<R
         take: 1,
         select: {
           id: true,
-          approvals: { select: { status: true } },
+          approvals: {
+            where: { OR: [...CURRENT_INSTANCE_ROW_FILTER] },
+            select: { status: true },
+          },
         },
       },
       engineerAssignments: {
@@ -345,7 +356,7 @@ export async function getRequestActionCapabilities(requestId: string): Promise<R
   const hasSolutionRejection = request.solutions[0]?.approvals.some((approval) => approval.status === 'rejected') === true
   const hasPendingRequestApprovals = request.approvals.some((approval) => approval.status === 'pending')
   const pendingSolutionApprovals = await prisma.solution_approvals.count({
-    where: { solution: { requestId }, status: 'pending' },
+    where: { solution: { requestId }, status: 'pending', OR: [...CURRENT_INSTANCE_ROW_FILTER] },
   })
 
   let hasDirectOriginUnitMembership = false

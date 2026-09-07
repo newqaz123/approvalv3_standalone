@@ -195,3 +195,116 @@ describe('canUserApproveFinalApproval assignment negatives (real action guard)',
     assert.equal(((await hierarchy.solutions.canUserApproveFinalApproval(SCENARIO.requestId)) as { canApprove: boolean }).canApprove, false)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Solution read surfaces follow the shared request visibility policy (I2)
+// ---------------------------------------------------------------------------
+
+describe('solution read surfaces authenticate then apply canUserViewRequest', () => {
+  function solutionIsolationHarness() {
+    return createHarness({
+      departments: departmentRows(),
+      users: [
+        { id: 'staff-pd1', departmentId: 'department-pd', level: 1, isActive: true, role: 'general', name: 'PD1 Staff', email: 'staff-pd1@example.test' },
+        { id: 'staff-pd2', departmentId: 'department-pd', level: 1, isActive: true, role: 'general', name: 'PD2 Staff', email: 'staff-pd2@example.test' },
+        { id: 'inactive-pd2', departmentId: 'department-pd', level: 1, isActive: false, role: 'general', name: 'Inactive PD2', email: 'inactive-pd2@example.test' },
+        { id: 'department-manager', departmentId: 'department-pd', level: 4, isActive: true, role: 'general', name: 'PD Manager', email: 'dept-mgr@example.test' },
+        { id: 'eng-sup-1', departmentId: 'department-engineering', level: 2, isActive: true, role: 'engineering', name: 'Engineering Supervisor', email: 'eng-sup-1@example.test' },
+        { id: 'admin-1', departmentId: null, level: 1, isActive: true, role: 'admin', name: 'Admin', email: 'admin-1@example.test' },
+      ],
+      organization_units: [
+        { id: 'factory-1', name: 'Factory', unitType: 'FACTORY', parentId: null, isActive: true, operationalType: 'GENERAL' },
+        { id: 'division-1', name: 'Division', unitType: 'DIVISION', parentId: 'factory-1', isActive: true, operationalType: 'GENERAL' },
+        { id: 'department-pd-unit', name: 'PD Department', unitType: 'DEPARTMENT', parentId: 'division-1', isActive: true, operationalType: 'GENERAL' },
+        { id: 'section-pd1', name: 'PD1', unitType: 'SECTION', parentId: 'department-pd-unit', isActive: true, operationalType: 'GENERAL' },
+        { id: 'section-pd2', name: 'PD2', unitType: 'SECTION', parentId: 'department-pd-unit', isActive: true, operationalType: 'GENERAL' },
+      ],
+      organization_position_assignments: [
+        { id: 'asg-pd1', userId: 'staff-pd1', unitId: 'section-pd1', positionCode: 'STAFF', isPrimary: true, isActive: true },
+        { id: 'asg-pd2', userId: 'staff-pd2', unitId: 'section-pd2', positionCode: 'STAFF', isPrimary: true, isActive: true },
+        { id: 'asg-mgr', userId: 'department-manager', unitId: 'department-pd-unit', positionCode: 'DEPARTMENT_MANAGER', isPrimary: true, isActive: true },
+      ],
+      requests: [
+        { id: 'pd1-r1', status: 'DesignCostEstimationApproval', requesterId: 'staff-pd1', title: 'PD1 request', description: '<p>PD1</p>', departmentId: 'department-pd', organizationUnitId: 'section-pd1', isDeleted: false, isArchived: false },
+        { id: 'pd2-r1', status: 'DesignCostEstimationApproval', requesterId: 'staff-pd2', title: 'PD2 request', description: '<p>PD2</p>', departmentId: 'department-pd', organizationUnitId: 'section-pd2', isDeleted: false, isArchived: false },
+        { id: 'pd2-deleted', status: 'DesignCostEstimationApproval', requesterId: 'staff-pd2', title: 'PD2 deleted', description: '<p>PD2d</p>', departmentId: 'department-pd', organizationUnitId: 'section-pd2', isDeleted: true, isArchived: false },
+      ],
+      solutions: [
+        { id: 'sol-pd1', requestId: 'pd1-r1', title: 'PD1 solution', description: '<p>s</p>', costEstimate: 100, currency: 'THB', timeline: '1 week', submittedById: 'eng-sup-1' },
+        { id: 'sol-pd2', requestId: 'pd2-r1', title: 'PD2 solution', description: '<p>s</p>', costEstimate: 200, currency: 'THB', timeline: '2 weeks', submittedById: 'eng-sup-1' },
+        { id: 'sol-pd2-deleted', requestId: 'pd2-deleted', title: 'PD2 deleted solution', description: '<p>s</p>', costEstimate: 300, currency: 'THB', timeline: '3 weeks', submittedById: 'eng-sup-1' },
+      ],
+      solution_approvals: [
+        { id: 'sa-pd1', solutionId: 'sol-pd1', requiredLevel: 2, order: 1, status: 'pending', isCustomChain: false },
+        { id: 'sa-pd2', solutionId: 'sol-pd2', requiredLevel: 2, order: 1, status: 'pending', isCustomChain: false },
+      ],
+    })
+  }
+
+  it('denies a sibling-section staff the solution by request id, by solution id, and its approval metadata', async () => {
+    const harness = solutionIsolationHarness()
+    harness.state.authUserId = 'staff-pd1'
+
+    assert.equal(await harness.solutions.getSolutionByRequestId('pd2-r1'), null)
+    assert.equal(await harness.solutions.getSolutionBySolutionId('sol-pd2'), null)
+    assert.equal(((await harness.solutions.getSolutionApprovals('sol-pd2')) as unknown[]).length, 0)
+
+    // The same caller still reads their own section's solution.
+    const own = (await harness.solutions.getSolutionByRequestId('pd1-r1')) as { id: string; costEstimate: number } | null
+    assert.equal(own?.id, 'sol-pd1')
+    assert.equal(own?.costEstimate, 100)
+    const ownById = (await harness.solutions.getSolutionBySolutionId('sol-pd1')) as { id: string } | null
+    assert.equal(ownById?.id, 'sol-pd1')
+    const ownApprovals = (await harness.solutions.getSolutionApprovals('sol-pd1')) as Array<{ id: string }>
+    assert.equal(ownApprovals.length, 1)
+    assert.equal(ownApprovals[0]?.id, 'sa-pd1')
+  })
+
+  it('denies inactive users and soft-deleted requests on every solution read surface', async () => {
+    const harness = solutionIsolationHarness()
+
+    harness.state.authUserId = 'inactive-pd2'
+    assert.equal(await harness.solutions.getSolutionByRequestId('pd2-r1'), null)
+    assert.equal(await harness.solutions.getSolutionBySolutionId('sol-pd2'), null)
+    assert.equal(((await harness.solutions.getSolutionApprovals('sol-pd2')) as unknown[]).length, 0)
+
+    harness.state.authUserId = 'staff-pd2'
+    assert.equal(await harness.solutions.getSolutionByRequestId('pd2-deleted'), null)
+    assert.equal(await harness.solutions.getSolutionBySolutionId('sol-pd2-deleted'), null)
+    assert.equal(((await harness.solutions.getSolutionApprovals('sol-pd2-deleted')) as unknown[]).length, 0)
+  })
+
+  it('rejects unauthenticated callers before any solution query result is returned', async () => {
+    const harness = solutionIsolationHarness()
+    harness.state.authUserId = null
+
+    await assert.rejects(harness.solutions.getSolutionByRequestId('pd2-r1'), /Unauthorized/)
+    await assert.rejects(harness.solutions.getSolutionBySolutionId('sol-pd2'), /Unauthorized/)
+    await assert.rejects(harness.solutions.getSolutionApprovals('sol-pd2'), /Unauthorized/)
+  })
+
+  it('keeps action eligibility separate: ineligible callers get no solution payload, eligible approvers do', async () => {
+    const harness = solutionIsolationHarness()
+
+    // Sibling staff: not the current approver, so the response carries no
+    // serialized solution (read surfaces are the visibility gate).
+    harness.state.authUserId = 'staff-pd1'
+    const ineligible = (await harness.solutions.canUserApproveSolution('sol-pd2')) as { canApprove: boolean; approval?: unknown; solution?: unknown }
+    assert.equal(ineligible.canApprove, false)
+    assert.equal(ineligible.approval, undefined)
+    assert.equal(ineligible.solution, undefined)
+
+    // Current-step engineering approver: eligibility true, payload present.
+    harness.state.authUserId = 'eng-sup-1'
+    const eligible = (await harness.solutions.canUserApproveSolution('sol-pd1')) as { canApprove: boolean; approval?: { id: string }; solution?: { id: string } }
+    assert.equal(eligible.canApprove, true)
+    assert.equal(eligible.approval?.id, 'sa-pd1')
+    assert.equal(eligible.solution?.id, 'sol-pd1')
+
+    // Even the owning requester (visible) gets no payload while ineligible.
+    harness.state.authUserId = 'staff-pd2'
+    const ownerIneligible = (await harness.solutions.canUserApproveSolution('sol-pd1')) as { canApprove: boolean; solution?: unknown }
+    assert.equal(ownerIneligible.canApprove, false)
+    assert.equal(ownerIneligible.solution, undefined)
+  })
+})

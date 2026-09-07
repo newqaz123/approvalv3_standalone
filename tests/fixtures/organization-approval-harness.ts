@@ -83,6 +83,8 @@ const MODEL_COLUMN_DEFAULTS: Record<string, Row> = {
   requests: { organizationUnitId: null, isDeleted: false, isArchived: false },
   request_approvals: { instanceId: null, requiredPosition: null, candidateGroupId: null, routingMode: 'LEGACY_LEVEL', integrityVersion: 0 },
   solution_approvals: { instanceId: null, requiredPosition: null, candidateGroupId: null, routingMode: 'LEGACY_LEVEL', integrityVersion: 0 },
+  // Database column default the current-instance row filter relies on.
+  approval_instances: { supersededAt: null },
 }
 
 /** Relation config: FK resolution + list/to-one kind. Unknown keys throw. */
@@ -444,6 +446,8 @@ export class ApprovalWorkflowDb {
   private readonly tables: Record<string, Map<string, Row>> = {}
   /** Every mutating call recorded for persistence assertions. */
   readonly writes: RecordedWrite[] = []
+  /** Second argument of every prisma.$transaction call (options object). */
+  readonly transactionOptions: unknown[] = []
   /** Concurrency injection point: runs after every `requests.findUnique`. */
   onRequestsRead?: () => void
   private readonly concurrentCommits: Array<(db: ApprovalWorkflowDb) => void> = []
@@ -553,9 +557,13 @@ export class ApprovalWorkflowDb {
         const data = { ...(MODEL_COLUMN_DEFAULTS[model] ?? {}), ...args.data }
         if (!data.id) {
           db.autoId += 1
-          data.id = `${model}-created-${db.autoId}`
+          // Deterministic UUID-shaped id: production schemas validate uuid
+          // columns, so generated ids must satisfy the same format.
+          data.id = scenarioUuid(db.autoId)
         }
-        if (!data.createdAt && model !== 'email_settings') data.createdAt = new Date()
+        // Only stamp createdAt on models whose schema actually has the column
+        // (snapshot tables carry capturedAt instead).
+        if (!data.createdAt && model !== 'email_settings' && MODEL_FIELDS[model].includes('createdAt')) data.createdAt = new Date()
         assertFields(model, data, `${model}.create data`)
         rows.set(String(data.id), data)
         db.writes.push({ model, op: 'create', data: structuredClone(data) })
@@ -567,8 +575,9 @@ export class ApprovalWorkflowDb {
           const row = { ...(MODEL_COLUMN_DEFAULTS[model] ?? {}), ...data }
           if (!row.id) {
             db.autoId += 1
-            row.id = `${model}-created-${db.autoId}`
+            row.id = scenarioUuid(db.autoId)
           }
+          if (!row.createdAt && model !== 'email_settings' && MODEL_FIELDS[model].includes('createdAt')) row.createdAt = new Date()
           assertFields(model, row, `${model}.createMany data`)
           rows.set(String(row.id), row)
         }
@@ -662,7 +671,10 @@ export class ApprovalWorkflowDb {
   /** The `prisma` default-export surface the real modules see. */
   asPrisma(): Record<string, unknown> {
     const prismaLike: Record<string, unknown> = {
-      $transaction: (fn: (tx: ApprovalWorkflowDb) => Promise<unknown>) => this.$transaction(fn),
+      $transaction: (fn: (tx: ApprovalWorkflowDb) => Promise<unknown>, options?: unknown) => {
+        this.transactionOptions.push(options)
+        return this.$transaction(fn)
+      },
     }
     for (const model of Object.keys(MODEL_FIELDS)) {
       prismaLike[model] = this.table(model)
@@ -721,6 +733,7 @@ export interface Harness {
   dashboard: Record<string, (...args: unknown[]) => Promise<unknown>>
   notifications: Record<string, (...args: unknown[]) => Promise<unknown>>
   requestAccess: Record<string, (...args: unknown[]) => Promise<unknown>>
+  actionPermissions: Record<string, (...args: unknown[]) => Promise<unknown>>
 }
 
 export function createHarness(seed: HarnessSeed = {}): Harness {
@@ -892,6 +905,7 @@ export function createHarness(seed: HarnessSeed = {}): Harness {
     approvals,
     dashboard,
     notifications: dependencies['./notifications'] as Harness['notifications'],
+    actionPermissions: dependencies['@/lib/action-permissions'] as Harness['actionPermissions'],
     requestAccess,
   }
 }
@@ -973,4 +987,132 @@ export function baselineSolution(overrides: Row = {}): Row {
 export function enableTestSmtp(state: HarnessState): void {
   state.env.SMTP_HOST = 'smtp.test'
   state.env.SMTP_FROM = 'approvals@test.local'
+}
+
+// ---------------------------------------------------------------------------
+// NEW-mode organization scenario (final-review fix wave)
+// ---------------------------------------------------------------------------
+
+/** Import digest the NEW-mode gate requires. */
+export const NEW_MODE_DIGEST = 'new-mode-fix-wave-digest'
+
+/**
+ * Typed organization tree shared by the NEW-mode action tests:
+ *
+ * factory-1 (FACTORY, factory-mgr)
+ * └─ division-1 (DIVISION, division-mgr)
+ *    ├─ department-pd-unit (DEPARTMENT, parent-mgr)
+ *    │  ├─ section-pd1 (SECTION: new-staff-1, new-supervisor-1, new-eng-1, new-eng-2)
+ *    │  └─ section-pd2 (SECTION: new-staff-2 — sibling isolation)
+ *    └─ engineering-unit (DEPARTMENT, ENGINEERING, eng-dept-mgr)
+ *       └─ section-eng (SECTION: eng-section-mgr)
+ *
+ * Published routes (one per scope+phase):
+ * - REQUEST  @ section-pd1: SUPERVISOR, DEPARTMENT_MANAGER
+ * - SOLUTION @ section-pd1: SUPERVISOR, DEPARTMENT_MANAGER (two-step snapshot)
+ * - SOLUTION @ section-eng: SUPERVISOR (single step)
+ * - FINAL    @ department-pd-unit: DIVISION_MANAGER, FACTORY_MANAGER (two-step)
+ */
+export function newModeOrgUsers(): Row[] {
+  return [
+    { id: 'parent-mgr', departmentId: null, level: 4, isActive: true, role: 'general', name: 'Parent Unit Manager', email: 'parent-mgr@example.test' },
+    { id: 'division-mgr', departmentId: null, level: 5, isActive: true, role: 'general', name: 'Division Manager', email: 'division-mgr@example.test' },
+    { id: 'factory-mgr', departmentId: null, level: 6, isActive: true, role: 'general', name: 'Factory Manager', email: 'factory-mgr@example.test' },
+    { id: 'new-staff-1', departmentId: 'department-pd', level: 1, isActive: true, role: 'general', name: 'PD1 New Staff', email: 'new-staff-1@example.test' },
+    { id: 'new-staff-2', departmentId: 'department-pd', level: 1, isActive: true, role: 'general', name: 'PD2 New Staff', email: 'new-staff-2@example.test' },
+    { id: 'new-supervisor-1', departmentId: 'department-pd', level: 2, isActive: true, role: 'general', name: 'PD1 New Supervisor', email: 'new-supervisor-1@example.test' },
+    { id: 'new-eng-1', departmentId: 'department-engineering', level: 1, isActive: true, role: 'engineering', name: 'New Engineer One', email: 'new-eng-1@example.test' },
+    { id: 'new-eng-2', departmentId: 'department-engineering', level: 1, isActive: true, role: 'engineering', name: 'New Engineer Two', email: 'new-eng-2@example.test' },
+    { id: 'eng-dept-mgr', departmentId: 'department-engineering', level: 4, isActive: true, role: 'general', name: 'Engineering Dept Manager', email: 'eng-dept-mgr@example.test' },
+  ]
+}
+
+export function newModeOrgUnits(): Row[] {
+  return [
+    { id: 'factory-1', name: 'Factory', unitType: 'FACTORY', parentId: null, legacyDepartmentId: null, isActive: true, operationalType: 'GENERAL' },
+    { id: 'division-1', name: 'Division', unitType: 'DIVISION', parentId: 'factory-1', legacyDepartmentId: null, isActive: true, operationalType: 'GENERAL' },
+    { id: 'department-pd-unit', name: 'PD Department', unitType: 'DEPARTMENT', parentId: 'division-1', legacyDepartmentId: 'department-pd', isActive: true, operationalType: 'GENERAL' },
+    { id: 'section-pd1', name: 'PD1', unitType: 'SECTION', parentId: 'department-pd-unit', legacyDepartmentId: null, isActive: true, operationalType: 'GENERAL' },
+    { id: 'section-pd2', name: 'PD2', unitType: 'SECTION', parentId: 'department-pd-unit', legacyDepartmentId: null, isActive: true, operationalType: 'GENERAL' },
+    { id: 'engineering-unit', name: 'Engineering Department', unitType: 'DEPARTMENT', parentId: 'division-1', legacyDepartmentId: 'department-engineering', isActive: true, operationalType: 'ENGINEERING' },
+    { id: 'section-eng', name: 'Engineering Section', unitType: 'SECTION', parentId: 'engineering-unit', legacyDepartmentId: null, isActive: true, operationalType: 'GENERAL' },
+  ]
+}
+
+export function newModeOrgAssignments(): Row[] {
+  return [
+    { id: 'asg-parent-mgr', userId: 'parent-mgr', unitId: 'department-pd-unit', positionCode: 'DEPARTMENT_MANAGER', reportingGroupId: null, isPrimary: true, isActive: true },
+    { id: 'asg-division-mgr', userId: 'division-mgr', unitId: 'division-1', positionCode: 'DIVISION_MANAGER', reportingGroupId: null, isPrimary: true, isActive: true },
+    { id: 'asg-factory-mgr', userId: 'factory-mgr', unitId: 'factory-1', positionCode: 'FACTORY_MANAGER', reportingGroupId: null, isPrimary: true, isActive: true },
+    { id: 'asg-new-staff-1', userId: 'new-staff-1', unitId: 'section-pd1', positionCode: 'STAFF', reportingGroupId: 'group-pd1', isPrimary: true, isActive: true },
+    { id: 'asg-new-staff-2', userId: 'new-staff-2', unitId: 'section-pd2', positionCode: 'STAFF', reportingGroupId: 'group-pd2', isPrimary: true, isActive: true },
+    { id: 'asg-new-supervisor-1', userId: 'new-supervisor-1', unitId: 'section-pd1', positionCode: 'SUPERVISOR', reportingGroupId: 'group-pd1', isPrimary: true, isActive: true },
+    { id: 'asg-new-eng-1', userId: 'new-eng-1', unitId: 'section-pd1', positionCode: 'STAFF', reportingGroupId: 'group-pd1', isPrimary: true, isActive: true },
+    { id: 'asg-new-eng-2', userId: 'new-eng-2', unitId: 'section-pd1', positionCode: 'STAFF', reportingGroupId: 'group-pd1', isPrimary: true, isActive: true },
+    { id: 'asg-eng-dept-mgr', userId: 'eng-dept-mgr', unitId: 'engineering-unit', positionCode: 'DEPARTMENT_MANAGER', reportingGroupId: null, isPrimary: true, isActive: true },
+  ]
+}
+
+export function newModeReportingGroups(): Row[] {
+  return [
+    { id: 'group-pd1', unitId: 'section-pd1', parentGroupId: null, name: 'PD1 Group', isActive: true },
+    { id: 'group-pd2', unitId: 'section-pd2', parentGroupId: null, name: 'PD2 Group', isActive: true },
+  ]
+}
+
+export function newModeReportingGroupMembers(): Row[] {
+  return [
+    { id: 'gm-1', reportingGroupId: 'group-pd1', userId: 'new-staff-1' },
+    { id: 'gm-2', reportingGroupId: 'group-pd1', userId: 'new-supervisor-1' },
+    { id: 'gm-3', reportingGroupId: 'group-pd1', userId: 'new-eng-1' },
+    { id: 'gm-4', reportingGroupId: 'group-pd1', userId: 'new-eng-2' },
+    { id: 'gm-5', reportingGroupId: 'group-pd2', userId: 'new-staff-2' },
+  ]
+}
+
+export function newModeRouteVersions(): Row[] {
+  return [
+    { id: 'route-req-pd', scopeUnitId: 'department-pd-unit', phase: 'REQUEST', version: 1, maximumPositionLevel: 6, status: 'PUBLISHED', createdById: 'admin-1' },
+    { id: 'route-sol-pd1', scopeUnitId: 'section-pd1', phase: 'SOLUTION', version: 1, maximumPositionLevel: 4, status: 'PUBLISHED', createdById: 'admin-1' },
+    { id: 'route-sol-eng', scopeUnitId: 'section-eng', phase: 'SOLUTION', version: 1, maximumPositionLevel: 4, status: 'PUBLISHED', createdById: 'admin-1' },
+    { id: 'route-final-pd', scopeUnitId: 'department-pd-unit', phase: 'FINAL', version: 1, maximumPositionLevel: 6, status: 'PUBLISHED', createdById: 'admin-1' },
+  ]
+}
+
+export function newModeRouteSteps(): Row[] {
+  return [
+    { id: 'rs-req-1', routeVersionId: 'route-req-pd', stepOrder: 1, positionCode: 'DIVISION_MANAGER' },
+    { id: 'rs-req-2', routeVersionId: 'route-req-pd', stepOrder: 2, positionCode: 'FACTORY_MANAGER' },
+    { id: 'rs-sol-pd1-1', routeVersionId: 'route-sol-pd1', stepOrder: 1, positionCode: 'SUPERVISOR' },
+    { id: 'rs-sol-pd1-2', routeVersionId: 'route-sol-pd1', stepOrder: 2, positionCode: 'DEPARTMENT_MANAGER' },
+    { id: 'rs-sol-eng-1', routeVersionId: 'route-sol-eng', stepOrder: 1, positionCode: 'SUPERVISOR' },
+    { id: 'rs-final-1', routeVersionId: 'route-final-pd', stepOrder: 1, positionCode: 'DIVISION_MANAGER' },
+    { id: 'rs-final-2', routeVersionId: 'route-final-pd', stepOrder: 2, positionCode: 'FACTORY_MANAGER' },
+  ]
+}
+
+export function newModeImportRuns(): Row[] {
+  return [
+    { id: 'run-new-1', mappingDigest: NEW_MODE_DIGEST, appliedAt: new Date('2026-02-01T00:00:00Z'), appliedBy: 'admin-1', targetIdentity: 'fix-wave', counts: {} },
+  ]
+}
+
+/** All organization/route/reporting seeds the NEW-mode scenarios share. */
+export function newModeOrgSeed(): HarnessSeed {
+  return {
+    users: newModeOrgUsers(),
+    organization_units: newModeOrgUnits(),
+    organization_position_assignments: newModeOrgAssignments(),
+    reporting_groups: newModeReportingGroups(),
+    reporting_group_members: newModeReportingGroupMembers(),
+    approval_route_versions: newModeRouteVersions(),
+    approval_route_steps: newModeRouteSteps(),
+    organization_import_runs: newModeImportRuns(),
+  }
+}
+
+/** Switches the harness into NEW rollout mode with the matching digest. */
+export function enableNewMode(state: HarnessState): void {
+  state.env.APPROVAL_ORG_ROUTING_MODE = 'new'
+  state.env.APPROVAL_ORG_MAPPING_DIGEST = NEW_MODE_DIGEST
 }

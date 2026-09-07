@@ -361,3 +361,107 @@ function baselineSeedSolution(): Record<string, unknown> {
     submittedById: 'engineer-1',
   }
 }
+
+// ---------------------------------------------------------------------------
+// NEW-mode request resubmission + transaction isolation (fix wave I3/I4)
+// ---------------------------------------------------------------------------
+
+import { APPROVAL_ENGINE_TRANSACTION_ISOLATION } from '@/lib/approval-engine/instances'
+import {
+  enableNewMode,
+  newModeOrgSeed,
+  scenarioUuid,
+} from '../fixtures/organization-approval-harness'
+
+describe('NEW mode resubmission authorization (current-attempt identity)', () => {
+  it('denies a second resubmission while the current attempt is pending: a superseded rejection is display history, not authorization', async () => {
+    const REQUEST_ID = scenarioUuid(61)
+    const harness = createHarness({
+      ...newModeOrgSeed(),
+      departments: departmentRows(),
+      requests: [{
+        id: REQUEST_ID,
+        status: 'ImprovementRequest',
+        requesterId: 'new-staff-1',
+        title: 'Resubmission window request',
+        description: '<p>Body</p>',
+        departmentId: null,
+        organizationUnitId: 'section-pd1',
+        isDeleted: false,
+        isArchived: false,
+        updatedAt: new Date('2026-02-02T00:00:00Z'),
+      }],
+      approval_instances: [
+        { id: 'inst-superseded', requestId: REQUEST_ID, phase: 'REQUEST', routeVersionId: 'route-req-pd', originUserId: 'new-staff-1', originUnitId: 'section-pd1', routingMode: 'SNAPSHOT_GROUP', state: 'REJECTED', attempt: 1, supersededAt: new Date('2026-02-03T00:00:00Z') },
+        { id: 'inst-current', requestId: REQUEST_ID, phase: 'REQUEST', routeVersionId: 'route-req-pd', originUserId: 'new-staff-1', originUnitId: 'section-pd1', routingMode: 'SNAPSHOT_GROUP', state: 'PENDING', attempt: 2, supersededAt: null },
+      ],
+      approval_candidate_groups: [
+        { id: 'cg-superseded', approvalInstanceId: 'inst-superseded', requiredPosition: 'DIVISION_MANAGER', scopeUnitId: 'division-1', capturedAt: new Date() },
+        { id: 'cg-current', approvalInstanceId: 'inst-current', requiredPosition: 'DIVISION_MANAGER', scopeUnitId: 'division-1', capturedAt: new Date() },
+      ],
+      request_approvals: [
+        { id: 'ra-rejected', requestId: REQUEST_ID, order: 1, status: 'rejected', isFinalApproval: false, routingMode: 'SNAPSHOT_GROUP', integrityVersion: 1, instanceId: 'inst-superseded', requiredPosition: 'DIVISION_MANAGER', candidateGroupId: 'cg-superseded' },
+        { id: 'ra-pending', requestId: REQUEST_ID, order: 1, status: 'pending', isFinalApproval: false, routingMode: 'SNAPSHOT_GROUP', integrityVersion: 1, instanceId: 'inst-current', requiredPosition: 'DIVISION_MANAGER', candidateGroupId: 'cg-current' },
+      ],
+    })
+    enableNewMode(harness.state)
+    harness.state.authUserId = 'new-staff-1'
+
+    // The only rejection belongs to the SUPERSEDED attempt; the current
+    // attempt is still pending, so nothing authorizes another resubmission.
+    await assert.rejects(
+      harness.requests.resubmitRequest({ requestId: REQUEST_ID }),
+      /does not have any rejections|changed by someone else/,
+    )
+    // No third attempt was created.
+    assert.equal(
+      [...harness.db.rows.approval_instances.values()].filter((row) => row.requestId === REQUEST_ID).length,
+      2,
+    )
+  })
+})
+
+describe('NEW creation transactions request engine SERIALIZABLE isolation', () => {
+  function isolationHarness(mode: 'new' | 'legacy') {
+    const harness = createHarness({
+      departments: departmentRows(),
+      // NEW mode uses its own org users (the author has a typed origin);
+      // legacy uses the standard workflow users.
+      ...(mode === 'new' ? newModeOrgSeed() : { users: workflowUsers() }),
+    })
+    if (mode === 'new') enableNewMode(harness.state)
+    const author = harness.db.user.rows.get(mode === 'new' ? 'new-staff-1' : 'staff-1')
+    harness.state.currentUser = {
+      ...author,
+      department: mode === 'new' ? null : { id: 'department-pd', type: 'PRODUCTION', name: 'Production PD' },
+    }
+    return harness
+  }
+
+  function creationInput(): Record<string, unknown> {
+    return {
+      title: 'Isolation probe request',
+      description: '<p>Isolation probe body.</p>',
+      inlineImageSessionId: scenarioUuid(95),
+      stagedAttachmentIds: [],
+    }
+  }
+
+  it('records Serializable isolation for the NEW creation transaction', async () => {
+    const harness = isolationHarness('new')
+    const created = (await harness.requests.createRequest(creationInput())) as { success: boolean; requestId?: string; error?: string }
+    assert.equal(created.success, true, created.error)
+    const options = harness.db.transactionOptions.at(-1) as Record<string, unknown> | undefined
+    // Realm-safe field comparison (vm-built objects differ in prototype).
+    assert.equal(options?.isolationLevel, APPROVAL_ENGINE_TRANSACTION_ISOLATION)
+    assert.deepEqual(Object.keys(options ?? {}), ['isolationLevel'])
+  })
+
+  it('keeps legacy creation transactions on the default isolation', async () => {
+    const harness = isolationHarness('legacy')
+    const created = (await harness.requests.createRequest(creationInput())) as { success: boolean; requestId?: string; error?: string }
+    assert.equal(created.success, true, created.error)
+    const options = harness.db.transactionOptions.at(-1)
+    assert.equal(options, undefined)
+  })
+})

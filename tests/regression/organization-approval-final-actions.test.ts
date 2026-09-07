@@ -14,7 +14,10 @@ import {
   baselineSolution,
   createHarness,
   departmentRows,
+  enableNewMode,
   enableTestSmtp,
+  newModeOrgSeed,
+  scenarioUuid,
   workflowUsers,
   type Harness,
 } from '../fixtures/organization-approval-harness'
@@ -430,5 +433,146 @@ describe('real approveFinalApproval completion: discriminating engineering exclu
     assert.ok(audience.length >= 3)
     assert.deepEqual([...harness.db.rows.notifications.values()], [])
     assert.deepEqual(harness.state.smtpMessages, [])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// NEW-mode two-step FINAL lifecycle (final-review fix wave C1/I1)
+// ---------------------------------------------------------------------------
+
+function newModeLifecycleHarness(): Harness {
+  return createHarness({ ...newModeOrgSeed(), departments: departmentRows() })
+}
+
+describe('NEW mode lifecycle: parent-unit manager request through two-step FINAL', () => {
+  it('creates a null-department NEW request, initiates FINAL by direct origin membership, marks every final row final, and requires both steps to complete', async () => {
+    const harness = newModeLifecycleHarness()
+    enableNewMode(harness.state)
+    enableTestSmtp(harness.state)
+
+    // 1. Parent-unit manager (no legacy department) creates a NEW request.
+    const parentMgr = harness.db.user.rows.get('parent-mgr')
+    harness.state.currentUser = { ...parentMgr, department: null }
+    const created = (await harness.requests.createRequest({
+      title: 'Parent unit improvement',
+      description: '<p>Parent unit needs a new fixture.</p>',
+      inlineImageSessionId: scenarioUuid(90),
+      stagedAttachmentIds: [],
+    })) as { success: boolean; requestId?: string; error?: string }
+    assert.equal(created.success, true, created.error)
+
+    const requestId = created.requestId!
+    const storedRequest = harness.db.requests.rows.get(requestId)
+    // NEW creation: typed origin unit persisted once; null legacy department.
+    assert.equal(storedRequest?.departmentId, null)
+    assert.equal(storedRequest?.organizationUnitId, 'department-pd-unit')
+    assert.equal(storedRequest?.status, 'ImprovementRequest')
+
+    // 2. The two-step REQUEST snapshot (division then factory) approves and
+    // sends the request to engineering.
+    harness.state.authUserId = 'division-mgr'
+    await harness.approvals.approveRequest(requestId)
+    harness.state.authUserId = 'factory-mgr'
+    await harness.approvals.approveRequest(requestId)
+    assert.equal(harness.db.requests.rows.get(requestId)?.status, 'SentToEngineer')
+
+    // 3. Engineering assigns and submits a solution; two-step SOLUTION
+    // snapshot (supervisor then parent manager) approves back to the requester.
+    const engineerTwo = harness.db.user.rows.get('new-eng-2')
+    harness.state.authUserId = 'new-eng-2'
+    harness.state.currentUser = { ...engineerTwo, department: { id: 'department-engineering', type: 'ENGINEERING', name: 'Engineering' } }
+    await harness.requests.assignEngineers(requestId, ['new-eng-1'])
+    harness.state.currentUser = null
+    harness.state.authUserId = 'new-eng-1'
+    const submitted = (await harness.solutions.submitSolution({
+      requestId,
+      title: 'Fixture retrofit',
+      description: '<p>Retrofit the fixture assembly.</p>',
+      inlineImageSessionId: scenarioUuid(91),
+      costEstimate: 1200,
+      currency: 'THB',
+      timeline: '2 weeks',
+    })) as { success: boolean; solutionId?: string; error?: string }
+    assert.equal(submitted.success, true, submitted.error)
+
+    const solutionId = submitted.solutionId!
+    // First SOLUTION step candidate notified before acting (emitted payload).
+    assert.deepEqual(
+      harness.db.notificationsFor('new-supervisor-1').map((row) => ({ type: row.type, title: row.title })),
+      [{ type: 'approval_needed', title: 'Solution Submitted for Approval' }],
+    )
+    harness.state.authUserId = 'new-supervisor-1'
+    await harness.solutions.approveSolution(solutionId)
+    harness.state.authUserId = 'parent-mgr'
+    await harness.solutions.approveSolution(solutionId)
+    assert.equal(harness.db.requests.rows.get(requestId)?.status, 'SendBackToRequester')
+
+    // 4. Final initiation succeeds for the direct origin-unit member even
+    // though the request has no legacy department (NEW typed origin).
+    // Earlier phase notifications are cleared so the final-phase audience
+    // assertions below see exactly the FINAL emissions.
+    harness.db.rows.notifications.clear()
+    const initiated = (await harness.solutions.initiateFinalApproval(requestId, false)) as { success: boolean }
+    assert.equal(initiated.success, true)
+
+    // C1: EVERY persisted NEW final row carries isFinalApproval identity.
+    const finalRows = harness.db
+      .requestApprovalsForRequest(requestId)
+      .filter((row) => row.isFinalApproval === true)
+      .sort((a, b) => (a.order as number) - (b.order as number))
+    assert.equal(finalRows.length, 2)
+    assert.deepEqual(
+      finalRows.map((row) => ({ order: row.order, status: row.status, isFinalApproval: row.isFinalApproval, routingMode: row.routingMode })),
+      [
+        { order: 1, status: 'pending', isFinalApproval: true, routingMode: 'SNAPSHOT_GROUP' },
+        { order: 2, status: 'pending', isFinalApproval: true, routingMode: 'SNAPSHOT_GROUP' },
+      ],
+    )
+    // Captured candidate groups: step 1 division manager, step 2 factory manager.
+    const groups = [...harness.db.rows.approval_candidate_groups.values()].sort((a, b) => (a.id > b.id ? 1 : -1))
+    const groupIdsByOrder = new Map(finalRows.map((row) => [row.order as number, row.candidateGroupId as string]))
+    const membersOf = (groupId: string) =>
+      [...harness.db.rows.approval_candidate_group_members.values()]
+        .filter((member) => member.candidateGroupId === groupId)
+        .map((member) => member.userId)
+    assert.equal(groupIdsByOrder.size, 2)
+    assert.deepEqual(membersOf(groupIdsByOrder.get(1)!), ['division-mgr'])
+    assert.deepEqual(membersOf(groupIdsByOrder.get(2)!), ['factory-mgr'])
+    assert.ok(groups.length >= 2)
+
+    // T10/next-step: only the FIRST final-step candidate is notified, with the
+    // production payload (persisted rows through the real recipient resolver).
+    assert.deepEqual(
+      harness.db.notificationsFor('division-mgr').map((row) => ({ type: row.type, title: row.title, message: row.message })),
+      [{ type: 'final_approval_needed', title: 'Final Approval Needed', message: `Request "Parent unit improvement" needs your final approval.` }],
+    )
+    assert.deepEqual(harness.db.notificationsFor('factory-mgr'), [])
+
+    // First-step candidate is current and eligible; the last step is not yet.
+    harness.state.authUserId = 'division-mgr'
+    const firstEligible = (await harness.solutions.canUserApproveFinalApproval(requestId)) as { canApprove: boolean }
+    assert.equal(firstEligible.canApprove, true)
+    harness.state.authUserId = 'factory-mgr'
+    const lastEligible = (await harness.solutions.canUserApproveFinalApproval(requestId)) as { canApprove: boolean }
+    assert.equal(lastEligible.canApprove, false)
+
+    // 5. First approval advances nothing terminal: the request stays in
+    // FinalApproval and exactly one final step remains pending.
+    harness.state.authUserId = 'division-mgr'
+    const firstApproval = (await harness.solutions.approveFinalApproval(requestId)) as { success: boolean }
+    assert.equal(firstApproval.success, true)
+    assert.equal(harness.db.requests.rows.get(requestId)?.status, 'FinalApproval')
+    assert.equal(
+      harness.db.requestApprovalsForRequest(requestId).filter((row) => row.status === 'pending' && row.isFinalApproval === true).length,
+      1,
+    )
+
+    // 6. Only after the second (last) step approves does the request complete.
+    harness.state.authUserId = 'factory-mgr'
+    const lastEligibleAfterFirst = (await harness.solutions.canUserApproveFinalApproval(requestId)) as { canApprove: boolean }
+    assert.equal(lastEligibleAfterFirst.canApprove, true)
+    const secondApproval = (await harness.solutions.approveFinalApproval(requestId)) as { success: boolean }
+    assert.equal(secondApproval.success, true)
+    assert.equal(harness.db.requests.rows.get(requestId)?.status, 'Completed')
   })
 })

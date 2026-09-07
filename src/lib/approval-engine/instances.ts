@@ -57,6 +57,16 @@ function translateConflict(error: unknown): never {
   throw error
 }
 
+/**
+ * Boundary translation for serialization failures that surface at the
+ * enclosing `$transaction` (including commit-time failures outside
+ * `persistApprovalInstance`). Callers wrap the whole transaction boundary;
+ * there is still no retry loop: non-conflict errors pass through untouched.
+ */
+export function translateTransactionConflict(error: unknown): never {
+  translateConflict(error)
+}
+
 function deepFreeze<T>(value: T): T {
   if (value !== null && typeof value === 'object') {
     for (const child of Object.values(value as Record<string, unknown>)) deepFreeze(child)
@@ -404,7 +414,10 @@ export async function persistApprovalInstance(
           data: {
             ...row,
             requestId: requireDocumentId(plan),
-            isFinalApproval: isFinalPhase && index === plan.steps.length - 1,
+            // Final-phase identity, not a last-step marker: every NEW FINAL
+            // row is final so the isFinalApproval consumers (eligibility,
+            // pending counts, next-step selection) cover the whole phase.
+            isFinalApproval: isFinalPhase,
           },
         })
       }

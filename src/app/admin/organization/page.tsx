@@ -41,6 +41,7 @@ export default async function OrganizationPage() {
         members={members}
         users={users}
         mappingCoverage={data.mappingCoverage}
+        mappingCoverageNote={data.mappingCoverageNote}
         pendingInstanceCounts={data.pendingInstanceCounts}
       />
     </div>

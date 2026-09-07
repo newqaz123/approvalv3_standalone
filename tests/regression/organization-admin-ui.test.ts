@@ -399,3 +399,23 @@ describe('updateUser legacy field preservation', () => {
     assert.equal(row?.level, 7)
   })
 })
+
+describe('mapping coverage is labeled unavailable, never presented as verification (M2)', () => {
+  it('reports mapping coverage as null with an explicit not-verified note instead of placeholder zeros', async () => {
+    const harness = createOrganizationAdminHarness()
+    const data = (await harness.actions.getOrganizationAdminData()) as {
+      mappingCoverage: unknown
+      mappingCoverageNote: string
+    }
+    assert.equal(data.mappingCoverage, null)
+    assert.match(data.mappingCoverageNote, /unavailable/i)
+    assert.match(data.mappingCoverageNote, /not verified here/i)
+
+    const editor = read('src/components/admin/organization/OrganizationEditor.tsx')
+    assert.match(editor, /mappingCoverage === null/)
+    assert.match(editor, /not verified here/i)
+    assert.match(editor, /Do not treat this page as rollout verification/)
+    const action = read('src/server-actions/organization.ts')
+    assert.doesNotMatch(action, /emptyMappingCoverage/)
+  })
+})

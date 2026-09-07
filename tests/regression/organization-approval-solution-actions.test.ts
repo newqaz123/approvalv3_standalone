@@ -15,7 +15,10 @@ import {
   baselineSolution,
   createHarness,
   departmentRows,
+  enableNewMode,
   enableTestSmtp,
+  newModeOrgSeed,
+  scenarioUuid,
   workflowUsers,
   type Harness,
 } from '../fixtures/organization-approval-harness'
@@ -384,5 +387,162 @@ describe('real resubmitSolution: custom, normal, and auto', () => {
       harness.solutions.resubmitSolution(resubmitInput()),
       /Can only resubmit rejected solutions/,
     )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// NEW-mode solution resubmission (final-review fix wave I1/I3/I5/T10)
+// ---------------------------------------------------------------------------
+
+/**
+ * Seeded NEW-mode request in SentToEngineer with an assigned engineer, so the
+ * REAL submitSolution/resubmitSolution actions run against the typed origin
+ * (section-pd1) without re-running the whole request-approval ladder. The
+ * request has a null legacy department: NEW typed-origin requests do not need
+ * one, and the resubmission gate must not reject them.
+ */
+function newModeSolutionHarness(requestId: string, solutionId: string): Harness {
+  const harness = createHarness({
+    ...newModeOrgSeed(),
+    departments: departmentRows(),
+    requests: [{
+      id: requestId,
+      status: 'SentToEngineer',
+      requesterId: 'new-staff-1',
+      title: 'New-mode fixture request',
+      description: '<p>Fixture request body</p>',
+      departmentId: null,
+      organizationUnitId: 'section-pd1',
+      isDeleted: false,
+      isArchived: false,
+    }],
+    request_engineer_assignments: [
+      { id: 'asg-eng-new', requestId, engineerId: 'new-eng-1', assignedAt: new Date(), assignedById: 'new-eng-2' },
+    ],
+  })
+  enableNewMode(harness.state)
+  return harness
+}
+
+function resubmissionInput(requestId: string): Record<string, unknown> {
+  return {
+    requestId,
+    title: 'Fixture retrofit (revised)',
+    description: '<p>Revised fixture retrofit plan.</p>',
+    inlineImageSessionId: scenarioUuid(92),
+    cost: 1350,
+    currency: 'THB',
+    timeline: '3 weeks',
+    useCustomHierarchy: false,
+  }
+}
+
+describe('NEW mode solution resubmission', () => {
+  it('lets an authorized second engineer resubmit a rejected solution: routing origin stays the stored submitter, actor is the reviser, and only the first-step candidate is notified', async () => {
+    const REQUEST_ID = scenarioUuid(51)
+    const harness = newModeSolutionHarness(REQUEST_ID, scenarioUuid(52))
+    enableTestSmtp(harness.state)
+    harness.state.authUserId = 'new-eng-1'
+
+    // Real submission by engineer one (the stored submitter/author).
+    const submitted = (await harness.solutions.submitSolution({
+      requestId: REQUEST_ID,
+      title: 'Fixture retrofit',
+      description: '<p>Retrofit the fixture assembly.</p>',
+      inlineImageSessionId: scenarioUuid(93),
+      costEstimate: 1200,
+      currency: 'THB',
+      timeline: '2 weeks',
+    })) as { success: boolean; solutionId?: string; error?: string }
+    assert.equal(submitted.success, true, submitted.error)
+    const solutionId = submitted.solutionId!
+    assert.equal(harness.db.solutions.rows.get(solutionId)?.submittedById, 'new-eng-1')
+    assert.equal(harness.db.requests.rows.get(REQUEST_ID)?.status, 'DesignCostEstimationApproval')
+
+    // First-step candidate rejects the solution.
+    harness.db.rows.notifications.clear()
+    harness.state.authUserId = 'new-supervisor-1'
+    await harness.solutions.rejectSolution(solutionId, 'Wrong fixture geometry')
+    assert.equal(harness.db.requests.rows.get(REQUEST_ID)?.status, 'SentToEngineer')
+
+    // Authorized SECOND engineer (same preserved engineering role rule)
+    // resubmits. The request has no legacy department (NEW typed origin).
+    harness.db.rows.notifications.clear()
+    harness.state.authUserId = 'new-eng-2'
+    const resubmitted = (await harness.solutions.resubmitSolution(resubmissionInput(REQUEST_ID))) as { success: boolean; solutionId?: string; error?: string }
+    assert.equal(resubmitted.success, true, resubmitted.error)
+
+    // I5: no authorship transfer — the stored submitter is untouched; the
+    // routing origin (attempt instance) is the stored submitter's branch.
+    assert.equal(harness.db.solutions.rows.get(solutionId)?.submittedById, 'new-eng-1')
+    const instances = [...harness.db.rows.approval_instances.values()]
+      .filter((row) => row.solutionId === solutionId)
+      .sort((a, b) => (a.attempt as number) - (b.attempt as number))
+    assert.equal(instances.length, 2)
+    assert.equal(instances[1]?.originUserId, 'new-eng-1')
+    assert.equal(instances[1]?.supersededAt, null)
+
+    // The reviser is recorded as the ACTOR on the activity log only.
+    const resubmitActivities = [...harness.db.rows.request_activities.values()]
+      .filter((row) => row.action === 'solution_resubmitted')
+    assert.equal(resubmitActivities.length, 1)
+    assert.equal(resubmitActivities[0]?.userId, 'new-eng-2')
+
+    // T10 SOLUTION next-step: the persisted first pending step's captured
+    // candidate group feeds the real recipient resolver — the emitted payload
+    // goes to the first-step candidate with the production wording, and the
+    // second-step candidate is not notified yet.
+    assert.deepEqual(
+      [...harness.db.rows.notifications.values()].map((row) => ({
+        userId: row.userId,
+        type: row.type,
+        title: row.title,
+        message: row.message,
+      })),
+      [{
+        userId: 'new-supervisor-1',
+        type: 'approval_needed',
+        title: 'Solution Resubmitted',
+        message: '📤 Solution resubmitted for "New-mode fixture request". Please review the updated solution.',
+      }],
+    )
+  })
+
+  it('denies a second resubmission while the current attempt is pending, even though the superseded attempt was rejected', async () => {
+    const REQUEST_ID = scenarioUuid(53)
+    const harness = newModeSolutionHarness(REQUEST_ID, scenarioUuid(54))
+    harness.state.authUserId = 'new-eng-1'
+
+    const submitted = (await harness.solutions.submitSolution({
+      requestId: REQUEST_ID,
+      title: 'Fixture retrofit',
+      description: '<p>Retrofit the fixture assembly.</p>',
+      inlineImageSessionId: scenarioUuid(94),
+      costEstimate: 1200,
+      currency: 'THB',
+      timeline: '2 weeks',
+    })) as { success: boolean; solutionId?: string; error?: string }
+    assert.equal(submitted.success, true, submitted.error)
+    const solutionId = submitted.solutionId!
+
+    harness.state.authUserId = 'new-supervisor-1'
+    await harness.solutions.rejectSolution(solutionId, 'Not robust enough')
+
+    harness.state.authUserId = 'new-eng-1'
+    const first = (await harness.solutions.resubmitSolution(resubmissionInput(REQUEST_ID))) as { success: boolean; error?: string }
+    assert.equal(first.success, true, first.error)
+    // Current attempt is pending again (request back in DesignCostEstimationApproval).
+    assert.equal(harness.db.requests.rows.get(REQUEST_ID)?.status, 'DesignCostEstimationApproval')
+
+    // The only rejection belongs to the SUPERSEDED attempt; it is display
+    // history and must not authorize another resubmission.
+    await assert.rejects(
+      harness.solutions.resubmitSolution(resubmissionInput(REQUEST_ID)),
+      /Can only resubmit rejected solutions/,
+    )
+    // No third attempt was created and the chain was not rebuilt.
+    const attempts = [...harness.db.rows.approval_instances.values()]
+      .filter((row) => row.solutionId === solutionId)
+    assert.equal(attempts.length, 2)
   })
 })

@@ -638,7 +638,7 @@ describe('approval instance persistence', () => {
     assert.equal((calls.approval_instances[0] as Record<string, unknown>).state, 'AUTO_APPROVED')
   })
 
-  it('writes final-phase self-audit rows with isFinalApproval and grouped final rows only on the last step', async () => {
+  it('writes every final-phase row with isFinalApproval identity (final-phase marker, not last-step)', async () => {
     const finalDb = createFakeApprovalEngineDb({
       origin: { userId: 'fm', unitId: 'factory-1', position: 'FACTORY_MANAGER' },
       route: {
@@ -664,7 +664,11 @@ describe('approval instance persistence', () => {
     const groupedTx = createRecordingTx()
     await persistApprovalInstance(groupedTx.tx, groupedPlan)
     assert.equal(groupedTx.calls.request_approvals.length, 2)
-    assert.equal((groupedTx.calls.request_approvals[0] as Record<string, unknown>).isFinalApproval, false)
+    // Parent ruling: every NEW FINAL-phase row persists isFinalApproval:true —
+    // final-phase identity, not a last-step marker. Consumers filter
+    // isFinalApproval:true, so a first-step false would hide the step from
+    // notification, eligibility, and completion counting.
+    assert.equal((groupedTx.calls.request_approvals[0] as Record<string, unknown>).isFinalApproval, true)
     assert.equal((groupedTx.calls.request_approvals[1] as Record<string, unknown>).isFinalApproval, true)
     assert.equal((groupedTx.calls.request_approvals[1] as Record<string, unknown>).order, 3)
   })

@@ -457,40 +457,6 @@ export async function createNotification(data: {
 }
 
 /**
- * Deliver one already-resolved recipient group through createNotification.
- * Identity dedup is only within this group; each user still gets the existing
- * in-app plus best-effort email channel. Origin-unit and SNAPSHOT audiences
- * resolve first via `notification-recipients`, then call this helper.
- */
-export async function notifyResolvedRecipientGroup(
-	userIds: readonly string[],
-	data: {
-		type:
-			| "approval_needed"
-			| "approval_granted"
-			| "approval_rejected"
-			| "status_changed"
-			| "request_assigned"
-			| "solution_ready"
-			| "final_approval_needed";
-		title: string;
-		message: string;
-		requestId?: string;
-	},
-) {
-	const seen = new Set<string>();
-	const unique: string[] = [];
-	for (const userId of userIds) {
-		if (seen.has(userId)) continue;
-		seen.add(userId);
-		unique.push(userId);
-	}
-	await Promise.all(
-		unique.map((userId) => createNotification({ userId, ...data })),
-	);
-}
-
-/**
  * Notify all users in a department (with optional exclusions)
  */
 export async function notifyUsersInDepartment(

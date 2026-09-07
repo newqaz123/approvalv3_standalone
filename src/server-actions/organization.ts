@@ -135,20 +135,6 @@ function validateProposedUnits(units: OrganizationUnitNode[]): Map<string, Organ
   return byId
 }
 
-function emptyMappingCoverage(): OrganizationImportReport {
-  return {
-    mappedDepartmentCount: 0,
-    mappedUserCount: 0,
-    mappedExternalApproverCount: 0,
-    unmappedDepartmentIds: [],
-    unmappedUserIds: [],
-    blockingReasons: [],
-    wouldCreateUnits: 0,
-    wouldCreateAssignments: 0,
-    wouldCreateReportingGroups: 0,
-  }
-}
-
 function assertAtMostOneActivePrimary(
   assignments: Array<{ isActive: boolean; isPrimary: boolean }>,
   userId: string,
@@ -159,11 +145,22 @@ function assertAtMostOneActivePrimary(
   }
 }
 
+/**
+ * Mapping coverage shown on the organization admin page is NOT rollout
+ * evidence: the reviewed dry-run report is produced by the CLI importer and
+ * is not recomputed by this page. The loader therefore reports coverage as
+ * explicitly unavailable instead of returning placeholder zeros that could
+ * be mistaken for verification.
+ */
+export const MAPPING_COVERAGE_UNAVAILABLE_NOTE =
+  'Mapping coverage is unavailable on this page and not verified here. Run the reviewed import dry-run report (CLI) to produce rollout evidence.'
+
 export async function getOrganizationAdminData(): Promise<{
   units: OrganizationUnitNode[]
   assignments: OrganizationPositionAssignment[]
   reportingGroups: ReportingGroupNode[]
-  mappingCoverage: OrganizationImportReport
+  mappingCoverage: OrganizationImportReport | null
+  mappingCoverageNote: string
   pendingInstanceCounts: Record<string, number>
 }> {
   await requireOrganizationAdmin()
@@ -207,7 +204,8 @@ export async function getOrganizationAdminData(): Promise<{
       name: row.name,
       isActive: row.isActive,
     })),
-    mappingCoverage: emptyMappingCoverage(),
+    mappingCoverage: null,
+    mappingCoverageNote: MAPPING_COVERAGE_UNAVAILABLE_NOTE,
     pendingInstanceCounts,
   }
 }

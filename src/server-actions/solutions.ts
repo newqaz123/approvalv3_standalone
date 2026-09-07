@@ -39,7 +39,12 @@ import {
   resolveStatusBroadcastRecipients,
 } from '@/lib/notification-recipients'
 import { getApprovalRolloutMode } from '@/lib/approval-rollout'
-import { createApprovalEngineDb } from '@/lib/approval-engine/instances'
+import {
+  APPROVAL_ENGINE_TRANSACTION_ISOLATION,
+  createApprovalEngineDb,
+  translateTransactionConflict,
+} from '@/lib/approval-engine/instances'
+import { canUserViewRequest } from '@/lib/request-access'
 import {
   CURRENT_INSTANCE_ROW_FILTER,
   assertNewCreationEnabled,
@@ -102,16 +107,37 @@ function isStaleData(currentUpdatedAt: Date, expectedUpdatedAt?: string | Date):
  * email notifications only after Prisma confirms the commit. Notification
  * delivery is best effort: failures are logged by the shared orchestration
  * primitive and never make an already-committed workflow look rolled back.
+ *
+ * NEW-mode creation callers pass the engine transaction isolation
+ * (APPROVAL_ENGINE_TRANSACTION_ISOLATION / Serializable). The enclosing
+ * boundary also translates serialization failures — including commit-time
+ * failures outside persistApprovalInstance — into ApprovalEngineConflictError
+ * without any retry loop; legacy/shadow transactions keep the default
+ * isolation and error behavior unchanged.
  */
 async function runSolutionTransactionWithNotifications<T>(
   work: (
     tx: Prisma.TransactionClient,
     notifications: PostCommitNotificationCollector,
   ) => Promise<T>,
+  options?: { isolationLevel?: typeof APPROVAL_ENGINE_TRANSACTION_ISOLATION },
 ): Promise<T> {
+  const runTransaction = async <R>(transactionWork: (tx: Prisma.TransactionClient) => Promise<R>): Promise<R> => {
+    if (!options?.isolationLevel) {
+      return prisma.$transaction((tx) => transactionWork(tx))
+    }
+    try {
+      return await prisma.$transaction((tx) => transactionWork(tx), {
+        isolationLevel: options.isolationLevel,
+      })
+    } catch (error) {
+      // Enclosing-boundary translation: commit-time serialization failures
+      // surface here, outside persistApprovalInstance. No retry loop.
+      translateTransactionConflict(error)
+    }
+  }
   return runTransactionWithPostCommitNotifications({
-    runTransaction: (transactionWork) =>
-      prisma.$transaction((tx) => transactionWork(tx)),
+    runTransaction,
     work,
     dispatchers: {
       notifyUser: async (notification) => {
@@ -360,8 +386,18 @@ export async function submitSolution(input: SubmitSolutionActionInput) {
     requestId: string
   }> = []
 
-  // Transaction: Create solution, approval chain, and update request status
-  const result = await prisma.$transaction(async (tx) => {
+  // Rollout gate: creation only. Legacy (the default) and shadow keep the
+  // existing builders exactly; new mode requires a completed import digest and origin coverage.
+  // Resolved before the transaction so NEW creation can request the engine's
+  // SERIALIZABLE isolation at the enclosing boundary.
+  const rolloutMode = getApprovalRolloutMode(process.env)
+
+  // Transaction: Create solution, approval chain, and update request status.
+  // NEW creation transactions run SERIALIZABLE and translate serialization
+  // failures (including commit-time ones) into ApprovalEngineConflictError —
+  // no retry loop; legacy/shadow keep default isolation and error behavior.
+  const result = await prisma.$transaction(
+    async (tx) => {
     // Find when status first changed to SentToEngineer (from activity log)
     const statusChangeActivity = await tx.request_activities.findFirst({
       where: {
@@ -438,10 +474,6 @@ export async function submitSolution(input: SubmitSolutionActionInput) {
     )
     const submitterLevel = normalizeSubmitterLevel(user.level)
     const isTopLevelSubmitter = submitterLevel >= maxLevel
-
-    // Rollout gate: creation only. Legacy (the default) and shadow keep the
-    // existing builders exactly; new mode requires a completed import digest and origin coverage.
-    const rolloutMode = getApprovalRolloutMode(process.env)
 
     // Create approval chain based on selection
     if (rolloutMode === 'new') {
@@ -671,8 +703,10 @@ export async function submitSolution(input: SubmitSolutionActionInput) {
       },
     })
 
-    return solution
-  })
+      return solution
+    },
+    rolloutMode === 'new' ? { isolationLevel: APPROVAL_ENGINE_TRANSACTION_ISOLATION } : undefined,
+  ).catch((error: unknown) => translateTransactionConflict(error))
 
   if (pendingNotifications.length > 0) {
     const { createNotification } = await import('./notifications')
@@ -801,7 +835,9 @@ async function createHierarchyApprovalChain(
 }
 
 /**
- * Get solution by ID with related data
+ * Get solution by ID with related data. Authenticated callers must also pass
+ * the shared request-visibility policy for the owning request before any
+ * solution payload, request context, or attachment list is returned.
  */
 export async function getSolutionBySolutionId(solutionId: string) {
   const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
@@ -836,25 +872,34 @@ export async function getSolutionBySolutionId(solutionId: string) {
     },
   })
 
-  // Convert Decimal to number for client component serialization
-  if (solution) {
-    return {
-      ...solution,
-      costEstimate: Number(solution.costEstimate),
-    }
+  if (!solution) {
+    return null
+  }
+  if (!(await canUserViewRequest(userId, solution.request.id))) {
+    return null
   }
 
-  return solution
+  // Convert Decimal to number for client component serialization
+  return {
+    ...solution,
+    costEstimate: Number(solution.costEstimate),
+  }
 }
 
 /**
  * Get solution by request ID
- * Returns the solution if one exists for the request
+ * Returns the solution if one exists for the request. Visibility is the
+ * shared request policy: a caller who cannot view the request learns
+ * nothing about its solutions.
  */
 export async function getSolutionByRequestId(requestId: string) {
   const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
   if (!userId) {
     throw new Error('Unauthorized')
+  }
+
+  if (!(await canUserViewRequest(userId, requestId))) {
+    return null
   }
 
   const solution = await prisma.solutions.findFirst({
@@ -892,8 +937,26 @@ export async function getSolutionByRequestId(requestId: string) {
  * Get solution approvals with eligible approvers
  * For custom chains, returns the specific required approver
  * For hierarchy chains, returns all eligible users at each level
+ * Authentication plus the owning request's shared visibility policy gate
+ * every return path; approval metadata never leaks to invisible callers.
  */
 export async function getSolutionApprovals(solutionId: string) {
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
+  if (!userId) {
+    throw new Error('Unauthorized')
+  }
+
+  const owningRequest = await prisma.solutions.findUnique({
+    where: { id: solutionId },
+    select: { requestId: true },
+  })
+  if (!owningRequest) {
+    return []
+  }
+  if (!(await canUserViewRequest(userId, owningRequest.requestId))) {
+    return []
+  }
+
   const solution = await prisma.solutions.findUnique({
     where: { id: solutionId },
     include: {
@@ -1028,7 +1091,7 @@ export async function canUserApproveSolution(solutionId: string): Promise<{
   })
 
   if (!approval) {
-    return { canApprove: false, solution: serializedSolution }
+    return { canApprove: false }
   }
 
   const eligibility = await engineCanUserApproveSolution(
@@ -1036,9 +1099,15 @@ export async function canUserApproveSolution(solutionId: string): Promise<{
     { approvalId: approval.id, actorId: userId },
   )
 
+  if (!eligibility.canApprove) {
+    // Eligibility-false responses carry no solution payload: action
+    // ineligibility must not become a solution-content read.
+    return { canApprove: false }
+  }
+
   return {
-    canApprove: eligibility.canApprove,
-    approval: eligibility.canApprove ? approval : undefined,
+    canApprove: true,
+    approval,
     solution: serializedSolution,
   }
 }
@@ -1530,6 +1599,7 @@ export async function initiateFinalApproval(
   const requestDepartmentId = request.departmentId
   const requestOrganizationUnitId = request.organizationUnitId
   const isTypedUnitRequest = requestOrganizationUnitId !== null
+  const rolloutMode = getApprovalRolloutMode(process.env)
   let hasDirectOriginUnitMembership = false
   if (isTypedUnitRequest) {
     const directMembership = await prisma.organization_position_assignments.findFirst({
@@ -1541,9 +1611,11 @@ export async function initiateFinalApproval(
       throw new Error('Only members of the request\'s originating unit can initiate final approval')
     }
   }
-  if (requestDepartmentId === null) {
-    // Legacy fail-closed boundary: legacy final approval still requires the
-    // request's department; typed-unit requests route through NEW creation.
+  if (requestDepartmentId === null && !(isTypedUnitRequest && rolloutMode === 'new')) {
+    // Legacy fail-closed boundary: a request without a legacy department has
+    // no legacy final-approval audience. Only typed NEW requests in NEW mode
+    // pass — they route through the NEW mode/digest/coverage gate below with
+    // direct originating-unit membership.
     throw new Error('Organization-owned requests are not supported by legacy final approval yet')
   }
   if (!isTypedUnitRequest && user.departmentId !== requestDepartmentId) {
@@ -1588,20 +1660,25 @@ export async function initiateFinalApproval(
     )
   }
 
-  // Get max level in department for top-level check
-  const maxLevel = validateApprovalLevel(
-    await getMaxValidLevelInDepartment(prisma, requestDepartmentId),
-  )
+  // Get max level in department for top-level check. Legacy-only: typed NEW
+  // requests resolve their ceiling from the published route, so a missing
+  // legacy department must never reach the numeric-level lookup.
+  const maxLevel = requestDepartmentId !== null
+    ? validateApprovalLevel(
+        await getMaxValidLevelInDepartment(prisma, requestDepartmentId),
+      )
+    : null
   const initiatorLevel = normalizeSubmitterLevel(user.level)
-  const isTopLevelInitiator = initiatorLevel >= maxLevel
+  const isTopLevelInitiator = maxLevel !== null && initiatorLevel >= maxLevel
 
   // Keep workflow writes atomic; approver notification plans are dispatched
-  // only after this transaction commits.
-  await runSolutionTransactionWithNotifications(async (tx, notifications) => {
+  // only after this transaction commits. NEW final creation runs under the
+  // engine's SERIALIZABLE isolation; legacy/shadow keep the default.
+  await runSolutionTransactionWithNotifications(
+    async (tx, notifications) => {
     // Rollout gate: creation only. Legacy (the default) and shadow keep the
     // existing delete-and-rebuild behavior exactly; new mode requires a completed
     // import digest and origin coverage.
-    const rolloutMode = getApprovalRolloutMode(process.env)
 
     // Delete old final approval records — legacy/shadow only; NEW mode keeps
     // prior attempts as superseded history instead of deleting their rows.
@@ -1738,7 +1815,13 @@ export async function initiateFinalApproval(
         },
       })
     } else {
-      // Use department hierarchy
+      // Use department hierarchy. The gate above fail-closes the only paths
+      // that could reach here without a legacy department (untyped null rows
+      // and typed rows outside NEW mode); this re-check keeps that guarantee
+      // explicit for the narrowed call below.
+      if (requestDepartmentId === null) {
+        throw new Error('Organization-owned requests are not supported by legacy final approval yet')
+      }
       await createHierarchyFinalApprovalChain(tx, requestId, requestDepartmentId, userId)
       // Update request status to FinalApproval via the shared expected-status
       // guard (see updateRequestStatusExpecting).
@@ -1788,7 +1871,9 @@ export async function initiateFinalApproval(
         notifications,
       )
     }
-  })
+    },
+    rolloutMode === 'new' ? { isolationLevel: APPROVAL_ENGINE_TRANSACTION_ISOLATION } : undefined,
+  )
 
   revalidateRequestViews()
 
@@ -2353,22 +2438,27 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
   // scoped enum.
   const validated = resubmitSolutionSchema.parse(input)
 
-  // Validate request exists and has a rejected solution
+  // Validate request exists and has a rejected solution. Rejection history
+  // counts only while it belongs to the current attempt: superseded NEW rows
+  // are display history, never resubmission authorization (I3).
   const request = await prisma.requests.findUnique({
     where: { id: validated.requestId },
     include: {
       solutions: {
         include: {
-          approvals: true,
+          approvals: {
+            where: { status: 'rejected', OR: [...CURRENT_INSTANCE_ROW_FILTER] },
+          },
           fileAttachments: true,
         },
         orderBy: { createdAt: 'desc' },
         take: 1,
       },
       approvals: {
-        where: { 
+        where: {
           status: 'rejected',
-          isFinalApproval: true 
+          isFinalApproval: true,
+          OR: [...CURRENT_INSTANCE_ROW_FILTER],
         },
         orderBy: { createdAt: 'desc' },
         take: 1,
@@ -2381,12 +2471,19 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
     throw new Error('Request not found')
   }
 
-  // Organization-owned requests have no legacy department; legacy solution
-  // resubmission is an unsupported boundary until NEW adapters are integrated.
+  // Organization-owned requests have no legacy department. In NEW mode their
+  // typed origin passes the mode/digest/coverage gate below, so the legacy
+  // fail-closed boundary applies to legacy/shadow rows only.
   if (request.departmentId === null) {
-    throw new Error('Organization-owned requests are not supported by legacy solution resubmission yet')
+    const rolloutModeForGate = getApprovalRolloutMode(process.env)
+    const isTypedRequest = request.organizationUnitId !== null
+    if (!(rolloutModeForGate === 'new' && isTypedRequest)) {
+      throw new Error('Organization-owned requests are not supported by legacy solution resubmission yet')
+    }
+    // NEW typed-origin request: the request-department broadcast audience is
+    // unavailable; auto-approval below broadcasts to the origin unit instead.
   }
-  const requestDepartmentId: string = request.departmentId
+  const requestDepartmentId: string | null = request.departmentId
 
   const solution = request.solutions[0]
   if (!solution) {
@@ -2447,7 +2544,8 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
   // existing delete-and-rebuild behavior exactly; new mode requires a completed
   // import digest and origin coverage.
   const rolloutMode = getApprovalRolloutMode(process.env)
-  const result = await runSolutionTransactionWithNotifications(async (tx, notifications) => {
+  const result = await runSolutionTransactionWithNotifications(
+    async (tx, notifications) => {
     // Update solution details
     const updatedSolution = await tx.solutions.update({
       where: { id: solution.id },
@@ -2544,10 +2642,18 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
         requestId: validated.requestId,
         solutionId: solution.id,
       })
+      // Authorization (the preserved engineering role rule) is distinct from
+      // routing origin: any authorized engineer may revise, but the routing
+      // origin stays the STORED original solution submitter branch. The
+      // revising engineer is recorded as the actor on activity/audit rows
+      // below; authorship (solutions.submittedById) is never transferred.
+      const storedSubmitterId: string = solution.submittedById
       const phaseDb = createPrismaPhaseAdapterDb(tx)
       if (validated.useCustomHierarchy && validated.customApprovers.length > 0) {
         // Custom ordered-person chain: preserved validators, never
-        // auto-approved.
+        // auto-approved. The submitter-exclusion rule keeps applying to the
+        // acting reviser; the attempt's routing origin is the stored
+        // submitter (the phase-origin adapter rejects an actor mismatch).
         const orderedApprovers = sanitizeCustomChainOrder(
           validated.customApprovers,
           userId,
@@ -2558,7 +2664,7 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
           requestId: validated.requestId,
           solutionId: solution.id,
           phase: 'SOLUTION',
-          initiatorId: userId,
+          initiatorId: storedSubmitterId,
           orderedApproverIds: orderedApprovers,
         })
         isAutoApproved = false
@@ -2572,7 +2678,8 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
         const attempt = await createSolutionApprovalAttempt(phaseDb, {
           requestId: validated.requestId,
           solutionId: solution.id,
-          submittedById: userId,
+          // Routing origin: the stored original submitter, not the reviser.
+          submittedById: storedSubmitterId,
         })
         isAutoApproved = attempt.autoApproved || attempt.completedWithoutSteps
         if (isAutoApproved && attempt.statusChange) {
@@ -2592,17 +2699,44 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
                 : `Solution "${validated.title}" resubmitted and auto-approved (top-level submitter). Request sent back to requester for final review.`,
             },
           })
-          // Queue requester-department notification for post-commit dispatch.
-          notifications.department(requestDepartmentId, {
-            type: 'solution_ready',
-            title: 'Solution Ready for Review',
-            message: `📤 Ready for Review: "${request.title}" solution has been updated and is ready for your department's final review.`,
-            requestId: validated.requestId,
-          })
+          // Queue the requester-side notification for post-commit dispatch:
+          // legacy department audience when the request has one, otherwise
+          // (NEW typed-origin request) the origin-unit status broadcast.
+          if (requestDepartmentId) {
+            notifications.department(requestDepartmentId, {
+              type: 'solution_ready',
+              title: 'Solution Ready for Review',
+              message: `📤 Ready for Review: "${request.title}" solution has been updated and is ready for your department's final review.`,
+              requestId: validated.requestId,
+            })
+          } else {
+            await queueOriginUnitStatusBroadcast(tx, notifications, {
+              requestId: validated.requestId,
+              notification: {
+                type: 'solution_ready',
+                title: 'Solution Ready for Review',
+                message: `📤 Ready for Review: "${request.title}" solution has been updated and is ready for your department's final review.`,
+                requestId: validated.requestId,
+              },
+            })
+          }
         }
-        // Pending NEW attempts: approver notifications resolve from candidate
-        // groups in Tasks 9/10 and are intentionally not invented here.
+        // Pending NEW attempts: first-step approver notifications resolve from
+        // the persisted candidate group in the post-commit block below.
       }
+      // Audit: the REVISER is the acting engineer for the resubmission
+      // activity; the routing origin above remains the stored submitter and
+      // authorship is never transferred (I5).
+      await tx.request_activities.create({
+        data: {
+          requestId: validated.requestId,
+          userId,
+          action: 'solution_resubmitted',
+          comments: isAutoApproved
+            ? `Solution resubmitted and auto-approved (top-level submitter): "${validated.title}"`
+            : `Solution resubmitted: "${validated.title}"`,
+        },
+      })
     } else {
     if (rolloutMode === 'shadow') {
       await compareNewResolutionWithoutWrites(createApprovalEngineDb(tx), {
@@ -2755,12 +2889,16 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
       })
 
       // Queue requester-department notification for post-commit dispatch.
-      notifications.department(requestDepartmentId, {
-        type: 'solution_ready',
-        title: 'Solution Ready for Review',
-        message: `📤 Ready for Review: "${request.title}" solution has been updated and is ready for your department's final review.`,
-        requestId: validated.requestId,
-      })
+      // Legacy/shadow rows always carry a request department (the gate above
+      // rejects null-department legacy resubmission).
+      if (requestDepartmentId) {
+        notifications.department(requestDepartmentId, {
+          type: 'solution_ready',
+          title: 'Solution Ready for Review',
+          message: `📤 Ready for Review: "${request.title}" solution has been updated and is ready for your department's final review.`,
+          requestId: validated.requestId,
+        })
+      }
     }
 
     const firstPendingApproval = approvalData.find((a) => a.status === 'pending')
@@ -2777,7 +2915,9 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
       isAutoApproved,
       submittedCustomApprovers,
     }
-  })
+    },
+    rolloutMode === 'new' ? { isolationLevel: APPROVAL_ENGINE_TRANSACTION_ISOLATION } : undefined,
+  )
 
   // AFTER the transaction commits: physically delete each removed attachment's
   // file. This runs outside the DB transaction, so a failed or slow unlink can

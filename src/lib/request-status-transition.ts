@@ -59,7 +59,11 @@ export function buildRejectedRequestCancellationWhere(
   }
 }
 
-/** Rejected-request state required before resubmission removes approvals. */
+/** Rejected-request state required before resubmission removes approvals.
+ *  The rejection predicate uses the current-instance identity filter so a
+ *  superseded NEW attempt's rejection (resubmission history) can never
+ *  re-authorize another resubmission while the current attempt is pending.
+ */
 export function buildRejectedRequestResubmissionWhere(
   expectedUpdatedAt: Date,
 ): Prisma.requestsWhereInput {
@@ -68,7 +72,11 @@ export function buildRejectedRequestResubmissionWhere(
       { updatedAt: expectedUpdatedAt },
       {
         approvals: {
-          some: { status: 'rejected', isFinalApproval: false },
+          some: {
+            status: 'rejected',
+            isFinalApproval: false,
+            OR: [...CURRENT_INSTANCE_ROW_FILTER],
+          },
         },
       },
     ],

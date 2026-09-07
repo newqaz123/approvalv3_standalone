@@ -36,11 +36,25 @@ function parseArguments(argv: readonly string[]): { help: boolean; mappingReport
   return { help: false, mappingReportPath, outPath }
 }
 
+/**
+ * Validate the reviewed mapping report shape and extract its blockers.
+ * Malformed evidence (null, non-object, missing/non-array blockingReasons,
+ * non-string entries) is a verification error — it must never be read as
+ * "zero blockers", because that would report rollout readiness from an
+ * unreadable report.
+ */
 function mappingBlockersFromReport(raw: unknown): string[] {
-  if (!raw || typeof raw !== 'object') return []
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('Malformed mapping report: expected a reviewed organization import report object')
+  }
   const blockers = (raw as { blockingReasons?: unknown }).blockingReasons
-  if (!Array.isArray(blockers)) return []
-  return blockers.filter((reason): reason is string => typeof reason === 'string')
+  if (!Array.isArray(blockers)) {
+    throw new Error('Malformed mapping report: missing blockingReasons array — refusing to treat unreadable evidence as zero blockers')
+  }
+  if (!blockers.every((reason) => typeof reason === 'string')) {
+    throw new Error('Malformed mapping report: every blockingReasons entry must be a string')
+  }
+  return blockers as string[]
 }
 
 export async function runVerifyOrganizationRollout(options: VerifyOrganizationRolloutOptions): Promise<number> {

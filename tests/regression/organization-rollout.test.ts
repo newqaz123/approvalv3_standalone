@@ -99,3 +99,68 @@ describe('organization rollout verification CLI', () => {
     },
   )
 })
+
+describe('organization rollout verification CLI: mapping report shape (M1)', () => {
+  function stubDb() {
+    return fakeRolloutDb({
+      mappingBlockers: [],
+      legacyRowsWithoutDiscriminator: 0,
+      publishedRouteConflicts: 0,
+      pendingSnapshotGroupsMissing: 0,
+    })
+  }
+
+  it('treats malformed mapping reports as verification errors, never as zero blockers', async () => {
+    const malformedReports: unknown[] = [
+      null,
+      {},
+      { blockingReasons: 'USER_NOT_MAPPED:u7' },
+      { blockingReasons: ['USER_NOT_MAPPED:u7', 42] },
+      [ 'USER_NOT_MAPPED:u7' ],
+    ]
+    for (const report of malformedReports) {
+      const prints: string[] = []
+      let verified = false
+      const code = await runVerifyOrganizationRollout({
+        argv: ['--mapping-report', 'mapping-report.json'],
+        readMappingReport: async () => report,
+        createDb: async () => {
+          verified = true
+          return stubDb()
+        },
+        print: (line) => prints.push(line),
+      }).catch((error: unknown) => {
+        assert.ok(error instanceof Error)
+        assert.match(error.message, /[Mm]alformed mapping report/)
+        return -1
+      })
+      assert.equal(code, -1, `expected malformed-report rejection for ${JSON.stringify(report)}`)
+      // The database was never consulted and no readiness report was printed:
+      // malformed evidence never becomes a "zero blockers" verdict.
+      assert.equal(verified, false)
+      assert.deepEqual(prints, [])
+    }
+  })
+
+  it('still accepts a well-formed report and joins its blockers with the database checks', async () => {
+    const prints: string[] = []
+    const code = await runVerifyOrganizationRollout({
+      argv: ['--mapping-report', 'mapping-report.json', '--out', 'verify-out.json'],
+      readMappingReport: async () => ({
+        mappedDepartmentCount: 1,
+        mappedUserCount: 2,
+        mappedExternalApproverCount: 0,
+        unmappedDepartmentIds: [],
+        unmappedUserIds: ['u7'],
+        blockingReasons: ['USER_NOT_MAPPED:u7'],
+        wouldCreateUnits: 0,
+        wouldCreateAssignments: 0,
+        wouldCreateReportingGroups: 0,
+      }),
+      createDb: async () => stubDb(),
+      writeReport: async () => {},
+      print: (line) => prints.push(line),
+    })
+    assert.equal(code, 2, 'report blockers must surface as a nonzero exit even when database counters are zero')
+  })
+})
