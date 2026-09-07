@@ -31,9 +31,29 @@ import {
   shouldShowActionButton,
 } from '@/lib/permission-checks'
 import {
+  advanceApprovalAtomically,
+  canUserApproveFinal,
+  canUserApproveRequest,
+  canUserApproveSolution,
+} from '@/lib/approval-engine/transactions'
+import {
+  createFinalApprovalAttempt,
+  createRequestApprovalAttempt,
+  createSolutionApprovalAttempt,
+} from '@/lib/approval-engine/phase-adapters'
+import {
+  evaluateRequestAction,
+  existingApprovalDecision,
+} from '@/lib/action-permissions'
+import { resolveApprovalNeededRecipients } from '@/lib/notification-recipients'
+import {
   LEGACY_CHAIN_EXPECTATIONS,
   LEGACY_NOTIFICATION_EXPECTATIONS,
   ORGANIZATION_APPROVAL_FIXTURE,
+  canViewWithFake,
+  createPhaseAdapterFixture,
+  fakeNotificationDb,
+  fakeTransactionalApprovalDb,
   legacyRequestRows,
   phaseStatusExpectation,
 } from '../fixtures/organization-approval-fixtures'
@@ -1288,5 +1308,400 @@ describe('legacy notification expectation matrix', () => {
     assert.ok(byCase('request cancelled'))
     assert.equal(byCase('request cancelled')?.eventType, null)
     assert.deepEqual(byCase('request cancelled')?.recipientIds, [])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Task 16 cross-layer matrix: the real request/solution/final adapters persist
+// snapshot steps, and the real recipient resolver, transaction core, visibility
+// predicate, and action policy consume what was persisted. Expectations come
+// from the shared fixture's phaseStatusExpectation, never from re-declared
+// constants. Fakes are the existing Task 8/9/11/12/13 harness fakes; fake
+// transaction dbs cannot prove SQL locking (that evidence is the Task 9/15 CI
+// PostgreSQL suite), only the wiring decisions recorded here.
+// ---------------------------------------------------------------------------
+
+/** One persisted SNAPSHOT_GROUP step, modeled for the NEW transaction core. */
+function snapshotStepTx(input: {
+  id: string
+  requestId: string
+  members: readonly string[]
+  order: number
+  requestStatus: string
+}) {
+  return fakeTransactionalApprovalDb({
+    approval: {
+      id: input.id,
+      requestId: input.requestId,
+      routingMode: 'SNAPSHOT_GROUP',
+      candidateUserIds: [...input.members],
+      status: 'pending',
+      order: input.order,
+    },
+    requestStatus: input.requestStatus,
+  })
+}
+
+/** The emitted approval_needed audience for a persisted step's candidate group. */
+function approvalNeededAudience(input: {
+  approvalId: string
+  candidateGroupId: string
+  phase: 'REQUEST' | 'SOLUTION' | 'FINAL'
+  members: readonly string[]
+  activeUsers: readonly string[]
+}): Promise<readonly string[]> {
+  return resolveApprovalNeededRecipients(
+    fakeNotificationDb({
+      row: { routingMode: 'SNAPSHOT_GROUP', candidateGroupId: input.candidateGroupId, requiredLevel: null },
+      groups: { [input.candidateGroupId]: [...input.members] },
+      activeUsers: [...input.activeUsers],
+    }),
+    { approvalId: input.approvalId, phase: input.phase },
+  )
+}
+
+/**
+ * Composed action capability for a NEW candidate-group actor. The canView
+ * verdict comes from the real visibility predicate (`canViewWithFake` over the
+ * Task 11 fake world, where `candidate-u1` is a persisted candidate on pd2-r1
+ * and `pd1-general` is an otherwise-identical PD1 peer); canApprove comes from
+ * the real current-step eligibility checkers.
+ */
+function currentStepCapability(input: {
+  action: 'APPROVE_REQUEST' | 'APPROVE_SOLUTION' | 'APPROVE_FINAL'
+  status: string
+  canView: boolean
+  canApprove: boolean
+}) {
+  return evaluateRequestAction(input.action, {
+    actor: {
+      id: 'candidate-u1',
+      role: 'general_dept',
+      isActive: true,
+      departmentId: 'department-other',
+      departmentType: 'GENERAL',
+    },
+    request: {
+      requesterId: 'other-pd1',
+      departmentId: 'department-pd2',
+      organizationUnitId: 'section-pd2',
+      status: input.status,
+    },
+    canView: input.canView,
+    approval: { canApprove: input.canApprove },
+    assignedEngineer: false,
+    existingActionDecisions: { [input.action]: existingApprovalDecision(input.canApprove) },
+  })
+}
+
+describe('organization approval redesign cross-layer matrix', () => {
+  it('covers all phase completion transitions without adding financial routing', () => {
+    assert.deepEqual(phaseStatusExpectation('REQUEST'), { from: 'ImprovementRequest', to: 'SentToEngineer' })
+    assert.deepEqual(phaseStatusExpectation('SOLUTION'), { from: 'DesignCostEstimationApproval', to: 'SendBackToRequester' })
+    assert.deepEqual(phaseStatusExpectation('FINAL'), { from: 'FinalApproval', to: 'Completed' })
+  })
+
+  it('REQUEST: adapter-persisted snapshot steps feed the approval_needed audience, current-step eligibility, and the completion payload', async () => {
+    const adapterDb = createPhaseAdapterFixture({
+      phase: 'REQUEST',
+      planOutcome: 'PENDING',
+      originUserId: F.requesterId,
+    })
+    const created = await createRequestApprovalAttempt(adapterDb, { requestId: 'r1', requesterId: F.requesterId })
+
+    // Persisted steps: one immutable candidate group per ordered route position.
+    const rows = adapterDb.approvalRows().sort((a, b) => a.order - b.order)
+    assert.deepEqual(
+      rows.map((row) => ({
+        requestId: row.requestId,
+        isFinalApproval: row.isFinalApproval,
+        order: row.order,
+        requiredPosition: row.requiredPosition,
+        requiredLevel: row.requiredLevel,
+        requiredApproverId: row.requiredApproverId,
+        status: row.status,
+        routingMode: row.routingMode,
+        integrityVersion: row.integrityVersion,
+        hasCandidateGroup: row.candidateGroupId !== null,
+      })),
+      [
+        { requestId: 'r1', isFinalApproval: false, order: 1, requiredPosition: 'SUPERVISOR', requiredLevel: null, requiredApproverId: null, status: 'pending', routingMode: 'SNAPSHOT_GROUP', integrityVersion: 1, hasCandidateGroup: true },
+        { requestId: 'r1', isFinalApproval: false, order: 2, requiredPosition: 'SECTION_MANAGER', requiredLevel: null, requiredApproverId: null, status: 'pending', routingMode: 'SNAPSHOT_GROUP', integrityVersion: 1, hasCandidateGroup: true },
+        { requestId: 'r1', isFinalApproval: false, order: 3, requiredPosition: 'DEPARTMENT_MANAGER', requiredLevel: null, requiredApproverId: null, status: 'pending', routingMode: 'SNAPSHOT_GROUP', integrityVersion: 1, hasCandidateGroup: true },
+      ],
+    )
+
+    // Creation emits no phase transition; the document waits at the REQUEST origin.
+    assert.equal(created.statusChange, undefined)
+    assert.equal(adapterDb.requestStatus(), phaseStatusExpectation('REQUEST').from)
+    assert.deepEqual(adapterDb.statusUpdates(), [])
+
+    // Emitted approval_needed payload: the persisted step's candidate group,
+    // active members only.
+    assert.deepEqual(
+      [...await approvalNeededAudience({
+        approvalId: rows[0]!.id,
+        candidateGroupId: rows[0]!.candidateGroupId!,
+        phase: 'REQUEST',
+        members: [F.supervisorId, F.inactiveCandidateId],
+        activeUsers: [F.supervisorId],
+      })],
+      [F.supervisorId],
+    )
+
+    // Current-step eligibility: only a persisted member may act on the step.
+    const stepOne = snapshotStepTx({
+      id: rows[0]!.id,
+      requestId: 'r1',
+      members: [F.supervisorId],
+      order: rows[0]!.order,
+      requestStatus: 'ImprovementRequest',
+    })
+    assert.equal((await canUserApproveRequest(stepOne, { approvalId: rows[0]!.id, actorId: F.supervisorId })).canApprove, true)
+    assert.equal((await canUserApproveRequest(stepOne, { approvalId: rows[0]!.id, actorId: F.engineeringId })).canApprove, false)
+
+    // The last current step completes the phase with exactly the fixture transition.
+    const lastStep = snapshotStepTx({
+      id: rows[2]!.id,
+      requestId: 'r1',
+      members: [F.departmentManagerId],
+      order: rows[2]!.order,
+      requestStatus: 'ImprovementRequest',
+    })
+    const completion = await advanceApprovalAtomically(lastStep, {
+      approvalId: rows[2]!.id,
+      actorId: F.departmentManagerId,
+      phase: 'REQUEST',
+    })
+    assert.deepEqual(completion.statusChange, {
+      from: phaseStatusExpectation('REQUEST').from,
+      to: phaseStatusExpectation('REQUEST').to,
+    })
+    assert.equal(lastStep.statusTransitionCount('r1'), 1, 'the guarded transition is written exactly once')
+    assert.deepEqual(
+      lastStep.activities.map((activity) => ({ approvalId: activity.approvalId, actorId: activity.actorId })),
+      [{ approvalId: rows[2]!.id, actorId: F.departmentManagerId }],
+    )
+
+    // Visibility feeds capability: the real predicate and the real action
+    // policy agree for the approved actor and refuse look-alike viewers.
+    const candidateView = await canViewWithFake({ userId: 'candidate-u1', requestId: 'pd2-r1' })
+    assert.equal(candidateView, true)
+    assert.deepEqual(
+      currentStepCapability({ action: 'APPROVE_REQUEST', status: 'ImprovementRequest', canView: candidateView, canApprove: true }),
+      { allowed: true, reason: 'ALLOWED' },
+    )
+    assert.deepEqual(
+      currentStepCapability({ action: 'APPROVE_REQUEST', status: 'ImprovementRequest', canView: candidateView, canApprove: false }),
+      { allowed: false, reason: 'NOT_PENDING_APPROVAL' },
+    )
+    const peerView = await canViewWithFake({ userId: 'pd1-general', requestId: 'pd2-r1' })
+    assert.equal(peerView, false)
+    assert.deepEqual(
+      currentStepCapability({ action: 'APPROVE_REQUEST', status: 'ImprovementRequest', canView: peerView, canApprove: true }),
+      { allowed: false, reason: 'NOT_VISIBLE' },
+    )
+  })
+
+  it('SOLUTION: adapter-persisted snapshot steps feed the approval_needed audience, current-step eligibility, and the completion payload', async () => {
+    const adapterDb = createPhaseAdapterFixture({
+      phase: 'SOLUTION',
+      planOutcome: 'PENDING',
+      originUserId: F.engineeringId,
+    })
+    const created = await createSolutionApprovalAttempt(adapterDb, {
+      requestId: 'r1',
+      solutionId: 's1',
+      submittedById: F.engineeringId,
+    })
+
+    // Persisted steps land on solution_approvals with candidate groups, never
+    // on the request's non-final approval rows.
+    const rows = adapterDb.approvalRows().sort((a, b) => a.order - b.order)
+    assert.deepEqual(
+      rows.map((row) => ({
+        solutionId: row.solutionId,
+        order: row.order,
+        requiredPosition: row.requiredPosition,
+        requiredLevel: row.requiredLevel,
+        requiredApproverId: row.requiredApproverId,
+        status: row.status,
+        routingMode: row.routingMode,
+        integrityVersion: row.integrityVersion,
+        hasCandidateGroup: row.candidateGroupId !== null,
+      })),
+      [
+        { solutionId: 's1', order: 1, requiredPosition: 'SUPERVISOR', requiredLevel: null, requiredApproverId: null, status: 'pending', routingMode: 'SNAPSHOT_GROUP', integrityVersion: 1, hasCandidateGroup: true },
+        { solutionId: 's1', order: 2, requiredPosition: 'SECTION_MANAGER', requiredLevel: null, requiredApproverId: null, status: 'pending', routingMode: 'SNAPSHOT_GROUP', integrityVersion: 1, hasCandidateGroup: true },
+        { solutionId: 's1', order: 3, requiredPosition: 'DEPARTMENT_MANAGER', requiredLevel: null, requiredApproverId: null, status: 'pending', routingMode: 'SNAPSHOT_GROUP', integrityVersion: 1, hasCandidateGroup: true },
+      ],
+    )
+
+    // Creation moves the document to the status the completion transition
+    // starts from: a single adapter-owned write.
+    assert.deepEqual(created.statusChange, {
+      from: 'SentToEngineer',
+      to: phaseStatusExpectation('SOLUTION').from,
+    })
+    assert.equal(adapterDb.requestStatus(), phaseStatusExpectation('SOLUTION').from)
+    assert.deepEqual(adapterDb.statusUpdates(), [
+      { from: 'SentToEngineer', to: phaseStatusExpectation('SOLUTION').from },
+    ])
+
+    // Emitted approval_needed payload for the first persisted engineering step.
+    assert.deepEqual(
+      [...await approvalNeededAudience({
+        approvalId: rows[0]!.id,
+        candidateGroupId: rows[0]!.candidateGroupId!,
+        phase: 'SOLUTION',
+        members: [F.engineeringId, F.inactiveCandidateId],
+        activeUsers: [F.engineeringId],
+      })],
+      [F.engineeringId],
+    )
+
+    // Current-step eligibility for the persisted solution step.
+    const stepOne = snapshotStepTx({
+      id: rows[0]!.id,
+      requestId: 'r1',
+      members: [F.engineeringId],
+      order: rows[0]!.order,
+      requestStatus: 'DesignCostEstimationApproval',
+    })
+    assert.equal((await canUserApproveSolution(stepOne, { approvalId: rows[0]!.id, actorId: F.engineeringId })).canApprove, true)
+    assert.equal((await canUserApproveSolution(stepOne, { approvalId: rows[0]!.id, actorId: F.requesterId })).canApprove, false)
+
+    // The last current step completes the phase with exactly the fixture transition.
+    const lastStep = snapshotStepTx({
+      id: rows[2]!.id,
+      requestId: 'r1',
+      members: [F.departmentManagerId],
+      order: rows[2]!.order,
+      requestStatus: 'DesignCostEstimationApproval',
+    })
+    const completion = await advanceApprovalAtomically(lastStep, {
+      approvalId: rows[2]!.id,
+      actorId: F.departmentManagerId,
+      phase: 'SOLUTION',
+    })
+    assert.deepEqual(completion.statusChange, {
+      from: phaseStatusExpectation('SOLUTION').from,
+      to: phaseStatusExpectation('SOLUTION').to,
+    })
+    assert.equal(lastStep.statusTransitionCount('r1'), 1, 'the guarded transition is written exactly once')
+
+    // Visibility feeds capability for the solution current step.
+    const candidateView = await canViewWithFake({ userId: 'candidate-u1', requestId: 'pd2-r1' })
+    assert.equal(candidateView, true)
+    assert.deepEqual(
+      currentStepCapability({ action: 'APPROVE_SOLUTION', status: 'DesignCostEstimationApproval', canView: candidateView, canApprove: true }),
+      { allowed: true, reason: 'ALLOWED' },
+    )
+    const peerView = await canViewWithFake({ userId: 'pd1-general', requestId: 'pd2-r1' })
+    assert.equal(peerView, false)
+    assert.deepEqual(
+      currentStepCapability({ action: 'APPROVE_SOLUTION', status: 'DesignCostEstimationApproval', canView: peerView, canApprove: true }),
+      { allowed: false, reason: 'NOT_VISIBLE' },
+    )
+  })
+
+  it('FINAL: adapter-persisted snapshot steps feed the final_approval_needed audience, current-step eligibility, and the completion payload', async () => {
+    const adapterDb = createPhaseAdapterFixture({
+      phase: 'FINAL',
+      planOutcome: 'PENDING',
+      originUserId: F.departmentManagerId,
+    })
+    const created = await createFinalApprovalAttempt(adapterDb, {
+      requestId: 'r1',
+      initiatorId: F.departmentManagerId,
+    })
+
+    // Persisted steps stay on request_approvals with isFinalApproval true.
+    const rows = adapterDb.approvalRows().sort((a, b) => a.order - b.order)
+    assert.deepEqual(
+      rows.map((row) => ({
+        requestId: row.requestId,
+        isFinalApproval: row.isFinalApproval,
+        order: row.order,
+        requiredPosition: row.requiredPosition,
+        requiredLevel: row.requiredLevel,
+        requiredApproverId: row.requiredApproverId,
+        status: row.status,
+        routingMode: row.routingMode,
+        integrityVersion: row.integrityVersion,
+        hasCandidateGroup: row.candidateGroupId !== null,
+      })),
+      [
+        { requestId: 'r1', isFinalApproval: true, order: 1, requiredPosition: 'SUPERVISOR', requiredLevel: null, requiredApproverId: null, status: 'pending', routingMode: 'SNAPSHOT_GROUP', integrityVersion: 1, hasCandidateGroup: true },
+        { requestId: 'r1', isFinalApproval: true, order: 2, requiredPosition: 'SECTION_MANAGER', requiredLevel: null, requiredApproverId: null, status: 'pending', routingMode: 'SNAPSHOT_GROUP', integrityVersion: 1, hasCandidateGroup: true },
+        { requestId: 'r1', isFinalApproval: true, order: 3, requiredPosition: 'DEPARTMENT_MANAGER', requiredLevel: null, requiredApproverId: null, status: 'pending', routingMode: 'SNAPSHOT_GROUP', integrityVersion: 1, hasCandidateGroup: true },
+      ],
+    )
+
+    // Creation moves the document to the status the completion starts from.
+    assert.deepEqual(created.statusChange, {
+      from: 'SendBackToRequester',
+      to: phaseStatusExpectation('FINAL').from,
+    })
+    assert.equal(adapterDb.requestStatus(), phaseStatusExpectation('FINAL').from)
+    assert.deepEqual(adapterDb.statusUpdates(), [
+      { from: 'SendBackToRequester', to: phaseStatusExpectation('FINAL').from },
+    ])
+
+    // Emitted final_approval_needed payload for the first persisted step.
+    assert.deepEqual(
+      [...await approvalNeededAudience({
+        approvalId: rows[0]!.id,
+        candidateGroupId: rows[0]!.candidateGroupId!,
+        phase: 'FINAL',
+        members: [F.supervisorId, F.inactiveCandidateId],
+        activeUsers: [F.supervisorId],
+      })],
+      [F.supervisorId],
+    )
+
+    // Current-step eligibility for the persisted final step.
+    const stepOne = snapshotStepTx({
+      id: rows[0]!.id,
+      requestId: 'r1',
+      members: [F.supervisorId],
+      order: rows[0]!.order,
+      requestStatus: 'FinalApproval',
+    })
+    assert.equal((await canUserApproveFinal(stepOne, { approvalId: rows[0]!.id, actorId: F.supervisorId })).canApprove, true)
+    assert.equal((await canUserApproveFinal(stepOne, { approvalId: rows[0]!.id, actorId: F.engineeringId })).canApprove, false)
+
+    // The last current step completes the phase with exactly the fixture transition.
+    const lastStep = snapshotStepTx({
+      id: rows[2]!.id,
+      requestId: 'r1',
+      members: [F.departmentManagerId],
+      order: rows[2]!.order,
+      requestStatus: 'FinalApproval',
+    })
+    const completion = await advanceApprovalAtomically(lastStep, {
+      approvalId: rows[2]!.id,
+      actorId: F.departmentManagerId,
+      phase: 'FINAL',
+    })
+    assert.deepEqual(completion.statusChange, {
+      from: phaseStatusExpectation('FINAL').from,
+      to: phaseStatusExpectation('FINAL').to,
+    })
+    assert.equal(lastStep.statusTransitionCount('r1'), 1, 'the guarded transition is written exactly once')
+
+    // Visibility feeds capability for the final current step.
+    const candidateView = await canViewWithFake({ userId: 'candidate-u1', requestId: 'pd2-r1' })
+    assert.equal(candidateView, true)
+    assert.deepEqual(
+      currentStepCapability({ action: 'APPROVE_FINAL', status: 'FinalApproval', canView: candidateView, canApprove: true }),
+      { allowed: true, reason: 'ALLOWED' },
+    )
+    const peerView = await canViewWithFake({ userId: 'pd1-general', requestId: 'pd2-r1' })
+    assert.equal(peerView, false)
+    assert.deepEqual(
+      currentStepCapability({ action: 'APPROVE_FINAL', status: 'FinalApproval', canView: peerView, canApprove: true }),
+      { allowed: false, reason: 'NOT_VISIBLE' },
+    )
   })
 })
