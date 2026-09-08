@@ -406,13 +406,27 @@ describe('evaluateRequestAction composes active/read/current-step checks', () =>
 })
 
 describe('server and UI wiring keep action policy separate from view', () => {
-  it('derives getRequestActionCapabilities from the authenticated session, not a client userId', () => {
-    const source = read('src/lib/action-permissions.ts')
-    assert.match(source, /export async function getRequestActionCapabilities\(requestId: string\)/)
-    assert.doesNotMatch(source, /getRequestActionCapabilities\(requestId:\s*string,\s*userId/)
-    assert.match(source, /auth\(\)/)
-    assert.match(source, /existingActionDecisions/)
-    assert.match(source, /evaluateRequestAction/)
+  it('keeps the authenticated capability action out of the client-imported policy module', () => {
+    const policySource = read('src/lib/action-permissions.ts')
+    assert.doesNotMatch(policySource, /['"]use server['"]/)
+    assert.doesNotMatch(policySource, /export async function getRequestActionCapabilities/)
+
+    const actionSource = read('src/server-actions/request-action-capabilities.ts')
+    assert.match(actionSource, /^['"]use server['"]/)
+    assert.match(actionSource, /export async function getRequestActionCapabilities\(requestId: string\)/)
+    assert.doesNotMatch(actionSource, /getRequestActionCapabilities\(requestId:\s*string,\s*userId/)
+    assert.match(actionSource, /auth\(\)/)
+    assert.match(actionSource, /existingActionDecisions/)
+    assert.match(actionSource, /evaluateRequestAction/)
+
+    const requestActionsSource = read('src/server-actions/requests.ts')
+    assert.doesNotMatch(requestActionsSource, /export \{ getRequestActionCapabilities \}/)
+
+    const modalSource = read('src/components/requests/request-modal-router.tsx')
+    assert.match(
+      modalSource,
+      /import \{ getRequestActionCapabilities \} from ['"]@\/server-actions\/request-action-capabilities['"]/,
+    )
   })
 
   it('wires mutating server actions through the policy after auth and before mutation', () => {

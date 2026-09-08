@@ -59,10 +59,8 @@ import {
   existingAssignEngineersDecision,
   existingCancelRequestDecision,
   existingResubmitRequestDecision,
-  getRequestActionCapabilities,
 } from '@/lib/action-permissions'
 
-export { getRequestActionCapabilities }
 import type { Prisma } from '@prisma/client'
 import * as XLSX from 'xlsx'
 

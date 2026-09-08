@@ -904,6 +904,8 @@ export function createHarness(seed: HarnessSeed = {}): Harness {
   dependencies['@/lib/permission-checks'] = load('lib/permission-checks.ts')
   dependencies['@/lib/engineering-sub-tasks'] = load('lib/engineering-sub-tasks.ts')
   dependencies['@/lib/action-permissions'] = load('lib/action-permissions.ts')
+  const requestActionCapabilities = load('server-actions/request-action-capabilities.ts')
+  dependencies['./request-action-capabilities'] = requestActionCapabilities
   dependencies['./notifications'] = load('server-actions/notifications.ts')
   const approvals = load('server-actions/approvals.ts')
   dependencies['./approvals'] = approvals
@@ -920,7 +922,10 @@ export function createHarness(seed: HarnessSeed = {}): Harness {
     approvals,
     dashboard,
     notifications: dependencies['./notifications'] as Harness['notifications'],
-    actionPermissions: dependencies['@/lib/action-permissions'] as Harness['actionPermissions'],
+    actionPermissions: {
+      ...(dependencies['@/lib/action-permissions'] ?? {}),
+      ...requestActionCapabilities,
+    } as Harness['actionPermissions'],
     requestAccess,
   }
 }

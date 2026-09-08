@@ -11,7 +11,8 @@ import { CompletedFinalModal } from "./completed-final-modal";
 import { RequestResubmitModal } from "./request-resubmit-modal";
 import { FinalApprovalResubmitModal } from "./final-approval-resubmit-modal";
 import { SubmitFinalApprovalModal } from "./submit-final-approval-modal";
-import { getRequest, getRequestActionCapabilities, resubmitRequest } from "@/server-actions/requests";
+import { getRequest, resubmitRequest } from "@/server-actions/requests";
+import { getRequestActionCapabilities } from "@/server-actions/request-action-capabilities";
 import { getEngineeringSubTaskOptions } from "@/server-actions/engineering-sub-tasks";
 import {
 	canUserApprove,
