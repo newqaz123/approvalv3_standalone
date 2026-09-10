@@ -2,7 +2,7 @@
 
 import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
-import { canUserViewRequest } from '@/lib/request-access'
+import { canUserViewRequest } from '@/lib/request-visibility/scope'
 import { CURRENT_INSTANCE_ROW_FILTER } from '@/lib/approval-engine/current-instance'
 import {
   canUserApproveFinal,

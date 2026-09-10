@@ -1,8 +1,7 @@
 import { auth } from "@/lib/auth-config";
 import { redirect } from "next/navigation";
 import prisma from "@/lib/prisma";
-import { buildRequestVisibilityWhere } from "@/lib/request-visibility/predicate";
-import { createRequestVisibilityDb } from "@/lib/request-access";
+import { buildRequestVisibilityWhere, createRequestVisibilityDb } from "@/lib/request-visibility/scope";
 import {
 	getRequestsNeedingEngineeringAction,
 	getEngineeringUsers,

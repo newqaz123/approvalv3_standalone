@@ -10,7 +10,7 @@ import {
   type ExportableAttachment,
   type ExportPackageRequestItem,
 } from '@/lib/pdf-package'
-import { canUserViewRequest } from '@/lib/request-access'
+import { canUserViewRequest } from '@/lib/request-visibility/scope'
 import { requireAdmin } from '@/lib/auth'
 
 /**

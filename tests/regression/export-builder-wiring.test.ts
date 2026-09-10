@@ -216,7 +216,7 @@ function loadReportsModule(options: {
 			mergePdfBuffers: async () => Buffer.from(""),
 			validateExportPackageRequestItems: () => [],
 		},
-		"@/lib/request-access": {
+		"@/lib/request-visibility/scope": {
 			canUserViewRequest: async () => false,
 		},
 	};

@@ -22,8 +22,7 @@ import {
   ENGINEERING_LIFECYCLE_STATUSES,
   buildEngineeringResolutionTrend,
 } from '@/lib/engineering-resolution-trend'
-import { buildRequestVisibilityWhere } from '@/lib/request-visibility/predicate'
-import { createRequestVisibilityDb } from '@/lib/request-access'
+import { buildRequestVisibilityWhere, createRequestVisibilityDb } from '@/lib/request-visibility/scope'
 
 /**
  * Get analytics data with applied filters

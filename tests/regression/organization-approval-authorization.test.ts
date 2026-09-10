@@ -32,7 +32,7 @@ describe('canUserViewRequest: same-section, unrelated, and privileged viewers', 
     assert.equal(await harness.requestAccess.canUserViewRequest('null-org-1', SCENARIO.requestId), false)
   })
 
-  it('lets engineering users read any non-deleted request regardless of department', async () => {
+  it('does not grant engineering-role blanket visibility; assigned custom approvers can view', async () => {
     const harness = createHarness({
       departments: departmentRows(),
       users: workflowUsers(),
@@ -40,7 +40,7 @@ describe('canUserViewRequest: same-section, unrelated, and privileged viewers', 
     })
     harness.state.authUserId = null
 
-    assert.equal(await harness.requestAccess.canUserViewRequest('engineer-1', SCENARIO.requestId), true)
+    assert.equal(await harness.requestAccess.canUserViewRequest('engineer-1', SCENARIO.requestId), false)
     // Assigned custom approver from outside the department reads via assignment.
     assert.equal(await harness.requestAccess.canUserViewRequest(SCENARIO.customApproverA, SCENARIO.requestId), false)
     harness.db.seed('request_approvals', [

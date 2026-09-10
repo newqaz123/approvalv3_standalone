@@ -4,7 +4,7 @@ import prisma from '@/lib/prisma'
 import { z } from 'zod'
 import { readAttachmentFile } from '@/lib/attachments/storage'
 import { buildContentDisposition } from '@/lib/attachments/content-disposition'
-import { canUserViewRequest } from '@/lib/request-access'
+import { canUserViewRequest } from '@/lib/request-visibility/scope'
 
 // ID-based access only: the caller may never supply a filesystem path. The `id`
 // selects a row from file_attachments; the physical path comes solely from the

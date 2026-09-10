@@ -51,7 +51,7 @@ import {
 } from '@/lib/approval-engine/attempts'
 import { canWorkOnSolutions } from '@/lib/solution-eligibility'
 import type { OrganizationUnitNode } from '@/lib/organization/model'
-import { canUserViewRequest } from '@/lib/request-access'
+import { canUserViewRequest } from '@/lib/request-visibility/scope'
 import {
   CURRENT_INSTANCE_ROW_FILTER,
   markCurrentInstanceOutcome,

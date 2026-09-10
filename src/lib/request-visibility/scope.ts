@@ -1,11 +1,17 @@
-// Clean-start downward-inclusive sharing-scope visibility predicate (Plan B Task 8).
+// Clean-start downward-inclusive sharing-scope visibility predicate (Plan B Task 8)
+// with production findActor (Plan B Task 9).
 // Visibility only: this module grants no mutation, approval, or notification
 // rights. The engineering ROLE grants no blanket visibility. Child sharing
 // settings never subtract from an ancestor member's complete subtree (A5
 // sharingScopeUnitIds). Explicit parent managers retain descendant visibility
-// via managedUnitIds independently of sharing scope.
+// via managedUnitIds independently of sharing scope. Production findActor reads
+// users + the active organization_assignments row + A5 sharingScopeUnitIds +
+// descendants of units this actor manages (organization_units.managerUserId).
 import type { Prisma } from '@prisma/client'
 import { CURRENT_INSTANCE_ROW_FILTER } from '@/lib/approval-engine/current-instance'
+import { descendantUnitIds, NoSharingScopeError } from '@/lib/organization/hierarchy'
+import type { OrganizationUnitNode } from '@/lib/organization/model'
+import { sharingScopeUnitIds } from '@/lib/organization/sharing'
 
 export interface RequestVisibilityActor {
   id: string
@@ -55,4 +61,130 @@ export async function canViewRequestByPredicate(
   const where = await buildRequestVisibilityWhere(db, { userId, includeArchived: true })
   const found = await db.findRequest({ AND: [{ id: requestId }, where] })
   return found !== null
+}
+
+type VisibilityUnitRow = {
+  id: string
+  name: string
+  parentId: string | null
+  isActive: boolean
+  shareRequests: boolean
+  canWorkOnSolutions: boolean
+  managerUserId: string | null
+}
+
+export type RequestVisibilityPrisma = {
+  user: {
+    findUnique(args: {
+      where: { id: string }
+      select: { id: true; isActive: true; role: true }
+    }): Promise<{ id: string; isActive: boolean; role: string } | null>
+  }
+  organization_assignments: {
+    findFirst(args: {
+      where: { userId: string; isActive: boolean }
+      select: { unitId: true }
+    }): Promise<{ unitId: string } | null>
+  }
+  organization_units: {
+    findMany(args: {
+      select: {
+        id: true
+        name: true
+        parentId: true
+        isActive: true
+        shareRequests: true
+        canWorkOnSolutions: true
+        managerUserId: true
+      }
+    }): Promise<VisibilityUnitRow[]>
+  }
+  requests: {
+    findFirst(args: {
+      where: Prisma.requestsWhereInput
+      select: { id: true }
+    }): Promise<{ id: string } | null>
+  }
+}
+
+function asActorRole(role: string): RequestVisibilityActor['role'] {
+  if (role === 'admin' || role === 'engineering') return role
+  return 'general_dept'
+}
+
+function toUnitNode(unit: VisibilityUnitRow): OrganizationUnitNode {
+  return {
+    id: unit.id,
+    name: unit.name,
+    parentId: unit.parentId,
+    isActive: unit.isActive,
+    shareRequests: unit.shareRequests,
+    canWorkOnSolutions: unit.canWorkOnSolutions,
+    managerUserId: unit.managerUserId,
+  }
+}
+
+export function createRequestVisibilityDb(client: RequestVisibilityPrisma): RequestVisibilityDb {
+  return {
+    async findActor(userId) {
+      const user = await client.user.findUnique({
+        where: { id: userId },
+        select: { id: true, isActive: true, role: true },
+      })
+      if (!user) return null
+
+      const assignment = await client.organization_assignments.findFirst({
+        where: { userId, isActive: true },
+        select: { unitId: true },
+      })
+
+      const units = await client.organization_units.findMany({
+        select: {
+          id: true,
+          name: true,
+          parentId: true,
+          isActive: true,
+          shareRequests: true,
+          canWorkOnSolutions: true,
+          managerUserId: true,
+        },
+      })
+      const nodes = units.map(toUnitNode)
+
+      let sharing: readonly string[] = []
+      if (assignment) {
+        try {
+          sharing = sharingScopeUnitIds(nodes, assignment.unitId)
+        } catch (error) {
+          if (!(error instanceof NoSharingScopeError)) throw error
+        }
+      }
+
+      const managed = new Set<string>()
+      for (const unit of units) {
+        if (unit.managerUserId !== user.id) continue
+        for (const id of descendantUnitIds(nodes, unit.id)) managed.add(id)
+      }
+
+      return {
+        id: user.id,
+        role: asActorRole(user.role),
+        isActive: user.isActive,
+        assignmentUnitId: assignment?.unitId ?? null,
+        sharingScopeUnitIds: sharing,
+        managedUnitIds: [...managed],
+      }
+    },
+    async findRequest(where) {
+      return client.requests.findFirst({
+        where,
+        select: { id: true },
+      })
+    },
+  }
+}
+
+export async function canUserViewRequest(userId: string, requestId: string): Promise<boolean> {
+  const { default: prisma } = await import('@/lib/prisma')
+  return canViewRequestByPredicate(createRequestVisibilityDb(prisma), userId, requestId)
 }

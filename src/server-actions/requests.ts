@@ -49,8 +49,7 @@ import {
 } from '@/lib/approval-engine/phase-adapters'
 import { ApprovalRouteConfigurationError } from '@/lib/approval-routes/definition'
 import { snapshotGroupActionWhere } from '@/lib/approval-engine/transactions'
-import { buildRequestVisibilityWhere } from '@/lib/request-visibility/predicate'
-import { canUserViewRequest, createRequestVisibilityDb } from '@/lib/request-access'
+import { buildRequestVisibilityWhere, canUserViewRequest, createRequestVisibilityDb } from '@/lib/request-visibility/scope'
 import {
   evaluateRequestAction,
   existingAssignEngineersDecision,

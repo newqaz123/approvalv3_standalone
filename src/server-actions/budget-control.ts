@@ -13,8 +13,7 @@ import {
   normalizeBudgetCode,
 } from '@/lib/budget-control'
 import type { BudgetMonitorData, BudgetMonitorFilters, BudgetRequestRecord } from '@/types/budget'
-import { buildRequestVisibilityWhere } from '@/lib/request-visibility/predicate'
-import { createRequestVisibilityDb } from '@/lib/request-access'
+import { buildRequestVisibilityWhere, createRequestVisibilityDb } from '@/lib/request-visibility/scope'
 import type { Prisma } from '@prisma/client'
 
 const MAX_BUDGET_MONEY_AMOUNT = 9999999999999.99

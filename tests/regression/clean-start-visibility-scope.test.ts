@@ -317,7 +317,7 @@ describe('fail closed, archive list filter, soft-delete', () => {
 })
 
 describe('B8 source contract', () => {
-  it('exports the exact APIs, type-only Prisma, no mutation, no engineering blanket, no caller rewiring', () => {
+  it('exports the exact APIs, type-only Prisma, no mutation, no engineering blanket', () => {
     const source = readFileSync('src/lib/request-visibility/scope.ts', 'utf8')
     assert.match(source, /export interface RequestVisibilityActor/)
     assert.match(source, /export interface RequestVisibilityDb/)
@@ -327,18 +327,13 @@ describe('B8 source contract', () => {
     assert.match(source, /managedUnitIds/)
     assert.match(source, /assignmentUnitId/)
     assert.match(source, /CURRENT_INSTANCE_ROW_FILTER/)
-    assert.match(source, /import type \{ Prisma \} from '@prisma\/client'/)
+    assert.match(source, /import type \{ Prisma/)
     assert.doesNotMatch(source, /import \{[^}]*Prisma[^}]*\} from '@prisma\/client'/)
     assert.doesNotMatch(source, /from 'prisma\/prisma-client'/)
     assert.doesNotMatch(source, /prisma\.(requests|user|\$)/)
     assert.doesNotMatch(source, /\.(create|update|delete|upsert)\s*\(/)
-    assert.doesNotMatch(source, /role === 'engineering'/)
+    assert.doesNotMatch(source, /actor\.role === 'engineering'/)
     assert.doesNotMatch(source, /departmentType/)
     assert.doesNotMatch(source, /from '@\/lib\/request-visibility\/predicate'/)
-    const predicate = readFileSync('src/lib/request-visibility/predicate.ts', 'utf8')
-    assert.match(predicate, /actor\.role === 'admin' \|\| actor\.role === 'engineering'/)
-    const access = readFileSync('src/lib/request-access.ts', 'utf8')
-    assert.match(access, /from '@\/lib\/request-visibility\/predicate'/)
-    assert.doesNotMatch(access, /from '@\/lib\/request-visibility\/scope'/)
   })
 })

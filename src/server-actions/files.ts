@@ -13,7 +13,7 @@ import {
   optimizeImageAttachment,
   type ImageOptimizationResult,
 } from '@/lib/attachments/image-optimization'
-import { canUserViewRequest } from '@/lib/request-access'
+import { canUserViewRequest } from '@/lib/request-visibility/scope'
 import {
   evaluateRequestAction,
   existingDeleteAttachmentDecision,

@@ -7,8 +7,7 @@ import { getMyRequests } from "@/server-actions/requests";
 import { buildFollowUpDashboard } from "@/lib/follow-up-dashboard";
 import { CURRENT_INSTANCE_ROW_FILTER } from "@/lib/approval-engine/current-instance";
 import { snapshotGroupActionWhere } from "@/lib/approval-engine/transactions";
-import { buildRequestVisibilityWhere } from "@/lib/request-visibility/predicate";
-import { createRequestVisibilityDb } from "@/lib/request-access";
+import { buildRequestVisibilityWhere, createRequestVisibilityDb } from "@/lib/request-visibility/scope";
 import type { Prisma } from "@prisma/client";
 export type {
 	FollowUpActivity,

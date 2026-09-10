@@ -9,8 +9,7 @@ import {
   isSubTaskVisibleForRequestStatus,
   validateSubTaskInput,
 } from '@/lib/engineering-sub-tasks'
-import { buildRequestVisibilityWhere } from '@/lib/request-visibility/predicate'
-import { canUserViewRequest, createRequestVisibilityDb } from '@/lib/request-access'
+import { buildRequestVisibilityWhere, canUserViewRequest, createRequestVisibilityDb } from '@/lib/request-visibility/scope'
 import {
   evaluateRequestAction,
   existingManageSubTasksDecision,
