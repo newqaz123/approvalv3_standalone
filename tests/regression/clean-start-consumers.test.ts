@@ -28,21 +28,9 @@ function sliceBetween(path: string, start: string, end: string): string {
 }
 
 const GREP_ALLOWLIST = [
-  'src/server-actions/departments.ts',
-  'src/server-actions/department-assignments.ts',
-  'src/server-actions/hierarchy.ts',
-  'src/app/admin/hierarchy/page.tsx',
-  'src/app/admin/departments/[id]/hierarchy/page.tsx',
-  'src/components/admin/user-form.tsx',
-  'src/components/admin/department-selector.tsx',
-  'src/components/admin/hierarchy-view.tsx',
-  'src/components/admin/additional-departments-section.tsx',
-  'src/components/admin/user-table.tsx',
-  'src/components/admin/edit-user-dialog.tsx',
   'src/lib/approval-engine/transactions.ts',
   'src/lib/approval-engine/phase-origin.ts',
   'src/lib/approval-engine/phase-adapters.ts',
-  'src/lib/organization/mapping.ts',
 ] as const
 
 const pickerPaths = [

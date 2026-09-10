@@ -10,31 +10,22 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
-import { UserForm, type OrganizationUnitOption } from '@/components/admin/user-form'
-import { AdditionalDepartmentsSection } from '@/components/admin/additional-departments-section'
+import { UserForm } from '@/components/admin/user-form'
 import { Pencil } from 'lucide-react'
 import { useRouter } from 'next/navigation'
-import type { departments as Department } from '@prisma/client'
-import type { OrganizationPositionCode } from '@/lib/organization/types'
 
 interface EditUserDialogProps {
   user: {
     id: string
     name: string
     email: string
-    departmentId: string | null
     role: 'admin' | 'general_dept' | 'engineering'
-    level: number | null
-    unitId?: string
-    positionCode?: OrganizationPositionCode
   }
-  departments: Department[]
-  organizationUnits?: OrganizationUnitOption[]
   open?: boolean
   onOpenChange?: (open: boolean) => void
 }
 
-export function EditUserDialog({ user, departments, organizationUnits = [], open: externalOpen, onOpenChange: externalOnOpenChange }: EditUserDialogProps) {
+export function EditUserDialog({ user, open: externalOpen, onOpenChange: externalOnOpenChange }: EditUserDialogProps) {
   const [internalOpen, setInternalOpen] = useState(false)
   const open = externalOpen !== undefined ? externalOpen : internalOpen
   const setOpen = externalOnOpenChange || setInternalOpen
@@ -58,33 +49,19 @@ export function EditUserDialog({ user, departments, organizationUnits = [], open
         <DialogHeader>
           <DialogTitle>Edit User</DialogTitle>
           <DialogDescription>
-            Update user details and assign approval level.
+            Update user details. Organization assignment is managed in Organization & Approvals.
           </DialogDescription>
         </DialogHeader>
         <UserForm
-          departments={departments as (Department & { levelNames: Record<string, string> | null })[]}
-          organizationUnits={organizationUnits}
           initialData={{
             id: user.id,
             name: user.name,
             email: user.email,
-            departmentId: user.departmentId || '',
             role: user.role,
-            level: user.level,
-            unitId: user.unitId || '',
-            positionCode: user.positionCode,
           }}
           onSuccess={handleSuccess}
           onCancel={() => setOpen(false)}
         />
-        {user.departmentId ? (
-          <AdditionalDepartmentsSection
-            userId={user.id}
-            userRole={user.role}
-            userHomeDepartmentId={user.departmentId}
-            departments={departments as (Department & { levelNames: Record<string, string> | null })[]}
-          />
-        ) : null}
       </DialogContent>
     </Dialog>
   )

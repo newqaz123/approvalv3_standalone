@@ -103,7 +103,7 @@ describe("authenticated shell and navigation", () => {
 			"src/components/analytics/analytics-page.tsx",
 			"src/app/admin/deleted-requests/page.tsx",
 			"src/app/admin/retention/page.tsx",
-			"src/app/admin/departments/[id]/hierarchy/page.tsx",
+			"src/app/admin/organization/page.tsx",
 		];
 
 		for (const path of widePages) {
@@ -125,14 +125,10 @@ describe("authenticated shell and navigation", () => {
 			assert.ok(read(path).includes(token));
 	});
 
-	it("keeps Approval Chain unassigned narrow and assigned wide", () => {
+	it("keeps Approval Chain on the shared shell without a nested container cap", () => {
 		const source = read("src/app/(dashboard)/approval-chain/page.tsx");
-		const unassignedStart = source.indexOf("if (!approvalChain)");
-		const assignedStart = source.lastIndexOf("return (");
-		const unassigned = source.slice(unassignedStart, assignedStart);
-		const assigned = source.slice(assignedStart);
-
-		assert.ok(unassigned.includes("max-w-4xl"));
-		assert.doesNotMatch(assigned, /max-w-7xl/);
+		assert.doesNotMatch(source, /className=["'][^"']*\bcontainer\b/);
+		assert.doesNotMatch(source, /max-w-7xl/);
+		assert.doesNotMatch(source, /HierarchyView/);
 	});
 });

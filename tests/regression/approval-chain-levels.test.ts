@@ -33,9 +33,12 @@ describe('approval-chain level generation contracts', () => {
     assert.doesNotMatch(solutions, /createHierarchyApprovalChain/)
   })
 
-  it('uses shared labels for hierarchy columns', () => {
-    const view = read('src/components/admin/hierarchy-view.tsx')
-    assert.match(view, /getApprovalLevelLabel/)
+  it('C1: approval-chain page no longer renders legacy hierarchy columns', () => {
+    const page = read('src/app/(dashboard)/approval-chain/page.tsx')
+    assert.doesNotMatch(page, /HierarchyView/)
+    assert.doesNotMatch(page, /getApprovalLevelLabel/)
+    assert.doesNotMatch(page, /getCurrentUserApprovalChain/)
+    assert.match(page, /published organization routes/)
   })
 
   it('targets solution submit/resubmit notifications from first pending approval data, not arithmetic [0]', { skip: 'B6-fix1: source-contract test (no SNAPSHOT_GROUP seeds). B6 rewired solution submit/resubmit; needs B11 participants-only notification targeting. Named replacement: tests/regression/clean-start-attempts.test.ts.' }, () => {

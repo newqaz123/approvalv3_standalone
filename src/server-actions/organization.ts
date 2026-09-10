@@ -1,482 +1,344 @@
 'use server'
 
-import prisma from '@/lib/prisma'
-import { requireAdmin } from '@/lib/auth'
-import { revalidatePath } from 'next/cache'
-import { assertAcyclicOrganizationTree } from '@/lib/organization/tree'
+import { ApprovalRouteConfigurationError } from '@/lib/approval-routes/definition'
+import type { ApprovalPhase } from '@/lib/approval-routes/definition'
+import { selectNearestRoute } from '@/lib/approval-routes/selection'
+import type { ApprovalRouteVersionDefinition } from '@/lib/approval-routes/definition'
+import { verifyCleanStartReadiness } from '@/lib/clean-start-readiness'
+import type { ReadinessReport } from '@/lib/clean-start-readiness'
 import type {
-  OrganizationPositionAssignment,
-  OrganizationPositionCode,
+  AssignmentNode,
   OrganizationUnitNode,
-  OrganizationUnitType,
-  ReportingGroupNode,
-} from '@/lib/organization/types'
-import type { OrganizationImportReport } from '../../scripts/organization-import-dry-run'
+  PositionNode,
+  TeamNode,
+} from '@/lib/organization/model'
 
-/**
- * Admin server actions for typed organization units, position assignments,
- * and reporting groups (Task 14). Every action derives its actor from
- * `requireAdmin`, validates parent type and acyclicity, rejects ambiguous
- * primary assignments, and writes an audit record. Organization edits never
- * touch pending approval rows or candidate groups. Deactivation is explicit
- * and does not activate a replacement. Parent managers stay on their parent
- * unit and are never duplicated into descendant sections.
- */
+const PHASES: readonly ApprovalPhase[] = ['REQUEST', 'SOLUTION', 'FINAL']
 
-const POSITION_UNIT: Record<OrganizationPositionCode, OrganizationUnitType> = {
-  STAFF: 'SECTION',
-  SUPERVISOR: 'SECTION',
-  SECTION_MANAGER: 'SECTION',
-  DEPARTMENT_MANAGER: 'DEPARTMENT',
-  DIVISION_MANAGER: 'DIVISION',
-  FACTORY_MANAGER: 'FACTORY',
+export type RouteSourceKind = 'ROOT_DEFAULT' | 'INHERITED' | 'CUSTOM'
+
+export interface WorkspaceRouteVersion {
+  id: string
+  scopeUnitId: string
+  phase: ApprovalPhase
+  status: 'DRAFT' | 'PUBLISHED' | 'RETIRED'
 }
 
-const EXPECTED_PARENT: Record<OrganizationUnitType, OrganizationUnitType | null> = {
-  FACTORY: null,
-  DIVISION: 'FACTORY',
-  DEPARTMENT: 'DIVISION',
-  SECTION: 'DEPARTMENT',
+export interface WorkspaceUser {
+  id: string
+  name: string
+  email: string
+  role: string
+  isActive: boolean
 }
 
-const UNIT_TYPES: readonly OrganizationUnitType[] = ['FACTORY', 'DIVISION', 'DEPARTMENT', 'SECTION']
-const POSITION_CODES = Object.keys(POSITION_UNIT) as OrganizationPositionCode[]
-const PARENT_MANAGER_POSITIONS = new Set<OrganizationPositionCode>([
-  'DEPARTMENT_MANAGER',
-  'DIVISION_MANAGER',
-  'FACTORY_MANAGER',
-])
+export interface OrganizationWorkspaceDb {
+  loadUnits(): Promise<OrganizationUnitNode[]>
+  loadPositions(): Promise<PositionNode[]>
+  loadAssignments(): Promise<AssignmentNode[]>
+  loadTeams(): Promise<TeamNode[]>
+  loadUsers(): Promise<WorkspaceUser[]>
+  loadRouteVersions(): Promise<WorkspaceRouteVersion[]>
+  loadCustomChainExceptions(): Promise<Array<{ requestId: string; title: string }>>
+}
 
-async function requireOrganizationAdmin(): Promise<string> {
+export interface WorkspaceSnapshot {
+  units: readonly OrganizationUnitNode[]
+  positions: readonly PositionNode[]
+  assignments: readonly AssignmentNode[]
+  teams: readonly TeamNode[]
+  users: ReadonlyArray<WorkspaceUser>
+  unassignedUsers: ReadonlyArray<{ id: string; name: string; email: string }>
+  routeSources: ReadonlyArray<{
+    unitId: string
+    phase: ApprovalPhase
+    source: RouteSourceKind
+    sourceUnitId: string | null
+    publishedVersionId: string | null
+    hasDraft: boolean
+  }>
+  customChainExceptions: ReadonlyArray<{ requestId: string; title: string }>
+  readiness: ReadinessReport
+}
+
+type WorkspacePrisma = {
+  organization_units: {
+    findMany: (args?: object) => Promise<Array<{
+      id: string
+      name: string
+      parentId: string | null
+      isActive: boolean
+      shareRequests: boolean
+      canWorkOnSolutions: boolean
+      managerUserId: string | null
+    }>>
+  }
+  positions: {
+    findMany: (args?: object) => Promise<Array<{
+      id: string
+      name: string
+      rank: number
+      isActive: boolean
+    }>>
+  }
+  organization_assignments: {
+    findMany: (args?: object) => Promise<Array<{
+      id: string
+      userId: string
+      unitId: string
+      positionId: string
+      teamId: string | null
+      isActive: boolean
+    }>>
+  }
+  teams: {
+    findMany: (args?: object) => Promise<Array<{
+      id: string
+      unitId: string
+      name: string
+      reportsToAssignmentId: string
+      isActive: boolean
+    }>>
+  }
+  user: {
+    findMany: (args?: object) => Promise<Array<{
+      id: string
+      name: string
+      email: string
+      role: string
+      isActive: boolean
+    }>>
+  }
+  approval_route_versions: {
+    findMany: (args?: object) => Promise<Array<{
+      id: string
+      scopeUnitId: string
+      phase: string
+      status: string
+    }>>
+  }
+  requests: {
+    findMany: (args?: object) => Promise<Array<{ id: string; title: string }>>
+  }
+}
+
+function ancestorScopeIds(units: readonly OrganizationUnitNode[], unitId: string): string[] {
+  const byId = new Map(units.map((unit) => [unit.id, unit]))
+  const path: string[] = []
+  const seen = new Set<string>()
+  let current: string | null = unitId
+  while (current) {
+    if (seen.has(current)) {
+      throw new Error(`organization unit cycle at ${current}`)
+    }
+    seen.add(current)
+    path.push(current)
+    current = byId.get(current)?.parentId ?? null
+  }
+  return path
+}
+
+function asRouteDefinition(row: WorkspaceRouteVersion): ApprovalRouteVersionDefinition {
+  return {
+    id: row.id,
+    scopeUnitId: row.scopeUnitId,
+    phase: row.phase,
+    version: 1,
+    approvalLimitPositionId: '_workspace-read-only',
+    status: row.status,
+    steps: [],
+  }
+}
+
+function classifyRouteSources(
+  units: readonly OrganizationUnitNode[],
+  routes: readonly WorkspaceRouteVersion[],
+): WorkspaceSnapshot['routeSources'] {
+  const root = units.find((unit) => unit.parentId === null) ?? null
+  const defs = routes.map(asRouteDefinition)
+  const rows: Array<WorkspaceSnapshot['routeSources'][number]> = []
+  for (const unit of units) {
+    const path = ancestorScopeIds(units, unit.id)
+    for (const phase of PHASES) {
+      const hasDraft = routes.some(
+        (route) => route.scopeUnitId === unit.id && route.phase === phase && route.status === 'DRAFT',
+      )
+      try {
+        const selected = selectNearestRoute(path, defs, phase)
+        let source: RouteSourceKind
+        let sourceUnitId: string | null
+        if (selected.scopeUnitId === unit.id) {
+          source = 'CUSTOM'
+          sourceUnitId = unit.id
+        } else if (root && selected.scopeUnitId === root.id) {
+          source = 'ROOT_DEFAULT'
+          sourceUnitId = root.id
+        } else {
+          source = 'INHERITED'
+          sourceUnitId = selected.scopeUnitId
+        }
+        rows.push({
+          unitId: unit.id,
+          phase,
+          source,
+          sourceUnitId,
+          publishedVersionId: selected.id,
+          hasDraft,
+        })
+      } catch (error) {
+        if (error instanceof ApprovalRouteConfigurationError && /No published route/.test(error.message)) {
+          continue
+        }
+        throw error
+      }
+    }
+  }
+  return rows
+}
+
+function countPublishedRootRoutesByPhase(
+  units: readonly OrganizationUnitNode[],
+  routes: readonly WorkspaceRouteVersion[],
+): Record<ApprovalPhase, number> {
+  const root = units.find((unit) => unit.parentId === null)
+  const counts: Record<ApprovalPhase, number> = { REQUEST: 0, SOLUTION: 0, FINAL: 0 }
+  if (!root) return counts
+  for (const phase of PHASES) {
+    counts[phase] = routes.filter(
+      (route) => route.scopeUnitId === root.id && route.phase === phase && route.status === 'PUBLISHED',
+    ).length
+  }
+  return counts
+}
+
+function createPrismaOrganizationWorkspaceDb(prisma: WorkspacePrisma): OrganizationWorkspaceDb {
+  return {
+    async loadUnits() {
+      const rows = await prisma.organization_units.findMany()
+      return rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        parentId: row.parentId,
+        isActive: row.isActive,
+        shareRequests: row.shareRequests,
+        canWorkOnSolutions: row.canWorkOnSolutions,
+        managerUserId: row.managerUserId,
+      }))
+    },
+    async loadPositions() {
+      const rows = await prisma.positions.findMany()
+      return rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        rank: row.rank,
+        isActive: row.isActive,
+      }))
+    },
+    async loadAssignments() {
+      const rows = await prisma.organization_assignments.findMany()
+      return rows.map((row) => ({
+        id: row.id,
+        userId: row.userId,
+        unitId: row.unitId,
+        positionId: row.positionId,
+        teamId: row.teamId,
+        isActive: row.isActive,
+      }))
+    },
+    async loadTeams() {
+      const rows = await prisma.teams.findMany()
+      return rows.map((row) => ({
+        id: row.id,
+        unitId: row.unitId,
+        name: row.name,
+        reportsToAssignmentId: row.reportsToAssignmentId,
+        isActive: row.isActive,
+      }))
+    },
+    async loadUsers() {
+      const rows = await prisma.user.findMany()
+      return rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        email: row.email,
+        role: row.role,
+        isActive: row.isActive,
+      }))
+    },
+    async loadRouteVersions() {
+      const rows = await prisma.approval_route_versions.findMany()
+      return rows.map((row) => ({
+        id: row.id,
+        scopeUnitId: row.scopeUnitId,
+        phase: row.phase as ApprovalPhase,
+        status: row.status as WorkspaceRouteVersion['status'],
+      }))
+    },
+    async loadCustomChainExceptions() {
+      const rows = await prisma.requests.findMany({
+        where: { isDeleted: false, approvals: { some: { isCustomChain: true } } },
+        select: { id: true, title: true },
+      })
+      return rows.map((row) => ({ requestId: row.id, title: row.title }))
+    },
+  }
+}
+
+async function createProductionWorkspaceDb(): Promise<OrganizationWorkspaceDb> {
+  const { requireAdmin } = await import('@/lib/auth')
   const adminId = await requireAdmin()
   if (!adminId) {
     throw new Error('Admin authorization is required for organization actions')
   }
-  return adminId
-}
-
-type OrganizationActionDb = {
-  user: { findUnique: (args: object) => Promise<{ id: string } | null> }
-  organization_units: { findMany: (args?: object) => Promise<Array<{ id: string; name: string; unitType: string; parentId: string | null; isActive: boolean }>> }
-  organization_position_assignments: {
-    findMany: (args?: object) => Promise<Array<{ id: string; userId: string; unitId: string; positionCode: string; reportingGroupId: string | null; isPrimary: boolean; isActive: boolean }>>
-    create: (args: object) => Promise<unknown>
-    update: (args: object) => Promise<unknown>
-  }
-  reporting_groups: { findUnique: (args: object) => Promise<{ id: string; unitId: string } | null> }
-  request_activities: { create: (args: object) => Promise<unknown> }
-}
-
-function organizationDb(db?: object): OrganizationActionDb {
-  return (db ?? prisma) as OrganizationActionDb
-}
-
-async function writeOrganizationAudit(adminId: string, comments: string, db?: object): Promise<void> {
-  await organizationDb(db).request_activities.create({
-    data: {
-      action: 'organization_admin_changed',
-      comments,
-      userId: adminId,
-      createdAt: new Date(),
-    },
-  })
-}
-
-function isUnitType(value: unknown): value is OrganizationUnitType {
-  return typeof value === 'string' && UNIT_TYPES.includes(value as OrganizationUnitType)
-}
-
-function isPositionCode(value: unknown): value is OrganizationPositionCode {
-  return typeof value === 'string' && POSITION_CODES.includes(value as OrganizationPositionCode)
-}
-
-function asUnitNode(row: {
-  id: string
-  name: string
-  unitType: OrganizationUnitType
-  parentId: string | null
-  isActive: boolean
-}): OrganizationUnitNode {
-  return {
-    id: row.id,
-    name: row.name,
-    unitType: row.unitType,
-    parentId: row.parentId,
-    isActive: row.isActive,
-  }
-}
-
-function assertValidParentType(unit: OrganizationUnitNode, byId: Map<string, OrganizationUnitNode>): void {
-  const expected = EXPECTED_PARENT[unit.unitType]
-  const parent = unit.parentId ? byId.get(unit.parentId) : undefined
-  if (expected === null && unit.parentId) {
-    throw new Error(`Invalid parent type for ${unit.id}: a factory cannot have a parent`)
-  }
-  if (expected !== null && (!parent || parent.unitType !== expected)) {
-    throw new Error(`Invalid parent type for ${unit.id}`)
-  }
-}
-
-async function loadUnitNodes(db?: object): Promise<OrganizationUnitNode[]> {
-  const rows = await organizationDb(db).organization_units.findMany()
-  return rows.map((row) => asUnitNode({
-    id: row.id,
-    name: row.name,
-    unitType: row.unitType as OrganizationUnitType,
-    parentId: row.parentId,
-    isActive: row.isActive,
-  }))
-}
-
-function validateProposedUnits(units: OrganizationUnitNode[]): Map<string, OrganizationUnitNode> {
-  assertAcyclicOrganizationTree(units)
-  const byId = new Map(units.map((unit) => [unit.id, unit]))
-  for (const unit of units) assertValidParentType(unit, byId)
-  return byId
-}
-
-function assertAtMostOneActivePrimary(
-  assignments: Array<{ isActive: boolean; isPrimary: boolean }>,
-  userId: string,
-): void {
-  const activePrimaries = assignments.filter((assignment) => assignment.isActive && assignment.isPrimary)
-  if (activePrimaries.length > 1) {
-    throw new Error(`User ${userId} must not have more than one active primary assignment`)
-  }
+  const { default: prisma } = await import('@/lib/prisma')
+  return createPrismaOrganizationWorkspaceDb(prisma as unknown as WorkspacePrisma)
 }
 
 /**
- * Mapping coverage shown on the organization admin page is NOT rollout
- * evidence: the reviewed dry-run report is produced by the CLI importer and
- * is not recomputed by this page. The loader therefore reports coverage as
- * explicitly unavailable instead of returning placeholder zeros that could
- * be mistaken for verification.
+ * Admin organization workspace snapshot. Production (no db argument) runs
+ * requireAdmin then reads Prisma. Tests inject an in-memory OrganizationWorkspaceDb.
+ * routeSources use the B2 nearest-published walk, read-only.
  */
-const MAPPING_COVERAGE_UNAVAILABLE_NOTE =
-  'Mapping coverage is unavailable on this page and not verified here. Run the reviewed import dry-run report (CLI) to produce rollout evidence.'
-
-export async function getOrganizationAdminData(): Promise<{
-  units: OrganizationUnitNode[]
-  assignments: OrganizationPositionAssignment[]
-  reportingGroups: ReportingGroupNode[]
-  mappingCoverage: OrganizationImportReport | null
-  mappingCoverageNote: string
-  pendingInstanceCounts: Record<string, number>
-}> {
-  await requireOrganizationAdmin()
-
-  const [unitRows, assignmentRows, groupRows, pendingRows] = await Promise.all([
-    prisma.organization_units.findMany({ orderBy: { name: 'asc' } }),
-    prisma.organization_position_assignments.findMany(),
-    prisma.reporting_groups.findMany({ orderBy: { name: 'asc' } }),
-    prisma.approval_instances.findMany({
-      where: { state: 'PENDING' },
-      select: { originUnitId: true },
-    }),
+export async function getOrganizationWorkspaceData(
+  db?: OrganizationWorkspaceDb,
+): Promise<WorkspaceSnapshot> {
+  const store = db ?? await createProductionWorkspaceDb()
+  const [units, positions, assignments, teams, users, routes, customChainExceptions] = await Promise.all([
+    store.loadUnits(),
+    store.loadPositions(),
+    store.loadAssignments(),
+    store.loadTeams(),
+    store.loadUsers(),
+    store.loadRouteVersions(),
+    store.loadCustomChainExceptions(),
   ])
 
-  const pendingInstanceCounts: Record<string, number> = {}
-  for (const row of pendingRows) {
-    pendingInstanceCounts[row.originUnitId] = (pendingInstanceCounts[row.originUnitId] ?? 0) + 1
-  }
+  const assignedUserIds = new Set(
+    assignments.filter((assignment) => assignment.isActive).map((assignment) => assignment.userId),
+  )
+  const unassignedUsers = users
+    .filter((user) => user.isActive && !assignedUserIds.has(user.id))
+    .map((user) => ({ id: user.id, name: user.name, email: user.email }))
+
+  const routeSources = classifyRouteSources(units, routes)
+  const publishedRootCounts = countPublishedRootRoutesByPhase(units, routes)
+  const readiness = await verifyCleanStartReadiness({
+    loadUnits: async () => units,
+    loadPositions: async () => positions,
+    loadAssignments: async () => assignments,
+    loadTeams: async () => teams,
+    countPublishedRoutesByPhase: async () => publishedRootCounts,
+  })
 
   return {
-    units: unitRows.map((row) => asUnitNode({
-      id: row.id,
-      name: row.name,
-      unitType: row.unitType as OrganizationUnitType,
-      parentId: row.parentId,
-      isActive: row.isActive,
-    })),
-    assignments: assignmentRows.map((row) => ({
-      id: row.id,
-      userId: row.userId,
-      unitId: row.unitId,
-      positionCode: row.positionCode as OrganizationPositionCode,
-      reportingGroupId: row.reportingGroupId,
-      isPrimary: row.isPrimary,
-      isActive: row.isActive,
-    })),
-    reportingGroups: groupRows.map((row) => ({
-      id: row.id,
-      unitId: row.unitId,
-      parentGroupId: row.parentGroupId,
-      name: row.name,
-      isActive: row.isActive,
-    })),
-    mappingCoverage: null,
-    mappingCoverageNote: MAPPING_COVERAGE_UNAVAILABLE_NOTE,
-    pendingInstanceCounts,
+    units,
+    positions,
+    assignments,
+    teams,
+    users,
+    unassignedUsers,
+    routeSources,
+    customChainExceptions,
+    readiness,
   }
-}
-
-export async function createOrganizationUnit(input: {
-  id?: string
-  name: string
-  unitType: OrganizationUnitType
-  parentId: string | null
-}): Promise<{ id: string }> {
-  const adminId = await requireOrganizationAdmin()
-  const name = input.name.trim()
-  if (!name) throw new Error('Organization unit name is required')
-  if (!isUnitType(input.unitType)) throw new Error('Organization unit type is invalid')
-
-  const units = await loadUnitNodes()
-  const id = input.id?.trim() || `unit-${Date.now()}`
-  if (units.some((unit) => unit.id === id)) throw new Error(`Organization unit ${id} already exists`)
-  const proposed: OrganizationUnitNode = {
-    id,
-    name,
-    unitType: input.unitType,
-    parentId: input.parentId,
-    isActive: true,
-  }
-  validateProposedUnits([...units, proposed])
-
-  const created = await prisma.organization_units.create({
-    data: {
-      id,
-      name,
-      unitType: input.unitType,
-      parentId: input.parentId,
-      isActive: true,
-      updatedAt: new Date(),
-    },
-  })
-  await writeOrganizationAudit(adminId, `Created organization unit ${created.id} (${name}, ${input.unitType})`)
-  revalidatePath('/admin/organization')
-  return { id: created.id }
-}
-
-export async function updateOrganizationUnit(input: {
-  id: string
-  name: string
-  parentId: string | null
-  isActive: boolean
-}): Promise<{ success: true }> {
-  const adminId = await requireOrganizationAdmin()
-  const name = input.name.trim()
-  if (!name) throw new Error('Organization unit name is required')
-
-  const units = await loadUnitNodes()
-  const current = units.find((unit) => unit.id === input.id)
-  if (!current) throw new Error(`Organization unit ${input.id} is missing`)
-
-  const proposed = units.map((unit) => (
-    unit.id === input.id
-      ? { ...unit, name, parentId: input.parentId, isActive: input.isActive }
-      : unit
-  ))
-  validateProposedUnits(proposed)
-
-  await prisma.organization_units.update({
-    where: { id: input.id },
-    data: {
-      name,
-      parentId: input.parentId,
-      isActive: input.isActive,
-      updatedAt: new Date(),
-    },
-  })
-  await writeOrganizationAudit(
-    adminId,
-    `Updated organization unit ${input.id}: name=${name}, parentId=${input.parentId ?? 'null'}, isActive=${input.isActive}`,
-  )
-  revalidatePath('/admin/organization')
-  return { success: true }
-}
-
-export async function savePositionAssignment(input: {
-  userId: string
-  unitId: string
-  positionCode: OrganizationPositionCode
-  reportingGroupId: string | null
-  isPrimary: boolean
-  isActive: boolean
-}, db?: object): Promise<{ success: true }> {
-  const adminId = await requireOrganizationAdmin()
-  if (!input.userId) throw new Error('User is required')
-  if (!isPositionCode(input.positionCode)) throw new Error('Position code is invalid')
-  const client = organizationDb(db)
-
-  const user = await client.user.findUnique({ where: { id: input.userId }, select: { id: true } })
-  if (!user) throw new Error('User not found')
-
-  const units = await loadUnitNodes(client)
-  validateProposedUnits(units)
-  const unit = units.find((candidate) => candidate.id === input.unitId)
-  if (!unit) throw new Error(`Organization unit ${input.unitId} is missing`)
-  if (POSITION_UNIT[input.positionCode] !== unit.unitType) {
-    throw new Error(`Position ${input.positionCode} does not match unit ${unit.id}`)
-  }
-  if (PARENT_MANAGER_POSITIONS.has(input.positionCode) && input.reportingGroupId) {
-    throw new Error(`Parent manager ${input.userId} cannot be duplicated into descendant sections`)
-  }
-
-  if (input.reportingGroupId) {
-    if (unit.unitType !== 'SECTION') {
-      throw new Error(`Reporting-group section membership is only valid on a section`)
-    }
-    const group = await client.reporting_groups.findUnique({ where: { id: input.reportingGroupId } })
-    if (!group || group.unitId !== unit.id) {
-      throw new Error(`Reporting group ${input.reportingGroupId} is outside the assigned section`)
-    }
-  }
-
-  const existing = await client.organization_position_assignments.findMany({ where: { userId: input.userId } })
-  const match = existing.find(
-    (assignment) => assignment.unitId === input.unitId && assignment.positionCode === input.positionCode,
-  )
-  const next = existing
-    .filter((assignment) => assignment !== match)
-    .map((assignment) => ({
-      isActive: assignment.isActive,
-      isPrimary: assignment.isPrimary,
-    }))
-  next.push({ isActive: input.isActive, isPrimary: input.isPrimary })
-  assertAtMostOneActivePrimary(next, input.userId)
-
-  if (match) {
-    await client.organization_position_assignments.update({
-      where: { id: match.id },
-      data: {
-        reportingGroupId: input.reportingGroupId,
-        isPrimary: input.isPrimary,
-        isActive: input.isActive,
-        updatedAt: new Date(),
-      },
-    })
-  } else {
-    await client.organization_position_assignments.create({
-      data: {
-        userId: input.userId,
-        unitId: input.unitId,
-        positionCode: input.positionCode,
-        reportingGroupId: input.reportingGroupId,
-        isPrimary: input.isPrimary,
-        isActive: input.isActive,
-        updatedAt: new Date(),
-      },
-    })
-  }
-
-  await writeOrganizationAudit(
-    adminId,
-    `Saved position assignment user=${input.userId} unit=${input.unitId} position=${input.positionCode} primary=${input.isPrimary} active=${input.isActive}`,
-    client,
-  )
-  if (!db) {
-    revalidatePath('/admin/organization')
-    revalidatePath('/admin/users')
-  }
-  return { success: true }
-}
-
-export async function saveReportingGroup(input: {
-  id?: string
-  unitId: string
-  parentGroupId: string | null
-  name: string
-  memberUserIds: string[]
-}): Promise<{ id: string }> {
-  const adminId = await requireOrganizationAdmin()
-  const name = input.name.trim()
-  if (!name) throw new Error('Reporting group name is required')
-
-  const units = await loadUnitNodes()
-  validateProposedUnits(units)
-  const unit = units.find((candidate) => candidate.id === input.unitId)
-  if (!unit || unit.unitType !== 'SECTION') {
-    throw new Error(`Reporting group must be attached to a section`)
-  }
-
-  const groups = (await prisma.reporting_groups.findMany()).map((group) => ({
-    id: group.id,
-    unitId: group.unitId,
-    parentGroupId: group.parentGroupId,
-    name: group.name,
-    isActive: group.isActive,
-  })) as ReportingGroupNode[]
-  const existingId = input.id?.trim() || ''
-  const id = existingId || `group-${Date.now()}`
-  const nextGroups = [
-    ...groups.filter((group) => group.id !== id),
-    { id, unitId: input.unitId, parentGroupId: input.parentGroupId, name, isActive: true },
-  ]
-  const byId = new Map(nextGroups.map((group) => [group.id, group]))
-  if (input.parentGroupId) {
-    const parent = byId.get(input.parentGroupId)
-    if (!parent) throw new Error(`Reporting group parent ${input.parentGroupId} is missing`)
-    if (parent.unitId !== input.unitId) throw new Error(`Reporting group ${id} crosses sections`)
-  }
-  const visiting = new Set<string>()
-  const visited = new Set<string>()
-  const visit = (groupId: string): void => {
-    if (visiting.has(groupId)) throw new Error(`Reporting group cycle detected at ${groupId}`)
-    if (visited.has(groupId)) return
-    const group = byId.get(groupId)
-    if (!group) throw new Error(`Reporting group ${groupId} is missing`)
-    visiting.add(groupId)
-    if (group.parentGroupId) visit(group.parentGroupId)
-    visiting.delete(groupId)
-    visited.add(groupId)
-  }
-  for (const group of nextGroups) visit(group.id)
-
-  const memberUserIds = [...new Set(input.memberUserIds)]
-  if (memberUserIds.length > 0) {
-    const memberAssignments = await prisma.organization_position_assignments.findMany({
-      where: { userId: { in: memberUserIds } },
-    })
-    for (const memberUserId of memberUserIds) {
-      const assignments = memberAssignments.filter((assignment) => assignment.userId === memberUserId && assignment.isActive)
-      if (assignments.some((assignment) => PARENT_MANAGER_POSITIONS.has(assignment.positionCode as OrganizationPositionCode))) {
-        throw new Error(`Parent manager ${memberUserId} cannot be duplicated into descendant sections`)
-      }
-      const sectionAssignment = assignments.find(
-        (assignment) =>
-          assignment.unitId === input.unitId &&
-          POSITION_UNIT[assignment.positionCode as OrganizationPositionCode] === 'SECTION',
-      )
-      if (!sectionAssignment) {
-        throw new Error(`User ${memberUserId} has inconsistent reporting-group section membership`)
-      }
-    }
-  }
-
-  const saved = existingId
-    ? await prisma.reporting_groups.update({
-        where: { id },
-        data: {
-          unitId: input.unitId,
-          parentGroupId: input.parentGroupId,
-          name,
-          isActive: true,
-          updatedAt: new Date(),
-        },
-      })
-    : await prisma.reporting_groups.create({
-        data: {
-          id,
-          unitId: input.unitId,
-          parentGroupId: input.parentGroupId,
-          name,
-          isActive: true,
-          updatedAt: new Date(),
-        },
-      })
-
-  await prisma.reporting_group_members.deleteMany({ where: { reportingGroupId: saved.id } })
-  for (const userId of memberUserIds) {
-    await prisma.reporting_group_members.create({
-      data: { reportingGroupId: saved.id, userId },
-    })
-  }
-
-  await writeOrganizationAudit(
-    adminId,
-    `Saved reporting group ${saved.id} on unit ${input.unitId} with ${memberUserIds.length} members`,
-  )
-  revalidatePath('/admin/organization')
-  return { id: saved.id }
 }

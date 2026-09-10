@@ -659,7 +659,7 @@ describe('admin route UI contracts', () => {
   const editor = read('src/components/admin/routes/RouteEditor.tsx')
   const stepList = read('src/components/admin/routes/RouteStepList.tsx')
   const preview = read('src/components/admin/routes/RoutePreview.tsx')
-  const page = read('src/app/admin/routes/page.tsx')
+  const page = read('src/app/admin/organization/page.tsx')
 
   it('submits only the scope, phase, ceiling, and ordered position list', () => {
     assert.match(editor, /saveApprovalRouteDraft/)
@@ -711,8 +711,10 @@ describe('admin route UI contracts', () => {
     }
   })
 
-  it('gates the admin page behind the existing admin guard', () => {
+  it('gates the organization workspace page behind the existing admin guard', () => {
     assert.match(page, /requireAdmin/)
-    assert.match(page, /RouteEditor/)
+    assert.match(page, /OrganizationWorkspace/)
+    assert.match(page, /getOrganizationWorkspaceData/)
+    assert.doesNotMatch(page, /RouteEditor/)
   })
 })

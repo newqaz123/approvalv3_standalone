@@ -10,22 +10,17 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
-import { UserForm, type OrganizationUnitOption } from '@/components/admin/user-form'
+import { UserForm } from '@/components/admin/user-form'
 import { Plus } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 
-interface CreateUserDialogProps {
-  departments: any[]
-  organizationUnits?: OrganizationUnitOption[]
-}
-
-export function CreateUserDialog({ departments, organizationUnits = [] }: CreateUserDialogProps) {
+export function CreateUserDialog() {
   const [open, setOpen] = useState(false)
   const router = useRouter()
 
   const handleSuccess = () => {
     setOpen(false)
-    router.refresh() // Refresh server components to show new user
+    router.refresh()
   }
 
   return (
@@ -40,12 +35,10 @@ export function CreateUserDialog({ departments, organizationUnits = [] }: Create
         <DialogHeader>
           <DialogTitle>Create User</DialogTitle>
           <DialogDescription>
-            Create a new user account. They will receive an email invitation to set their password.
+            Create a new user account. Organization assignment is managed in Organization & Approvals.
           </DialogDescription>
         </DialogHeader>
         <UserForm
-          departments={departments}
-          organizationUnits={organizationUnits}
           onSuccess={handleSuccess}
           onCancel={() => setOpen(false)}
         />
