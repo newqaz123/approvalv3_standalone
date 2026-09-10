@@ -277,7 +277,7 @@ describe('budget control helpers', () => {
 
     const grouped = groupBudgetCodesByDepartment(groups)
     assert.deepEqual(
-      grouped.map((entry) => [entry.departmentName, entry.departmentId, entry.groups.length]),
+      grouped.map((entry) => [entry.departmentName, entry.unitId, entry.groups.length]),
       [
         ['Maintenance', 'd2', 1],
         ['Production 1', 'd1', 1],
@@ -521,8 +521,8 @@ describe('budget monitor server actions', () => {
 
     assert.match(schema, /model budget_codes[\s\S]*departmentId/)
     assert.match(schema, /model departments[\s\S]*budgetCodes/)
-    assert.match(getDataBody, /budgetCode\?\.department\?\.id === filters\.departmentId/)
-    assert.match(getDataBody, /request\.department\?\.id === filters\.departmentId/)
+    assert.match(getDataBody, /budgetCode\?\.department\?\.id === filters\.unitId/)
+    assert.match(getDataBody, /request\.department\?\.id === filters\.unitId/)
     assert.doesNotMatch(source.slice(source.indexOf('function applyBudgetFilters'), source.indexOf('function decimalToNumber')), /where\.departmentId/)
   })
 

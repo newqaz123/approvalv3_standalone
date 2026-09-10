@@ -170,7 +170,7 @@ export function buildBudgetExportRows(requests: BudgetRequestRecord[]) {
 }
 
 export function groupBudgetCodesByDepartment(groups: BudgetCodeGroup[]) {
-  const named = new Map<string, { departmentName: string; departmentId: string; groups: BudgetCodeGroup[] }>()
+  const named = new Map<string, { departmentName: string; unitId: string; groups: BudgetCodeGroup[] }>()
   const unassigned: BudgetCodeGroup[] = []
 
   for (const group of groups) {
@@ -186,7 +186,7 @@ export function groupBudgetCodesByDepartment(groups: BudgetCodeGroup[]) {
     }
     named.set(department.id, {
       departmentName: department.name,
-      departmentId: department.id,
+      unitId: department.id,
       groups: [group],
     })
   }
@@ -198,14 +198,14 @@ export function groupBudgetCodesByDepartment(groups: BudgetCodeGroup[]) {
   if (unassigned.length > 0) {
     departments.push({
       departmentName: 'No department',
-      departmentId: null as unknown as string,
+      unitId: null as unknown as string,
       groups: unassigned,
     })
   }
 
   return departments.map((entry) => ({
     departmentName: entry.departmentName,
-    departmentId: entry.departmentName === 'No department' ? null : entry.departmentId,
+    unitId: entry.departmentName === 'No department' ? null : entry.unitId,
     groups: entry.groups,
   }))
 }

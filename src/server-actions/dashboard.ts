@@ -61,37 +61,11 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
 		snapshotGroupActionWhere(user.id),
 	];
 
-	// Add hierarchy-based approvals scoped to user's own department (LEGACY_LEVEL)
-	if (user.level && user.departmentId) {
-		requestOrConditions.push({
-			routingMode: "LEGACY_LEVEL",
-			requiredLevel: user.level,
-			request: { departmentId: user.departmentId },
-		});
-	}
-
-	// Add cross-department approver assignments
-	const crossDeptApprovals = await prisma.department_approvers.findMany({
-		where: { approverId: user.id },
-		select: { departmentId: true, approverLevel: true },
-	});
-	for (const cda of crossDeptApprovals) {
-		requestOrConditions.push({
-			routingMode: "LEGACY_LEVEL",
-			requiredLevel: cda.approverLevel,
-			request: { departmentId: cda.departmentId },
-		});
-	}
-
 	// Build OR conditions for solution_approvals (discriminator-aware)
 	const solutionOrConditions: any[] = [
 		{ requiredApproverId: user.id },
 		snapshotGroupActionWhere(user.id),
 	];
-	// Only match by level for engineering users (matches canUserApproveSolution logic)
-	if (user.level && user.role === "engineering") {
-		solutionOrConditions.push({ routingMode: "LEGACY_LEVEL", requiredLevel: user.level });
-	}
 
 	// Find all pending approvals for user's level OR custom approver ID
 	const pendingApprovals = await prisma.request_approvals.findMany({
@@ -129,7 +103,7 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
 							id: true,
 							submittedBy: {
 								select: {
-									departmentId: true,
+									id: true,
 								},
 							},
 							approvals: {
@@ -200,9 +174,6 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
 		},
 	});
 
-	// Import getApproversAtLevel for loading potential approvers
-	const { getApproversAtLevel } = await import("./approvals");
-
 	// Check if each approval is actually actionable (no pending approvals before it)
 	const actionableRequests = [];
 	const seenRequestIds = new Set<string>();
@@ -237,36 +208,7 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
 				seenRequestIds.add(approval.request.id);
 
 				// Load potential approvers for pending approvals without requiredApprover
-				const approvals = await Promise.all(
-					approval.request.approvals.map(async (a) => {
-						if (
-							a.status === "pending" &&
-							!a.requiredApprover &&
-							approval.request.departmentId &&
-							a.requiredLevel !== null
-						) {
-							try {
-								const potentialApprovers = await getApproversAtLevel(
-									approval.request.departmentId,
-									a.requiredLevel,
-								);
-								return {
-									...a,
-									potentialApprovers: potentialApprovers.map((p) => ({
-										name: p.name,
-									})),
-								};
-							} catch (error) {
-								console.error(
-									"[getPendingMyApprovals] Error loading potential approvers:",
-									error,
-								);
-								return a;
-							}
-						}
-						return a;
-					}),
-				);
+				const approvals = approval.request.approvals;
 
 				actionableRequests.push({
 					id: approval.request.id,
@@ -398,36 +340,7 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
 				seenRequestIds.add(request.id);
 
 				// Load potential approvers for pending approvals without requiredApprover
-				const approvals = await Promise.all(
-					request.approvals.map(async (a) => {
-						if (
-							a.status === "pending" &&
-							!a.requiredApprover &&
-							request.departmentId &&
-							a.requiredLevel !== null
-						) {
-							try {
-								const potentialApprovers = await getApproversAtLevel(
-									request.departmentId,
-									a.requiredLevel,
-								);
-								return {
-									...a,
-									potentialApprovers: potentialApprovers.map((p) => ({
-										name: p.name,
-									})),
-								};
-							} catch (error) {
-								console.error(
-									"[getPendingMyApprovals] Error loading potential approvers:",
-									error,
-								);
-								return a;
-							}
-						}
-						return a;
-					}),
-				);
+				const approvals = request.approvals;
 
 				actionableRequests.push({
 					id: request.id,
@@ -476,7 +389,6 @@ export async function getMyCreatedRequests(): Promise<RequestListRow[]> {
 			createdAt: true,
 			workRequisitionReceived: true,
 			requesterId: true,
-			departmentId: true,
 			department: {
 				select: {
 					id: true,
@@ -499,7 +411,6 @@ export async function getMyCreatedRequests(): Promise<RequestListRow[]> {
 					id: true,
 					submittedBy: {
 						select: {
-							departmentId: true,
 						},
 					},
 					approvals: {
@@ -566,9 +477,6 @@ export async function getMyCreatedRequests(): Promise<RequestListRow[]> {
 		},
 	});
 
-	// Import getApproversAtLevel for loading potential approvers
-	const { getApproversAtLevel } = await import("./approvals");
-
 	// Process requests and load potential approvers
 	const processedRequests = await Promise.all(
 		requests.map(async (req) => {
@@ -601,43 +509,7 @@ export async function getMyCreatedRequests(): Promise<RequestListRow[]> {
 
 			// For solution approvals, use the Engineering department (submitter's department)
 			// For request approvals, use the request's department
-			const approvalDepartmentId =
-				useSolutionApprovals && req.solutions[0]?.submittedBy?.departmentId
-					? req.solutions[0].submittedBy.departmentId
-					: req.departmentId;
-
-			// Load potential approvers for pending approvals that don't have a requiredApprover
-			const approvals = await Promise.all(
-				rawApprovals.map(async (approval) => {
-					// If pending and no specific requiredApprover, load potential approvers at that level
-					if (
-						approval.status === "pending" &&
-						!approval.requiredApprover &&
-						approvalDepartmentId &&
-						approval.requiredLevel !== null
-					) {
-						try {
-							const potentialApprovers = await getApproversAtLevel(
-								approvalDepartmentId,
-								approval.requiredLevel,
-							);
-							return {
-								...approval,
-								potentialApprovers: potentialApprovers.map((p) => ({
-									name: p.name,
-								})),
-							};
-						} catch (error) {
-							console.error(
-								"[getMyCreatedRequests] Error loading potential approvers:",
-								error,
-							);
-							return approval;
-						}
-					}
-					return approval;
-				}),
-			);
+			const approvals = rawApprovals;
 
 			return {
 				id: req.id,
@@ -695,7 +567,6 @@ export async function getAllRequests(): Promise<RequestListRow[]> {
 			createdAt: true,
 			workRequisitionReceived: true,
 			requesterId: true,
-			departmentId: true,
 			department: {
 				select: {
 					id: true,
@@ -718,7 +589,6 @@ export async function getAllRequests(): Promise<RequestListRow[]> {
 					id: true,
 					submittedBy: {
 						select: {
-							departmentId: true,
 						},
 					},
 					approvals: {
@@ -785,9 +655,6 @@ export async function getAllRequests(): Promise<RequestListRow[]> {
 		},
 	});
 
-	// Import getApproversAtLevel for loading potential approvers
-	const { getApproversAtLevel } = await import("./approvals");
-
 	// Process requests and load potential approvers
 	const processedRequests = await Promise.all(
 		requests.map(async (req) => {
@@ -818,45 +685,7 @@ export async function getAllRequests(): Promise<RequestListRow[]> {
 				? solutionApprovals
 				: req.approvals;
 
-			// For solution approvals, use the Engineering department (submitter's department)
-			// For request approvals, use the request's department
-			const approvalDepartmentId =
-				useSolutionApprovals && req.solutions[0]?.submittedBy?.departmentId
-					? req.solutions[0].submittedBy.departmentId
-					: req.departmentId;
-
-			// Load potential approvers for pending approvals that don't have a requiredApprover
-			const approvals = await Promise.all(
-				rawApprovals.map(async (approval) => {
-					// If pending and no specific requiredApprover, load potential approvers at this level
-					if (
-						approval.status === "pending" &&
-						!approval.requiredApprover &&
-						approvalDepartmentId &&
-						approval.requiredLevel !== null
-					) {
-						try {
-							const potentialApprovers = await getApproversAtLevel(
-								approvalDepartmentId,
-								approval.requiredLevel,
-							);
-							return {
-								...approval,
-								potentialApprovers: potentialApprovers.map((p) => ({
-									name: p.name,
-								})),
-							};
-						} catch (error) {
-							console.error(
-								"[getAllRequests] Error loading potential approvers:",
-								error,
-							);
-							return approval;
-						}
-					}
-					return approval;
-				}),
-			);
+			const approvals = rawApprovals;
 
 			return {
 				id: req.id,

@@ -45,7 +45,7 @@ export async function getAuditTrailForRequest(requestId: string) {
         select: {
           id: true,
           title: true,
-          departmentId: true,
+          organizationUnitId: true,
           status: true,
         },
       },
@@ -99,7 +99,7 @@ export async function getAuditTrailForDateRange(
         select: {
           id: true,
           title: true,
-          departmentId: true,
+          organizationUnitId: true,
           status: true,
         },
       },
@@ -183,7 +183,7 @@ export async function getAuditTrailForUser(
         select: {
           id: true,
           title: true,
-          departmentId: true,
+          organizationUnitId: true,
           status: true,
         },
       },

@@ -21,7 +21,6 @@ export interface UserPositionAssignmentInput {
 export interface CreateUserInput {
   name: string
   email: string
-  departmentId?: string | null
   role: UserRole
   password?: string
   level?: number | null
@@ -32,7 +31,6 @@ export interface UpdateUserInput {
   id: string
   name: string
   email: string
-  departmentId?: string | null
   role?: UserRole // Optional to allow manual override
   level?: number | null
   positionAssignment?: UserPositionAssignmentInput
@@ -139,21 +137,6 @@ export async function createUser(input: CreateUserInput) {
     throw new Error('Admin authorization is required for user actions')
   }
   const level = validateApprovalLevel(input.level, { allowNull: true })
-  const departmentId = input.departmentId ?? null
-
-  if (!departmentId && !input.positionAssignment) {
-    throw new Error('Department or a valid organization position assignment is required')
-  }
-
-  if (departmentId) {
-    const department = await prisma.departments.findUnique({
-      where: { id: departmentId },
-    })
-
-    if (!department) {
-      throw new Error('Department not found')
-    }
-  }
 
   // Check if email already exists
   const existing = await prisma.user.findUnique({
@@ -163,9 +146,7 @@ export async function createUser(input: CreateUserInput) {
     throw new Error('A user with this email already exists')
   }
 
-  // Automatically determine role based on department; NEW managers may supply a system role.
-  const autoRole: UserRole = departmentId === 'ENG' ? 'engineering' : 'general_dept'
-  const finalRole: UserRole = input.positionAssignment ? (input.role || autoRole) : autoRole
+  const finalRole: UserRole = input.role
 
   // Hash default password (admin sets it, or use default)
   const password = input.password || 'changeme'
@@ -178,7 +159,6 @@ export async function createUser(input: CreateUserInput) {
             email: input.email,
             name: input.name,
             passwordHash,
-            departmentId,
             role: finalRole,
             level,
             isActive: true,
@@ -201,7 +181,6 @@ export async function createUser(input: CreateUserInput) {
           email: input.email,
           name: input.name,
           passwordHash,
-          departmentId,
           role: finalRole,
           level,
           isActive: true,
@@ -236,48 +215,14 @@ export async function updateUser(input: UpdateUserInput) {
     throw new Error('User not found')
   }
 
-  // Keep existing legacy department/level when omitted so in-flight attempts still resolve.
-  const nextDepartmentId = input.departmentId === undefined ? existingUser.departmentId : input.departmentId
   const level = input.level === undefined ? existingUser.level : validatedLevel
-
-  // Use provided role, or auto-determine based on department
-  const autoRole: UserRole = nextDepartmentId === 'ENG' ? 'engineering' : 'general_dept'
-  const finalRole: UserRole = input.role || autoRole
+  const finalRole: UserRole = input.role || existingUser.role
 
   // Track original values for audit logging
   const originalName = existingUser.name
   const originalEmail = existingUser.email
   const originalRole = existingUser.role
-  const originalDepartmentId = existingUser.departmentId
   const originalLevel = existingUser.level
-
-  // Check for pending approvals before changing department. Do not clear legacy
-  // fields that still serve in-flight attempts.
-  if (nextDepartmentId !== originalDepartmentId) {
-    // Check for pending request approvals
-    const pendingRequestApprovals = await prisma.request_approvals.findMany({
-      where: {
-        requiredApproverId: input.id,
-        status: 'pending',
-      },
-    })
-
-    // Check for pending solution approvals
-    const pendingSolutionApprovals = await prisma.solution_approvals.findMany({
-      where: {
-        requiredApproverId: input.id,
-        status: 'pending',
-      },
-    })
-
-    const totalPending = pendingRequestApprovals.length + pendingSolutionApprovals.length
-
-    if (totalPending > 0) {
-      throw new Error(
-        `User has ${totalPending} pending approval${totalPending > 1 ? 's' : ''}. Cannot change department. Please contact user to complete approvals or reassign manually.`
-      )
-    }
-  }
 
   // Check if email is being changed to one that already exists
   if (input.email !== originalEmail) {
@@ -293,7 +238,6 @@ export async function updateUser(input: UpdateUserInput) {
   if (input.name !== originalName) changes.push(`name: "${originalName}" → "${input.name}"`)
   if (input.email !== originalEmail) changes.push(`email: "${originalEmail}" → "${input.email}"`)
   if (finalRole !== originalRole) changes.push(`role: "${originalRole}" → "${finalRole}"`)
-  if (nextDepartmentId !== originalDepartmentId) changes.push(`departmentId: "${originalDepartmentId}" → "${nextDepartmentId}"`)
   if (level !== originalLevel) changes.push(`level: "${String(originalLevel ?? 'null')}" → "${String(level ?? 'null')}"`)
 
   const user = input.positionAssignment
@@ -303,7 +247,6 @@ export async function updateUser(input: UpdateUserInput) {
           data: {
             name: input.name,
             email: input.email,
-            departmentId: nextDepartmentId,
             role: finalRole,
             level,
             updatedAt: new Date(),
@@ -334,7 +277,6 @@ export async function updateUser(input: UpdateUserInput) {
         data: {
           name: input.name,
           email: input.email,
-          departmentId: nextDepartmentId,
           role: finalRole,
           level,
           updatedAt: new Date(),
@@ -554,37 +496,4 @@ export async function changePassword(currentPassword: string, newPassword: strin
   })
 
   return { success: true }
-}
-
-/**
- * Get users from a specific department for custom approval hierarchy
- * Returns users with level >= specified minimum level
- */
-export async function getUsersForCustomHierarchy(departmentId: string, minLevel: number = 1) {
-  const session = await auth()
-  if (!session?.user?.id) {
-    throw new Error('Not authenticated')
-  }
-
-  const users = await prisma.user.findMany({
-    where: {
-      departmentId,
-      isActive: true,
-      level: {
-        gte: minLevel,
-      },
-    },
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      level: true,
-    },
-    orderBy: [
-      { level: 'desc' },
-      { name: 'asc' },
-    ],
-  })
-
-  return users
 }

@@ -23,17 +23,14 @@ describe('approval-chain level generation contracts', () => {
     assert.equal(normalizePersistedApprovalLevel(null), null)
   })
 
-  it('wires approvals and solutions chain builders to the shared level policy', () => {
+  it('drops legacy numeric chain builders from approvals and solutions', () => {
     const approvals = read('src/server-actions/approvals.ts')
     const solutions = read('src/server-actions/solutions.ts')
 
-    assert.match(approvals, /getApprovalLevelsAboveSubmitter/)
-    assert.match(approvals, /normalizePersistedApprovalLevel|validateApprovalLevel/)
-    assert.match(approvals, /gte:\s*MIN_APPROVAL_LEVEL|gte:\s*1/)
-    assert.match(approvals, /lte:\s*MAX_APPROVAL_LEVEL|lte:\s*10/)
-
-    assert.match(solutions, /getApprovalLevelsAboveSubmitter/)
-    assert.match(solutions, /normalizePersistedApprovalLevel|validateApprovalLevel/)
+    assert.doesNotMatch(approvals, /getApprovalLevelsAboveSubmitter/)
+    assert.doesNotMatch(approvals, /createApprovalChain/)
+    assert.doesNotMatch(solutions, /getApprovalLevelsAboveSubmitter/)
+    assert.doesNotMatch(solutions, /createHierarchyApprovalChain/)
   })
 
   it('uses shared labels for hierarchy columns', () => {

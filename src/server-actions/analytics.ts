@@ -23,6 +23,8 @@ import {
   buildEngineeringResolutionTrend,
 } from '@/lib/engineering-resolution-trend'
 import { buildRequestVisibilityWhere, createRequestVisibilityDb } from '@/lib/request-visibility/scope'
+import { buildUnitSubtreeRequestFilter } from '@/lib/unit-labels'
+import type { OrganizationUnitNode } from '@/lib/organization/model'
 
 /**
  * Get analytics data with applied filters
@@ -43,9 +45,25 @@ export async function getAnalyticsData(filters: AnalyticsFilters): Promise<Analy
   // Calculate date range filter
   const dateFilter = getDateRangeFilter(filters.dateRange)
 
+  let unitFilter: { organizationUnitId: { in: string[] } } | undefined
+  if (filters.unitId) {
+    const units = await prisma.organization_units.findMany({
+      select: {
+        id: true,
+        name: true,
+        parentId: true,
+        isActive: true,
+        shareRequests: true,
+        canWorkOnSolutions: true,
+        managerUserId: true,
+      },
+    }) as OrganizationUnitNode[]
+    unitFilter = buildUnitSubtreeRequestFilter(units, filters.unitId)
+  }
+
   const extraFilters = {
     ...(dateFilter && { createdAt: dateFilter }),
-    ...(filters.departmentId && { departmentId: filters.departmentId }),
+    ...(unitFilter ?? {}),
     ...(filters.status && { status: filters.status }),
     ...(filters.requesterId && { requesterId: filters.requesterId }),
   }
@@ -63,7 +81,7 @@ export async function getAnalyticsData(filters: AnalyticsFilters): Promise<Analy
       visibilityWhere,
       {
         ...(prevDateFilter && { createdAt: prevDateFilter }),
-        ...(filters.departmentId && { departmentId: filters.departmentId }),
+        ...(unitFilter ?? {}),
         ...(filters.status && { status: filters.status }),
         ...(filters.requesterId && { requesterId: filters.requesterId }),
       },
@@ -78,7 +96,7 @@ export async function getAnalyticsData(filters: AnalyticsFilters): Promise<Analy
     AND: [
       visibilityWhere,
       {
-        ...(filters.departmentId && { departmentId: filters.departmentId }),
+        ...(unitFilter ?? {}),
         ...(filters.status && { status: filters.status }),
         ...(filters.requesterId && { requesterId: filters.requesterId }),
       },
@@ -128,8 +146,8 @@ export async function getAnalyticsFilters(): Promise<{
     throw new Error('Unauthorized')
   }
 
-  // Fetch all departments
-  const departments = await prisma.departments.findMany({
+  const departments = await prisma.organization_units.findMany({
+    where: { isActive: true },
     select: {
       id: true,
       name: true,

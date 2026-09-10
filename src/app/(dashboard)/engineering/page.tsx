@@ -30,7 +30,6 @@ export default async function EngineeringDashboardPage() {
 		select: {
 			id: true,
 			role: true,
-			departmentId: true,
 		},
 	});
 

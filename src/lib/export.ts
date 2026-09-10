@@ -14,7 +14,7 @@ export type AuditActivityRecord = RequestActivity & {
   request: {
     id: string
     title: string
-    departmentId: string | null
+    organizationUnitId: string | null
     status: string
   } | null
 }
@@ -44,8 +44,8 @@ export interface AuditCSVRow {
 export interface AuditExportJSON {
   requestId: string
   requestTitle: string
-  departmentId: string | null
-  departmentName: string | null
+  organizationUnitId: string | null
+  unitPathNames: string[]
   createdAt: string
   status: string
   requester: {
@@ -157,8 +157,8 @@ export function generateJSONExport(requests: RequestSnapshot[]): string {
   const exportData: AuditExportJSON[] = requests.map((request) => ({
     requestId: request.id,
     requestTitle: request.title,
-    departmentId: request.departmentId,
-    departmentName: request.department?.name || null,
+    organizationUnitId: request.organizationUnitId,
+    unitPathNames: request.department ? [request.department.name] : [],
     createdAt: request.createdAt.toISOString(),
     status: request.status,
     requester: {

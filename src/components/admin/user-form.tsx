@@ -143,11 +143,9 @@ export function UserForm({ departments, organizationUnits = [], initialData, onS
     setError(null)
 
     try {
-      const departmentId = data.departmentId ? data.departmentId : null
       const submitData = {
         name: data.name,
         email: data.email,
-        departmentId,
         role: data.role || autoRole,
         level: data.level ?? null,
         positionAssignment: data.unitId && data.positionCode

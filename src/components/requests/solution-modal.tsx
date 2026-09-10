@@ -93,7 +93,7 @@ interface User {
 	name: string;
 	email: string;
 	role: string;
-	departmentName: string | null;
+	unitPathNames: string[];
 	level?: number;
 }
 
@@ -431,7 +431,7 @@ function CustomApprovalPicker({
 											{user.name}
 										</p>
 										<p className="text-xs text-slate-400">
-											{user.departmentName ?? "No department"} • {user.email}
+											{(user.unitPathNames.length ? user.unitPathNames.join(' / ') : 'No unit')} • {user.email}
 										</p>
 									</div>
 									<div className="flex items-center gap-1">
@@ -497,7 +497,7 @@ function CustomApprovalPicker({
 												{user.name}
 											</p>
 											<p className="text-xs text-slate-400">
-												{user.departmentName ?? "No department"} • {user.email}
+												{(user.unitPathNames.length ? user.unitPathNames.join(' / ') : 'No unit')} • {user.email}
 											</p>
 										</div>
 										<Plus className="w-4 h-4 text-slate-400" />

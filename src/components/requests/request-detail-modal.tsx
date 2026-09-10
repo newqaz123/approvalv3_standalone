@@ -94,7 +94,7 @@ export function RequestDetailModal({
   const [canApproveFinal, setCanApproveFinal] = useState(false)
   const [finalApproval, setFinalApproval] = useState<any>(null)
   const [finalApprovals, setFinalApprovals] = useState<any[]>([])
-  const [departmentUsers, setDepartmentUsers] = useState<Array<{ id: string; name: string; email: string; departmentName: string | null; level: number | null }>>([])
+  const [departmentUsers, setDepartmentUsers] = useState<Array<{ id: string; name: string; email: string; unitPathNames: string[] }>>([])
   const [showStaleWarning, setShowStaleWarning] = useState(false)
   const [isUserInteracting, setIsUserInteracting] = useState(false)
   const [interactionTimer, setInteractionTimer] = useState<NodeJS.Timeout | null>(null)
@@ -272,15 +272,15 @@ export function RequestDetailModal({
       } else if (data?.status === 'SendBackToRequester') {
         // Load department users for final approval initiation
         // We'll fetch users from the request's department
-        if (data?.departmentId) {
+        if (data?.organizationUnitId) {
           try {
-            const response = await fetch(`/api/departments/${data.departmentId}/users`)
+            const response = await fetch(`/api/organization/unit-users?unitId=${data.organizationUnitId}`)
             if (response.ok) {
               const users = await response.json()
               setDepartmentUsers(users)
             }
           } catch (error) {
-            console.error('Failed to load department users:', error)
+            console.error('Failed to load unit users:', error)
           }
         }
       }

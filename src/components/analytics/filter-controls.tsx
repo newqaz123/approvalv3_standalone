@@ -33,8 +33,8 @@ export function FilterControls({ filters, onFilterChange }: FilterControlsProps)
   const [dateRange, setDateRange] = React.useState<DateRangePreset>(
     (searchParams.get('dateRange') as DateRangePreset) || '30days'
   )
-  const [departmentId, setDepartmentId] = React.useState<string | undefined>(
-    searchParams.get('departmentId') || undefined
+  const [unitId, setUnitId] = React.useState<string | undefined>(
+    searchParams.get('unitId') || undefined
   )
   const [status, setStatus] = React.useState<string | undefined>(
     searchParams.get('status') || undefined
@@ -43,7 +43,7 @@ export function FilterControls({ filters, onFilterChange }: FilterControlsProps)
     searchParams.get('requesterId') || undefined
   )
   const [showAdvanced, setShowAdvanced] = React.useState(
-    !!(searchParams.get('departmentId') || searchParams.get('status') || searchParams.get('requesterId'))
+    !!(searchParams.get('unitId') || searchParams.get('status') || searchParams.get('requesterId'))
   )
 
   // Status options based on workflow
@@ -65,7 +65,7 @@ export function FilterControls({ filters, onFilterChange }: FilterControlsProps)
     { value: 'all', label: 'All' },
   ]
 
-  const hasActiveFilters = !!(departmentId || status || requesterId)
+  const hasActiveFilters = !!(unitId || status || requesterId)
 
   /**
    * Apply filters and notify parent component
@@ -73,7 +73,7 @@ export function FilterControls({ filters, onFilterChange }: FilterControlsProps)
   function handleApplyFilter() {
     const newFilters: AnalyticsFilters = {
       dateRange,
-      ...(departmentId && { departmentId }),
+      ...(unitId && { unitId }),
       ...(status && { status }),
       ...(requesterId && { requesterId }),
     }
@@ -81,7 +81,7 @@ export function FilterControls({ filters, onFilterChange }: FilterControlsProps)
   }
 
   function clearFilters() {
-    setDepartmentId(undefined)
+    setUnitId(undefined)
     setStatus(undefined)
     setRequesterId(undefined)
   }
@@ -90,7 +90,7 @@ export function FilterControls({ filters, onFilterChange }: FilterControlsProps)
   React.useEffect(() => {
     handleApplyFilter()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dateRange, departmentId, status, requesterId])
+  }, [dateRange, unitId, status, requesterId])
 
   return (
     <div className="space-y-3">
@@ -125,7 +125,7 @@ export function FilterControls({ filters, onFilterChange }: FilterControlsProps)
           Filters
           {hasActiveFilters && (
             <span className="ml-1 rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-bold text-primary-foreground">
-              {[departmentId, status, requesterId].filter(Boolean).length}
+              {[unitId, status, requesterId].filter(Boolean).length}
             </span>
           )}
         </Button>
@@ -149,8 +149,8 @@ export function FilterControls({ filters, onFilterChange }: FilterControlsProps)
         <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/30 p-3">
           {/* Department Filter */}
           <Select
-            value={departmentId || 'all'}
-            onValueChange={(value) => setDepartmentId(value === 'all' ? undefined : value)}
+            value={unitId || 'all'}
+            onValueChange={(value) => setUnitId(value === 'all' ? undefined : value)}
           >
             <SelectTrigger className="w-[180px] bg-background">
               <SelectValue placeholder="All Departments" />

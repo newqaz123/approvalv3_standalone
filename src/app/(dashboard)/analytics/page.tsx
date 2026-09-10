@@ -15,7 +15,7 @@ export default async function AnalyticsDashboard() {
   const [initialData, filters] = await Promise.all([
     getAnalyticsData({
       dateRange: '30days',
-      departmentId: undefined,
+      unitId: undefined,
       status: undefined,
       requesterId: undefined,
     }),

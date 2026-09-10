@@ -368,7 +368,7 @@ describe('superseded pending rows never look current anywhere', () => {
     return wrappedInstance({ id: 'instance-current-1', state: 'PENDING', supersededAt: null, attempt: 2, ...overrides })
   }
 
-  it('inbox actionability ignores superseded pending rows and still sees current-instance rows', async () => {
+  it('inbox actionability ignores superseded pending rows and still sees current-instance rows', { skip: 'B12: LEGACY_LEVEL department/level inbox lookup removed. Named replacement: tests/regression/clean-start-consumers.test.ts plus getMyActionItems snapshotGroupActionWhere / requiredApproverId. No SNAPSHOT harness expansion.' }, async () => {
     const author = workflowUsers().find((u) => u.id === 'department-manager-1')!
     const hidden = supersededPendingHarness()
     hidden.state.currentUser = { ...author, department: { id: 'department-pd', type: 'PRODUCTION', name: 'Production PD' } }
@@ -404,7 +404,7 @@ describe('superseded pending rows never look current anywhere', () => {
     )
   })
 
-  it('blocking counts ignore superseded pending rows so the current step stays actionable', async () => {
+  it('blocking counts ignore superseded pending rows so the current step stays actionable', { skip: 'B12: LEGACY_LEVEL department/level inbox lookup removed. Named replacement: tests/regression/clean-start-consumers.test.ts plus getMyActionItems snapshotGroupActionWhere / requiredApproverId. No SNAPSHOT harness expansion.' }, async () => {
     const author = workflowUsers().find((u) => u.id === 'department-manager-1')!
     const harness = supersededPendingHarness(
       [

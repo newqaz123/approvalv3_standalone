@@ -80,7 +80,7 @@ describe('organization admin UI contracts', () => {
     assert.match(form, /positionCode/)
     assert.match(form, /unitId/)
     assert.doesNotMatch(form, /AdditionalDepartmentsSection/)
-    assert.match(users, /departmentId\?:\s*string\s*\|\s*null/)
+    assert.doesNotMatch(users, /departmentId\?:\s*string\s*\|\s*null/)
     assert.match(users, /positionAssignment/)
   })
 
@@ -287,7 +287,6 @@ describe('Factory Manager create', () => {
     const created = await harness.userActions.createUser({
       name: 'Factory Manager',
       email: 'factory-manager@example.test',
-      departmentId: null,
       role: 'general_dept',
       positionAssignment: {
         unitId: ADMIN_SCENARIO.factoryId,
@@ -295,9 +294,8 @@ describe('Factory Manager create', () => {
         reportingGroupId: null,
         isPrimary: true,
       },
-    }) as { id: string; departmentId: string | null; level: number | null; role: string }
+    }) as { id: string; level: number | null; role: string }
 
-    assert.equal(created.departmentId, null)
     assert.equal(created.level, null)
     assert.equal(created.role, 'general_dept')
     const assignments = harness.db.snapshot('organization_position_assignments').filter((row) => row.userId === created.id)

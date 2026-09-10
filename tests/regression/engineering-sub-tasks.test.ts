@@ -425,7 +425,7 @@ describe("engineering sub-task request and filter wiring", () => {
 		);
 		assert.match(dashboardTable, /filterRowsByWorkRequisition/);
 		assert.match(dashboardTable, /data: tableData/);
-		assert.match(dashboardTable, /id: 'departmentId'/);
+		assert.match(dashboardTable, /id: 'unitId'/);
 		assert.match(
 			dashboardTable,
 			/accessorFn: \(row\) => row\.department\?\.id/,
@@ -607,7 +607,7 @@ describe("engineering stale sub-task filters", () => {
 		assert.match(tabs, /subContractors: Array<\{ id: string; name: string \}>/);
 		assert.match(tabs, /engineeringUsers: Array<\{/);
 		assert.match(tabs, /email: string;/);
-		assert.match(tabs, /level: number \| null;/);
+		assert.doesNotMatch(tabs, /level: number \| null;/);
 		assert.match(
 			tabs,
 			/assignedEngineers: Array<\{ id: string; name: string \}>/,

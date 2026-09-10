@@ -15,7 +15,7 @@ interface BudgetCodeCreateDialogProps {
     budgetCode: string
     name: string
     budgetAmount: number
-    departmentId: string | null
+    unitId: string | null
   }) => Promise<void>
 }
 
@@ -23,7 +23,7 @@ export function BudgetCodeCreateDialog({ open, onOpenChange, departments, onCrea
   const [budgetCode, setBudgetCode] = useState('')
   const [name, setName] = useState('')
   const [budgetAmount, setBudgetAmount] = useState('')
-  const [departmentId, setDepartmentId] = useState<string>('none')
+  const [unitId, setDepartmentId] = useState<string>('none')
   const [isSaving, setIsSaving] = useState(false)
 
   const parsedAmount = Number(budgetAmount)
@@ -41,7 +41,7 @@ export function BudgetCodeCreateDialog({ open, onOpenChange, departments, onCrea
         budgetCode,
         name: name.trim(),
         budgetAmount: parsedAmount,
-        departmentId: departmentId === 'none' ? null : departmentId,
+        unitId: unitId === 'none' ? null : unitId,
       })
       setBudgetCode('')
       setName('')
@@ -92,7 +92,7 @@ export function BudgetCodeCreateDialog({ open, onOpenChange, departments, onCrea
           </div>
           <div className="space-y-2">
             <Label>Department budget</Label>
-            <Select value={departmentId} onValueChange={setDepartmentId}>
+            <Select value={unitId} onValueChange={setDepartmentId}>
               <SelectTrigger>
                 <SelectValue placeholder="Select department" />
               </SelectTrigger>

@@ -20,7 +20,7 @@ export async function GET() {
 
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { level: true, departmentId: true, role: true },
+      select: { id: true },
     })
 
     if (!user) {
@@ -31,32 +31,11 @@ export async function GET() {
       { requiredApproverId: userId },
       snapshotGroupActionWhere(userId),
     ]
-    if (user.level && user.departmentId) {
-      requestOrConditions.push({
-        routingMode: 'LEGACY_LEVEL',
-        requiredLevel: user.level,
-        request: { departmentId: user.departmentId },
-      })
-    }
-    const crossDeptApprovals = await prisma.department_approvers.findMany({
-      where: { approverId: userId },
-      select: { departmentId: true, approverLevel: true },
-    })
-    for (const cda of crossDeptApprovals) {
-      requestOrConditions.push({
-        routingMode: 'LEGACY_LEVEL',
-        requiredLevel: cda.approverLevel,
-        request: { departmentId: cda.departmentId },
-      })
-    }
 
     const solutionOrConditions: any[] = [
       { requiredApproverId: userId },
       snapshotGroupActionWhere(userId),
     ]
-    if (user.level && user.role === 'engineering') {
-      solutionOrConditions.push({ routingMode: 'LEGACY_LEVEL', requiredLevel: user.level })
-    }
 
     const [requestApprovalCount, solutionApprovalCount] = await Promise.all([
       prisma.request_approvals.count({

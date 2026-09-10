@@ -8,7 +8,6 @@ export interface SignUpInput {
   name: string
   email: string
   password: string
-  departmentId?: string
 }
 
 /**
@@ -31,15 +30,14 @@ export async function signUp(input: SignUpInput) {
       email: input.email,
       name: input.name,
       passwordHash,
-      departmentId: null, // No department assigned yet - admin will assign later
-      role: 'general_dept', // Default role, will be updated when department is assigned
+      role: 'general_dept',
       isActive: true,
       forcePasswordChange: false,
       updatedAt: new Date(),
     },
   })
 
-  console.log(`User signed up: ${input.email} (pending department assignment)`)
+  console.log(`User signed up: ${input.email} (pending organization assignment)`)
 
   revalidatePath('/admin/users')
   return { success: true, userId: user.id }

@@ -1,13 +1,6 @@
 'use server'
 
 import { auth } from '@/lib/auth-config'
-import {
-  getApprovalLevelsAboveSubmitter,
-  MAX_APPROVAL_LEVEL,
-  MIN_APPROVAL_LEVEL,
-  normalizePersistedApprovalLevel,
-  validateApprovalLevel,
-} from '@/lib/approval-levels'
 import prisma from '@/lib/prisma'
 import { RequestStatus, UserRole, type Prisma } from '@prisma/client'
 import { submitSolutionSchema, SubmitSolutionInput, resubmitSolutionSchema, ResubmitSolutionInput } from '@/lib/schemas/solution-schemas'
@@ -101,27 +94,6 @@ function translateAttemptConflict(error: unknown): never {
   const code = (error as { code?: unknown })?.code
   if (code === 'P2034' || code === '40001') throw new ApprovalEngineConflictError()
   throw error
-}
-
-async function getMaxValidLevelInDepartment(
-  tx: { user: { findFirst: Function } },
-  departmentId: string,
-): Promise<number> {
-  const maxUser = await tx.user.findFirst({
-    where: {
-      departmentId,
-      isActive: true,
-      level: { gte: MIN_APPROVAL_LEVEL, lte: MAX_APPROVAL_LEVEL },
-    },
-    orderBy: { level: 'desc' },
-    select: { level: true },
-  })
-
-  return normalizePersistedApprovalLevel(maxUser?.level) ?? MIN_APPROVAL_LEVEL
-}
-
-function normalizeSubmitterLevel(level: number | null | undefined): number {
-  return normalizePersistedApprovalLevel(level) ?? MIN_APPROVAL_LEVEL
 }
 
 /**
@@ -296,7 +268,7 @@ export async function submitSolution(input: SubmitSolutionActionInput) {
   // Get current user with role and level
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, role: true, departmentId: true, level: true, isActive: true },
+    select: { id: true, role: true, level: true, isActive: true },
   })
 
   if (!user) {
@@ -319,7 +291,6 @@ export async function submitSolution(input: SubmitSolutionActionInput) {
       id: true,
       title: true,
       status: true,
-      departmentId: true,
       requesterId: true,
       organizationUnitId: true,
     },
@@ -625,70 +596,6 @@ async function createCustomApprovalChain(
 }
 
 /**
- * Create a hierarchy-based approval chain for a solution
- * Reuses the logic from approvals.ts createApprovalChain
- * All levels above submitter need to approve
- */
-async function createHierarchyApprovalChain(
-  tx: any,
-  solutionId: string,
-  departmentId: string,
-  submitterLevel: number,
-  submitterId: string
-) {
-  const maxLevel = validateApprovalLevel(await getMaxValidLevelInDepartment(tx, departmentId))
-  const normalizedSubmitter = normalizeSubmitterLevel(submitterLevel)
-
-  const approvals = []
-  let order = 1
-
-  // If submitter is top-level, create auto-approved record
-  if (normalizedSubmitter >= maxLevel) {
-    approvals.push({
-      solutionId,
-      requiredLevel: maxLevel,
-      order: 1,
-      status: 'approved' as const,
-      approverId: submitterId,
-      approvedAt: new Date(),
-      comments: 'Auto-approved (top-level submitter)',
-      isCustomChain: false,
-    })
-  } else {
-    // Create approvals for all levels between submitter and max level
-    for (const level of getApprovalLevelsAboveSubmitter(normalizedSubmitter, maxLevel)) {
-      const requiredLevel = validateApprovalLevel(level)
-
-      // Check if there are active users at this level
-      const hasUsersAtLevel = await tx.user.findFirst({
-        where: {
-          departmentId,
-          level: requiredLevel,
-          isActive: true,
-        },
-        select: { id: true },
-      })
-
-      if (hasUsersAtLevel) {
-        approvals.push({
-          solutionId,
-          requiredLevel,
-          order: order++,
-          status: 'pending' as const,
-          isCustomChain: false,
-        })
-      }
-    }
-  }
-
-  if (approvals.length > 0) {
-    await tx.solution_approvals.createMany({ data: approvals })
-  }
-
-  return approvals
-}
-
-/**
  * Get solution by ID with related data. Authenticated callers must also pass
  * the shared request-visibility policy for the owning request before any
  * solution payload, request context, or attachment list is returned.
@@ -815,22 +722,12 @@ export async function getSolutionApprovals(solutionId: string) {
     where: { id: solutionId },
     include: {
       request: {
-        select: { departmentId: true },
+        select: { id: true },
       },
     },
   })
 
   if (!solution) {
-    return []
-  }
-
-  // Get engineering department ID
-  const engineeringDept = await prisma.departments.findFirst({
-    where: { type: 'ENGINEERING' },
-    select: { id: true },
-  })
-
-  if (!engineeringDept) {
     return []
   }
 
@@ -862,22 +759,13 @@ export async function getSolutionApprovals(solutionId: string) {
     approvals.map(async (approval) => {
       let eligibleApprovers: Array<{ id: string; name: string; level: number | null }> = []
 
-      // For hierarchy-based pending approvals, get eligible users at this level
-      if (approval.status === 'pending' && !approval.isCustomChain && approval.requiredLevel) {
-        const users = await prisma.user.findMany({
-          where: {
-            departmentId: engineeringDept.id,
-            level: approval.requiredLevel,
-            isActive: true,
-          },
-          select: {
-            id: true,
-            name: true,
-            level: true,
-          },
+      if (approval.status === 'pending' && approval.candidateGroupId) {
+        const users = await prisma.approval_candidate_group_members.findMany({
+          where: { candidateGroupId: approval.candidateGroupId },
+          select: { userId: true, capturedDisplayName: true },
           take: 10,
         })
-        eligibleApprovers = users.filter(u => u.level !== null)
+        eligibleApprovers = users.map((row) => ({ id: row.userId, name: row.capturedDisplayName, level: null }))
       }
 
       return {
@@ -906,7 +794,7 @@ export async function canUserApproveSolution(solutionId: string): Promise<{
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, level: true, departmentId: true, role: true },
+    select: { id: true, role: true },
   })
 
   if (!user) {
@@ -920,7 +808,6 @@ export async function canUserApproveSolution(solutionId: string): Promise<{
       request: {
         select: {
           status: true,
-          departmentId: true,
         },
       },
     },
@@ -1377,7 +1264,7 @@ export async function initiateFinalApproval(
   // Get current user
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, role: true, departmentId: true, level: true },
+    select: { id: true, role: true, level: true },
   })
 
   if (!user) {
@@ -1391,7 +1278,6 @@ export async function initiateFinalApproval(
       id: true,
       title: true,
       status: true,
-      departmentId: true,
       organizationUnitId: true,
       requesterId: true,
     },
@@ -1406,7 +1292,6 @@ export async function initiateFinalApproval(
   }
 
   // O3: initiator holds an active assignment in the request's originating unit.
-  const requestDepartmentId = request.departmentId
   const actorAssignment = await loadActiveAssignment(user.id)
   const requestOriginUnitId = request.organizationUnitId ?? ''
 
@@ -1440,17 +1325,6 @@ export async function initiateFinalApproval(
     }
     throw new Error('Only members of the request\'s originating unit can initiate final approval')
   }
-
-  // Get max level in department for top-level check. Legacy-only: typed NEW
-  // requests resolve their ceiling from the published route, so a missing
-  // legacy department must never reach the numeric-level lookup.
-  const maxLevel = requestDepartmentId !== null
-    ? validateApprovalLevel(
-        await getMaxValidLevelInDepartment(prisma, requestDepartmentId),
-      )
-    : null
-  const initiatorLevel = normalizeSubmitterLevel(user.level)
-  const isTopLevelInitiator = maxLevel !== null && initiatorLevel >= maxLevel
 
   await runSolutionTransactionWithNotifications(
     async (tx, notifications) => {
@@ -1592,75 +1466,6 @@ async function createCustomFinalApprovalChain(
 }
 
 /**
- * Create hierarchy-based final approval chain
- * Uses department's approval hierarchy (like Phase 3)
- */
-async function createHierarchyFinalApprovalChain(
-  tx: any,
-  requestId: string,
-  departmentId: string,
-  initiatorId: string
-) {
-  // Get initiator's level
-  const initiator = await tx.user.findUnique({
-    where: { id: initiatorId },
-    select: { level: true },
-  })
-
-  const initiatorLevel = normalizeSubmitterLevel(initiator?.level)
-  const maxLevel = validateApprovalLevel(await getMaxValidLevelInDepartment(tx, departmentId))
-
-  const approvals = []
-  let order = 1
-
-  // If initiator is top-level, auto-approve
-  if (initiatorLevel >= maxLevel) {
-    approvals.push({
-      requestId,
-      requiredLevel: maxLevel,
-      order: 1,
-      status: 'approved' as const,
-      approverId: initiatorId,
-      approvedAt: new Date(),
-      comments: 'Auto-approved (top-level initiator)',
-      isCustomChain: false,
-      isFinalApproval: true,
-    })
-  } else {
-    // Create approvals for all levels between initiator and max level
-    for (const level of getApprovalLevelsAboveSubmitter(initiatorLevel, maxLevel)) {
-      const requiredLevel = validateApprovalLevel(level)
-
-      const hasUsersAtLevel = await tx.user.findFirst({
-        where: {
-          departmentId,
-          level: requiredLevel,
-          isActive: true,
-        },
-        select: { id: true },
-      })
-
-      if (hasUsersAtLevel) {
-        approvals.push({
-          requestId,
-          requiredLevel,
-          order: order++,
-          status: 'pending' as const,
-          isCustomChain: false,
-          isFinalApproval: true,
-        })
-      }
-    }
-  }
-
-  if (approvals.length > 0) {
-    await tx.request_approvals.createMany({ data: approvals })
-  }
-
-  return approvals
-}
-
-/**
  * Resolve the next final approver(s) using transaction reads and enqueue
  * immutable notification descriptions for post-commit dispatch.
  */
@@ -1681,7 +1486,6 @@ async function queueNextFinalApproverNotifications(
       request: {
         select: {
           title: true,
-          departmentId: true,
         },
       },
     },
@@ -1715,7 +1519,7 @@ export async function canUserApproveFinalApproval(requestId: string): Promise<{
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, level: true, departmentId: true },
+    select: { id: true },
   })
 
   if (!user) {
@@ -1988,7 +1792,7 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
   // Get current user with role and level
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, role: true, departmentId: true, level: true, isActive: true },
+    select: { id: true, role: true, level: true, isActive: true },
   })
 
   if (!user) {

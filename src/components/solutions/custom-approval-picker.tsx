@@ -24,8 +24,7 @@ interface User {
   id: string
   name: string
   email: string
-  departmentName: string | null
-  level: number | null
+  unitPathNames: string[]
 }
 
 interface CustomApprovalPickerProps {
@@ -131,13 +130,8 @@ export function CustomApprovalPicker({
                         <User className="mr-2 h-4 w-4" />
                         <span className="flex-1">{user.name}</span>
                         <span className="text-xs text-muted-foreground">
-                          {user.departmentName ?? 'No department'} • {user.email}
+                          {(user.unitPathNames.length ? user.unitPathNames.join(' / ') : 'No unit')} • {user.email}
                         </span>
-                        {user.level != null && (
-                          <span className="text-xs text-muted-foreground">
-                            Level {user.level}
-                          </span>
-                        )}
                         <Check
                           className={cn(
                             'ml-2 h-4 w-4',
@@ -181,7 +175,7 @@ export function CustomApprovalPicker({
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate">{user.name}</p>
                   <p className="text-xs text-muted-foreground truncate">
-                    {user.departmentName ?? 'No department'} • {user.email}
+                    {(user.unitPathNames.length ? user.unitPathNames.join(' / ') : 'No unit')} • {user.email}
                   </p>
                 </div>
                 <div className="flex items-center gap-1">

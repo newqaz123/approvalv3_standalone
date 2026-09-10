@@ -24,7 +24,6 @@ interface EngineerUser {
 	id: string;
 	name: string;
 	email: string;
-	level: number | null;
 }
 
 interface EngineerPicPickerProps {
@@ -156,11 +155,7 @@ export function EngineerPicPicker({
 									<div className="flex-1">
 										<div className="flex items-center justify-between">
 											<span className="font-medium">{user.name}</span>
-											{user.level !== null && (
-												<Badge variant="outline" className="text-xs ml-2">
-													L{user.level}
-												</Badge>
-											)}
+
 										</div>
 										<span className="text-xs text-muted-foreground">
 											{user.email}

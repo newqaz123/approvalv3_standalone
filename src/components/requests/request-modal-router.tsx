@@ -117,9 +117,8 @@ function RequestModalRouterContent({
 			id: string;
 			name: string;
 			email: string;
-			level: number | undefined;
 			role: string;
-			departmentName: string | null;
+			unitPathNames: string[];
 		}>
 	>([]);
 
@@ -195,7 +194,7 @@ function RequestModalRouterContent({
 					.filter((u: any) => u.id !== user?.id)
 					.map((u: any) => ({
 						...u,
-						level: u.level ?? undefined,
+						unitPathNames: Array.isArray(u.unitPathNames) ? u.unitPathNames : [],
 					}));
 				setAvailableUsers(filteredUsers);
 			}

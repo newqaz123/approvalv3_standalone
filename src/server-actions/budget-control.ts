@@ -47,7 +47,7 @@ const requiredMoneySchema = z.preprocess((value) => {
 const filtersSchema = z.object({
   budgetCodeSearch: z.string().optional(),
   requestSearch: z.string().optional(),
-  departmentId: z.string().optional(),
+  unitId: z.string().optional(),
   status: z.string().optional(),
   dateFrom: z.string().optional(),
   dateTo: z.string().optional(),
@@ -58,7 +58,7 @@ const assignSchema = z.object({
   budgetCodeId: z.string().min(1).optional(),
   budgetCode: z.string().min(1).optional(),
   budgetAmount: moneySchema,
-  departmentId: z.string().min(1).nullable().optional(),
+  unitId: z.string().min(1).nullable().optional(),
 }).superRefine((data, ctx) => {
   if (Boolean(data.budgetCodeId) === Boolean(data.budgetCode)) {
     ctx.addIssue({
@@ -78,14 +78,14 @@ const budgetAmountSchema = z.object({
   budgetCodeId: z.string().min(1),
   name: z.string().trim().min(1),
   budgetAmount: requiredMoneySchema,
-  departmentId: z.string().min(1).nullable().optional(),
+  unitId: z.string().min(1).nullable().optional(),
 })
 
 const createBudgetCodeSchema = z.object({
   budgetCode: z.string().min(1),
   name: z.string().trim().min(1),
   budgetAmount: requiredMoneySchema,
-  departmentId: z.string().min(1).nullable().optional(),
+  unitId: z.string().min(1).nullable().optional(),
 })
 
 const pasteBudgetCodesSchema = z.object({
@@ -255,16 +255,16 @@ export async function getBudgetMonitorData(input: BudgetMonitorFilters = {}): Pr
   let mapped = requests.map(mapBudgetRequest)
   const assignedRequests = mapped.filter((request) => request.budgetCode)
   let budgetRequests = assignedRequests
-  if (filters.departmentId) {
-    budgetRequests = budgetRequests.filter((request) => request.budgetCode?.department?.id === filters.departmentId)
+  if (filters.unitId) {
+    budgetRequests = budgetRequests.filter((request) => request.budgetCode?.department?.id === filters.unitId)
   }
   if (filters.budgetCodeSearch) {
     budgetRequests = budgetRequests.filter((request) => matchesBudgetMonitorSearch(request, filters.budgetCodeSearch!))
   }
 
   let remainingRequests = mapped.filter((request) => !request.budgetCode)
-  if (filters.departmentId) {
-    remainingRequests = remainingRequests.filter((request) => request.department?.id === filters.departmentId)
+  if (filters.unitId) {
+    remainingRequests = remainingRequests.filter((request) => request.department?.id === filters.unitId)
   }
   if (filters.requestSearch) {
     const requestSearch = filters.requestSearch.toLowerCase()
@@ -274,8 +274,8 @@ export async function getBudgetMonitorData(input: BudgetMonitorFilters = {}): Pr
   }
 
   let pageRequests = mapped
-  if (filters.departmentId) {
-    pageRequests = pageRequests.filter((request) => request.department?.id === filters.departmentId)
+  if (filters.unitId) {
+    pageRequests = pageRequests.filter((request) => request.department?.id === filters.unitId)
   }
   if (filters.budgetCodeSearch) {
     pageRequests = pageRequests.filter((request) =>
@@ -284,8 +284,8 @@ export async function getBudgetMonitorData(input: BudgetMonitorFilters = {}): Pr
   }
 
   let budgetCodes = mergeBudgetCodes(mapped, creatorBudgetCodes)
-  if (filters.departmentId) {
-    budgetCodes = budgetCodes.filter((budgetCode) => budgetCode.department?.id === filters.departmentId)
+  if (filters.unitId) {
+    budgetCodes = budgetCodes.filter((budgetCode) => budgetCode.department?.id === filters.unitId)
   }
   if (filters.budgetCodeSearch) {
     budgetCodes = budgetCodes.filter((budgetCode) =>
@@ -325,7 +325,7 @@ export async function assignRequestToBudgetCode(input: z.infer<typeof assignSche
           code: normalizedCode,
           displayCode: data.budgetCode!.trim(),
           budgetAmount: data.budgetAmount ?? null,
-          departmentId: data.departmentId ?? null,
+          unitId: data.unitId ?? null,
           createdById: user.id,
         },
       })
@@ -382,7 +382,7 @@ export async function updateBudgetCodeAmount(input: z.infer<typeof budgetAmountS
     data: {
       name: data.name,
       budgetAmount: data.budgetAmount,
-      ...(data.departmentId !== undefined ? { departmentId: data.departmentId } : {}),
+      ...(data.unitId !== undefined ? { unitId: data.unitId } : {}),
     },
   })
   revalidatePath('/budget-monitor')
@@ -404,7 +404,7 @@ export async function createBudgetCode(input: z.infer<typeof createBudgetCodeSch
         displayCode: data.budgetCode.trim(),
         name: data.name,
         budgetAmount: data.budgetAmount,
-        departmentId: data.departmentId ?? null,
+        unitId: data.unitId ?? null,
         createdById: user.id,
       },
     })

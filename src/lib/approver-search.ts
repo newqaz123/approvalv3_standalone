@@ -3,8 +3,7 @@ export interface ApproverSearchFields {
   name: string
   email: string
   role?: string | null
-  departmentName?: string | null
-  level?: number | null
+  unitPathNames?: readonly string[] | null
 }
 
 export function filterApproversByQuery<T extends ApproverSearchFields>(
@@ -21,11 +20,8 @@ export function filterApproversByQuery<T extends ApproverSearchFields>(
     if (user.role) {
       parts.push(user.role)
     }
-    if (user.departmentName) {
-      parts.push(user.departmentName)
-    }
-    if (user.level != null) {
-      parts.push(String(user.level), `Level ${user.level}`)
+    if (user.unitPathNames && user.unitPathNames.length > 0) {
+      parts.push(...user.unitPathNames)
     }
     return parts.join(' ').toLowerCase().includes(normalizedQuery)
   })
