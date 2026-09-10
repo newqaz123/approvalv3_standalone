@@ -334,3 +334,110 @@ describe('verify-clean-start-readiness CLI (child process, deterministic)', () =
     assert.match(run.stdout, /usage/i)
   })
 })
+
+describe('clean-start readiness FIX1 (review 9a6fbd83, NOT APPROVED remediation)', () => {
+  it('P1-1 (library): a provider RESOLVING a malformed count container is one identifying invalid-count blocker, never ready and never a throw', async () => {
+    const containers: unknown[] = [undefined, null, 3, 'nope', [1, 2], true]
+    for (const container of containers) {
+      const report = await verifyCleanStartReadiness(makeDb({
+        countPublishedRoutesByPhase: async () => container as PhaseCounts,
+      }))
+      assert.equal(report.ready, false, `container ${String(container)}`)
+      assert.deepEqual(
+        report.blockers.map((b) => b.code),
+        ['PUBLISHED_ROUTE_COUNTS_INVALID'],
+        `container ${String(container)} must be exactly one container-level blocker`,
+      )
+      assert.match(report.blockers[0].detail, /countPublishedRoutesByPhase/, String(container))
+    }
+  })
+
+  it('P1-1 (library): a resolved undefined container is NOT the failure sentinel — no READINESS_PROVIDER_ERROR may be recorded for it', async () => {
+    const report = await verifyCleanStartReadiness(makeDb({
+      countPublishedRoutesByPhase: async () => undefined as unknown as PhaseCounts,
+    }))
+    assert.equal(report.blockers.some((b) => b.code === 'READINESS_PROVIDER_ERROR'), false)
+    assert.equal(report.blockers.some((b) => b.code === 'PUBLISHED_ROUTE_COUNTS_INVALID'), true)
+  })
+
+  it('P1-1 (injected CLI): resolved malformed count containers still print a JSON report and exit 1', async () => {
+    for (const container of [undefined, null]) {
+      const prints: string[] = []
+      const code = await runVerifyCleanStartReadiness({
+        argv: [],
+        createDb: async () => makeDb({ countPublishedRoutesByPhase: async () => container as unknown as PhaseCounts }),
+        print: (line) => prints.push(line),
+      })
+      assert.equal(code, 1, String(container))
+      const report = JSON.parse(prints.join('\n')) as ReadinessReport
+      assert.equal(report.ready, false)
+      assert.deepEqual(report.blockers.map((b) => b.code), ['PUBLISHED_ROUTE_COUNTS_INVALID'])
+    }
+  })
+
+  it('P1-2 (CLI): an injected createDb that throws SYNCHRONOUSLY is caught, sanitized, and reported as JSON with exit 1', async () => {
+    const prints: string[] = []
+    const code = await runVerifyCleanStartReadiness({
+      argv: [],
+      createDb: () => {
+        throw new Error('connect failed: postgres://svc:topsecret@db.internal:5432/app_cleanstart_dev')
+      },
+      print: (line) => prints.push(line),
+    })
+    assert.equal(code, 1)
+    const report = JSON.parse(prints.join('\n')) as ReadinessReport
+    assert.equal(report.ready, false)
+    assert.deepEqual(report.blockers.map((b) => b.code), ['READINESS_PROVIDER_ERROR'])
+    assert.match(report.blockers[0].detail, /createDb/)
+    assert.doesNotMatch(JSON.stringify(report), /topsecret|postgres|db\.internal|5432/)
+  })
+
+  it('P1-2 (CLI): an injected createDb that REJECTS asynchronously is caught, sanitized, and reported as JSON with exit 1', async () => {
+    const prints: string[] = []
+    const code = await runVerifyCleanStartReadiness({
+      argv: [],
+      createDb: async () => {
+        throw new Error('auth rejected: password hunter2 via smtp://mail:secretword@relay.internal')
+      },
+      print: (line) => prints.push(line),
+    })
+    assert.equal(code, 1)
+    const report = JSON.parse(prints.join('\n')) as ReadinessReport
+    assert.equal(report.ready, false)
+    assert.deepEqual(report.blockers.map((b) => b.code), ['READINESS_PROVIDER_ERROR'])
+    assert.match(report.blockers[0].detail, /createDb/)
+    assert.doesNotMatch(JSON.stringify(report), /hunter2|secretword|smtp|relay\.internal/)
+  })
+
+  it('P2-1 (library): validates and assesses zero independently per phase — malformed phases never suppress valid zero blockers and never get root blockers', async () => {
+    const report = await verifyCleanStartReadiness(
+      makeDb({}, { REQUEST: 0, SOLUTION: Number.NaN, FINAL: 0 } as unknown as PhaseCounts),
+    )
+    assert.equal(report.ready, false)
+    assert.deepEqual(report.blockers.map((b) => b.code), [
+      ROOT_DEFAULT_ROUTES_REQUIRED, 'PUBLISHED_ROUTE_COUNTS_INVALID', ROOT_DEFAULT_ROUTES_REQUIRED,
+    ])
+    assert.match(report.blockers[0].detail, /REQUEST/)
+    assert.match(report.blockers[1].detail, /SOLUTION/)
+    assert.match(report.blockers[2].detail, /FINAL/)
+  })
+
+  it('P2-2 (CLI): help never overrides unknown arguments — every argument is validated first, both orders fail closed with no construction', async () => {
+    for (const argv of [['--bogus', '--help'], ['--help', '--bogus']]) {
+      let constructed = 0
+      const prints: string[] = []
+      const code = await runVerifyCleanStartReadiness({
+        argv,
+        createDb: () => {
+          constructed += 1
+          throw new Error('database client must not be constructed for a usage error')
+        },
+        print: (line) => prints.push(line),
+      })
+      assert.equal(code, 1, argv.join(' '))
+      assert.equal(constructed, 0, argv.join(' '))
+      assert.ok(prints.some((line) => /unknown argument: --bogus/i.test(line)))
+      assert.ok(prints.some((line) => /usage/i.test(line)))
+    }
+  })
+})

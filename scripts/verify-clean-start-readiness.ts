@@ -13,10 +13,19 @@
 // database state. R-A7-2: Plan B Task 6 MUST wire the actual ROOT-scope
 // adapter AND this normal entrypoint — injecting only in tests does not
 // finish the production CLI.
+//
+// FIX1 (review 9a6fbd83 P1-2/P2-2): EVERY argument is validated before help
+// is honored (unknown + help in any order is a fail-closed usage error), and
+// an injected `createDb` that throws synchronously OR rejects is caught and
+// reported as a sanitized JSON READINESS_PROVIDER_ERROR blocker naming
+// createDb with exit 1 — construction failures never bypass the JSON failure
+// contract, and the script-level catch below remains only for unexpected
+// internal errors, never for provider/construction failures.
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { verifyCleanStartReadiness } from '../src/lib/clean-start-readiness'
 import type { CleanStartReadinessDb, ReadinessReport } from '../src/lib/clean-start-readiness'
+import { OrganizationValidationError } from '../src/lib/organization/assignments'
 
 export interface VerifyCleanStartReadinessOptions {
   argv: readonly string[]
@@ -28,11 +37,18 @@ export interface VerifyCleanStartReadinessOptions {
 const USAGE = 'Usage: verify-clean-start-readiness [--help]'
 
 function parseArguments(argv: readonly string[]): { help: boolean } {
-  if (argv.includes('--help') || argv.includes('-h')) return { help: true }
+  // FIX1 P2-2: EVERY argument is validated before help is returned — an
+  // unknown flag fails closed regardless of position, so help can never
+  // override it.
+  let help = false
   for (const flag of argv) {
+    if (flag === '--help' || flag === '-h') {
+      help = true
+      continue
+    }
     throw new Error(`Unknown argument: ${flag}`)
   }
-  return { help: false }
+  return { help }
 }
 
 /**
@@ -72,7 +88,21 @@ export async function runVerifyCleanStartReadiness(options: VerifyCleanStartRead
     print(`${JSON.stringify(adapterUnavailableReport(), null, 2)}`)
     return 1
   }
-  const db = await options.createDb()
+  let db: CleanStartReadinessDb
+  try {
+    db = await options.createDb()
+  } catch (error) {
+    // FIX1 P1-2: construction failures stay inside the JSON failure contract
+    // — sanitized blocker naming createDb, exit 1. Raw provider text is
+    // echoed only for known-safe domain errors, never for foreign messages
+    // (credentials/URLs must not leak into the public JSON report).
+    const detail = error instanceof OrganizationValidationError
+      ? `createDb failed: ${error.message}`
+      : 'createDb failed (provider error; detail sanitized because the raw provider message is not a known-safe domain error)'
+    const report: ReadinessReport = { ready: false, blockers: [{ code: 'READINESS_PROVIDER_ERROR', detail }] }
+    print(`${JSON.stringify(report, null, 2)}`)
+    return 1
+  }
   const report = await verifyCleanStartReadiness(db)
   print(`${JSON.stringify(report, null, 2)}`)
   return report.ready ? 0 : 1
