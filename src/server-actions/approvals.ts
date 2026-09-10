@@ -29,6 +29,19 @@ import {
   evaluateRequestAction,
   existingApprovalDecision,
 } from '@/lib/action-permissions'
+import { requireAdmin } from '@/lib/auth'
+import { APPROVAL_ENGINE_TRANSACTION_ISOLATION } from '@/lib/approval-engine/plan'
+import {
+  createCleanStartPhaseAttemptTx,
+  previewReplacementChain as previewReplacementChainOnPorts,
+  restartStrandedAttempt as restartStrandedAttemptOnPorts,
+  type CleanStartAttemptStore,
+  type ReplacementChainPreview,
+  type RestartAttemptRecord,
+  type RestartStrandedPorts,
+} from '@/lib/approval-engine/attempts'
+
+export type { ReplacementChainPreview }
 
 /**
  * Check if data is stale based on updatedAt timestamp
@@ -643,4 +656,83 @@ export async function getRequestApprovals(requestId: string) {
   )
 
   return approvalsWithEligible
+}
+
+function createProductionRestartPorts(
+  db: Prisma.TransactionClient | typeof prisma,
+  requireAdminFn: () => Promise<string | null>,
+): RestartStrandedPorts {
+  return {
+    requireAdmin: requireAdminFn,
+    async loadAttemptForRestart(instanceId) {
+      const instance = await db.approval_instances.findUnique({
+        where: { id: instanceId },
+        include: {
+          candidateGroups: {
+            include: { members: true },
+          },
+        },
+      })
+      if (!instance) return null
+      const userIds = [...new Set(instance.candidateGroups.flatMap((group) => group.members.map((member) => member.userId)))]
+      const users = userIds.length === 0
+        ? []
+        : await db.user.findMany({
+            where: { id: { in: userIds } },
+            select: { id: true, isActive: true },
+          })
+      const active = new Map(users.map((user) => [user.id, user.isActive]))
+      const record: RestartAttemptRecord = {
+        id: instance.id,
+        phase: instance.phase,
+        requestId: instance.requestId,
+        solutionId: instance.solutionId,
+        originUserId: instance.originUserId,
+        attempt: instance.attempt,
+        state: instance.state,
+        supersededAt: instance.supersededAt,
+        candidateGroups: instance.candidateGroups.map((group) => ({
+          members: group.members.map((member) => ({
+            userId: member.userId,
+            user: { isActive: active.get(member.userId) === true },
+          })),
+        })),
+      }
+      return record
+    },
+    attemptTx: createCleanStartPhaseAttemptTx(db as unknown as CleanStartAttemptStore),
+    request_activities: {
+      create: (args) => db.request_activities.create({
+        data: {
+          userId: args.data.userId,
+          action: args.data.action,
+          comments: args.data.comments ?? undefined,
+          ...(args.data.requestId ? { requestId: args.data.requestId } : {}),
+        },
+      }),
+    },
+  }
+}
+
+export async function previewReplacementChain(input: { instanceId: string }): Promise<ReplacementChainPreview> {
+  const adminId = await requireAdmin()
+  if (!adminId) throw new Error('Admin access required')
+  return previewReplacementChainOnPorts(
+    createProductionRestartPorts(prisma, async () => adminId),
+    input,
+  )
+}
+
+export async function restartStrandedAttempt(input: { instanceId: string; reason: string }): Promise<{ oldInstanceId: string; newInstanceId: string }> {
+  const adminId = await requireAdmin()
+  if (!adminId) throw new Error('Admin access required')
+  const result = await prisma.$transaction(
+    (tx) => restartStrandedAttemptOnPorts(
+      createProductionRestartPorts(tx, async () => adminId),
+      input,
+    ),
+    { isolationLevel: APPROVAL_ENGINE_TRANSACTION_ISOLATION },
+  )
+  revalidateRequestViews()
+  return result
 }

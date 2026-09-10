@@ -1,7 +1,8 @@
-// Clean-start phase origins, attempt creators, custom chains, and the
-// assignment submission gate (Plan B Task 6). Structural ports only: NO
-// Prisma import, no legacy position-code enum mapping, no live inserts here
-// (B4 persist ruling: live CHECK remains B6/B15; fakes cover the contract).
+// Clean-start phase origins, attempt creators, custom chains, the
+// assignment submission gate (Plan B Task 6), and admin stranded restart
+// (Plan B Task 7). Structural ports only: NO Prisma import, no legacy
+// position-code enum mapping, no live inserts here (B4 persist ruling:
+// live CHECK remains B6/B15; fakes cover the contract).
 // Production callers pass a Prisma transaction via a structural cast.
 //
 // Origins (spec): REQUEST = stored requests.requesterId; SOLUTION = stored
@@ -563,4 +564,169 @@ export function createCleanStartPhaseAttemptTx(store: CleanStartAttemptStore): P
     request_approvals: store.request_approvals,
     solution_approvals: store.solution_approvals,
   }
+}
+
+// ---------------------------------------------------------------------------
+// Plan B Task 7: admin-only stranded-attempt restart + read-only preview
+// ---------------------------------------------------------------------------
+
+export interface ReplacementChainPreview {
+  routeVersionId: string | 'DRAFT'
+  scopeUnitId: string
+  phase: ApprovalPhase
+  autoApproved: boolean
+  steps: ReadonlyArray<{
+    order: number
+    requiredPositionId: string
+    candidates: ReadonlyArray<{ id: string; name: string }>
+    skipped: boolean
+  }>
+}
+
+export interface RestartAttemptRecord {
+  id: string
+  phase: ApprovalPhase
+  requestId: string | null
+  solutionId: string | null
+  originUserId: string
+  attempt: number
+  state: string
+  supersededAt: Date | null
+  candidateGroups: ReadonlyArray<{
+    members: ReadonlyArray<{ userId: string; user: { isActive: boolean } }>
+  }>
+}
+
+export interface RestartStrandedPorts {
+  requireAdmin(): Promise<string | null>
+  loadAttemptForRestart(instanceId: string): Promise<RestartAttemptRecord | null>
+  attemptTx: PhaseAttemptTx
+  request_activities: {
+    create(args: {
+      data: {
+        requestId?: string | null
+        userId: string
+        action: string
+        comments?: string | null
+      }
+    }): Promise<unknown>
+  }
+}
+
+function restartError(message: string): never {
+  throw new Error(message)
+}
+
+// Same predicate as decisions.isAttemptStranded (B5). Copied here so this
+// module keeps its SNAPSHOT-harness import allowlist (no ./decisions).
+function isAttemptStranded(instance: RestartAttemptRecord): boolean {
+  const members = instance.candidateGroups.flatMap((group) => group.members)
+  return members.length > 0 && members.every((member) => !member.user.isActive)
+}
+
+async function requireRestartAdmin(ports: RestartStrandedPorts): Promise<string> {
+  const adminId = await ports.requireAdmin()
+  if (!adminId) restartError('Admin access required')
+  return adminId
+}
+
+async function loadRestartTarget(
+  ports: RestartStrandedPorts,
+  instanceId: string,
+): Promise<RestartAttemptRecord> {
+  const record = await ports.loadAttemptForRestart(instanceId)
+  if (!record) restartError('Approval instance not found')
+  return record
+}
+
+function buildInputFromRecord(record: RestartAttemptRecord): BuildApprovalInstanceInput {
+  const input: BuildApprovalInstanceInput = {
+    requestId: record.requestId ?? '',
+    phase: record.phase,
+    originUserId: record.originUserId,
+  }
+  if (record.solutionId) input.solutionId = record.solutionId
+  return input
+}
+
+async function previewFromPlan(
+  ports: RestartStrandedPorts,
+  plan: ApprovalInstancePlan,
+): Promise<ReplacementChainPreview> {
+  const candidateIds = plan.steps.flatMap((step) => [...step.candidateUserIds])
+  const labels = candidateIds.length === 0
+    ? {}
+    : Object.fromEntries(
+        (await ports.attemptTx.user.findMany({
+          where: { id: { in: [...new Set(candidateIds)] } },
+          select: { id: true, name: true },
+        })).map((user) => [user.id, user.name]),
+      )
+  const liveSteps = plan.steps.map((step) => ({
+    order: step.order,
+    requiredPositionId: step.requiredPositionId,
+    candidates: step.candidateUserIds.map((id) => ({ id, name: labels[id] ?? id })),
+    skipped: false,
+  }))
+  const skippedSteps = plan.skipped.map((skip, index) => ({
+    order: liveSteps.length + index + 1,
+    requiredPositionId: skip.requiredPositionId,
+    candidates: [] as Array<{ id: string; name: string }>,
+    skipped: true,
+  }))
+  return {
+    routeVersionId: plan.routeVersionId ?? 'DRAFT',
+    scopeUnitId: plan.steps[0]?.scopeUnitId ?? plan.originUnitId,
+    phase: plan.phase,
+    autoApproved: plan.state === 'AUTO_APPROVED',
+    steps: Object.freeze([...liveSteps, ...skippedSteps]),
+  }
+}
+
+export async function previewReplacementChain(
+  ports: RestartStrandedPorts,
+  input: { instanceId: string },
+): Promise<ReplacementChainPreview> {
+  await requireRestartAdmin(ports)
+  const record = await loadRestartTarget(ports, input.instanceId)
+  const plan = await buildNormalApprovalInstance(ports.attemptTx, buildInputFromRecord(record))
+  return previewFromPlan(ports, plan)
+}
+
+export async function restartStrandedAttempt(
+  ports: RestartStrandedPorts,
+  input: { instanceId: string; reason: string },
+): Promise<{ oldInstanceId: string; newInstanceId: string }> {
+  const adminId = await requireRestartAdmin(ports)
+  const reason = input.reason.trim()
+  if (!reason) restartError('Restart reason is required')
+  const record = await loadRestartTarget(ports, input.instanceId)
+  if (record.supersededAt != null || !isAttemptStranded(record)) {
+    restartError('Attempt is not stranded')
+  }
+  const plan = await buildNormalApprovalInstance(ports.attemptTx, buildInputFromRecord(record))
+  const restartPlan: ApprovalInstancePlan = {
+    ...plan,
+    restartOfInstanceId: record.id,
+    restartReason: reason,
+    restartedById: adminId,
+  }
+  await ports.attemptTx.approval_instances.update({
+    where: { id: record.id },
+    data: { supersededAt: new Date() },
+  })
+  const persisted = await persistApprovalInstance(ports.attemptTx, restartPlan)
+  const activity: {
+    requestId?: string | null
+    userId: string
+    action: string
+    comments: string
+  } = {
+    userId: adminId,
+    action: 'restarted_stranded_attempt',
+    comments: reason,
+  }
+  if (record.requestId) activity.requestId = record.requestId
+  await ports.request_activities.create({ data: activity })
+  return { oldInstanceId: record.id, newInstanceId: persisted.id }
 }
