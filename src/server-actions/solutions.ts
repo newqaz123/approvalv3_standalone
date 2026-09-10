@@ -324,7 +324,7 @@ export async function submitSolution(input: SubmitSolutionActionInput) {
   // Get current user with role and level
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, role: true, departmentId: true, level: true },
+    select: { id: true, role: true, departmentId: true, level: true, isActive: true },
   })
 
   if (!user) {
@@ -335,10 +335,6 @@ export async function submitSolution(input: SubmitSolutionActionInput) {
   const units = await loadOrganizationUnitNodes()
   if (!canWorkOnSolutions(units, actorAssignment?.unitId ?? null)) {
     throw new Error('Your organization assignment is not eligible to submit solutions')
-  }
-
-  if (user.role !== UserRole.engineering) {
-    throw new Error('Only engineering users can submit solutions')
   }
 
   // Validate input
@@ -365,13 +361,11 @@ export async function submitSolution(input: SubmitSolutionActionInput) {
     actor: {
       id: user.id,
       role: user.role,
-      isActive: true,
-      departmentId: user.departmentId,
-      departmentType: null,
+      isActive: user.isActive !== false,
+      assignmentUnitId: actorAssignment?.unitId ?? null,
     },
     request: {
       requesterId: request.requesterId,
-      departmentId: request.departmentId,
       organizationUnitId: request.organizationUnitId,
       status: request.status,
     },
@@ -380,7 +374,9 @@ export async function submitSolution(input: SubmitSolutionActionInput) {
     assignedEngineer: false,
     existingActionDecisions: {
       SUBMIT_SOLUTION: existingSubmitSolutionDecision({
-        userRole: user.role,
+        isActive: user.isActive !== false,
+        assignmentUnitId: actorAssignment?.unitId ?? null,
+        units,
         status: request.status,
       }),
     },
@@ -389,7 +385,7 @@ export async function submitSolution(input: SubmitSolutionActionInput) {
     if (submitAction.reason === 'WRONG_STATUS') {
       throw new Error(`Request must be in SentToEngineer status to submit solution. Current status: ${request.status}`)
     }
-    throw new Error('Only engineering users can submit solutions')
+    throw new Error('Your organization assignment is not eligible to submit solutions')
   }
 
   if (request.status !== RequestStatus.SentToEngineer) {
@@ -1002,10 +998,9 @@ export async function approveSolution(solutionId: string, comments?: string, exp
 
   const { canApprove, approval, solution } = await canUserApproveSolution(solutionId)
   const approveSolutionAction = evaluateRequestAction('APPROVE_SOLUTION', {
-    actor: { id: userId, role: '', isActive: true, departmentId: null, departmentType: null },
+    actor: { id: userId, role: '', isActive: true, assignmentUnitId: null },
     request: {
       requesterId: '',
-      departmentId: solution?.request?.departmentId ?? null,
       organizationUnitId: null,
       status: solution?.request?.status ?? '',
     },
@@ -1100,10 +1095,9 @@ export async function rejectSolution(solutionId: string, comments: string, expec
 
   const { canApprove, approval, solution } = await canUserApproveSolution(solutionId)
   const rejectSolutionAction = evaluateRequestAction('REJECT_SOLUTION', {
-    actor: { id: userId, role: '', isActive: true, departmentId: null, departmentType: null },
+    actor: { id: userId, role: '', isActive: true, assignmentUnitId: null },
     request: {
       requesterId: '',
-      departmentId: solution?.request?.departmentId ?? null,
       organizationUnitId: null,
       status: solution?.request?.status ?? '',
     },
@@ -1472,30 +1466,18 @@ export async function initiateFinalApproval(
 
   // O3: initiator holds an active assignment in the request's originating unit.
   const requestDepartmentId = request.departmentId
-  const requestOrganizationUnitId = request.organizationUnitId
-  const isTypedUnitRequest = requestOrganizationUnitId !== null
-  let hasDirectOriginUnitMembership = false
-  if (isTypedUnitRequest) {
-    const directMembership = await loadActiveAssignment(userId, requestOrganizationUnitId)
-    hasDirectOriginUnitMembership = Boolean(directMembership)
-    if (!directMembership) {
-      throw new Error('Only members of the request\'s originating unit can initiate final approval')
-    }
-  } else if (user.departmentId !== requestDepartmentId) {
-    throw new Error('Only department members can initiate final approval')
-  }
+  const actorAssignment = await loadActiveAssignment(user.id)
+  const requestOriginUnitId = request.organizationUnitId ?? ''
 
   const initiateAction = evaluateRequestAction('INITIATE_FINAL_APPROVAL', {
     actor: {
       id: user.id,
       role: user.role,
       isActive: true,
-      departmentId: user.departmentId,
-      departmentType: null,
+      assignmentUnitId: actorAssignment?.unitId ?? null,
     },
     request: {
       requesterId: request.requesterId,
-      departmentId: request.departmentId,
       organizationUnitId: request.organizationUnitId,
       status: request.status,
     },
@@ -1504,11 +1486,10 @@ export async function initiateFinalApproval(
     assignedEngineer: false,
     existingActionDecisions: {
       INITIATE_FINAL_APPROVAL: existingInitiateFinalApprovalDecision({
+        isActive: true,
+        assignmentUnitId: actorAssignment?.unitId ?? null,
+        requestOriginUnitId,
         status: request.status,
-        isTypedUnitRequest,
-        hasDirectOriginUnitMembership,
-        userDepartmentId: user.departmentId,
-        requestDepartmentId,
       }),
     },
   })
@@ -1516,11 +1497,7 @@ export async function initiateFinalApproval(
     if (initiateAction.reason === 'WRONG_STATUS') {
       throw new Error(`Request must be in SendBackToRequester status to initiate final approval. Current status: ${request.status}`)
     }
-    throw new Error(
-      isTypedUnitRequest
-        ? 'Only members of the request\'s originating unit can initiate final approval'
-        : 'Only department members can initiate final approval',
-    )
+    throw new Error('Only members of the request\'s originating unit can initiate final approval')
   }
 
   // Get max level in department for top-level check. Legacy-only: typed NEW
@@ -1879,8 +1856,8 @@ export async function approveFinalApproval(requestId: string, comments?: string,
 
   const { canApprove, approval } = await canUserApproveFinalApproval(requestId)
   const approveFinalAction = evaluateRequestAction('APPROVE_FINAL', {
-    actor: { id: userId, role: '', isActive: true, departmentId: null, departmentType: null },
-    request: { requesterId: '', departmentId: null, organizationUnitId: null, status: 'FinalApproval' },
+    actor: { id: userId, role: '', isActive: true, assignmentUnitId: null },
+    request: { requesterId: '', organizationUnitId: null, status: 'FinalApproval' },
     canView: true,
     approval: { canApprove },
     assignedEngineer: false,
@@ -1982,8 +1959,8 @@ export async function rejectFinalApproval(requestId: string, comments: string, e
 
   const { canApprove, approval } = await canUserApproveFinalApproval(requestId)
   const rejectFinalAction = evaluateRequestAction('REJECT_FINAL', {
-    actor: { id: userId, role: '', isActive: true, departmentId: null, departmentType: null },
-    request: { requesterId: '', departmentId: null, organizationUnitId: null, status: 'FinalApproval' },
+    actor: { id: userId, role: '', isActive: true, assignmentUnitId: null },
+    request: { requesterId: '', organizationUnitId: null, status: 'FinalApproval' },
     canView: true,
     approval: { canApprove },
     assignedEngineer: false,
@@ -2163,7 +2140,7 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
   // Get current user with role and level
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, role: true, departmentId: true, level: true },
+    select: { id: true, role: true, departmentId: true, level: true, isActive: true },
   })
 
   if (!user) {
@@ -2174,10 +2151,6 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
   const units = await loadOrganizationUnitNodes()
   if (!canWorkOnSolutions(units, actorAssignment?.unitId ?? null)) {
     throw new Error('Your organization assignment is not eligible to submit solutions')
-  }
-
-  if (user.role !== UserRole.engineering) {
-    throw new Error('Only engineering users can resubmit solutions')
   }
 
   // Validate input. newFileIds / deletedFileIds / customApprovers are <= 10
@@ -2237,13 +2210,11 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
     actor: {
       id: user.id,
       role: user.role,
-      isActive: true,
-      departmentId: user.departmentId,
-      departmentType: null,
+      isActive: user.isActive !== false,
+      assignmentUnitId: actorAssignment?.unitId ?? null,
     },
     request: {
       requesterId: request.requesterId,
-      departmentId: request.departmentId,
       organizationUnitId: request.organizationUnitId,
       status: request.status,
     },
@@ -2252,7 +2223,9 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
     assignedEngineer: false,
     existingActionDecisions: {
       RESUBMIT_SOLUTION: existingResubmitSolutionDecision({
-        userRole: user.role,
+        isActive: user.isActive !== false,
+        assignmentUnitId: actorAssignment?.unitId ?? null,
+        units,
         hasSolutionRejection,
         hasFinalApprovalRejection,
       }),
@@ -2260,7 +2233,7 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
   })
   if (!resubmitSolutionAction.allowed) {
     if (resubmitSolutionAction.reason === 'WRONG_ROLE') {
-      throw new Error('Only engineering users can resubmit solutions')
+      throw new Error('Your organization assignment is not eligible to submit solutions')
     }
     throw new Error('Can only resubmit rejected solutions')
   }

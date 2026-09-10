@@ -13,12 +13,27 @@ import {
   optimizeImageAttachment,
   type ImageOptimizationResult,
 } from '@/lib/attachments/image-optimization'
-import { canUserViewRequest } from '@/lib/request-visibility/scope'
+import { canUserViewRequest, createRequestVisibilityDb } from '@/lib/request-visibility/scope'
+import type { OrganizationUnitNode } from '@/lib/organization/model'
 import {
   evaluateRequestAction,
   existingDeleteAttachmentDecision,
   existingUploadAttachmentDecision,
 } from '@/lib/action-permissions'
+
+async function loadOrganizationUnitNodes(): Promise<OrganizationUnitNode[]> {
+  return prisma.organization_units.findMany({
+    select: {
+      id: true,
+      name: true,
+      parentId: true,
+      isActive: true,
+      shareRequests: true,
+      canWorkOnSolutions: true,
+      managerUserId: true,
+    },
+  })
+}
 
 /**
  * Delete a file attachment
@@ -79,27 +94,25 @@ export async function deleteFileAttachment({ fileId }: { fileId: string }) {
     throw new Error('Unauthorized to delete this file')
   }
 
-  // Write-specific guards. Section sharing never grants attachment mutation.
+  // Write-specific guards. Sharing-scope visibility never grants attachment mutation.
   const isUploader = fileAttachment.uploadedById === userId
   const isRequester = request.requesterId === userId
-
-  // Check if user is engineering user (for engineering-phase files)
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { role: true },
-  })
-  const isEngineeringUser = user?.role === 'engineering'
-  const isEngineeringPhase = ['SentToEngineer', 'DesignCostEstimationApproval', 'SendBackToRequester', 'FinalApproval'].includes(request.status)
-
-  if (!isUploader && !isRequester && !(isEngineeringUser && isEngineeringPhase)) {
+  const visibilityDb = createRequestVisibilityDb(prisma)
+  const actor = await visibilityDb.findActor(userId)
+  if (!actor || !actor.isActive) {
     throw new Error('Unauthorized to delete this file')
   }
+  const units = await loadOrganizationUnitNodes()
 
   const deleteAction = evaluateRequestAction('DELETE_ATTACHMENT', {
-    actor: { id: userId, role: user?.role ?? '', isActive: true, departmentId: null, departmentType: null },
+    actor: {
+      id: actor.id,
+      role: actor.role,
+      isActive: actor.isActive,
+      assignmentUnitId: actor.assignmentUnitId,
+    },
     request: {
       requesterId: request.requesterId,
-      departmentId: null,
       organizationUnitId: null,
       status: request.status,
     },
@@ -110,7 +123,9 @@ export async function deleteFileAttachment({ fileId }: { fileId: string }) {
       DELETE_ATTACHMENT: existingDeleteAttachmentDecision({
         isUploader,
         isRequester,
-        isEngineeringUser,
+        isActive: actor.isActive,
+        assignmentUnitId: actor.assignmentUnitId,
+        units,
         status: request.status,
       }),
     },
@@ -181,17 +196,10 @@ export async function uploadFileAction(
     return { success: false, error: policyError }
   }
 
-  // Verify request exists and user is authorized
-  const [dbRequest, user] = await Promise.all([
-    prisma.requests.findUnique({
-      where: { id: requestId },
-      select: { id: true, requesterId: true, status: true },
-    }),
-    prisma.user.findUnique({
-      where: { id: userId },
-      select: { role: true },
-    }),
-  ])
+  const dbRequest = await prisma.requests.findUnique({
+    where: { id: requestId },
+    select: { id: true, requesterId: true, status: true },
+  })
 
   if (!dbRequest) {
     return { success: false, error: 'Request not found' }
@@ -201,20 +209,23 @@ export async function uploadFileAction(
     return { success: false, error: 'Not authorized to upload to this request' }
   }
 
-  const isRequester = dbRequest.requesterId === userId
-  const isEngineeringUser = user?.role === 'engineering'
-  const isEngineeringRequest = dbRequest.status === 'SentToEngineer'
-  const canEngineerUpload = isEngineeringUser && isEngineeringRequest
-
-  if (!isRequester && !canEngineerUpload) {
+  const visibilityDb = createRequestVisibilityDb(prisma)
+  const actor = await visibilityDb.findActor(userId)
+  if (!actor || !actor.isActive) {
     return { success: false, error: 'Not authorized to upload to this request' }
   }
+  const units = await loadOrganizationUnitNodes()
+  const isRequester = dbRequest.requesterId === userId
 
   const uploadAction = evaluateRequestAction('UPLOAD_ATTACHMENT', {
-    actor: { id: userId, role: user?.role ?? '', isActive: true, departmentId: null, departmentType: null },
+    actor: {
+      id: actor.id,
+      role: actor.role,
+      isActive: actor.isActive,
+      assignmentUnitId: actor.assignmentUnitId,
+    },
     request: {
       requesterId: dbRequest.requesterId,
-      departmentId: null,
       organizationUnitId: null,
       status: dbRequest.status,
     },
@@ -224,7 +235,9 @@ export async function uploadFileAction(
     existingActionDecisions: {
       UPLOAD_ATTACHMENT: existingUploadAttachmentDecision({
         isRequester,
-        isEngineeringUser,
+        isActive: actor.isActive,
+        assignmentUnitId: actor.assignmentUnitId,
+        units,
         status: dbRequest.status,
       }),
     },

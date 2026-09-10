@@ -283,10 +283,9 @@ export async function approveRequest(
 
   const { canApprove, approval } = await canUserApprove(requestId)
   const approveAction = evaluateRequestAction('APPROVE_REQUEST', {
-    actor: { id: userId, role: '', isActive: true, departmentId: null, departmentType: null },
+    actor: { id: userId, role: '', isActive: true, assignmentUnitId: null },
     request: {
       requesterId: '',
-      departmentId: approval?.request?.departmentId ?? null,
       organizationUnitId: null,
       status: approval?.request?.status ?? '',
     },
@@ -365,10 +364,9 @@ export async function rejectRequest(
 
   const { canApprove, approval } = await canUserApprove(requestId)
   const rejectAction = evaluateRequestAction('REJECT_REQUEST', {
-    actor: { id: userId, role: '', isActive: true, departmentId: null, departmentType: null },
+    actor: { id: userId, role: '', isActive: true, assignmentUnitId: null },
     request: {
       requesterId: '',
-      departmentId: approval?.request?.departmentId ?? null,
       organizationUnitId: null,
       status: approval?.request?.status ?? '',
     },

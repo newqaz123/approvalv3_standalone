@@ -1164,8 +1164,8 @@ export async function cancelRequest(input: { requestId: string; reason: string }
       hasPendingSolutionApprovals: pendingSolutionApprovals > 0,
     })
     const cancelAction = evaluateRequestAction('CANCEL_REQUEST', {
-      actor: { id: userId, role: '', isActive: true, departmentId: null, departmentType: null },
-      request: { requesterId: request.requesterId, departmentId: null, organizationUnitId: null, status: request.status },
+      actor: { id: userId, role: '', isActive: true, assignmentUnitId: null },
+      request: { requesterId: request.requesterId, organizationUnitId: null, status: request.status },
       canView: true,
       approval: null,
       assignedEngineer: false,
@@ -1794,16 +1794,6 @@ export async function getRequestsNeedingEngineeringAction(userId: string): Promi
     return { needsSolution: [], needsApproval: [] }
   }
 
-  // Get engineering department
-  const engineeringDept = await prisma.departments.findFirst({
-    where: { type: 'ENGINEERING' },
-    select: { id: true },
-  })
-
-  if (!engineeringDept) {
-    return { needsSolution: [], needsApproval: [] }
-  }
-
   const visibilityWhere = await buildRequestVisibilityWhere(createRequestVisibilityDb(prisma), {
     userId,
     includeArchived: false,
@@ -2001,12 +1991,10 @@ export async function assignEngineers(requestId: string, engineerIds: string[]) 
       id: user.id,
       role: user.role,
       isActive: user.isActive !== false,
-      departmentId: user.departmentId ?? null,
-      departmentType: user.department?.type ?? null,
+      assignmentUnitId: null,
     },
     request: {
       requesterId: request.requesterId,
-      departmentId: request.departmentId,
       organizationUnitId: request.organizationUnitId,
       status: request.status,
     },
@@ -2316,10 +2304,9 @@ export async function resubmitRequest(input: {
   }
 
   const resubmitAction = evaluateRequestAction('RESUBMIT_REQUEST', {
-    actor: { id: userId, role: '', isActive: true, departmentId: request.departmentId, departmentType: null },
+    actor: { id: userId, role: '', isActive: true, assignmentUnitId: null },
     request: {
       requesterId: request.requesterId,
-      departmentId: request.departmentId,
       organizationUnitId: request.organizationUnitId,
       status: request.status,
     },

@@ -48,20 +48,18 @@ async function requireVisibleStageRequest(requestId: string) {
 }
 
 function assertCanManageSubTasks(
-  user: { id: string; role: string; isActive?: boolean | null; departmentId?: string | null; department?: { type?: string | null } | null },
-  request: { requesterId?: string | null; departmentId?: string | null; organizationUnitId?: string | null; status: string },
+  user: { id: string; role: string; isActive?: boolean | null },
+  request: { requesterId?: string | null; organizationUnitId?: string | null; status: string },
 ) {
   const manageAction = evaluateRequestAction('MANAGE_SUB_TASKS', {
     actor: {
       id: user.id,
       role: user.role,
       isActive: user.isActive !== false,
-      departmentId: user.departmentId ?? null,
-      departmentType: user.department?.type ?? null,
+      assignmentUnitId: null,
     },
     request: {
       requesterId: request.requesterId ?? '',
-      departmentId: request.departmentId ?? null,
       organizationUnitId: request.organizationUnitId ?? null,
       status: request.status,
     },

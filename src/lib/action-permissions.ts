@@ -1,5 +1,6 @@
 import {
-  canInitiateFinalApprovalByOrigin,
+  canInitiateFinalApproval,
+  canSubmitSolutionWork,
   canUserAssignEngineers,
 } from '@/lib/permission-checks'
 import {
@@ -10,6 +11,7 @@ import {
   canManageEngineeringSubTasks,
   isSubTaskVisibleForRequestStatus,
 } from '@/lib/engineering-sub-tasks'
+import type { OrganizationUnitNode } from '@/lib/organization/model'
 
 export type RequestAction =
   | 'RESUBMIT_REQUEST'
@@ -58,8 +60,8 @@ export interface ActionDecision {
 }
 
 export interface ActionPermissionContext {
-  actor: { id: string; role: string; isActive: boolean; departmentId: string | null; departmentType: string | null }
-  request: { requesterId: string; departmentId: string | null; organizationUnitId: string | null; status: string }
+  actor: { id: string; role: string; isActive: boolean; assignmentUnitId: string | null }
+  request: { requesterId: string; organizationUnitId: string | null; status: string }
   canView: boolean
   approval: { canApprove: boolean } | null
   assignedEngineer: boolean
@@ -76,6 +78,13 @@ const CURRENT_STEP_ACTIONS: ReadonlySet<RequestAction> = new Set([
 ])
 
 const MISSING_EVIDENCE_DECISION: ActionDecision = { allowed: false, reason: 'WRONG_ROLE' }
+
+const ENGINEERING_PHASE_STATUSES = [
+  'SentToEngineer',
+  'DesignCostEstimationApproval',
+  'SendBackToRequester',
+  'FinalApproval',
+] as const
 
 export function evaluateRequestAction(action: RequestAction, context: ActionPermissionContext): ActionDecision {
   if (!context.actor.isActive) {
@@ -133,10 +142,12 @@ export function existingResubmitRequestDecision(input: {
 }
 
 export function existingSubmitSolutionDecision(input: {
-  userRole: string | null | undefined
+  isActive: boolean
+  assignmentUnitId: string | null
+  units: readonly OrganizationUnitNode[]
   status: string
 }): ActionDecision {
-  if (input.userRole !== 'engineering') {
+  if (!canSubmitSolutionWork(input)) {
     return { allowed: false, reason: 'WRONG_ROLE' }
   }
   if (input.status !== 'SentToEngineer') {
@@ -146,11 +157,13 @@ export function existingSubmitSolutionDecision(input: {
 }
 
 export function existingResubmitSolutionDecision(input: {
-  userRole: string | null | undefined
+  isActive: boolean
+  assignmentUnitId: string | null
+  units: readonly OrganizationUnitNode[]
   hasSolutionRejection: boolean
   hasFinalApprovalRejection: boolean
 }): ActionDecision {
-  if (input.userRole !== 'engineering') {
+  if (!canSubmitSolutionWork(input)) {
     return { allowed: false, reason: 'WRONG_ROLE' }
   }
   if (!input.hasSolutionRejection && !input.hasFinalApprovalRejection) {
@@ -160,34 +173,25 @@ export function existingResubmitSolutionDecision(input: {
 }
 
 export function existingInitiateFinalApprovalDecision(input: {
+  isActive: boolean
+  assignmentUnitId: string | null
+  requestOriginUnitId: string
   status: string
-  isTypedUnitRequest: boolean
-  hasDirectOriginUnitMembership: boolean
-  userDepartmentId: string | null | undefined
-  requestDepartmentId: string | null | undefined
 }): ActionDecision {
   if (input.status !== 'SendBackToRequester') {
     return { allowed: false, reason: 'WRONG_STATUS' }
   }
-  if (!canInitiateFinalApprovalByOrigin(input)) {
+  if (!canInitiateFinalApproval(input)) {
     return { allowed: false, reason: 'WRONG_ROLE' }
-  }
-  if (!input.isTypedUnitRequest && input.requestDepartmentId == null) {
-    // Legacy fail-closed boundary only: an untyped legacy row without a
-    // department has no final-approval audience. Typed NEW requests are
-    // gated by direct originating-unit membership instead and must not be
-    // denied for a null legacy department.
-    return { allowed: false, reason: 'WRONG_STATUS' }
   }
   return { allowed: true, reason: 'ALLOWED' }
 }
 
 export function existingResubmitFinalApprovalDecision(input: {
+  isActive: boolean
+  assignmentUnitId: string | null
+  requestOriginUnitId: string
   status: string
-  isTypedUnitRequest: boolean
-  hasDirectOriginUnitMembership: boolean
-  userDepartmentId: string | null | undefined
-  requestDepartmentId: string | null | undefined
   hasFinalApprovalRejection: boolean
 }): ActionDecision {
   if (!input.hasFinalApprovalRejection) {
@@ -209,12 +213,15 @@ export function existingCancelRequestDecision(input: RequesterCancellationCheck)
 
 export function existingUploadAttachmentDecision(input: {
   isRequester: boolean
-  isEngineeringUser: boolean
+  isActive: boolean
+  assignmentUnitId: string | null
+  units: readonly OrganizationUnitNode[]
   status: string
 }): ActionDecision {
-  const canEngineerUpload = input.isEngineeringUser && input.status === 'SentToEngineer'
+  const canSolutionWork = canSubmitSolutionWork(input)
+  const canEngineerUpload = canSolutionWork && input.status === 'SentToEngineer'
   if (!input.isRequester && !canEngineerUpload) {
-    return { allowed: false, reason: input.isEngineeringUser ? 'WRONG_STATUS' : 'WRONG_ROLE' }
+    return { allowed: false, reason: canSolutionWork ? 'WRONG_STATUS' : 'WRONG_ROLE' }
   }
   return { allowed: true, reason: 'ALLOWED' }
 }
@@ -222,11 +229,13 @@ export function existingUploadAttachmentDecision(input: {
 export function existingDeleteAttachmentDecision(input: {
   isUploader: boolean
   isRequester: boolean
-  isEngineeringUser: boolean
+  isActive: boolean
+  assignmentUnitId: string | null
+  units: readonly OrganizationUnitNode[]
   status: string
 }): ActionDecision {
-  const isEngineeringPhase = ['SentToEngineer', 'DesignCostEstimationApproval', 'SendBackToRequester', 'FinalApproval'].includes(input.status)
-  if (!input.isUploader && !input.isRequester && !(input.isEngineeringUser && isEngineeringPhase)) {
+  const isEngineeringPhase = (ENGINEERING_PHASE_STATUSES as readonly string[]).includes(input.status)
+  if (!input.isUploader && !input.isRequester && !(canSubmitSolutionWork(input) && isEngineeringPhase)) {
     return { allowed: false, reason: 'WRONG_ROLE' }
   }
   return { allowed: true, reason: 'ALLOWED' }

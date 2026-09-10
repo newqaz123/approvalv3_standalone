@@ -174,7 +174,8 @@ describe('visibility callers rewired to sharing-scope predicate', () => {
     assert.match(source, /canUserViewRequest/)
     assert.match(source, /isUploader/)
     assert.match(source, /isRequester/)
-    assert.match(source, /isEngineeringUser/)
+    assert.match(source, /assignmentUnitId/)
+    assert.match(source, /existing(Upload|Delete)AttachmentDecision/)
   })
 })
 

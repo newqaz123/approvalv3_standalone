@@ -30,7 +30,6 @@ import { RequestModalHeader } from "./request-modal-header";
 import { Separator } from "@/components/ui/separator";
 import { FormattedText } from "@/components/ui/formatted-text";
 import { CancelRequestDialog } from "./cancel-request-dialog";
-import { canUserSubmitSolution } from "@/lib/permission-checks";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
 
@@ -212,8 +211,6 @@ export function CompletedRequestModal({
 	open,
 	onOpenChange,
 	data,
-	userDepartment,
-	userRole,
 	onSubmitSolution,
 	showCancel,
 	onCancelled,
@@ -221,7 +218,6 @@ export function CompletedRequestModal({
 	onPreviewFile,
 	subTasksElement,
 }: CompletedRequestModalProps) {
-	const isEngineering = canUserSubmitSolution(userDepartment, userRole);
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
 			<DialogContent className="max-w-5xl w-full max-h-[90vh] p-0 gap-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl rounded-xl overflow-hidden">
@@ -467,7 +463,7 @@ export function CompletedRequestModal({
 								onCancelled={onCancelled}
 							/>
 						)}
-						{isEngineering && onSubmitSolution && (
+						{onSubmitSolution && (
 							<button
 								onClick={onSubmitSolution}
 								className="flex w-full sm:w-auto items-center justify-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-bold rounded-lg transition-colors"

@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import type { OrganizationUnitNode } from '@/lib/organization/model'
 import {
   evaluateRequestAction,
   existingAssignEngineersDecision,
@@ -19,6 +20,16 @@ import { canUserAssignEngineers } from '@/lib/permission-checks'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
+const u = (id: string, parentId: string | null, over: Partial<OrganizationUnitNode> = {}): OrganizationUnitNode =>
+  ({ id, name: id, parentId, isActive: true, shareRequests: false, canWorkOnSolutions: false, managerUserId: null, ...over })
+
+const units = [
+  u('company', null),
+  u('engineering', 'company', { canWorkOnSolutions: true }),
+  u('web', 'engineering'),
+  u('sales', 'company'),
+]
+
 function engineeringViewerContext(
   existingActionDecisions: ActionPermissionContext['existingActionDecisions'],
 ): ActionPermissionContext {
@@ -27,13 +38,11 @@ function engineeringViewerContext(
       id: 'engineering-1',
       role: 'engineering',
       isActive: true,
-      departmentId: 'eng',
-      departmentType: 'ENGINEERING',
+      assignmentUnitId: 'web',
     },
     request: {
       requesterId: 'requester-1',
-      departmentId: 'pd1',
-      organizationUnitId: 'section-pd1',
+      organizationUnitId: 'sales',
       status: 'SentToEngineer',
     },
     canView: true,
@@ -46,8 +55,8 @@ function engineeringViewerContext(
 describe('action permissions are independent from visibility', () => {
   it('does not grant operations merely because Engineering/Admin can read', () => {
     const context = {
-      actor: { id: 'engineering-1', role: 'engineering', isActive: true, departmentId: 'eng', departmentType: 'ENGINEERING' },
-      request: { requesterId: 'requester-1', departmentId: 'pd1', organizationUnitId: 'section-pd1', status: 'SentToEngineer' },
+      actor: { id: 'engineering-1', role: 'engineering', isActive: true, assignmentUnitId: 'web' },
+      request: { requesterId: 'requester-1', organizationUnitId: 'sales', status: 'SentToEngineer' },
       canView: true,
       approval: { canApprove: false },
       assignedEngineer: false,
@@ -64,8 +73,8 @@ describe('action permissions are independent from visibility', () => {
 
   it('retains ownership, role, assignment, phase, and status guards', () => {
     const context = {
-      actor: { id: 'other-user', role: 'general_dept', isActive: true, departmentId: 'pd1', departmentType: 'GENERAL' },
-      request: { requesterId: 'requester-1', departmentId: 'pd1', organizationUnitId: 'section-pd1', status: 'ImprovementRequest' },
+      actor: { id: 'other-user', role: 'general_dept', isActive: true, assignmentUnitId: 'sales' },
+      request: { requesterId: 'requester-1', organizationUnitId: 'sales', status: 'ImprovementRequest' },
       canView: true,
       approval: { canApprove: false },
       assignedEngineer: false,
@@ -80,8 +89,8 @@ describe('action permissions are independent from visibility', () => {
 
   it('does not let an admin viewer resubmit or approve from canView alone', () => {
     const context = {
-      actor: { id: 'admin-1', role: 'admin', isActive: true, departmentId: 'pd1', departmentType: 'GENERAL' },
-      request: { requesterId: 'requester-1', departmentId: 'pd1', organizationUnitId: 'section-pd1', status: 'ImprovementRequest' },
+      actor: { id: 'admin-1', role: 'admin', isActive: true, assignmentUnitId: 'sales' },
+      request: { requesterId: 'requester-1', organizationUnitId: 'sales', status: 'ImprovementRequest' },
       canView: true,
       approval: { canApprove: false },
       assignedEngineer: false,
@@ -125,13 +134,12 @@ describe('extracted existing action guards feed existingActionDecisions', () => 
     assert.equal(evaluateRequestAction('APPROVE_REQUEST', context).allowed, false)
   })
 
-  it('blocks a manager who can see descendant requests from initiating final approval without direct section membership', () => {
+  it('blocks a manager who can see descendant requests from initiating final approval without origin-unit assignment', () => {
     const initiation = existingInitiateFinalApprovalDecision({
+      isActive: true,
+      assignmentUnitId: 'company',
+      requestOriginUnitId: 'sales',
       status: 'SendBackToRequester',
-      isTypedUnitRequest: true,
-      hasDirectOriginUnitMembership: false,
-      userDepartmentId: 'department-pd',
-      requestDepartmentId: 'department-pd',
     })
     assert.equal(initiation.allowed, false)
 
@@ -140,13 +148,11 @@ describe('extracted existing action guards feed existingActionDecisions', () => 
         id: 'department-manager-1',
         role: 'general_dept',
         isActive: true,
-        departmentId: 'department-pd',
-        departmentType: 'GENERAL',
+        assignmentUnitId: 'company',
       },
       request: {
         requesterId: 'staff-1',
-        departmentId: 'department-pd',
-        organizationUnitId: 'section-pd1',
+        organizationUnitId: 'sales',
         status: 'SendBackToRequester',
       },
       canView: true,
@@ -159,56 +165,20 @@ describe('extracted existing action guards feed existingActionDecisions', () => 
     assert.equal(evaluateRequestAction('INITIATE_FINAL_APPROVAL', context).allowed, false)
   })
 
-  it('retains same-section final initiation for ordinary legacy rows', () => {
-    const sameSection = existingInitiateFinalApprovalDecision({
-      status: 'SendBackToRequester',
-      isTypedUnitRequest: false,
-      hasDirectOriginUnitMembership: false,
-      userDepartmentId: 'department-pd',
-      requestDepartmentId: 'department-pd',
-    })
-    assert.equal(sameSection.allowed, true)
-
-    const otherSection = existingInitiateFinalApprovalDecision({
-      status: 'SendBackToRequester',
-      isTypedUnitRequest: false,
-      hasDirectOriginUnitMembership: false,
-      userDepartmentId: 'department-eng',
-      requestDepartmentId: 'department-pd',
-    })
-    assert.equal(otherSection.allowed, false)
-  })
-
-  it('replaces legacy same-department membership with direct origin-unit membership for NEW parent-unit requests', () => {
-    const ancestorOnly = existingInitiateFinalApprovalDecision({
-      status: 'SendBackToRequester',
-      isTypedUnitRequest: true,
-      hasDirectOriginUnitMembership: false,
-      userDepartmentId: 'department-pd',
-      requestDepartmentId: 'department-pd',
-    })
-    assert.equal(ancestorOnly.allowed, false)
-
-    const directMember = existingInitiateFinalApprovalDecision({
-      status: 'SendBackToRequester',
-      isTypedUnitRequest: true,
-      hasDirectOriginUnitMembership: true,
-      userDepartmentId: 'department-pd',
-      requestDepartmentId: 'department-pd',
-    })
-    assert.equal(directMember.allowed, true)
-  })
-
-  it('keeps solution resubmit on the engineering role/rejection guard', () => {
+  it('keeps solution resubmit on assignment eligibility and rejection evidence', () => {
     const allowed = existingResubmitSolutionDecision({
-      userRole: 'engineering',
+      isActive: true,
+      assignmentUnitId: 'web',
+      units,
       hasSolutionRejection: true,
       hasFinalApprovalRejection: false,
     })
     assert.equal(allowed.allowed, true)
 
     const adminViewer = existingResubmitSolutionDecision({
-      userRole: 'admin',
+      isActive: true,
+      assignmentUnitId: 'sales',
+      units,
       hasSolutionRejection: true,
       hasFinalApprovalRejection: false,
     })
@@ -223,21 +193,19 @@ describe('extracted existing action guards feed existingActionDecisions', () => 
 
   it('keeps final resubmit on origin membership rather than descendant visibility', () => {
     const denied = existingResubmitFinalApprovalDecision({
+      isActive: true,
+      assignmentUnitId: 'company',
+      requestOriginUnitId: 'sales',
       status: 'SendBackToRequester',
-      isTypedUnitRequest: true,
-      hasDirectOriginUnitMembership: false,
-      userDepartmentId: 'department-pd',
-      requestDepartmentId: 'department-pd',
       hasFinalApprovalRejection: true,
     })
     assert.equal(denied.allowed, false)
 
     const allowed = existingResubmitFinalApprovalDecision({
+      isActive: true,
+      assignmentUnitId: 'sales',
+      requestOriginUnitId: 'sales',
       status: 'SendBackToRequester',
-      isTypedUnitRequest: true,
-      hasDirectOriginUnitMembership: true,
-      userDepartmentId: 'department-pd',
-      requestDepartmentId: 'department-pd',
       hasFinalApprovalRejection: true,
     })
     assert.equal(allowed.allowed, true)
@@ -246,21 +214,27 @@ describe('extracted existing action guards feed existingActionDecisions', () => 
   it('keeps attachment mutation on write-specific guards, not section sharing', () => {
     const uploadRequester = existingUploadAttachmentDecision({
       isRequester: true,
-      isEngineeringUser: false,
+      isActive: true,
+      assignmentUnitId: 'sales',
+      units,
       status: 'ImprovementRequest',
     })
     assert.equal(uploadRequester.allowed, true)
 
     const uploadViewer = existingUploadAttachmentDecision({
       isRequester: false,
-      isEngineeringUser: false,
+      isActive: true,
+      assignmentUnitId: 'sales',
+      units,
       status: 'ImprovementRequest',
     })
     assert.equal(uploadViewer.allowed, false)
 
     const uploadEngineer = existingUploadAttachmentDecision({
       isRequester: false,
-      isEngineeringUser: true,
+      isActive: true,
+      assignmentUnitId: 'web',
+      units,
       status: 'SentToEngineer',
     })
     assert.equal(uploadEngineer.allowed, true)
@@ -268,7 +242,9 @@ describe('extracted existing action guards feed existingActionDecisions', () => 
     const deleteUploader = existingDeleteAttachmentDecision({
       isUploader: true,
       isRequester: false,
-      isEngineeringUser: false,
+      isActive: true,
+      assignmentUnitId: 'sales',
+      units,
       status: 'ImprovementRequest',
     })
     assert.equal(deleteUploader.allowed, true)
@@ -276,7 +252,9 @@ describe('extracted existing action guards feed existingActionDecisions', () => 
     const deleteSharedViewer = existingDeleteAttachmentDecision({
       isUploader: false,
       isRequester: false,
-      isEngineeringUser: false,
+      isActive: true,
+      assignmentUnitId: 'sales',
+      units,
       status: 'SentToEngineer',
     })
     assert.equal(deleteSharedViewer.allowed, false)
@@ -336,15 +314,19 @@ describe('extracted existing action guards feed existingActionDecisions', () => 
     assert.equal(owner.allowed, true)
   })
 
-  it('keeps solution submit on the engineering role and SentToEngineer status', () => {
+  it('keeps solution submit on assignment eligibility and SentToEngineer status', () => {
     const allowed = existingSubmitSolutionDecision({
-      userRole: 'engineering',
+      isActive: true,
+      assignmentUnitId: 'web',
+      units,
       status: 'SentToEngineer',
     })
     assert.equal(allowed.allowed, true)
 
     const wrongRole = existingSubmitSolutionDecision({
-      userRole: 'admin',
+      isActive: true,
+      assignmentUnitId: 'sales',
+      units,
       status: 'SentToEngineer',
     })
     assert.equal(wrongRole.allowed, false)
@@ -367,8 +349,7 @@ describe('evaluateRequestAction composes active/read/current-step checks', () =>
         id: 'engineering-1',
         role: 'engineering',
         isActive: false,
-        departmentId: 'eng',
-        departmentType: 'ENGINEERING',
+        assignmentUnitId: 'web',
       },
     }
     const decision = evaluateRequestAction('ASSIGN_ENGINEERS', context)
@@ -463,68 +444,37 @@ describe('server and UI wiring keep action policy separate from view', () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// Final-review fix wave: I1 typed-origin capability, I3 current-instance
-// capability aggregates
-// ---------------------------------------------------------------------------
-
-describe('INITIATE_FINAL_APPROVAL capability for typed-origin NEW requests (I1)', () => {
-  it('allows a direct origin-unit member on a typed request with a null legacy department', () => {
+describe('INITIATE_FINAL_APPROVAL capability for origin-unit assignment (I1 re-based)', () => {
+  it('allows an active assignment in the request origin unit even when legacy department is null', () => {
     const decision = existingInitiateFinalApprovalDecision({
+      isActive: true,
+      assignmentUnitId: 'sales',
+      requestOriginUnitId: 'sales',
       status: 'SendBackToRequester',
-      isTypedUnitRequest: true,
-      hasDirectOriginUnitMembership: true,
-      userDepartmentId: null,
-      requestDepartmentId: null,
     })
     assert.deepEqual(decision, { allowed: true, reason: 'ALLOWED' })
   })
 
-  it('keeps denying untyped rows without a legacy department (preserved same-department rule)', () => {
+  it('denies missing origin unit', () => {
     const decision = existingInitiateFinalApprovalDecision({
+      isActive: true,
+      assignmentUnitId: 'sales',
+      requestOriginUnitId: '',
       status: 'SendBackToRequester',
-      isTypedUnitRequest: false,
-      hasDirectOriginUnitMembership: false,
-      userDepartmentId: 'department-pd',
-      requestDepartmentId: null,
     })
-    // The preserved legacy same-department rule already denies this; the
-    // null-department fail-closed boundary below it stays defensive.
     assert.equal(decision.allowed, false)
     assert.equal(decision.reason, 'WRONG_ROLE')
   })
 
-  it('still requires direct origin-unit membership for typed requests', () => {
+  it('still requires origin-unit assignment', () => {
     const decision = existingInitiateFinalApprovalDecision({
+      isActive: true,
+      assignmentUnitId: 'company',
+      requestOriginUnitId: 'sales',
       status: 'SendBackToRequester',
-      isTypedUnitRequest: true,
-      hasDirectOriginUnitMembership: false,
-      userDepartmentId: null,
-      requestDepartmentId: null,
     })
     assert.equal(decision.allowed, false)
-    // Membership failure is the origin-role rule, not the status boundary.
     assert.equal(decision.reason, 'WRONG_ROLE')
-  })
-
-  it('preserves the legacy same-department rule for untyped rows', () => {
-    const allowed = existingInitiateFinalApprovalDecision({
-      status: 'SendBackToRequester',
-      isTypedUnitRequest: false,
-      hasDirectOriginUnitMembership: false,
-      userDepartmentId: 'department-pd',
-      requestDepartmentId: 'department-pd',
-    })
-    assert.equal(allowed.allowed, true)
-    const otherDepartment = existingInitiateFinalApprovalDecision({
-      status: 'SendBackToRequester',
-      isTypedUnitRequest: false,
-      hasDirectOriginUnitMembership: false,
-      userDepartmentId: 'department-engineering',
-      requestDepartmentId: 'department-pd',
-    })
-    assert.equal(otherDepartment.allowed, false)
-    assert.equal(otherDepartment.reason, 'WRONG_ROLE')
   })
 })
 

@@ -10,6 +10,7 @@ import {
   canUserApproveSolution,
   createPrismaApprovalTransactionDb,
 } from '@/lib/approval-engine/transactions'
+import type { OrganizationUnitNode } from '@/lib/organization/model'
 import {
   REQUEST_ACTIONS,
   evaluateRequestAction,
@@ -38,6 +39,20 @@ function allDecisions(decision: ActionDecision): Record<RequestAction, ActionDec
   return result
 }
 
+async function loadOrganizationUnitNodes(): Promise<OrganizationUnitNode[]> {
+  return prisma.organization_units.findMany({
+    select: {
+      id: true,
+      name: true,
+      parentId: true,
+      isActive: true,
+      shareRequests: true,
+      canWorkOnSolutions: true,
+      managerUserId: true,
+    },
+  })
+}
+
 /**
  * Session-derived capability map. Identity comes from `auth()`, never from a
  * client-supplied userId. The server builds existingActionDecisions from
@@ -56,8 +71,6 @@ export async function getRequestActionCapabilities(requestId: string): Promise<R
       id: true,
       role: true,
       isActive: true,
-      departmentId: true,
-      department: { select: { type: true } },
     },
   })
   if (!user || !user.isActive) {
@@ -69,7 +82,6 @@ export async function getRequestActionCapabilities(requestId: string): Promise<R
     select: {
       id: true,
       requesterId: true,
-      departmentId: true,
       organizationUnitId: true,
       status: true,
       isDeleted: true,
@@ -104,6 +116,14 @@ export async function getRequestActionCapabilities(requestId: string): Promise<R
     return allDecisions({ allowed: false, reason: 'NOT_VISIBLE' })
   }
 
+  const assignment = await prisma.organization_assignments.findFirst({
+    where: { userId, isActive: true },
+    select: { unitId: true },
+  })
+  const assignmentUnitId = assignment?.unitId ?? null
+  const units = await loadOrganizationUnitNodes()
+  const requestOriginUnitId = request.organizationUnitId ?? ''
+
   const hasRequestRejection = request.approvals.some(
     (approval) => approval.status === 'rejected' && !approval.isFinalApproval,
   )
@@ -115,15 +135,6 @@ export async function getRequestActionCapabilities(requestId: string): Promise<R
   const pendingSolutionApprovals = await prisma.solution_approvals.count({
     where: { solution: { requestId }, status: 'pending', OR: [...CURRENT_INSTANCE_ROW_FILTER] },
   })
-
-  let hasDirectOriginUnitMembership = false
-  if (request.organizationUnitId) {
-    const membership = await prisma.organization_position_assignments.findFirst({
-      where: { userId, unitId: request.organizationUnitId, isActive: true },
-      select: { id: true },
-    })
-    hasDirectOriginUnitMembership = Boolean(membership)
-  }
 
   const approvalTx = createPrismaApprovalTransactionDb(prisma as Parameters<typeof createPrismaApprovalTransactionDb>[0])
   let canApprove = false
@@ -171,13 +182,11 @@ export async function getRequestActionCapabilities(requestId: string): Promise<R
   }
 
   const isRequester = user.id === request.requesterId
-  const isEngineeringUser = user.role === 'engineering'
   const originInput = {
+    isActive: user.isActive,
+    assignmentUnitId,
+    requestOriginUnitId,
     status: request.status,
-    isTypedUnitRequest: request.organizationUnitId !== null,
-    hasDirectOriginUnitMembership,
-    userDepartmentId: user.departmentId,
-    requestDepartmentId: request.departmentId,
   }
 
   const existingActionDecisions: Partial<Record<RequestAction, ActionDecision>> = {
@@ -188,11 +197,15 @@ export async function getRequestActionCapabilities(requestId: string): Promise<R
       hasRejection: hasRequestRejection,
     }),
     SUBMIT_SOLUTION: existingSubmitSolutionDecision({
-      userRole: user.role,
+      isActive: user.isActive,
+      assignmentUnitId,
+      units,
       status: request.status,
     }),
     RESUBMIT_SOLUTION: existingResubmitSolutionDecision({
-      userRole: user.role,
+      isActive: user.isActive,
+      assignmentUnitId,
+      units,
       hasSolutionRejection,
       hasFinalApprovalRejection,
     }),
@@ -202,13 +215,17 @@ export async function getRequestActionCapabilities(requestId: string): Promise<R
     }),
     UPLOAD_ATTACHMENT: existingUploadAttachmentDecision({
       isRequester,
-      isEngineeringUser,
+      isActive: user.isActive,
+      assignmentUnitId,
+      units,
       status: request.status,
     }),
     DELETE_ATTACHMENT: existingDeleteAttachmentDecision({
       isUploader: false,
       isRequester,
-      isEngineeringUser,
+      isActive: user.isActive,
+      assignmentUnitId,
+      units,
       status: request.status,
     }),
     INITIATE_FINAL_APPROVAL: existingInitiateFinalApprovalDecision(originInput),
@@ -244,12 +261,10 @@ export async function getRequestActionCapabilities(requestId: string): Promise<R
       id: user.id,
       role: user.role,
       isActive: user.isActive,
-      departmentId: user.departmentId,
-      departmentType: user.department?.type ?? null,
+      assignmentUnitId,
     },
     request: {
       requesterId: request.requesterId,
-      departmentId: request.departmentId,
       organizationUnitId: request.organizationUnitId,
       status: request.status,
     },
