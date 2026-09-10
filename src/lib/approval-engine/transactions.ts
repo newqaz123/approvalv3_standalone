@@ -497,9 +497,10 @@ type LoadedContext = {
  * back. Absent `$queryRaw` (the in-memory harness) the lock is skipped.
  */
 async function lockOwningRequestRow(tx: Prisma.TransactionClient, requestId: string): Promise<void> {
-  const queryRaw = (tx as { $queryRaw?: Prisma.TransactionClient['$queryRaw'] }).$queryRaw
-  if (typeof queryRaw !== 'function') return
-  await queryRaw`SELECT id FROM requests WHERE id = ${requestId} FOR UPDATE`
+  if (typeof tx.$queryRaw !== 'function') return
+  // Call through `tx` so Prisma keeps its client `this` (destructuring `$queryRaw`
+  // throws `_createPrismaPromise` of undefined on the global client).
+  await tx.$queryRaw`SELECT id FROM requests WHERE id = ${requestId} FOR UPDATE`
 }
 
 function asApprovalStatus(status: string): 'pending' | 'approved' | 'rejected' {
@@ -509,9 +510,8 @@ function asApprovalStatus(status: string): 'pending' | 'approved' | 'rejected' {
 
 async function loadCandidateUserIds(tx: Prisma.TransactionClient, candidateGroupId: string | null): Promise<string[]> {
   if (!candidateGroupId) return []
-  const membersTable = (tx as { approval_candidate_group_members?: Prisma.TransactionClient['approval_candidate_group_members'] }).approval_candidate_group_members
-  if (!membersTable) return []
-  const members = await membersTable.findMany({
+  if (!tx.approval_candidate_group_members) return []
+  const members = await tx.approval_candidate_group_members.findMany({
     where: { candidateGroupId },
     select: { userId: true },
   })

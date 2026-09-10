@@ -771,7 +771,8 @@ model approval_instance_skips {
   id                String                    @id @default(uuid())
   approvalInstanceId String
   routeStepId       String?
-  requiredPosition  OrganizationPositionCode
+  // B14 transitional: leftover enum nullable until B15 drop. Persist writes requiredPositionId only.
+  requiredPosition  OrganizationPositionCode?
   requiredPositionId String?
   reason            ApprovalSkipReason
   createdAt         DateTime                  @default(now())
@@ -786,7 +787,8 @@ model approval_instance_skips {
 model approval_candidate_groups {
   id                 String                               @id @default(uuid())
   approvalInstanceId String
-  requiredPosition   OrganizationPositionCode
+  // B14 transitional: leftover enum nullable until B15 drop. Persist writes requiredPositionId only.
+  requiredPosition   OrganizationPositionCode?
   scopeUnitId        String
   requiredPositionId String?
   capturedAt         DateTime                             @default(now())

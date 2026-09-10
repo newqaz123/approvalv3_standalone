@@ -400,7 +400,12 @@ describe('clean-start engine plan — builder + persist', () => {
     assert.equal(instance.state, 'PENDING')
     assert.equal(instance.requestId, 'req-1')
     assert.equal(instance.routeVersionId, 'rv-1')
-    assert.equal('originContext' in instance, false)
+    assert.deepEqual(instance.originContext, {
+      positionId: 'p-staff',
+      assignmentId: 'a-origin',
+      unitPath: ['web', 'eng', 'company'],
+      labels: {},
+    })
     assert.equal('restartOfInstanceId' in instance, false)
     assert.equal(tx.groups.length, 1)
     assert.equal(tx.groups[0].requiredPositionId, 'p-lead')
@@ -420,7 +425,7 @@ describe('clean-start engine plan — builder + persist', () => {
     assert.equal(tx.requestApprovals[0].candidateGroupId, tx.groups[0].id)
     assert.equal(tx.requestApprovals[0].instanceId, first.id)
     assert.equal(tx.requestApprovals[0].order, 2)
-    assert.equal('integrityVersion' in tx.requestApprovals[0], false)
+    assert.equal(tx.requestApprovals[0].integrityVersion, 1)
     assert.equal('requiredLevel' in tx.requestApprovals[0], false)
     assert.equal('isCustomChain' in tx.requestApprovals[0], false)
     assert.equal('isFinalApproval' in tx.requestApprovals[0], false)
@@ -459,11 +464,17 @@ describe('clean-start engine plan — builder + persist', () => {
     assert.equal(selfRow.status, 'approved')
     assert.equal(selfRow.approverId, 'u-origin')
     assert.equal(selfRow.instanceId, persisted.id)
+    assert.equal(selfRow.integrityVersion, 1)
     assert.equal('candidateGroupId' in selfRow, false)
     assert.equal('requiredPositionId' in selfRow, false)
     assert.equal('requiredPosition' in selfRow, false)
     assert.equal(tx.instances[0].originPositionId, 'p-dir')
-    assert.equal('originContext' in tx.instances[0], false)
+    assert.deepEqual(tx.instances[0].originContext, {
+      positionId: 'p-dir',
+      assignmentId: 'a-origin',
+      unitPath: ['web', 'eng', 'company'],
+      labels: {},
+    })
   })
 
   it('missing origin position rank fails closed with ApprovalEnginePlanError', async () => {
@@ -516,7 +527,7 @@ describe('clean-start engine plan — builder + persist', () => {
     assert.doesNotMatch(src, /ApprovalRouteConfigurationError/)
     assert.doesNotMatch(src, /from ['"]@\/lib\/approval-engine\/(legacy|transactions|instances|candidate-groups|phase-adapters|phase-origin|types)['"]/)
     assert.doesNotMatch(src, /from ['"]\.\/(legacy|transactions|instances|candidate-groups|phase-adapters|phase-origin|types)['"]/)
-    assert.doesNotMatch(src, /integrityVersion/)
+    assert.match(src, /integrityVersion: 1/)
     assert.doesNotMatch(src, /isCustomChain/)
     assert.doesNotMatch(src, /isFinalApproval/)
   })

@@ -499,6 +499,10 @@ describe('persisted approval row classification', () => {
       candidateGroupId: 'group-1',
       requiredPosition: 'SUPERVISOR',
     })
+    assert.deepEqual(
+      classifyApprovalRow({ ...snapshotRow, requiredPosition: null }),
+      { mode: 'SNAPSHOT_GROUP', instanceId: 'instance-1', candidateGroupId: 'group-1' },
+    )
     assert.throws(() => classifyApprovalRow({ ...snapshotRow, candidateGroupId: null }), ApprovalRowCorruptedError)
     assert.throws(() => classifyApprovalRow({ ...snapshotRow, instanceId: null }), ApprovalRowCorruptedError)
     assert.throws(() => classifyApprovalRow({ ...snapshotRow, requiredPosition: 'NOT_A_POSITION' }), ApprovalRowCorruptedError)

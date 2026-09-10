@@ -24,7 +24,7 @@ export interface ApprovalRowModeInput {
 export type ApprovalRowClassification =
   | { mode: 'LEGACY_LEVEL'; requiredLevel: number | null }
   | { mode: 'CUSTOM_PERSON'; requiredApproverId: string | null; instanceId: string | null }
-  | { mode: 'SNAPSHOT_GROUP'; instanceId: string; candidateGroupId: string; requiredPosition: OrganizationPositionCode }
+  | { mode: 'SNAPSHOT_GROUP'; instanceId: string; candidateGroupId: string; requiredPosition?: OrganizationPositionCode }
 
 /** Corrupted persisted metadata must fail closed, never downgrade modes. */
 export class ApprovalRowCorruptedError extends Error {
@@ -56,13 +56,14 @@ const POSITION_CODES: readonly string[] = [
  *   null on legacy rows whose account was deleted (existing SetNull
  *   semantics); `instanceId` is null for legacy custom rows and set for NEW
  *   custom attempts.
- * - SNAPSHOT_GROUP: requires integrity version 1, a current instance id, a
- *   captured candidate group and a valid required position. Malformed
- *   snapshot metadata throws `ApprovalRowCorruptedError` and is never
- *   silently downgraded to live-level routing. The group-less approved
- *   self-audit row of an AUTO_APPROVED instance is terminal audit data, not
- *   an actionable step: callers must short-circuit on instance state before
- *   classifying it as a candidate step.
+ * - SNAPSHOT_GROUP: requires integrity version 1, a current instance id, and a
+ *   captured candidate group. B14 leftover enum on requiredPosition is optional:
+ *   persist writes requiredPositionId only. A present but invalid leftover
+ *   value still fails closed. Malformed snapshot metadata throws
+ *   `ApprovalRowCorruptedError` and is never silently downgraded to live-level
+ *   routing. The group-less approved self-audit row of an AUTO_APPROVED
+ *   instance is terminal audit data, not an actionable step: callers must
+ *   short-circuit on instance state before classifying it as a candidate step.
  */
 export function classifyApprovalRow(row: ApprovalRowModeInput): ApprovalRowClassification {
   const routingMode: ApprovalRoutingMode | string =
@@ -89,15 +90,18 @@ export function classifyApprovalRow(row: ApprovalRowModeInput): ApprovalRowClass
       if (!row.candidateGroupId) {
         throw new ApprovalRowCorruptedError('Snapshot approval row is missing its captured candidate group')
       }
-      if (!row.requiredPosition || !POSITION_CODES.includes(row.requiredPosition)) {
+      if (row.requiredPosition != null && row.requiredPosition !== '' && !POSITION_CODES.includes(row.requiredPosition)) {
         throw new ApprovalRowCorruptedError(`Snapshot approval row has an invalid required position: ${String(row.requiredPosition)}`)
       }
-      return {
+      const snapshot: Extract<ApprovalRowClassification, { mode: 'SNAPSHOT_GROUP' }> = {
         mode: 'SNAPSHOT_GROUP',
         instanceId: row.instanceId,
         candidateGroupId: row.candidateGroupId,
-        requiredPosition: row.requiredPosition as OrganizationPositionCode,
       }
+      if (row.requiredPosition && POSITION_CODES.includes(row.requiredPosition)) {
+        snapshot.requiredPosition = row.requiredPosition as OrganizationPositionCode
+      }
+      return snapshot
     }
     default:
       throw new ApprovalRowCorruptedError(`Unknown approval routing mode: ${String(routingMode)}`)
