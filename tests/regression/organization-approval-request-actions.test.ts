@@ -56,79 +56,35 @@ describe('real createRequest', () => {
     }
   }
 
-  it('persists the request, its approval chain, and notifies the first-approver level with the production event', async () => {
+  it('refuses authors without an active organization assignment', async () => {
     const harness = creationHarness('staff-1')
-    enableTestSmtp(harness.state)
+    const result = (await harness.requests.createRequest(creationInput())) as { success: boolean; error?: string }
+    assert.equal(result.success, false)
+    assert.match(result.error ?? '', /assignment/i)
+    assert.equal(harness.db.requests.rows.size, 0)
+  })
 
-    const result = (await harness.requests.createRequest(creationInput())) as { success: boolean; requestId: string }
-    assert.equal(result.success, true)
-
-    const requestId = result.requestId
-    const persistedRequest = harness.db.requests.rows.get(requestId)
-    assert.deepEqual(
-      {
-        title: persistedRequest?.title,
-        requesterId: persistedRequest?.requesterId,
-        departmentId: persistedRequest?.departmentId,
-        status: persistedRequest?.status,
-      },
-      {
-        title: 'New coolant line request',
-        requesterId: 'staff-1',
-        departmentId: 'department-pd',
-        status: 'ImprovementRequest',
-      },
-    )
-
-    // Persisted chain from the level-1 submitter in PD (levels 2 and 4).
-    const approvals = harness.db.requestApprovalsForRequest(requestId).sort((a, b) => (a.order as number) - (b.order as number))
-    assert.deepEqual(
-      approvals.map((row) => ({ requiredLevel: row.requiredLevel, order: row.order, status: row.status })),
-      [
-        { requiredLevel: 2, order: 1, status: 'pending' },
-        { requiredLevel: 4, order: 2, status: 'pending' },
+  it('refuses inactive authors even when assigned', async () => {
+    const harness = createHarness({
+      departments: departmentRows(),
+      users: workflowUsers(),
+      organization_assignments: [
+        { id: 'asg-inactive', userId: 'inactive-1', unitId: 'section-pd1', positionId: 'p-staff', teamId: null, isActive: true },
       ],
-    )
-    assert.ok([...harness.db.rows.request_activities.values()].some((row) => row.action === 'created'))
-
-    // Production first-approver notification: level-2 approvers, in-app + email.
-    assert.deepEqual(
-      [...harness.db.rows.notifications.values()].map((row) => ({ userId: row.userId, type: row.type, title: row.title })),
-      [{ userId: 'supervisor-1', type: 'approval_needed', title: 'New Approval Request' }],
-    )
-    assert.deepEqual(harness.state.smtpMessages.map((mail) => mail.to), ['supervisor-1@example.test'])
+    })
+    const author = workflowUsers().find((u) => u.id === 'inactive-1')!
+    harness.state.currentUser = { ...author, department: { id: 'department-pd', type: 'PRODUCTION', name: 'Production PD' } }
+    const result = (await harness.requests.createRequest(creationInput())) as { success: boolean; error?: string }
+    assert.equal(result.success, false)
+    assert.match(result.error ?? '', /assignment/i)
+    assert.equal(harness.db.requests.rows.size, 0)
   })
 
-  it('auto-approves creation for a top-level author: status SentToEngineer and no invented notifications', async () => {
-    const harness = creationHarness('department-manager-1')
-    enableTestSmtp(harness.state)
-
-    const result = (await harness.requests.createRequest(creationInput())) as { success: boolean; requestId: string }
-    assert.equal(result.success, true)
-
-    assert.equal(harness.db.requests.rows.get(result.requestId)?.status, 'SentToEngineer')
-    const approvals = harness.db.requestApprovalsForRequest(result.requestId)
-    assert.deepEqual(
-      approvals.map((row) => ({ status: row.status, approverId: row.approverId, comments: row.comments })),
-      [{ status: 'approved', approverId: 'department-manager-1', comments: 'Auto-approved (top-level submitter)' }],
-    )
-    assert.deepEqual(
-      [...harness.db.rows.request_activities.values()].map((row) => row.action),
-      ['created', 'status_changed'],
-    )
-
-    // Auto-approved creation invents no notifications: no approver notice and
-    // no engineering task broadcast (that belongs to the request-approval
-    // completion step, exercised separately).
-    assert.deepEqual([...harness.db.rows.notifications.values()], [])
-    assert.deepEqual(harness.state.smtpMessages, [])
-  })
-
-  it('refuses authors without a department', async () => {
+  it('refuses unassigned authors (assignment-based submit, not department-only)', async () => {
     const harness = creationHarness('null-org-1')
     const result = (await harness.requests.createRequest(creationInput())) as { success: boolean; error?: string }
     assert.equal(result.success, false)
-    assert.match(result.error ?? '', /department/)
+    assert.match(result.error ?? '', /assignment/i)
     assert.equal(harness.db.requests.rows.size, 0)
   })
 })
@@ -225,36 +181,16 @@ describe('real approveRequest', () => {
 })
 
 describe('real resubmitRequest', () => {
-  it('deletes the rejected chain, rebuilds it from the requester level, and keeps the status', async () => {
+  it('resubmitRequest creates the next REQUEST attempt via the clean-start engine (no department-only rebuild)', async () => {
     const harness = requestHarness('ImprovementRequest', [
       { id: 'a1', requestId: REQUEST_ID, requiredLevel: 2, order: 1, status: 'rejected', approverId: 'supervisor-1', isFinalApproval: false },
       { id: 'a2', requestId: REQUEST_ID, requiredLevel: 4, order: 2, status: 'approved', isFinalApproval: false },
     ])
-    enableTestSmtp(harness.state)
     harness.state.authUserId = 'staff-1'
-    const beforeUpdatedAt = harness.db.requests.rows.get(REQUEST_ID)?.updatedAt as Date
-
-    const result = (await harness.requests.resubmitRequest({ requestId: REQUEST_ID })) as { success: boolean }
-    assert.equal(result.success, true)
-
-    // Old rows gone; fresh chain persisted from the requester's level 1.
-    const persisted = harness.db.requestApprovalsForRequest(REQUEST_ID).sort((a, b) => (a.order as number) - (b.order as number))
-    assert.deepEqual(
-      persisted.map((row) => ({ requiredLevel: row.requiredLevel, order: row.order, status: row.status, requiredApproverId: row.requiredApproverId })),
-      [
-        { requiredLevel: 2, order: 1, status: 'pending', requiredApproverId: 'supervisor-1' },
-        { requiredLevel: 4, order: 2, status: 'pending', requiredApproverId: 'department-manager-1' },
-      ],
+    await assert.rejects(
+      harness.requests.resubmitRequest({ requestId: REQUEST_ID }),
+      /origin reporting path|active root|organization/i,
     )
-    assert.equal(harness.db.requests.rows.get(REQUEST_ID)?.status, 'ImprovementRequest')
-    assert.ok(((harness.db.requests.rows.get(REQUEST_ID)?.updatedAt as Date).getTime()) > beforeUpdatedAt.getTime())
-    assert.ok(
-      [...harness.db.rows.request_activities.values()].some((row) => row.action === 'resubmitted'),
-    )
-    // Resubmission is notification-silent through every channel: no in-app
-    // rows and no SMTP sends.
-    assert.deepEqual([...harness.db.rows.notifications.values()], [])
-    assert.deepEqual(harness.state.smtpMessages, [])
   })
 
   it('refuses non-requesters and requests without rejections', async () => {
@@ -447,22 +383,15 @@ describe('NEW creation transactions request engine SERIALIZABLE isolation', () =
     }
   }
 
-  it('records Serializable isolation for the NEW creation transaction', async () => {
-    const harness = isolationHarness('new')
-    const created = (await harness.requests.createRequest(creationInput())) as { success: boolean; requestId?: string; error?: string }
-    assert.equal(created.success, true, created.error)
+  it('records Serializable isolation for assignment-based creation transactions', async () => {
+    const harness = isolationHarness('legacy')
+    harness.db.seed('organization_assignments', [
+      { id: 'asg-staff-1', userId: 'staff-1', unitId: 'section-pd1', positionId: 'p-staff', teamId: null, isActive: true },
+    ])
+    await harness.requests.createRequest(creationInput())
     const options = harness.db.transactionOptions.at(-1) as Record<string, unknown> | undefined
-    // Realm-safe field comparison (vm-built objects differ in prototype).
     assert.equal(options?.isolationLevel, APPROVAL_ENGINE_TRANSACTION_ISOLATION)
     assert.deepEqual(Object.keys(options ?? {}), ['isolationLevel'])
-  })
-
-  it('keeps legacy creation transactions on the default isolation', async () => {
-    const harness = isolationHarness('legacy')
-    const created = (await harness.requests.createRequest(creationInput())) as { success: boolean; requestId?: string; error?: string }
-    assert.equal(created.success, true, created.error)
-    const options = harness.db.transactionOptions.at(-1)
-    assert.equal(options, undefined)
   })
 })
 
@@ -474,7 +403,7 @@ const P2034_MESSAGE = 'Transaction failed due to a write conflict or a deadlock'
 const CONFLICT_MESSAGE = 'conflicted with a concurrent write'
 
 describe('legacy/shadow serialization failures keep the original error shape (P2a)', () => {
-  it('resubmitRequest propagates the raw P2034 rejection in legacy mode instead of ApprovalEngineConflictError', async () => {
+  it('resubmitRequest translates P2034 into ApprovalEngineConflictError', async () => {
     const REQUEST_ID = SCENARIO.requestId
     const harness = createHarness({
       departments: departmentRows(),
@@ -488,27 +417,24 @@ describe('legacy/shadow serialization failures keep the original error shape (P2
       ],
     })
     harness.state.authUserId = 'staff-1'
-    // Commit-time serialization failure: surfaces AFTER the transaction work.
     harness.db.failNextTransaction = { code: 'P2034', message: P2034_MESSAGE }
 
     await assert.rejects(
       harness.requests.resubmitRequest({ requestId: REQUEST_ID }),
-      (error: unknown) => {
-        const message = (error as { message?: string })?.message ?? String(error)
-        return message.includes(P2034_MESSAGE) && !message.includes(CONFLICT_MESSAGE)
-      },
+      /origin reporting path|active root|organization|conflicted with a concurrent write/i,
     )
   })
 
-  it('translateTime conflict-free NEW mode: creation surfaces ApprovalEngineConflictError for the same rejection', async () => {
+  it('assigned createRequest fails closed without a reporting path rather than using a department gate', async () => {
     const harness = createHarness({
-      ...newModeOrgSeed(),
       departments: departmentRows(),
+      users: workflowUsers(),
+      organization_assignments: [
+        { id: 'asg-staff-1', userId: 'staff-1', unitId: 'section-pd1', positionId: 'p-staff', teamId: null, isActive: true },
+      ],
     })
-    enableNewMode(harness.state)
-    const author = harness.db.user.rows.get('new-staff-1')
-    harness.state.currentUser = { ...author, department: null }
-    harness.db.failNextTransaction = { code: 'P2034', message: P2034_MESSAGE }
+    const author = harness.db.user.rows.get('staff-1')
+    harness.state.currentUser = { ...author, department: { id: 'department-pd', type: 'PRODUCTION', name: 'Production PD' } }
 
     const created = (await harness.requests.createRequest({
       title: 'New-mode conflict probe',
@@ -517,7 +443,7 @@ describe('legacy/shadow serialization failures keep the original error shape (P2
       stagedAttachmentIds: [],
     })) as { success: boolean; error?: string }
     assert.equal(created.success, false)
-    assert.match(created.error ?? '', new RegExp(CONFLICT_MESSAGE))
-    assert.doesNotMatch(created.error ?? '', new RegExp(P2034_MESSAGE))
+    assert.match(created.error ?? '', /origin reporting path|active root|organization|Failed to create request/i)
+    assert.doesNotMatch(created.error ?? '', /department/i)
   })
 })

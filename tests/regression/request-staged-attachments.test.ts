@@ -3,7 +3,6 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 const source = readFileSync('src/server-actions/requests.ts', 'utf8')
-const approvalsSource = readFileSync('src/server-actions/approvals.ts', 'utf8')
 const storageSource = readFileSync('src/lib/attachments/storage.ts', 'utf8')
 
 const createRequest = source.slice(
@@ -71,25 +70,20 @@ describe('createRequest adopts ready draft IDs inside the same transaction', () 
     assert.match(txCallback, /adopted\.count !== stagedAttachmentIds\.length/)
   })
 
-  it('reconciles inline images, writes creation activity, and builds the approval chain in the same transaction', () => {
+  it('reconciles inline images, writes creation activity, and creates the REQUEST attempt in the same transaction', () => {
     assert.match(txCallback, /reconcileInlineDescriptionImages\(tx/)
     assert.match(txCallback, /action:\s*'created'/)
-    assert.match(txCallback, /createApprovalChain\(/)
-    assert.match(txCallback, /\btx,\s*\)/)
-    assert.match(approvalsSource, /db: Prisma\.TransactionClient \| typeof prisma = prisma/)
-    assert.match(approvalsSource, /db\.request_approvals\.createMany/)
-    assert.match(approvalsSource, /getMaxLevelInDepartment\(departmentId, db\)/)
+    assert.match(txCallback, /createRequestApprovalAttempt\(/)
+    assert.match(txCallback, /createCleanStartPhaseAttemptTx\(/)
   })
 
-  it('applies top-level auto-approve status and activity inside the same transaction', () => {
-    assert.match(txCallback, /status:\s*'SentToEngineer'/)
+  it('applies auto-approve status and activity inside the same transaction', () => {
+    assert.match(txCallback, /attempt\.statusChange/)
     assert.match(txCallback, /action:\s*'status_changed'/)
-    assert.match(txCallback, /Auto-approved by top-level user/)
-    const statusIdx = txCallback.indexOf("status: 'SentToEngineer'")
+    assert.match(txCallback, /Auto-approved by position ceiling/)
     const notifyIdx = createRequest.indexOf('createNotification')
     const txIdx = createRequest.indexOf('prisma.$transaction')
-    assert.ok(statusIdx >= 0)
-    assert.ok(notifyIdx > txIdx, 'top-level status change must not wait for notifications')
+    assert.ok(notifyIdx > txIdx, 'status change must not wait for notifications')
   })
 
   it('creates notifications only after transaction success', () => {

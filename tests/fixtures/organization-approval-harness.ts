@@ -51,22 +51,25 @@ const MODEL_FIELDS: Record<string, readonly string[]> = {
   department_approvers: ['id', 'departmentId', 'approverId', 'approverLevel', 'createdAt'],
   departments: ['id', 'type', 'name', 'createdAt'],
   requests: ['id', 'status', 'requesterId', 'title', 'description', 'departmentId', 'organizationUnitId', 'projectEstimateCost', 'engineeringCostEstimate', 'updatedAt', 'createdAt', 'isDeleted', 'isArchived'],
-  request_approvals: ['id', 'requestId', 'requiredLevel', 'requiredApproverId', 'order', 'status', 'approverId', 'comments', 'approvedAt', 'isCustomChain', 'isFinalApproval', 'routingMode', 'integrityVersion', 'instanceId', 'requiredPosition', 'candidateGroupId', 'createdAt'],
+  request_approvals: ['id', 'requestId', 'requiredLevel', 'requiredApproverId', 'order', 'status', 'approverId', 'comments', 'approvedAt', 'isCustomChain', 'isFinalApproval', 'routingMode', 'integrityVersion', 'instanceId', 'requiredPosition', 'requiredPositionId', 'candidateGroupId', 'createdAt'],
   request_activities: ['id', 'requestId', 'userId', 'action', 'comments', 'fromStatus', 'toStatus', 'createdAt'],
   notifications: ['id', 'userId', 'type', 'title', 'message', 'requestId', 'readAt', 'createdAt'],
   solutions: ['id', 'requestId', 'title', 'description', 'costEstimate', 'currency', 'timeline', 'conceptDesign', 'submittedById', 'submittedAt', 'createdAt', 'updatedAt'],
-  solution_approvals: ['id', 'solutionId', 'requiredLevel', 'requiredApproverId', 'order', 'status', 'approverId', 'comments', 'approvedAt', 'isCustomChain', 'routingMode', 'integrityVersion', 'instanceId', 'requiredPosition', 'candidateGroupId', 'createdAt'],
+  solution_approvals: ['id', 'solutionId', 'requiredLevel', 'requiredApproverId', 'order', 'status', 'approverId', 'comments', 'approvedAt', 'isCustomChain', 'routingMode', 'integrityVersion', 'instanceId', 'requiredPosition', 'requiredPositionId', 'candidateGroupId', 'createdAt'],
   file_attachments: ['id', 'requestId', 'solutionId', 'uploadedById', 'filePath', 'fileName', 'createdAt'],
   email_settings: ['id', 'enabled', 'host', 'port', 'username', 'password', 'fromAddress', 'createdAt'],
-  approval_instances: ['id', 'requestId', 'solutionId', 'phase', 'routeVersionId', 'originUserId', 'originUnitId', 'originContext', 'routingMode', 'state', 'attempt', 'completionReason', 'supersededAt', 'createdAt'],
-  organization_units: ['id', 'name', 'unitType', 'parentId', 'legacyDepartmentId', 'isActive', 'operationalType', 'createdAt', 'updatedAt'],
+  approval_instances: ['id', 'requestId', 'solutionId', 'phase', 'routeVersionId', 'originUserId', 'originUnitId', 'originContext', 'originAssignmentId', 'originPositionId', 'routingMode', 'state', 'attempt', 'completionReason', 'supersededAt', 'createdAt'],
+  organization_units: ['id', 'name', 'unitType', 'parentId', 'legacyDepartmentId', 'isActive', 'operationalType', 'shareRequests', 'canWorkOnSolutions', 'managerUserId', 'createdAt', 'updatedAt'],
   organization_position_assignments: ['id', 'userId', 'unitId', 'positionCode', 'reportingGroupId', 'isPrimary', 'isActive', 'createdAt', 'updatedAt'],
+  organization_assignments: ['id', 'userId', 'unitId', 'positionId', 'teamId', 'isActive', 'deactivatedAt', 'createdAt', 'updatedAt'],
+  positions: ['id', 'name', 'rank', 'isActive', 'createdAt', 'updatedAt'],
+  teams: ['id', 'unitId', 'name', 'reportsToAssignmentId', 'isActive', 'createdAt', 'updatedAt'],
   organization_import_runs: ['id', 'mappingDigest', 'appliedAt', 'appliedBy', 'targetIdentity', 'counts', 'createdAt'],
   reporting_groups: ['id', 'unitId', 'parentGroupId', 'name', 'isActive', 'createdAt'],
   reporting_group_members: ['id', 'reportingGroupId', 'userId', 'createdAt'],
-  approval_route_versions: ['id', 'scopeUnitId', 'phase', 'version', 'maximumPositionLevel', 'status', 'createdById', 'createdAt', 'publishedAt'],
-  approval_route_steps: ['id', 'routeVersionId', 'stepOrder', 'positionCode', 'createdAt'],
-  approval_candidate_groups: ['id', 'approvalInstanceId', 'requiredPosition', 'scopeUnitId', 'capturedAt'],
+  approval_route_versions: ['id', 'scopeUnitId', 'phase', 'version', 'maximumPositionLevel', 'approvalLimitPositionId', 'status', 'createdById', 'createdAt', 'publishedAt'],
+  approval_route_steps: ['id', 'routeVersionId', 'stepOrder', 'positionCode', 'positionId', 'createdAt'],
+  approval_candidate_groups: ['id', 'approvalInstanceId', 'requiredPosition', 'requiredPositionId', 'scopeUnitId', 'capturedAt'],
   approval_candidate_group_members: ['id', 'candidateGroupId', 'userId', 'capturedAt', 'capturedDisplayName'],
   request_engineer_assignments: ['id', 'requestId', 'engineerId', 'assignedAt', 'assignedById'],
 }
@@ -85,6 +88,10 @@ const MODEL_COLUMN_DEFAULTS: Record<string, Row> = {
   solution_approvals: { instanceId: null, requiredPosition: null, candidateGroupId: null, routingMode: 'LEGACY_LEVEL', integrityVersion: 0 },
   // Database column default the current-instance row filter relies on.
   approval_instances: { supersededAt: null },
+  organization_units: { shareRequests: true, canWorkOnSolutions: false, managerUserId: null },
+  organization_assignments: { teamId: null, isActive: true },
+  positions: { isActive: true },
+  teams: { isActive: true },
 }
 
 /** Relation config: FK resolution + list/to-one kind. Unknown keys throw. */
@@ -481,6 +488,9 @@ export class ApprovalWorkflowDb {
   readonly request_engineer_assignments: ModelTable
   readonly organization_units: ModelTable
   readonly organization_position_assignments: ModelTable
+  readonly organization_assignments: ModelTable
+  readonly positions: ModelTable
+  readonly teams: ModelTable
   readonly organization_import_runs: ModelTable
   readonly reporting_groups: ModelTable
   readonly reporting_group_members: ModelTable
@@ -508,6 +518,9 @@ export class ApprovalWorkflowDb {
     this.request_engineer_assignments = this.table('request_engineer_assignments') as ModelTable
     this.organization_units = this.table('organization_units') as ModelTable
     this.organization_position_assignments = this.table('organization_position_assignments') as ModelTable
+    this.organization_assignments = this.table('organization_assignments') as ModelTable
+    this.positions = this.table('positions') as ModelTable
+    this.teams = this.table('teams') as ModelTable
     this.organization_import_runs = this.table('organization_import_runs') as ModelTable
     this.reporting_groups = this.table('reporting_groups') as ModelTable
     this.reporting_group_members = this.table('reporting_group_members') as ModelTable
@@ -729,6 +742,9 @@ export interface HarnessSeed {
   approval_instances?: Row[]
   organization_units?: Row[]
   organization_position_assignments?: Row[]
+  organization_assignments?: Row[]
+  positions?: Row[]
+  teams?: Row[]
   reporting_groups?: Row[]
   reporting_group_members?: Row[]
   organization_import_runs?: Row[]
@@ -777,6 +793,9 @@ export function createHarness(seed: HarnessSeed = {}): Harness {
   db.seed('approval_instances', seed.approval_instances ?? [])
   db.seed('organization_units', seed.organization_units ?? [])
   db.seed('organization_position_assignments', seed.organization_position_assignments ?? [])
+  db.seed('organization_assignments', seed.organization_assignments ?? [])
+  db.seed('positions', seed.positions ?? [])
+  db.seed('teams', seed.teams ?? [])
   db.seed('reporting_groups', seed.reporting_groups ?? [])
   db.seed('reporting_group_members', seed.reporting_group_members ?? [])
   db.seed('organization_import_runs', seed.organization_import_runs ?? [])
@@ -896,6 +915,24 @@ export function createHarness(seed: HarnessSeed = {}): Harness {
   dependencies['@/lib/approval-engine/transactions'] = load('lib/approval-engine/transactions.ts')
   dependencies['@/lib/approval-rollout'] = load('lib/approval-rollout.ts')
   dependencies['@/lib/approval-engine/phase-adapters'] = load('lib/approval-engine/phase-adapters.ts')
+  dependencies['@/lib/organization/model'] = load('lib/organization/model.ts')
+  dependencies['./model'] = dependencies['@/lib/organization/model']
+  dependencies['@/lib/organization/hierarchy'] = load('lib/organization/hierarchy.ts')
+  dependencies['./hierarchy'] = dependencies['@/lib/organization/hierarchy']
+  dependencies['@/lib/organization/assignments'] = load('lib/organization/assignments.ts')
+  dependencies['./assignments'] = dependencies['@/lib/organization/assignments']
+  dependencies['@/lib/organization/reporting-path'] = load('lib/organization/reporting-path.ts')
+  dependencies['@/lib/approval-routes/definition'] = load('lib/approval-routes/definition.ts')
+  dependencies['./definition'] = dependencies['@/lib/approval-routes/definition']
+  dependencies['@/lib/approval-routes/selection'] = load('lib/approval-routes/selection.ts')
+  dependencies['./selection'] = dependencies['@/lib/approval-routes/selection']
+  dependencies['@/lib/approval-engine/candidates'] = load('lib/approval-engine/candidates.ts')
+  dependencies['./candidates'] = dependencies['@/lib/approval-engine/candidates']
+  dependencies['@/lib/approval-engine/plan'] = load('lib/approval-engine/plan.ts')
+  dependencies['./plan'] = dependencies['@/lib/approval-engine/plan']
+  dependencies['@/lib/approval-engine/attempts'] = load('lib/approval-engine/attempts.ts')
+  dependencies['./attempts'] = dependencies['@/lib/approval-engine/attempts']
+  dependencies['@/lib/solution-eligibility'] = load('lib/solution-eligibility.ts')
   dependencies['@/lib/notification-recipients'] = load('lib/notification-recipients.ts')
   dependencies['@/lib/request-visibility/types'] = load('lib/request-visibility/types.ts')
   dependencies['@/lib/request-visibility/predicate'] = load('lib/request-visibility/predicate.ts')

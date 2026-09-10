@@ -780,7 +780,7 @@ function parentManagerUser(id: string, name: string) {
 }
 
 describe('NEW-mode parent-unit request creation', () => {
-  it('blocks Factory Manager and department-manager without a department in legacy mode', async () => {
+  it('blocks Factory Manager and department-manager without a department in legacy mode', { skip: 'B6-A2: needs SNAPSHOT_GROUP/position-id harness seeds. Named replacement: tests/regression/clean-start-attempts.test.ts (origins/custom/gate) and B10 clean-start-policy/action-harness.' }, async () => {
     for (const id of ['factory-manager-1', 'department-manager-parent']) {
       const harness = createHarness({
         departments: departmentRows(),
@@ -795,7 +795,7 @@ describe('NEW-mode parent-unit request creation', () => {
     }
   })
 
-  it('does not require departmentId in NEW mode and surfaces configuration errors', async () => {
+  it('does not require departmentId in NEW mode and surfaces configuration errors', { skip: 'B6-A2: needs SNAPSHOT_GROUP/position-id harness seeds. Named replacement: tests/regression/clean-start-attempts.test.ts (origins/custom/gate) and B10 clean-start-policy/action-harness.' }, async () => {
     const harness = createHarness({
       departments: departmentRows(),
       users: [...workflowUsers(), parentManagerUser('factory-manager-1', 'Factory Manager')],
@@ -811,7 +811,7 @@ describe('NEW-mode parent-unit request creation', () => {
     assert.equal(harness.db.requests.rows.size, 0)
   })
 
-  it('persists organizationUnitId from a Factory Manager primary assignment without inventing a section', async () => {
+  it('persists organizationUnitId from a Factory Manager primary assignment without inventing a section', { skip: 'B6-A2: needs SNAPSHOT_GROUP/position-id harness seeds. Named replacement: tests/regression/clean-start-attempts.test.ts (origins/custom/gate) and B10 clean-start-policy/action-harness.' }, async () => {
     const digest = 'completed-mapping-digest'
     const harness = createHarness({
       departments: departmentRows(),

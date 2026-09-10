@@ -5,7 +5,7 @@ import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 import { revalidateRequestViews } from './request-view-invalidation'
 import { z } from 'zod'
-import { createApprovalChain, getApproversAtLevel } from './approvals'
+import { getApproversAtLevel } from './approvals'
 import { requireAdmin } from '@/lib/auth'
 import { getCurrentUser, getUserById } from '@/lib/cache/user-cache'
 import {
@@ -30,28 +30,25 @@ import {
   buildRejectedRequestResubmissionWhere,
   updateRequestStatusExpecting,
 } from '@/lib/request-status-transition'
-import { getApprovalRolloutMode } from '@/lib/approval-rollout'
 import {
   APPROVAL_ENGINE_TRANSACTION_ISOLATION,
   ApprovalEngineConflictError,
-  createApprovalEngineDb,
-  translateTransactionConflict,
-} from '@/lib/approval-engine/instances'
+  ApprovalEnginePlanError,
+} from '@/lib/approval-engine/plan'
 import {
-  ApprovalCreationDisabledError,
-  CURRENT_INSTANCE_ROW_FILTER,
-  assertNewCreationEnabled,
-  compareNewResolutionWithoutWrites,
-  createPrismaPhaseAdapterDb,
+  canSubmitRequests,
+  createCleanStartPhaseAttemptTx,
   createRequestApprovalAttempt,
+  requireAssignableSubmitter,
+  SubmissionDeniedError,
+  type CleanStartAttemptStore,
+} from '@/lib/approval-engine/attempts'
+import {
+  CURRENT_INSTANCE_ROW_FILTER,
   markCurrentInstanceOutcome,
 } from '@/lib/approval-engine/phase-adapters'
-import { ApprovalRouteConfigurationError } from '@/lib/approval-routes/validation'
+import { ApprovalRouteConfigurationError } from '@/lib/approval-routes/definition'
 import { snapshotGroupActionWhere } from '@/lib/approval-engine/transactions'
-import {
-  createPrismaNotificationRecipientDb,
-  resolveApprovalNeededRecipients,
-} from '@/lib/notification-recipients'
 import { buildRequestVisibilityWhere } from '@/lib/request-visibility/predicate'
 import { canUserViewRequest, createRequestVisibilityDb } from '@/lib/request-access'
 import {
@@ -105,18 +102,21 @@ export interface CreateRequestInput {
  */
 export async function createRequest(input: CreateRequestInput) {
   const user = await getCurrentUser()
-  const rolloutMode = getApprovalRolloutMode(process.env)
 
   if (!user) {
     return {
       success: false,
-      error: 'User must belong to a department to create requests',
+      error: 'Active organization assignment is required to create requests',
     }
   }
-  if (rolloutMode !== 'new' && !user.departmentId) {
+  const existingAssignment = await prisma.organization_assignments.findFirst({
+    where: { userId: user.id, isActive: true },
+    select: { unitId: true },
+  })
+  if (!canSubmitRequests({ isActiveUser: user.isActive, hasActiveAssignment: Boolean(existingAssignment) })) {
     return {
       success: false,
-      error: 'User must belong to a department to create requests',
+      error: 'Active organization assignment is required to create requests',
     }
   }
 
@@ -163,25 +163,27 @@ export async function createRequest(input: CreateRequestInput) {
   }
 
   let request: { id: string; title: string }
-  let approvals: Awaited<ReturnType<typeof createApprovalChain>>
-  // Rollout gate: creation only. Legacy (the default) and shadow keep the
-  // existing builder exactly; new mode requires a completed import digest and origin coverage.
+  let pendingCandidateUserIds: readonly string[] = []
 
   try {
-    // NEW creation transactions run under the engine's SERIALIZABLE isolation
-    // (the resolver and persistence must share one snapshot); legacy/shadow
-    // keep the default isolation and error behavior. Serialization failures —
-    // including commit-time ones outside persistApprovalInstance — translate
-    // to ApprovalEngineConflictError at this enclosing boundary; no retries.
     const txResult = await prisma.$transaction(
       async (tx) => {
+      const assignment = await tx.organization_assignments.findFirst({
+        where: { userId: user.id, isActive: true },
+        select: { unitId: true },
+      })
+      const { unitId: organizationUnitId } = requireAssignableSubmitter({
+        isActiveUser: user.isActive,
+        assignment,
+      })
+
       let newRequest = await tx.requests.create({
         data: {
           title: validatedFields.data.title,
           description: prepared.html,
           requesterId: user.id,
-          departmentId: rolloutMode === 'new' ? user.departmentId ?? null : user.departmentId!,
-          organizationUnitId: null,
+          departmentId: user.departmentId ?? null,
+          organizationUnitId,
           status: 'ImprovementRequest',
         },
       })
@@ -211,151 +213,75 @@ export async function createRequest(input: CreateRequestInput) {
         },
       })
 
-      let chain: Awaited<ReturnType<typeof createApprovalChain>>
-
-      if (rolloutMode === 'new') {
-        await assertNewCreationEnabled(tx, {
-          phase: 'REQUEST',
-          originUserId: user.id,
-          requestId: newRequest.id,
-        })
-        const attempt = await createRequestApprovalAttempt(
-          createPrismaPhaseAdapterDb(tx),
-          { requestId: newRequest.id, requesterId: user.id },
-        )
-        chain = []
-        if (attempt.statusChange) {
-          newRequest = { ...newRequest, status: attempt.statusChange.to }
-          await tx.request_activities.create({
-            data: {
-              requestId: newRequest.id,
-              userId: user.id,
-              action: 'status_changed',
-              fromStatus: attempt.statusChange.from,
-              toStatus: attempt.statusChange.to,
-              comments: attempt.completedWithoutSteps
-                ? 'Auto-completed: NO_ELIGIBLE_APPROVAL_STEPS (no eligible approval steps)'
-                : 'Auto-approved by position ceiling',
-            },
-          })
-        }
-        // The request's origin unit is persisted once, at creation.
-        if (!newRequest.organizationUnitId) {
-          newRequest = { ...newRequest, organizationUnitId: attempt.instance.originUnitId }
-          await tx.requests.update({
-            where: { id: newRequest.id },
-            data: { organizationUnitId: attempt.instance.originUnitId },
-          })
-        }
-      } else {
-        chain = await createApprovalChain(
-          newRequest.id,
-          user.departmentId!,
-          user.level || 1,
-          user.id,
-          tx,
-        )
-        if (rolloutMode === 'shadow') {
-          // Read-only NEW resolution alongside the legacy result; reports a
-          // missing/unmapped route without ever failing the submission.
-          await compareNewResolutionWithoutWrites(createApprovalEngineDb(tx), {
-            phase: 'REQUEST',
-            requestId: newRequest.id,
-            originUserId: user.id,
-          })
-        }
-      }
-
-      const isTopLevel = chain.length > 0 && chain[0].status === 'approved'
-      if (isTopLevel) {
+      const attempt = await createRequestApprovalAttempt(
+        createCleanStartPhaseAttemptTx(tx as unknown as CleanStartAttemptStore),
+        { requestId: newRequest.id, phase: 'REQUEST', originUserId: user.id },
+      )
+      if (attempt.statusChange) {
         newRequest = await tx.requests.update({
           where: { id: newRequest.id },
-          data: { status: 'SentToEngineer' },
+          data: { status: attempt.statusChange.to },
         })
         await tx.request_activities.create({
           data: {
             requestId: newRequest.id,
             userId: user.id,
             action: 'status_changed',
-            fromStatus: 'ImprovementRequest',
-            toStatus: 'SentToEngineer',
-            comments: 'Auto-approved by top-level user',
+            fromStatus: attempt.statusChange.from,
+            toStatus: attempt.statusChange.to,
+            comments: attempt.completedWithoutSteps
+              ? 'Auto-completed: NO_ELIGIBLE_APPROVAL_STEPS (no eligible approval steps)'
+              : 'Auto-approved by position ceiling',
           },
         })
       }
 
-      return { request: newRequest, approvals: chain }
+      return {
+        request: newRequest,
+        pendingCandidateUserIds: attempt.instance.state === 'PENDING'
+          ? (attempt.instance.steps[0]?.candidateUserIds ?? [])
+          : [],
+      }
         },
-        rolloutMode === 'new' ? { isolationLevel: APPROVAL_ENGINE_TRANSACTION_ISOLATION } : undefined,
+        { isolationLevel: APPROVAL_ENGINE_TRANSACTION_ISOLATION },
       )
-      // Boundary translation is NEW-mode only: legacy/shadow serialization
-      // failures surface as the original error, matching the unchanged
-      // legacy error contract.
       .catch((error: unknown) => {
-        if (rolloutMode !== 'new') throw error
-        translateTransactionConflict(error)
+        if (error instanceof ApprovalEngineConflictError) throw error
+        const code = (error as { code?: unknown })?.code
+        if (code === 'P2034' || code === '40001') {
+          throw new ApprovalEngineConflictError()
+        }
+        throw error
       })
 
     request = txResult.request
-    approvals = txResult.approvals
+    pendingCandidateUserIds = txResult.pendingCandidateUserIds
   } catch (error) {
     console.error('Failed to create request atomically:', error)
     if (error instanceof Error && error.message === ATTACHMENT_ADOPTION_ERROR) {
       return { success: false, error: ATTACHMENT_ADOPTION_ERROR }
     }
-    if (error instanceof ApprovalCreationDisabledError || error instanceof ApprovalRouteConfigurationError) {
-      return { success: false, error: error.message }
-    }
-    if (error instanceof ApprovalEngineConflictError) {
+    if (
+      error instanceof SubmissionDeniedError
+      || error instanceof ApprovalRouteConfigurationError
+      || error instanceof ApprovalEnginePlanError
+      || error instanceof ApprovalEngineConflictError
+    ) {
       return { success: false, error: error.message }
     }
     return { success: false, error: 'Failed to create request — please try again' }
   }
 
-  // Notify department approvers if there are pending approvals (not auto-approved)
-  const pendingApprovals = approvals.filter(a => a.status === 'pending')
-  if (pendingApprovals.length > 0 && user.departmentId) {
-    const firstLevel = pendingApprovals[0].requiredLevel
-    const { getApproversAtLevel } = await import('./approvals')
-    const approvers = await getApproversAtLevel(user.departmentId, firstLevel)
-    
-    // Notify each approver
+  if (pendingCandidateUserIds.length > 0) {
     const { createNotification } = await import('./notifications')
-    for (const approver of approvers) {
+    for (const userId of pendingCandidateUserIds) {
       await createNotification({
-        userId: approver.id,
+        userId,
         type: 'approval_needed',
         title: 'New Approval Request',
-        message: `📋 New Approval Request: "${request.title}" requires your approval (Level ${firstLevel}).`,
+        message: `📋 New Approval Request: "${request.title}" requires your approval.`,
         requestId: request.id,
       })
-    }
-  } else if (rolloutMode === 'new') {
-    const nextApproval = await prisma.request_approvals.findFirst({
-      where: {
-        requestId: request.id,
-        status: 'pending',
-        isFinalApproval: false,
-        OR: [...CURRENT_INSTANCE_ROW_FILTER],
-      },
-      orderBy: { order: 'asc' },
-      select: { id: true },
-    })
-    if (nextApproval) {
-      const recipients = await resolveApprovalNeededRecipients(
-        createPrismaNotificationRecipientDb(prisma),
-        { approvalId: nextApproval.id, phase: 'REQUEST' },
-      )
-      const { createNotification } = await import('./notifications')
-      for (const userId of recipients) {
-        await createNotification({
-          userId,
-          type: 'approval_needed',
-          title: 'New Approval Request',
-          message: `📋 New Approval Request: "${request.title}" requires your approval.`,
-          requestId: request.id,
-        })
-      }
     }
   }
 
@@ -2454,7 +2380,6 @@ export async function resubmitRequest(input: {
   // the engine's SERIALIZABLE isolation; serialization failures (including
   // commit-time ones) translate to ApprovalEngineConflictError at this
   // boundary. Legacy/shadow keep default isolation and error behavior.
-  const rolloutMode = getApprovalRolloutMode(process.env)
   const result = await prisma.$transaction(
     async (tx) => {
     // The same-status guarded update locks the request row and requires the
@@ -2484,33 +2409,10 @@ export async function resubmitRequest(input: {
       })
     }
 
-    if (rolloutMode === 'new') {
-      await assertNewCreationEnabled(tx, {
-        phase: 'REQUEST',
-        originUserId: userId,
-        requestId: input.requestId,
-      })
-      await createRequestApprovalAttempt(
-        createPrismaPhaseAdapterDb(tx),
-        { requestId: input.requestId, requesterId: userId },
-      )
-    } else {
-      if (rolloutMode === 'shadow') {
-        await compareNewResolutionWithoutWrites(createApprovalEngineDb(tx), {
-          phase: 'REQUEST',
-          requestId: input.requestId,
-          originUserId: userId,
-        })
-      }
-      // Delete all existing approvals (legacy mode keeps its behavior;
-      // NEW attempt rows would belong to superseded history and are never
-      // deleted here).
-      await tx.request_approvals.deleteMany({
-        where: {
-          requestId: input.requestId,
-        },
-      })
-    }
+    await createRequestApprovalAttempt(
+      createCleanStartPhaseAttemptTx(tx as unknown as CleanStartAttemptStore),
+      { requestId: input.requestId, phase: 'REQUEST', originUserId: userId },
+    )
 
     // Log resubmit activity
     await tx.request_activities.create({
@@ -2527,23 +2429,16 @@ export async function resubmitRequest(input: {
       where: { id: input.requestId },
     })
     },
-    rolloutMode === 'new' ? { isolationLevel: APPROVAL_ENGINE_TRANSACTION_ISOLATION } : undefined,
+    { isolationLevel: APPROVAL_ENGINE_TRANSACTION_ISOLATION },
   )
-  // Boundary translation is NEW-mode only: legacy/shadow serialization
-  // failures surface as the original error, matching the unchanged legacy
-  // error contract.
   .catch((error: unknown) => {
-    if (rolloutMode !== 'new') throw error
-    translateTransactionConflict(error)
+    if (error instanceof ApprovalEngineConflictError) throw error
+    const code = (error as { code?: unknown })?.code
+    if (code === 'P2034' || code === '40001') {
+      throw new ApprovalEngineConflictError()
+    }
+    throw error
   })
-
-  // Create fresh approval chain (legacy/shadow creation only; the new mode
-  // created its attempt inside the transaction above).
-  if (rolloutMode !== 'new') {
-    const userLevel = request.requester.level || 1
-    const departmentId = request.requester.departmentId!
-    await createApprovalChain(input.requestId, departmentId, userLevel, userId)
-  }
 
   revalidateRequestViews()
 
