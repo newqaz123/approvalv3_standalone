@@ -23,6 +23,7 @@ import {
 } from '@/lib/approval-engine/transactions'
 import {
   createPrismaNotificationRecipientDb,
+  mapEventRecipients,
   resolveApprovalNeededRecipients,
 } from '@/lib/notification-recipients'
 import {
@@ -455,13 +456,22 @@ export async function rejectRequest(
   })
 
   if (rejectedRequest) {
-    await createNotification({
-      userId: rejectedRequest.requesterId,
+    const recipients = mapEventRecipients({
       type: 'approval_rejected',
-      title: 'Request Rejected',
-      message: `❌ Request Rejected: Your request "${rejectedRequest.title}" has been rejected. Reason: "${comments}"`,
-      requestId,
+      requesterId: rejectedRequest.requesterId,
+      decidedActorId: userId,
     })
+    await Promise.all(
+      recipients.map((recipientId) =>
+        createNotification({
+          userId: recipientId,
+          type: 'approval_rejected',
+          title: 'Request Rejected',
+          message: `❌ Request Rejected: Your request "${rejectedRequest.title}" has been rejected. Reason: "${comments}"`,
+          requestId,
+        }),
+      ),
+    )
   }
 
   revalidateRequestViews()
@@ -471,39 +481,23 @@ export async function rejectRequest(
 /**
  * Notify about a status change that the approval transaction committed.
  *
- * Notification behavior of the former changeRequestStatus: engineering gets
- * notified when a request first reaches SentToEngineer; every other status
- * change notifies the requester. Runs only after the approval transaction
- * committed, so notifications never escape a rolled-back approval.
+ * Event mapping (O2): status_changed → requester only. The former
+ * engineering-department task broadcast is removed (N1).
+ * Runs only after the approval transaction committed, so notifications
+ * never escape a rolled-back approval.
  */
 async function notifyRequestStatusChange(
   requestId: string,
   change: RequestStatusChangeResult,
 ) {
-  if (change.toStatus === 'SentToEngineer') {
-    // Notify all engineering users
-    const engineeringDept = await prisma.departments.findFirst({
-      where: { type: 'ENGINEERING' },
-      select: { id: true },
-    })
-
-    if (engineeringDept) {
-      const { notifyUsersInDepartment } = await import('./notifications')
-      await notifyUsersInDepartment(
-        engineeringDept.id,
-        {
-          type: 'request_assigned',
-          title: 'New Task Available',
-          message: `🔧 New Task Available: "${change.title}" has been approved and needs engineering solution.`,
-          requestId,
-        }
-      )
-    }
-  } else {
-    // Other status changes - notify requester
+  const recipients = mapEventRecipients({
+    type: 'status_changed',
+    requesterId: change.requesterId,
+  })
+  for (const userId of recipients) {
     await prisma.notifications.create({
       data: {
-        userId: change.requesterId,
+        userId,
         type: 'status_changed',
         title: 'Request Status Changed',
         message: `Your request status changed to ${change.toStatus}`,
@@ -514,7 +508,9 @@ async function notifyRequestStatusChange(
 }
 
 /**
- * Notify next approver in chain
+ * Notify next approver in chain — current-step active candidates only
+ * (plus custom requiredApproverId). Live department/level holders,
+ * visibility descendants, and ancestor managers are never a substitute.
  */
 async function notifyNextApprover(requestId: string) {
   const nextApproval = await prisma.request_approvals.findFirst({
@@ -528,7 +524,6 @@ async function notifyNextApprover(requestId: string) {
       request: {
         select: {
           title: true,
-          departmentId: true,
         },
       },
     },
@@ -536,54 +531,21 @@ async function notifyNextApprover(requestId: string) {
 
   if (!nextApproval) return
 
-  // NEW SNAPSHOT_GROUP rows notify only the persisted current-step candidate
-  // group (active users, identity-deduped). Live position holders, visibility
-  // descendants, and ancestor managers are never a substitute audience.
-  if (nextApproval.routingMode === 'SNAPSHOT_GROUP') {
-    const recipients = await resolveApprovalNeededRecipients(
-      createPrismaNotificationRecipientDb(prisma),
-      { approvalId: nextApproval.id, phase: 'REQUEST' },
-    )
-    const { createNotification } = await import('./notifications')
-    await Promise.all(
-      recipients.map((userId) =>
-        createNotification({
-          userId,
-          type: 'approval_needed',
-          title: 'Approval Needed',
-          message: `Request "${nextApproval.request.title}" needs your approval`,
-          requestId,
-        }),
-      ),
-    )
-    return
-  }
-
-  // Legacy notification boundaries require the request's department and the
-  // pending row's level. A missing value is an unsupported (organization-owned)
-  // state: reject explicitly instead of querying a substituted audience.
-  if (nextApproval.request.departmentId === null || nextApproval.requiredLevel === null) {
-    throw new Error('Cannot notify the next approver: organization-owned requests are not supported by legacy notifications yet')
-  }
-
-  // Get users at this level
-  const approvers = await getApproversAtLevel(
-    nextApproval.request.departmentId,
-    nextApproval.requiredLevel
+  const recipients = await resolveApprovalNeededRecipients(
+    createPrismaNotificationRecipientDb(prisma),
+    { approvalId: nextApproval.id, phase: nextApproval.isFinalApproval ? 'FINAL' : 'REQUEST' },
   )
-
-  // Create notifications for all approvers at this level
   const { createNotification } = await import('./notifications')
   await Promise.all(
-    approvers.map((approver) =>
+    recipients.map((userId) =>
       createNotification({
-        userId: approver.id,
+        userId,
         type: 'approval_needed',
         title: 'Approval Needed',
         message: `Request "${nextApproval.request.title}" needs your approval`,
         requestId,
-      })
-    )
+      }),
+    ),
   )
 }
 

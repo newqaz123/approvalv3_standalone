@@ -35,8 +35,8 @@ import {
 } from '@/lib/post-commit-notifications'
 import {
   createPrismaNotificationRecipientDb,
+  mapEventRecipients,
   resolveApprovalNeededRecipients,
-  resolveStatusBroadcastRecipients,
 } from '@/lib/notification-recipients'
 import {
   APPROVAL_ENGINE_TRANSACTION_ISOLATION,
@@ -176,53 +176,25 @@ async function runSolutionTransactionWithNotifications<T>(
         const { createNotification } = await import('./notifications')
         return createNotification(notification)
       },
-      notifyDepartment: async (
-        departmentId,
-        notification,
-        excludeUserIds,
-      ) => {
-        const { notifyUsersInDepartment } = await import('./notifications')
-        return notifyUsersInDepartment(
-          departmentId,
-          notification,
-          excludeUserIds,
-        )
-      },
     },
     onDispatchError: (plan, error) => {
-      const target =
-        plan.target === 'user'
-          ? `user ${plan.notification.userId}`
-          : `department ${plan.departmentId}`
       console.error(
-        `[solutions] Failed to dispatch post-commit notification to ${target}`,
+        `[solutions] Failed to dispatch post-commit notification to user ${plan.notification.userId}`,
         error,
       )
     },
   })
 }
 
-async function queueOriginUnitStatusBroadcast(
-  tx: Prisma.TransactionClient,
+function queueMappedUsers(
   notifications: PostCommitNotificationCollector,
-  input: {
-    requestId: string
-    notification: NotificationPayload
-    excludeUserIds?: readonly string[]
-  },
+  userIds: readonly string[],
+  notification: NotificationPayload,
 ) {
-  const recipients = await resolveStatusBroadcastRecipients(
-    createPrismaNotificationRecipientDb(tx),
-    {
-      legacyDepartmentId: null,
-      requestId: input.requestId,
-      excludeUserIds: input.excludeUserIds,
-    },
-  )
-  for (const userId of recipients) {
+  for (const userId of userIds) {
     notifications.user({
       userId,
-      ...input.notification,
+      ...notification,
     })
   }
 }
@@ -504,9 +476,10 @@ export async function submitSolution(input: SubmitSolutionActionInput) {
           actionLabel: 'submit solution',
         })
       }
-      for (const approverId of validated.customApproverIds) {
+      const currentStepId = orderedApprovers[0]
+      if (currentStepId) {
         pendingNotifications.push({
-          userId: approverId,
+          userId: currentStepId,
           type: 'approval_needed',
           title: 'Solution Submitted for Approval',
           message: `📤 Solution Submitted: "${request.title}" has a new solution ready for your approval.`,
@@ -545,13 +518,19 @@ export async function submitSolution(input: SubmitSolutionActionInput) {
                 : `Solution "${validated.title}" auto-approved (top-level submitter). Request sent back to requester for final review.`,
             },
           })
-          pendingNotifications.push({
-            userId: request.requesterId,
+          for (const userId of mapEventRecipients({
             type: 'solution_ready',
-            title: 'Solution Ready for Review',
-            message: `Engineering solution for "${request.title}" is ready for your review.`,
-            requestId: validated.requestId,
-          })
+            requesterId: request.requesterId,
+            solutionSubmitterIds: [user.id],
+          })) {
+            pendingNotifications.push({
+              userId,
+              type: 'solution_ready',
+              title: 'Solution Ready for Review',
+              message: `Engineering solution for "${request.title}" is ready for your review.`,
+              requestId: validated.requestId,
+            })
+          }
         }
       }
       if (attempt.instance.state === 'PENDING') {
@@ -1032,7 +1011,7 @@ export async function approveSolution(solutionId: string, comments?: string, exp
   await runSolutionTransactionWithNotifications(async (tx, notifications) => {
     const solutionData = await tx.solutions.findUnique({
       where: { id: solutionId },
-      select: { requestId: true, title: true, costEstimate: true },
+      select: { requestId: true, title: true, costEstimate: true, submittedById: true },
     })
     if (!solutionData) {
       throw new Error('Solution not found')
@@ -1050,25 +1029,23 @@ export async function approveSolution(solutionId: string, comments?: string, exp
       // onto the request (locked FOR UPDATE in the same transaction).
       const request = await tx.requests.findUnique({
         where: { id: solutionData.requestId },
-        select: { title: true, departmentId: true },
+        select: { title: true, requesterId: true },
       })
-      if (request?.departmentId) {
-        notifications.department(request.departmentId, {
-          type: 'solution_ready',
-          title: 'Solution Ready for Review',
-          message: `📤 Ready for Review: "${request.title}" has been completed and awaits your department's final review.`,
-          requestId: solution.requestId,
-        })
-      } else if (request) {
-        await queueOriginUnitStatusBroadcast(tx, notifications, {
-          requestId: solution.requestId,
-          notification: {
+      if (request) {
+        queueMappedUsers(
+          notifications,
+          mapEventRecipients({
+            type: 'solution_ready',
+            requesterId: request.requesterId,
+            solutionSubmitterIds: [solutionData.submittedById],
+          }),
+          {
             type: 'solution_ready',
             title: 'Solution Ready for Review',
             message: `📤 Ready for Review: "${request.title}" has been completed and awaits your department's final review.`,
             requestId: solution.requestId,
           },
-        })
+        )
       }
     } else {
       await queueNextSolutionApproverNotifications(tx, solutionId, notifications)
@@ -1179,21 +1156,32 @@ export async function rejectSolution(solutionId: string, comments: string, expec
       data: { status: RequestStatus.SentToEngineer },
     })
 
-    // Get solution details for notification
-    const solutionData = await tx.solutions.findUnique({
-      where: { id: solutionId },
-      select: { submittedById: true, title: true },
-    })
+    const [solutionData, requestRow] = await Promise.all([
+      tx.solutions.findUnique({
+        where: { id: solutionId },
+        select: { submittedById: true, title: true },
+      }),
+      tx.requests.findUnique({
+        where: { id: solution.requestId },
+        select: { requesterId: true },
+      }),
+    ])
 
-    if (solutionData) {
-      // Queue the submitter notification for post-commit dispatch.
-      notifications.user({
-        userId: solutionData.submittedById,
-        type: 'approval_rejected',
-        title: 'Solution Rejected',
-        message: `Your solution "${solutionData.title}" was rejected and returned for resubmission.`,
-        requestId: solution.requestId,
-      })
+    if (solutionData && requestRow) {
+      queueMappedUsers(
+        notifications,
+        mapEventRecipients({
+          type: 'approval_rejected',
+          requesterId: requestRow.requesterId,
+          decidedActorId: userId,
+        }),
+        {
+          type: 'approval_rejected',
+          title: 'Solution Rejected',
+          message: `Your solution "${solutionData.title}" was rejected and returned for resubmission.`,
+          requestId: solution.requestId,
+        },
+      )
     }
   })
 
@@ -1356,63 +1344,16 @@ async function queueNextSolutionApproverNotifications(
 
   if (!nextApproval) return
 
-  if (nextApproval.routingMode === 'SNAPSHOT_GROUP') {
-    const recipients = await resolveApprovalNeededRecipients(
-      createPrismaNotificationRecipientDb(tx),
-      { approvalId: nextApproval.id, phase: 'SOLUTION' },
-    )
-    for (const userId of recipients) {
-      notifications.user({
-        userId,
-        type: 'approval_needed',
-        title: 'Solution Approval Needed',
-        message: `Solution "${nextApproval.solution.title}" needs your approval.`,
-        requestId: nextApproval.solution.requestId,
-      })
-    }
-    return
-  }
-
-  // For custom chain: notify specific requiredApproverId
-  if (nextApproval.isCustomChain && nextApproval.requiredApproverId) {
-    notifications.user({
-      userId: nextApproval.requiredApproverId,
-      type: 'approval_needed',
-      title: 'Solution Approval Needed',
-      message: `Solution "${nextApproval.solution.title}" needs your approval.`,
-      requestId: nextApproval.solution.requestId,
-    })
-    return
-  }
-
-  // For hierarchy chain: notify all users at requiredLevel in engineering dept
-  if (nextApproval.requiredLevel) {
-    const engineeringDept = await tx.departments.findFirst({
-      where: { type: 'ENGINEERING' },
-      select: { id: true },
-    })
-
-    if (engineeringDept) {
-      const approvers = await tx.user.findMany({
-        where: {
-          departmentId: engineeringDept.id,
-          level: nextApproval.requiredLevel,
-          isActive: true,
-        },
-        select: { id: true },
-      })
-
-      for (const approver of approvers) {
-        notifications.user({
-          userId: approver.id,
-          type: 'approval_needed',
-          title: 'Solution Approval Needed',
-          message: `Solution "${nextApproval.solution.title}" needs your approval.`,
-          requestId: nextApproval.solution.requestId,
-        })
-      }
-    }
-  }
+  const recipients = await resolveApprovalNeededRecipients(
+    createPrismaNotificationRecipientDb(tx),
+    { approvalId: nextApproval.id, phase: 'SOLUTION' },
+  )
+  queueMappedUsers(notifications, recipients, {
+    type: 'approval_needed',
+    title: 'Solution Approval Needed',
+    message: `Solution "${nextApproval.solution.title}" needs your approval.`,
+    requestId: nextApproval.solution.requestId,
+  })
 }
 
 // ============================================================================
@@ -1748,58 +1689,16 @@ async function queueNextFinalApproverNotifications(
 
   if (!nextApproval) return
 
-  if (nextApproval.routingMode === 'SNAPSHOT_GROUP') {
-    const recipients = await resolveApprovalNeededRecipients(
-      createPrismaNotificationRecipientDb(tx),
-      { approvalId: nextApproval.id, phase: 'FINAL' },
-    )
-    for (const userId of recipients) {
-      notifications.user({
-        userId,
-        type: 'final_approval_needed',
-        title: 'Final Approval Needed',
-        message: `Request "${nextApproval.request.title}" needs your final approval.`,
-        requestId,
-      })
-    }
-    return
-  }
-
-  // For custom chain: notify specific requiredApproverId
-  if (nextApproval.isCustomChain && nextApproval.requiredApproverId) {
-    notifications.user({
-      userId: nextApproval.requiredApproverId,
-      type: 'final_approval_needed',
-      title: 'Final Approval Needed',
-      message: `Request "${nextApproval.request.title}" needs your final approval.`,
-      requestId,
-    })
-    return
-  }
-
-  // For hierarchy chain: notify all users at requiredLevel in request's department
-  if (nextApproval.requiredLevel && nextApproval.request.departmentId) {
-    // The departmentId truthiness guard keeps a missing legacy department from
-    // being queried as an audience (never notify departmentless users).
-    const approvers = await tx.user.findMany({
-      where: {
-        departmentId: nextApproval.request.departmentId,
-        level: nextApproval.requiredLevel,
-        isActive: true,
-      },
-      select: { id: true },
-    })
-
-    for (const approver of approvers) {
-      notifications.user({
-        userId: approver.id,
-        type: 'final_approval_needed',
-        title: 'Final Approval Needed',
-        message: `Request "${nextApproval.request.title}" needs your final approval.`,
-        requestId,
-      })
-    }
-  }
+  const recipients = await resolveApprovalNeededRecipients(
+    createPrismaNotificationRecipientDb(tx),
+    { approvalId: nextApproval.id, phase: 'FINAL' },
+  )
+  queueMappedUsers(notifications, recipients, {
+    type: 'final_approval_needed',
+    title: 'Final Approval Needed',
+    message: `Request "${nextApproval.request.title}" needs your final approval.`,
+    requestId,
+  })
 }
 
 /**
@@ -1894,45 +1793,24 @@ export async function approveFinalApproval(requestId: string, comments?: string,
     if (result.statusChange) {
       const request = await tx.requests.findUnique({
         where: { id: requestId },
-        select: { title: true, departmentId: true },
+        select: { title: true, requesterId: true },
       })
       if (!request) {
         throw new Error('Request not found')
       }
-      const engineeringDept = await tx.departments.findFirst({
-        where: { type: 'ENGINEERING' },
-        select: { id: true },
-      })
-      const engineeringUsers = engineeringDept
-        ? await tx.user.findMany({
-            where: { departmentId: engineeringDept.id },
-            select: { id: true },
-          })
-        : []
-      const engineeringUserIds = engineeringUsers.map((u) => u.id)
-      if (request.departmentId) {
-        notifications.department(
-          request.departmentId,
-          {
-            type: 'approval_granted',
-            title: 'Request Completed',
-            message: `✅ Request Completed: "${request.title}" has been fully approved and completed.`,
-            requestId,
-          },
-          engineeringUserIds,
-        )
-      } else {
-        await queueOriginUnitStatusBroadcast(tx, notifications, {
+      queueMappedUsers(
+        notifications,
+        mapEventRecipients({
+          type: 'approval_granted',
+          requesterId: request.requesterId,
+        }),
+        {
+          type: 'approval_granted',
+          title: 'Request Completed',
+          message: `✅ Request Completed: "${request.title}" has been fully approved and completed.`,
           requestId,
-          notification: {
-            type: 'approval_granted',
-            title: 'Request Completed',
-            message: `✅ Request Completed: "${request.title}" has been fully approved and completed.`,
-            requestId,
-          },
-          excludeUserIds: engineeringUserIds,
-        })
-      }
+        },
+      )
     } else {
       await queueNextFinalApproverNotifications(tx, requestId, notifications)
     }
@@ -1984,8 +1862,8 @@ export async function rejectFinalApproval(requestId: string, comments: string, e
     }
   }
 
-  // Keep workflow writes atomic; both department notification plans are
-  // dispatched concurrently only after this transaction commits.
+  // Keep workflow writes atomic; notification plans are dispatched only
+  // after this transaction commits.
   await runSolutionTransactionWithNotifications(async (tx, notifications) => {
     const rejected = await tx.request_approvals.updateMany({
       where: {
@@ -2028,7 +1906,7 @@ export async function rejectFinalApproval(requestId: string, comments: string, e
     // Get request details
     const request = await tx.requests.findUnique({
       where: { id: requestId },
-      select: { title: true, departmentId: true },
+      select: { title: true, requesterId: true },
     })
 
     if (!request) {
@@ -2068,50 +1946,20 @@ export async function rejectFinalApproval(requestId: string, comments: string, e
       },
     })
 
-    // Get engineering department to notify all engineers
-    const engineeringDept = await tx.departments.findFirst({
-      where: { type: 'ENGINEERING' },
-      select: { id: true },
-    })
-
-    if (engineeringDept && request) {
-      notifications.department(
-        engineeringDept.id,
-        {
-          type: 'approval_rejected',
-          title: 'Final Approval Rejected',
-          message: `❌ Final Rejection: "${request.title}" was rejected during final approval. Reason: "${comments}". Please revise the solution.`,
-          requestId,
-        },
-        [userId],
-      )
-
-      // Also notify requester's department about the rejection (excluding
-      // the rejector if they're in that department).
-      if (request.departmentId) {
-        notifications.department(
-          request.departmentId,
-          {
-            type: 'status_changed',
-            title: 'Final Approval Rejected',
-            message: `❌ Final Approval Rejected: "${request.title}" was rejected during final approval. The request has been returned to engineering for revision.`,
-            requestId,
-          },
-          [userId],
-        )
-      } else {
-        await queueOriginUnitStatusBroadcast(tx, notifications, {
-          requestId,
-          notification: {
-            type: 'status_changed',
-            title: 'Final Approval Rejected',
-            message: `❌ Final Approval Rejected: "${request.title}" was rejected during final approval. The request has been returned to engineering for revision.`,
-            requestId,
-          },
-          excludeUserIds: [userId],
-        })
-      }
-    }
+    queueMappedUsers(
+      notifications,
+      mapEventRecipients({
+        type: 'approval_rejected',
+        requesterId: request.requesterId,
+        decidedActorId: userId,
+      }),
+      {
+        type: 'approval_rejected',
+        title: 'Final Approval Rejected',
+        message: `❌ Final Rejection: "${request.title}" was rejected during final approval. Reason: "${comments}". Please revise the solution.`,
+        requestId,
+      },
+    )
   })
 
   revalidateRequestViews()
@@ -2190,8 +2038,6 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
   if (!request) {
     throw new Error('Request not found')
   }
-
-  const requestDepartmentId: string | null = request.departmentId
 
   const solution = request.solutions[0]
   if (!solution) {
@@ -2391,14 +2237,20 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
               : `Solution "${validated.title}" resubmitted and auto-approved (top-level submitter). Request sent back to requester for final review.`,
           },
         })
-        if (requestDepartmentId) {
-          notifications.department(requestDepartmentId, {
+        queueMappedUsers(
+          notifications,
+          mapEventRecipients({
+            type: 'solution_ready',
+            requesterId: request.requesterId,
+            solutionSubmitterIds: [storedSubmitterId],
+          }),
+          {
             type: 'solution_ready',
             title: 'Solution Ready for Review',
             message: `📤 Ready for Review: "${request.title}" solution has been updated and is ready for your department's final review.`,
             requestId: validated.requestId,
-          })
-        }
+          },
+        )
       } else if (attempt.statusChange && attempt.statusChange.to !== request.status) {
         await updateRequestStatusExpecting(tx, {
           requestId: validated.requestId,
@@ -2466,41 +2318,28 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
   if (!isAutoApproved) {
     const { createNotification } = await import('./notifications')
     
-    if (validated.useCustomHierarchy && validated.customApprovers.length > 0) {
-      // Notify custom approvers
-      for (const approverId of validated.customApprovers) {
+    const nextApproval = await prisma.solution_approvals.findFirst({
+      where: {
+        solutionId: result.updatedSolution.id,
+        status: 'pending',
+        OR: [...CURRENT_INSTANCE_ROW_FILTER],
+      },
+      orderBy: { order: 'asc' },
+      select: { id: true },
+    })
+    if (nextApproval) {
+      const recipients = await resolveApprovalNeededRecipients(
+        createPrismaNotificationRecipientDb(prisma),
+        { approvalId: nextApproval.id, phase: 'SOLUTION' },
+      )
+      for (const userId of recipients) {
         await createNotification({
-          userId: approverId,
+          userId,
           type: 'approval_needed',
           title: 'Solution Resubmitted',
           message: `📤 Solution resubmitted for "${request.title}". Please review the updated solution.`,
-          requestId: validated.requestId,
+          requestId: request.id,
         })
-      }
-    } else {
-      const nextApproval = await prisma.solution_approvals.findFirst({
-        where: {
-          solutionId: result.updatedSolution.id,
-          status: 'pending',
-          OR: [...CURRENT_INSTANCE_ROW_FILTER],
-        },
-        orderBy: { order: 'asc' },
-        select: { id: true },
-      })
-      if (nextApproval) {
-        const recipients = await resolveApprovalNeededRecipients(
-          createPrismaNotificationRecipientDb(prisma),
-          { approvalId: nextApproval.id, phase: 'SOLUTION' },
-        )
-        for (const userId of recipients) {
-          await createNotification({
-            userId,
-            type: 'approval_needed',
-            title: 'Solution Resubmitted',
-            message: `📤 Solution resubmitted for "${request.title}". Please review the updated solution.`,
-            requestId: request.id,
-          })
-        }
       }
     }
   }

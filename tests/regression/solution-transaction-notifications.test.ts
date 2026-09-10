@@ -86,7 +86,7 @@ describe('solution workflow transaction notification boundaries', () => {
     )
   })
 
-  it('preserves post-commit notification contracts for every affected workflow', { skip: 'B6-fix1: source-contract test (no SNAPSHOT_GROUP seeds). Needs B11 participants-only post-commit notification contracts. Named replacement: tests/regression/clean-start-attempts.test.ts.' }, () => {
+  it('preserves post-commit notification contracts for every affected workflow', { skip: 'B6-fix1: source-contract test (no SNAPSHOT_GROUP seeds). Replaced by B11 participants-only contracts. Named replacement: tests/regression/clean-start-notifications.test.ts.' }, () => {
     const filePath = resolve(process.cwd(), 'src/server-actions/solutions.ts')
     const sourceText = readFileSync(filePath, 'utf8')
     const source = ts.createSourceFile(

@@ -273,16 +273,12 @@ describe('pending, action, and notification queries filter current instance iden
     assert.equal(result.success, true)
     // The wrapped level-4 pending row is invisible to the completion count:
     // a3 was the last CURRENT approval, so the phase completes into
-    // SentToEngineer with the pinned engineering task broadcast — the wrapped
-    // row neither blocks completion nor is notified.
+    // SentToEngineer. B11: status_changed notifies the requester only; the
+    // former engineering-department task broadcast is removed (N1).
     assert.equal(harness.db.requests.rows.get(REQUEST_ID)?.status, 'SentToEngineer')
     assert.deepEqual(
       [...harness.db.rows.notifications.values()].map((row) => ({ userId: row.userId, type: row.type })),
-      [
-        { userId: 'engineer-1', type: 'request_assigned' },
-        { userId: SCENARIO.engineeringSupervisorId, type: 'request_assigned' },
-        { userId: SCENARIO.engineeringManagerId, type: 'request_assigned' },
-      ],
+      [{ userId: 'staff-1', type: 'status_changed' }],
     )
   })
 
@@ -304,10 +300,13 @@ describe('pending, action, and notification queries filter current instance iden
     assert.equal(harness.db.rows.approval_instances.get('instance-current-1')?.supersededAt, null)
     const statuses = [...harness.db.rows.request_approvals.values()].map((row) => row.status).sort()
     assert.deepEqual(statuses, ['rejected', 'rejected'], 'the matched row and remaining current pending rows are rejected')
-    // Only the existing rejection notification to the requester is emitted.
+    // B11: approval_rejected → requester (+ decided actor).
     assert.deepEqual(
       [...harness.db.rows.notifications.values()].map((row) => ({ userId: row.userId, type: row.type })),
-      [{ userId: 'staff-1', type: 'approval_rejected' }],
+      [
+        { userId: 'staff-1', type: 'approval_rejected' },
+        { userId: 'supervisor-1', type: 'approval_rejected' },
+      ],
     )
   })
 

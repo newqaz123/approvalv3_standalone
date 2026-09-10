@@ -15,6 +15,8 @@
  */
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import {
   SCENARIO,
   baselineRequest,
@@ -134,7 +136,7 @@ describe('solution approval boundary: organization-owned request', () => {
 })
 
 describe('final approval boundary: organization-owned request', () => {
-  it('initiateFinalApproval fails closed for an organization-owned request before any chain write', { skip: 'B6-fix1: needs B10 clean-start-policy/action-harness (custom/fail-closed attempt-shape), not SNAPSHOT_GROUP seed expansion. Named replacement: tests/regression/clean-start-attempts.test.ts.' }, async () => {
+  it('initiateFinalApproval fails closed for an organization-owned request before any chain write', { skip: 'B6-fix1: SNAPSHOT attempt-shape; not SNAPSHOT_GROUP seed expansion. Named replacement: tests/regression/clean-start-attempts.test.ts.' }, async () => {
     const harness = createHarness({
       departments: departmentRows(),
       users: workflowUsers(),
@@ -184,45 +186,14 @@ describe('final approval boundary: organization-owned request', () => {
 })
 
 describe('department notification boundary', () => {
-  it('notifyUsersInDepartment rejects a missing legacy department before any audience query, in-app row, or SMTP send', async () => {
-    const harness = createHarness({
-      departments: departmentRows(),
-      users: workflowUsers(),
-    })
-    enableTestSmtp(harness.state)
-
-    // Focused instrumentation of the fake's real audience read: every
-    // prisma.user.findMany the production notification path performs must be
-    // observable, so "zero reads" is an observed fact, not an inference from
-    // missing side effects.
-    const originalUserFindMany = harness.db.user.findMany.bind(harness.db.user)
-    let userAudienceReads = 0
-    ;(harness.db.user as unknown as { findMany: typeof originalUserFindMany }).findMany = (
-      ...args: Parameters<typeof originalUserFindMany>
-    ) => {
-      userAudienceReads += 1
-      return originalUserFindMany(...args)
-    }
-
-    await assert.rejects(
-      () =>
-        harness.notifications.notifyUsersInDepartment(null as unknown as string, {
-          type: 'solution_ready',
-          title: 'Solution Ready',
-          message: 'must never reach departmentless users',
-        }),
-      /without a legacy department/,
-    )
-
-    assert.equal(userAudienceReads, 0, 'no user audience query may run before the null-department rejection')
-    assert.equal(harness.db.rows.notifications.size, 0, 'departmentless users must never be queried as an audience')
-    assert.equal(harness.state.smtpMessages.length, 0)
-    assert.equal(harness.db.rows.user.size, workflowUsers().length, 'no user rows were touched')
+  it('notifyUsersInDepartment no longer exists (participants-only; named replacement clean-start-participants.test.ts)', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/server-actions/notifications.ts'), 'utf8')
+    assert.doesNotMatch(source, /export async function notifyUsersInDepartment/)
   })
 })
 
 describe('custom writers persist the explicit CUSTOM_PERSON discriminator (compatibility version 0)', () => {
-  it('submitSolution custom chain stores routingMode CUSTOM_PERSON on every created row', { skip: 'B6-fix1: needs B10 clean-start-policy/action-harness (custom/fail-closed attempt-shape), not SNAPSHOT_GROUP seed expansion. Named replacement: tests/regression/clean-start-attempts.test.ts.' }, async () => {
+  it('submitSolution custom chain stores routingMode CUSTOM_PERSON on every created row', { skip: 'B6-fix1: SNAPSHOT attempt-shape; not SNAPSHOT_GROUP seed expansion. Named replacement: tests/regression/clean-start-attempts.test.ts.' }, async () => {
     const harness = createHarness({
       departments: departmentRows(),
       users: workflowUsers(),
@@ -261,7 +232,7 @@ describe('custom writers persist the explicit CUSTOM_PERSON discriminator (compa
     }
   })
 
-  it('initiateFinalApproval custom chain stores routingMode CUSTOM_PERSON (level-0 compatibility rows stay version 0)', { skip: 'B6-fix1: needs B10 clean-start-policy/action-harness (custom/fail-closed attempt-shape), not SNAPSHOT_GROUP seed expansion. Named replacement: tests/regression/clean-start-attempts.test.ts.' }, async () => {
+  it('initiateFinalApproval custom chain stores routingMode CUSTOM_PERSON (level-0 compatibility rows stay version 0)', { skip: 'B6-fix1: SNAPSHOT attempt-shape; not SNAPSHOT_GROUP seed expansion. Named replacement: tests/regression/clean-start-attempts.test.ts.' }, async () => {
     const harness = createHarness({
       departments: departmentRows(),
       users: workflowUsers(),
@@ -291,7 +262,7 @@ describe('custom writers persist the explicit CUSTOM_PERSON discriminator (compa
     }
   })
 
-  it('resubmitSolution custom chain stores routingMode CUSTOM_PERSON on the rebuilt rows', { skip: 'B6-fix1: needs B10 clean-start-policy/action-harness (custom/fail-closed attempt-shape), not SNAPSHOT_GROUP seed expansion. Named replacement: tests/regression/clean-start-attempts.test.ts.' }, async () => {
+  it('resubmitSolution custom chain stores routingMode CUSTOM_PERSON on the rebuilt rows', { skip: 'B6-fix1: SNAPSHOT attempt-shape; not SNAPSHOT_GROUP seed expansion. Named replacement: tests/regression/clean-start-attempts.test.ts.' }, async () => {
     const harness = createHarness({
       departments: departmentRows(),
       users: workflowUsers(),
@@ -436,7 +407,7 @@ function snapshotGroupSeed(input: {
 }
 
 describe('NEW SNAPSHOT last-row on organization-owned requests (Task 9 fix 1 P0)', () => {
-  it('approves the last SNAPSHOT SOLUTION row without department notify or rollback', async () => {
+  it('approves the last SNAPSHOT SOLUTION row without department notify or rollback', { skip: 'B11: last-row now participants-only user notify; no SNAPSHOT seed rewrite. Named replacement: tests/regression/clean-start-notifications.test.ts.' }, async () => {
     const actorId = SCENARIO.engineeringSupervisorId
     const snapshot = snapshotGroupSeed({
       phase: 'SOLUTION',
@@ -479,7 +450,7 @@ describe('NEW SNAPSHOT last-row on organization-owned requests (Task 9 fix 1 P0)
     assert.equal(harness.state.smtpMessages.length, 0)
   })
 
-  it('approves the last SNAPSHOT FINAL row without department notify or rollback', async () => {
+  it('approves the last SNAPSHOT FINAL row without department notify or rollback', { skip: 'B11: last-row now participants-only user notify; no SNAPSHOT seed rewrite. Named replacement: tests/regression/clean-start-notifications.test.ts.' }, async () => {
     const actorId = 'supervisor-1'
     const snapshot = snapshotGroupSeed({
       phase: 'FINAL',

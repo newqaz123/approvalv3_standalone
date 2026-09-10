@@ -16,14 +16,16 @@ import {
  * an open transaction and keep it open, reproducing the timeout boundary.
  * These tests exercise the real orchestration primitive; only the external
  * notification transports and transaction boundary are replaced.
+ *
+ * B11: the post-commit plan type has no department target.
  */
 
 function deferred() {
-  let resolve!: () => void
+  let resolveFn!: () => void
   const promise = new Promise<void>((done) => {
-    resolve = done
+    resolveFn = done
   })
-  return { promise, resolve }
+  return { promise, resolve: resolveFn }
 }
 
 const payload = {
@@ -34,11 +36,11 @@ const payload = {
 }
 
 describe('post-commit notification transactions', () => {
-  it('commits before starting both independent notification dispatches', async () => {
+  it('commits before starting independent user notification dispatches', async () => {
     let transactionOpen = false
     const order: string[] = []
-    const userGate = deferred()
-    const departmentGate = deferred()
+    const firstGate = deferred()
+    const secondGate = deferred()
     const observedPlans: PostCommitNotificationPlan[] = []
 
     const action = runTransactionWithPostCommitNotifications({
@@ -53,33 +55,21 @@ describe('post-commit notification transactions', () => {
       },
       work: async (_tx, notifications) => {
         notifications.user({ userId: 'engineer-1', ...payload })
-        notifications.department('requester-department', payload, ['rejector-1'])
+        notifications.user({ userId: 'requester-1', ...payload })
         return { status: 'SentToEngineer' as const }
       },
       dispatchers: {
         notifyUser: async (notification) => {
           assert.equal(transactionOpen, false)
-          order.push('user-notification-started')
+          order.push(`user-${notification.userId}-started`)
           observedPlans.push({ target: 'user', notification })
-          await userGate.promise
-        },
-        notifyDepartment: async (departmentId, notification, excludeUserIds) => {
-          assert.equal(transactionOpen, false)
-          order.push('department-notification-started')
-          observedPlans.push({
-            target: 'department',
-            departmentId,
-            notification,
-            excludeUserIds,
-          })
-          await departmentGate.promise
+          if (notification.userId === 'engineer-1') await firstGate.promise
+          else await secondGate.promise
         },
       },
     })
 
-    // Promise.allSettled-style dispatch starts both independent operations
-    // before either deferred operation completes.
-    await new Promise<void>((resolve) => setImmediate(resolve))
+    await new Promise<void>((resolveWait) => setImmediate(resolveWait))
 
     try {
       assert.equal(transactionOpen, false)
@@ -87,13 +77,13 @@ describe('post-commit notification transactions', () => {
         'transaction-started',
         'transaction-work-finished',
         'transaction-committed',
-        'user-notification-started',
-        'department-notification-started',
+        'user-engineer-1-started',
+        'user-requester-1-started',
       ])
       assert.equal(observedPlans.length, 2)
     } finally {
-      userGate.resolve()
-      departmentGate.resolve()
+      firstGate.resolve()
+      secondGate.resolve()
     }
 
     assert.deepEqual(await action, { status: 'SentToEngineer' })
@@ -103,10 +93,8 @@ describe('post-commit notification transactions', () => {
         notification: { userId: 'engineer-1', ...payload },
       },
       {
-        target: 'department',
-        departmentId: 'requester-department',
-        notification: payload,
-        excludeUserIds: ['rejector-1'],
+        target: 'user',
+        notification: { userId: 'requester-1', ...payload },
       },
     ])
   })
@@ -121,20 +109,12 @@ describe('post-commit notification transactions', () => {
           throw new Error('database rollback')
         },
         work: async (_tx, notifications) => {
-          notifications.department('engineering', payload, ['rejector-1'])
+          notifications.user({ userId: 'engineer-1', ...payload })
           return 'uncommitted'
         },
         dispatchers: {
           notifyUser: async (notification) => {
             dispatched.push({ target: 'user', notification })
-          },
-          notifyDepartment: async (departmentId, notification, excludeUserIds) => {
-            dispatched.push({
-              target: 'department',
-              departmentId,
-              notification,
-              excludeUserIds,
-            })
           },
         },
       }),
@@ -145,23 +125,17 @@ describe('post-commit notification transactions', () => {
   })
 
   it('logs a post-commit dispatch failure without falsely failing the committed workflow', async () => {
-    const dispatchedTargets: string[] = []
     const logged: Array<{ plan: PostCommitNotificationPlan; error: unknown }> = []
 
     const result = await runTransactionWithPostCommitNotifications({
       runTransaction: async (work) => work({ connection: 'transaction-client' }),
       work: async (_tx, notifications) => {
         notifications.user({ userId: 'engineer-1', ...payload })
-        notifications.department('requester-department', payload)
         return { committed: true }
       },
       dispatchers: {
         notifyUser: async () => {
-          dispatchedTargets.push('user')
           throw new Error('notification database unavailable')
-        },
-        notifyDepartment: async () => {
-          dispatchedTargets.push('department')
         },
       },
       onDispatchError: (plan, error) => {
@@ -170,7 +144,6 @@ describe('post-commit notification transactions', () => {
     })
 
     assert.deepEqual(result, { committed: true })
-    assert.deepEqual(dispatchedTargets.sort(), ['department', 'user'])
     assert.equal(logged.length, 1)
     assert.equal(logged[0]?.plan.target, 'user')
     assert.match(String(logged[0]?.error), /notification database unavailable/)
@@ -178,18 +151,17 @@ describe('post-commit notification transactions', () => {
 })
 
 describe('post-commit notification compatibility (no new channel)', () => {
-  it('retains only user and department delivery targets',
-    () => {
-      const source = readFileSync(
-        resolve(process.cwd(), 'src/lib/post-commit-notifications.ts'),
-        'utf8',
-      )
-      assert.match(source, /target: 'user'/)
-      assert.match(source, /target: 'department'/)
-      assert.doesNotMatch(source, /target: 'unit'/)
-      assert.doesNotMatch(source, /target: 'section'/)
-      assert.doesNotMatch(source, /target: 'subscription'/)
-      assert.doesNotMatch(source, /retryQueue|dedupeKey/)
-    },
-  )
+  it('retains only the user delivery target', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'src/lib/post-commit-notifications.ts'),
+      'utf8',
+    )
+    assert.match(source, /target: 'user'/)
+    assert.doesNotMatch(source, /target: 'department'/)
+    assert.doesNotMatch(source, /target: 'unit'/)
+    assert.doesNotMatch(source, /target: 'section'/)
+    assert.doesNotMatch(source, /target: 'subscription'/)
+    assert.doesNotMatch(source, /notifyDepartment/)
+    assert.doesNotMatch(source, /retryQueue|dedupeKey/)
+  })
 })

@@ -939,7 +939,6 @@ export function notificationRecipientDbForPersisted(
       return {
         routingMode: row.routingMode as 'LEGACY_LEVEL' | 'SNAPSHOT_GROUP' | 'CUSTOM_PERSON',
         candidateGroupId: row.candidateGroupId ?? null,
-        requiredLevel: row.requiredLevel ?? null,
         requiredApproverId: row.requiredApproverId ?? null,
         requestId: row.requestId ?? 'r1',
         isCurrentInstance: instance ? instance.supersededAt === null : true,
@@ -958,19 +957,6 @@ export function notificationRecipientDbForPersisted(
         ordered.push(userId)
       }
       return ordered
-    },
-    async findLegacyApproverIds() {
-      // The persisted NEW attempt store holds no legacy level rows.
-      return []
-    },
-    async findCustomRecipientIds(approvalId) {
-      const row = findRow(approvalId)
-      return row?.requiredApproverId ? [row.requiredApproverId] : []
-    },
-    async findReviewedSectionRecipientIds() {
-      // Section/department broadcast audiences are organization queries, not
-      // attempt-store data; they stay with the dedicated Task 12 fakes.
-      return []
     },
   }
 }
@@ -1295,16 +1281,12 @@ export interface FakeNotificationDbInput {
   row: {
     routingMode: 'SNAPSHOT_GROUP' | 'LEGACY_LEVEL' | 'CUSTOM_PERSON'
     candidateGroupId: string | null
-    requiredLevel: number | null
+    requiredApproverId?: string | null
+    isCurrentInstance?: boolean
   }
   groups?: Record<string, string[]>
   activeUsers?: string[]
   livePositionHolders?: string[]
-  legacyLevelHolders?: string[]
-  customRecipientIds?: readonly string[]
-  reviewedSectionRecipientIds?: readonly string[]
-  originUnitMemberIds?: readonly string[]
-  firstLegacyDepartmentMemberIds?: readonly string[]
 }
 
 /**
@@ -1316,9 +1298,7 @@ export function fakeNotificationDb(input: FakeNotificationDbInput): Notification
   const groups = input.groups ?? {}
   const activeUsers = input.activeUsers
   const livePositionHolders = input.livePositionHolders ?? []
-  const firstLegacyDepartmentMemberIds = input.firstLegacyDepartmentMemberIds ?? []
   void livePositionHolders
-  void firstLegacyDepartmentMemberIds
 
   const uniqueActive = async (userIds: readonly string[]): Promise<readonly string[]> => {
     const seen = new Set<string>()
@@ -1338,10 +1318,9 @@ export function fakeNotificationDb(input: FakeNotificationDbInput): Notification
       return {
         routingMode: input.row.routingMode,
         candidateGroupId: input.row.candidateGroupId,
-        requiredLevel: input.row.requiredLevel,
-        requiredApproverId: null,
+        requiredApproverId: input.row.requiredApproverId ?? null,
         requestId: query.approvalId.startsWith('legacy') ? 'legacy-r1' : 'r1',
-        isCurrentInstance: true,
+        isCurrentInstance: input.row.isCurrentInstance ?? true,
         status: 'pending',
       }
     },
@@ -1350,18 +1329,6 @@ export function fakeNotificationDb(input: FakeNotificationDbInput): Notification
     },
     async findActiveUserIds(userIds) {
       return uniqueActive(userIds)
-    },
-    async findLegacyApproverIds() {
-      return input.legacyLevelHolders ?? []
-    },
-    async findCustomRecipientIds() {
-      return input.customRecipientIds ?? []
-    },
-    async findReviewedSectionRecipientIds(query) {
-      if (query.legacyDepartmentId === null) {
-        return input.originUnitMemberIds ?? []
-      }
-      return input.reviewedSectionRecipientIds ?? []
     },
   }
 }
