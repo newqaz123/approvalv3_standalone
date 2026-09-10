@@ -397,11 +397,17 @@ ci('clean-start SQL constraints and races (CI database)', () => {
     await db.user.create({
       data: { id: userId, name: 'B13 assignment user', email: `b13-assign-${userId}@example.test`, isActive: true },
     })
-    await db.organization_units.createMany({
-      data: [
-        { id: unitA, name: `B13 unit A ${unitA}`, unitType: 'SECTION', operationalType: 'GENERAL' },
-        { id: unitB, name: `B13 unit B ${unitB}`, unitType: 'SECTION', operationalType: 'GENERAL' },
-      ],
+    await db.organization_units.create({
+      data: { id: unitA, name: `B13 unit A ${unitA}`, unitType: 'SECTION', operationalType: 'GENERAL' },
+    })
+    await db.organization_units.create({
+      data: {
+        id: unitB,
+        name: `B13 unit B ${unitB}`,
+        unitType: 'SECTION',
+        operationalType: 'GENERAL',
+        parentId: unitA,
+      },
     })
     await db.positions.create({ data: { id: positionId, name: `B13 pos ${positionId}`, rank: 10, isActive: true } })
     await db.organization_assignments.create({
@@ -411,7 +417,7 @@ ci('clean-start SQL constraints and races (CI database)', () => {
     await assert.rejects(
       () =>
         db.$executeRawUnsafe(
-          `INSERT INTO "organization_assignments" ("id", "userId", "unitId", "positionId", "isActive") VALUES ('${secondAssignmentId}', '${userId}', '${unitB}', '${positionId}', true)`,
+          `INSERT INTO "organization_assignments" ("id", "userId", "unitId", "positionId", "isActive", "updatedAt") VALUES ('${secondAssignmentId}', '${userId}', '${unitB}', '${positionId}', true, NOW())`,
         ),
       (error: unknown) => {
         assertIndexViolation(error, 'one_active_assignment_per_user')
@@ -444,7 +450,7 @@ ci('clean-start SQL constraints and races (CI database)', () => {
     await assert.rejects(
       () =>
         db.$executeRawUnsafe(
-          `INSERT INTO "organization_units" ("id", "name", "unitType", "parentId", "isActive") VALUES ('${secondRootId}', 'B13 root ${secondRootId}', 'FACTORY', NULL, true)`,
+          `INSERT INTO "organization_units" ("id", "name", "unitType", "parentId", "isActive", "updatedAt") VALUES ('${secondRootId}', 'B13 root ${secondRootId}', 'FACTORY', NULL, true, NOW())`,
         ),
       (error: unknown) => {
         assertIndexViolation(error, 'one_active_company_root')
