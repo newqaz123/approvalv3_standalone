@@ -2,8 +2,9 @@
 
 import React from 'react'
 import { Badge } from '@/components/ui/badge'
+import { InlineNameEdit } from '@/components/organization/InlineNameEdit'
 import type { AssignmentNode, OrganizationUnitNode, PositionNode, TeamNode } from '@/lib/organization/model'
-import type { WorkspaceSnapshot } from '@/server-actions/organization'
+import { renameOrganizationUnit, renameTeam, type WorkspaceSnapshot } from '@/server-actions/organization'
 
 function byName<T extends { name: string }>(left: T, right: T): number {
   return left.name.localeCompare(right.name)
@@ -86,7 +87,14 @@ function TeamGroup({
 
   return (
     <div data-testid={`team-group-${team.id}`} className="ml-4 space-y-1 border-l pl-3">
-      <div className="text-sm font-medium text-muted-foreground">{team.name}</div>
+      <div className="text-sm font-medium text-muted-foreground">
+        <InlineNameEdit
+          value={team.name}
+          onSave={async (next) => {
+            await renameTeam({ id: team.id, name: next })
+          }}
+        />
+      </div>
       <div className="flex flex-wrap gap-1">
         {members.map((assignment) => {
           const label = personLabel(assignment, usersById, positionsById)
@@ -133,7 +141,12 @@ export function TreeNodeRow({
     <div data-testid={`unit-row-${unit.id}`} className="space-y-2">
       <div data-testid={`unit-header-${unit.id}`} className="flex flex-wrap items-center gap-2">
         <span data-testid={`unit-name-${unit.id}`} className="font-medium">
-          {unit.name}
+          <InlineNameEdit
+            value={unit.name}
+            onSave={async (next) => {
+              await renameOrganizationUnit({ id: unit.id, name: next })
+            }}
+          />
         </span>
         {unit.shareRequests ? (
           <Badge variant="secondary" data-testid={`sharing-badge-${unit.id}`}>

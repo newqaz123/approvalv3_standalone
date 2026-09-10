@@ -169,16 +169,13 @@ describe('clean-start organization tree UI', () => {
     assert.ok(sectionA >= 0 && sectionB > sectionA, 'Section A must precede Section B')
   })
 
-  it('keeps unit and team names read-only until InlineNameEdit (C3)', () => {
+  it('keeps unit and team names in view mode until pencil (no idle inputs)', () => {
     const html = renderWorkspace()
     assert.doesNotMatch(html, /<input/)
-    const workspace = read('src/components/organization/OrganizationWorkspace.tsx')
-    const tree = read('src/components/organization/OrganizationTree.tsx')
+    assert.match(html, /Operations/)
+    assert.match(html, /Alpha Team/)
     const row = read('src/components/organization/TreeNodeRow.tsx')
-    const unassigned = read('src/components/organization/UnassignedPeopleList.tsx')
-    for (const source of [workspace, tree, row, unassigned]) {
-      assert.doesNotMatch(source, /InlineNameEdit/)
-    }
+    assert.match(row, /InlineNameEdit/)
   })
 
   it('person-once is structural: assignments map keyed by user, not per team', () => {

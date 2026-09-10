@@ -6,6 +6,7 @@ import { selectNearestRoute } from '@/lib/approval-routes/selection'
 import type { ApprovalRouteVersionDefinition } from '@/lib/approval-routes/definition'
 import { verifyCleanStartReadiness } from '@/lib/clean-start-readiness'
 import type { ReadinessReport } from '@/lib/clean-start-readiness'
+import { OrganizationValidationError } from '@/lib/organization/assignments'
 import type {
   AssignmentNode,
   OrganizationUnitNode,
@@ -341,4 +342,172 @@ export async function getOrganizationWorkspaceData(
     customChainExceptions,
     readiness,
   }
+}
+
+export interface OrganizationMutationDb {
+  adminUserId: string
+  loadUnits(): Promise<OrganizationUnitNode[]>
+  loadTeams(): Promise<TeamNode[]>
+  updateUnitName(id: string, name: string): Promise<void>
+  updateTeamName(id: string, name: string): Promise<void>
+  writeAudit(entry: { action: string; comments: string }): Promise<void>
+  revalidateOrganization(): Promise<void>
+}
+
+type MutationPrisma = {
+  organization_units: {
+    findMany: (args?: object) => Promise<Array<{
+      id: string
+      name: string
+      parentId: string | null
+      isActive: boolean
+      shareRequests: boolean
+      canWorkOnSolutions: boolean
+      managerUserId: string | null
+    }>>
+    update: (args: { where: { id: string }; data: { name: string } }) => Promise<unknown>
+  }
+  teams: {
+    findMany: (args?: object) => Promise<Array<{
+      id: string
+      unitId: string
+      name: string
+      reportsToAssignmentId: string
+      isActive: boolean
+    }>>
+    update: (args: { where: { id: string }; data: { name: string } }) => Promise<unknown>
+  }
+  request_activities: {
+    create: (args: { data: { action: string; comments: string; userId: string } }) => Promise<unknown>
+  }
+}
+
+function requireTrimmedName(name: string): string {
+  const trimmed = name.trim()
+  if (trimmed.length === 0) {
+    throw new OrganizationValidationError('Name is required')
+  }
+  return trimmed
+}
+
+async function createProductionMutationDb(): Promise<OrganizationMutationDb> {
+  const { requireAdmin } = await import('@/lib/auth')
+  const adminId = await requireAdmin()
+  if (!adminId) {
+    throw new Error('Admin authorization is required for organization actions')
+  }
+  const { default: prisma } = await import('@/lib/prisma')
+  const client = prisma as unknown as MutationPrisma
+  return {
+    adminUserId: adminId,
+    async loadUnits() {
+      const rows = await client.organization_units.findMany()
+      return rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        parentId: row.parentId,
+        isActive: row.isActive,
+        shareRequests: row.shareRequests,
+        canWorkOnSolutions: row.canWorkOnSolutions,
+        managerUserId: row.managerUserId,
+      }))
+    },
+    async loadTeams() {
+      const rows = await client.teams.findMany()
+      return rows.map((row) => ({
+        id: row.id,
+        unitId: row.unitId,
+        name: row.name,
+        reportsToAssignmentId: row.reportsToAssignmentId,
+        isActive: row.isActive,
+      }))
+    },
+    async updateUnitName(id, name) {
+      await client.organization_units.update({ where: { id }, data: { name } })
+    },
+    async updateTeamName(id, name) {
+      await client.teams.update({ where: { id }, data: { name } })
+    },
+    async writeAudit(entry) {
+      await client.request_activities.create({
+        data: {
+          action: entry.action,
+          comments: entry.comments,
+          userId: adminId,
+        },
+      })
+    },
+    async revalidateOrganization() {
+      const { revalidatePath } = await import('next/cache')
+      revalidatePath('/admin/organization')
+    },
+  }
+}
+
+/**
+ * Rename an organization unit. Production (no db argument) runs requireAdmin,
+ * trims, rejects empty/duplicate-sibling names, writes an audit row, and
+ * revalidates. Tests inject OrganizationMutationDb. Never touches attempts
+ * or snapshots. No name normalization beyond trim.
+ */
+export async function renameOrganizationUnit(
+  input: { id: string; name: string },
+  db?: OrganizationMutationDb,
+): Promise<{ success: true }> {
+  const store = db ?? await createProductionMutationDb()
+  const name = requireTrimmedName(input.name)
+  const units = await store.loadUnits()
+  const current = units.find((unit) => unit.id === input.id)
+  if (current === undefined) {
+    throw new OrganizationValidationError(`organization unit "${input.id}" was not found`)
+  }
+  const duplicate = units.some((unit) => (
+    unit.isActive
+    && unit.id !== current.id
+    && unit.parentId === current.parentId
+    && unit.name === name
+  ))
+  if (duplicate) {
+    throw new OrganizationValidationError('Name must be unique among sibling units')
+  }
+  await store.updateUnitName(current.id, name)
+  await store.writeAudit({
+    action: 'organization_unit_renamed',
+    comments: `Renamed unit ${current.id}: "${current.name}" → "${name}"`,
+  })
+  await store.revalidateOrganization()
+  return { success: true }
+}
+
+/**
+ * Rename a team. Unique among active teams in the same unit (A3 duplicate-name
+ * rule). Never touches attempts or snapshots. No name normalization beyond trim.
+ */
+export async function renameTeam(
+  input: { id: string; name: string },
+  db?: OrganizationMutationDb,
+): Promise<{ success: true }> {
+  const store = db ?? await createProductionMutationDb()
+  const name = requireTrimmedName(input.name)
+  const teams = await store.loadTeams()
+  const current = teams.find((row) => row.id === input.id)
+  if (current === undefined) {
+    throw new OrganizationValidationError(`team "${input.id}" was not found`)
+  }
+  const duplicate = teams.some((row) => (
+    row.isActive
+    && row.id !== current.id
+    && row.unitId === current.unitId
+    && row.name === name
+  ))
+  if (duplicate) {
+    throw new OrganizationValidationError('Team name must be unique within the unit')
+  }
+  await store.updateTeamName(current.id, name)
+  await store.writeAudit({
+    action: 'team_renamed',
+    comments: `Renamed team ${current.id}: "${current.name}" → "${name}"`,
+  })
+  await store.revalidateOrganization()
+  return { success: true }
 }
