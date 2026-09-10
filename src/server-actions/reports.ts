@@ -85,7 +85,7 @@ async function getExportableRequest(requestId: string) {
     where: { id: requestId },
     include: {
       requester: { select: { id: true, name: true, email: true } },
-      department: { select: { id: true, name: true } },
+      organizationUnit: { select: { id: true, name: true } },
       fileAttachments: {
         include: { uploadedBy: { select: { id: true, name: true } } },
         orderBy: { createdAt: 'asc' },
@@ -255,9 +255,9 @@ async function buildRequestPDFData(
     requester: {
       name: request.requester.name,
       email: request.requester.email,
-      department: request.department?.name ?? '',
+      department: request.organizationUnit?.name ?? '',
     },
-    department: request.department?.name ?? '',
+    department: request.organizationUnit?.name ?? '',
     status: request.status,
     createdAt: request.createdAt,
     completedAt,

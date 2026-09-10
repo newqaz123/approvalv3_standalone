@@ -350,7 +350,7 @@ export async function getStaleSubTaskRequests(input: { olderThanDays?: number; s
       id: true,
       title: true,
       status: true,
-      department: { select: { name: true } },
+      organizationUnit: { select: { name: true } },
       requester: { select: { name: true } },
       subTasks: {
         where: {

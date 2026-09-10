@@ -1,6 +1,8 @@
 import { Parser } from 'json2csv'
 import { format } from 'date-fns'
 import type { request_activities as RequestActivity, User, requests as Request, request_approvals as RequestApproval, file_attachments as FileAttachment } from '@prisma/client'
+import { unitPathNames } from '@/lib/unit-labels'
+import type { OrganizationUnitNode } from '@/lib/organization/model'
 
 /**
  * Activity with related user and request data (from audit query API)
@@ -85,7 +87,7 @@ export interface AuditExportJSON {
  */
 export type RequestSnapshot = Request & {
   requester: User
-  department: {
+  organizationUnit: {
     id: string
     name: string
   } | null
@@ -150,15 +152,21 @@ export function generateCSVExport(activities: AuditActivityRecord[]): string {
  * Grouped by request with nested arrays
  *
  * @param requests - Array of full request snapshots with related data
+ * @param units - Organization units used by unitPathNames (root-last)
  * @returns JSON string (formatted)
  */
-export function generateJSONExport(requests: RequestSnapshot[]): string {
+export function generateJSONExport(
+  requests: RequestSnapshot[],
+  units: readonly OrganizationUnitNode[],
+): string {
   // Convert requests to export format
   const exportData: AuditExportJSON[] = requests.map((request) => ({
     requestId: request.id,
     requestTitle: request.title,
     organizationUnitId: request.organizationUnitId,
-    unitPathNames: request.department ? [request.department.name] : [],
+    unitPathNames: request.organizationUnitId
+      ? unitPathNames(units, request.organizationUnitId)
+      : [],
     createdAt: request.createdAt.toISOString(),
     status: request.status,
     requester: {

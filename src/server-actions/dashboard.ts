@@ -81,7 +81,7 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
 		include: {
 			request: {
 				include: {
-					department: {
+					organizationUnit: {
 						select: {
 							id: true,
 							name: true,
@@ -217,7 +217,7 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
 					createdAt: approval.request.createdAt,
 					workRequisitionReceived: approval.request.workRequisitionReceived,
 					requesterId: approval.request.requesterId,
-					department: approval.request.department,
+					department: approval.request.organizationUnit,
 					requester: approval.request.requester,
 					_count: approval.request._count,
 					hasRejection,
@@ -246,7 +246,7 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
 				include: {
 					request: {
 						include: {
-							department: {
+							organizationUnit: {
 								select: {
 									id: true,
 									name: true,
@@ -349,7 +349,7 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
 					createdAt: request.createdAt,
 					workRequisitionReceived: request.workRequisitionReceived,
 					requesterId: request.requesterId,
-					department: request.department,
+					department: request.organizationUnit,
 					requester: request.requester,
 					_count: request._count,
 					hasRejection,
@@ -389,7 +389,7 @@ export async function getMyCreatedRequests(): Promise<RequestListRow[]> {
 			createdAt: true,
 			workRequisitionReceived: true,
 			requesterId: true,
-			department: {
+			organizationUnit: {
 				select: {
 					id: true,
 					name: true,
@@ -518,7 +518,7 @@ export async function getMyCreatedRequests(): Promise<RequestListRow[]> {
 				createdAt: req.createdAt,
 				workRequisitionReceived: req.workRequisitionReceived,
 				requesterId: req.requesterId,
-				department: req.department,
+				department: req.organizationUnit,
 				requester: req.requester,
 				_count: req._count,
 				hasRejection:
@@ -567,7 +567,7 @@ export async function getAllRequests(): Promise<RequestListRow[]> {
 			createdAt: true,
 			workRequisitionReceived: true,
 			requesterId: true,
-			department: {
+			organizationUnit: {
 				select: {
 					id: true,
 					name: true,
@@ -694,7 +694,7 @@ export async function getAllRequests(): Promise<RequestListRow[]> {
 				createdAt: req.createdAt,
 				workRequisitionReceived: req.workRequisitionReceived,
 				requesterId: req.requesterId,
-				department: req.department,
+				department: req.organizationUnit,
 				requester: req.requester,
 				_count: req._count,
 				hasRejection:

@@ -107,6 +107,7 @@ const MODEL_RELATIONS: Record<
     solutions: { kind: 'many', model: 'solutions', foreignKey: 'requestId' },
     requester: { kind: 'one', model: 'user', localKey: 'requesterId' },
     department: { kind: 'one', model: 'departments', foreignKey: 'departmentId' },
+    organizationUnit: { kind: 'one', model: 'organization_units', localKey: 'organizationUnitId' },
     fileAttachments: { kind: 'many', model: 'file_attachments', foreignKey: 'requestId' },
     activities: { kind: 'many', model: 'request_activities', foreignKey: 'requestId' },
     engineerAssignments: { kind: 'many', model: 'request_engineer_assignments', foreignKey: 'requestId' },

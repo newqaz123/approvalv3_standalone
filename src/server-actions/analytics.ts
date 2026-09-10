@@ -267,7 +267,7 @@ async function fetchDepartmentData(
       status: { not: 'Cancelled' },
     },
     select: {
-      department: {
+      organizationUnit: {
         select: {
           name: true,
         },
@@ -275,9 +275,9 @@ async function fetchDepartmentData(
     },
   })
 
-  // Group by department name
+  // Group by organization unit name
   const deptCounts = requests.reduce((acc, req) => {
-    const deptName = req.department?.name || 'Unknown'
+    const deptName = req.organizationUnit?.name || 'Unknown'
     acc[deptName] = (acc[deptName] || 0) + 1
     return acc
   }, {} as Record<string, number>)
@@ -741,7 +741,7 @@ async function fetchEngineeringMetrics(whereClause: any): Promise<EngineeringMet
  *   - Final Approval: SendBackToRequester → Completed
  */
 async function fetchDepartmentSpeeds(whereClause: any): Promise<DepartmentApprovalSpeed[]> {
-  // Get completed requests with their department
+  // Get completed requests with their organization unit
   const requests = await prisma.requests.findMany({
     where: {
       ...whereClause,
@@ -750,7 +750,7 @@ async function fetchDepartmentSpeeds(whereClause: any): Promise<DepartmentApprov
     select: {
       id: true,
       createdAt: true,
-      department: {
+      organizationUnit: {
         select: { name: true },
       },
     },
@@ -799,7 +799,7 @@ async function fetchDepartmentSpeeds(whereClause: any): Promise<DepartmentApprov
   const deptData: Record<string, StepTimes> = {}
 
   for (const req of requests) {
-    const deptName = req.department?.name || 'Unknown'
+    const deptName = req.organizationUnit?.name || 'Unknown'
     const transitions = activityMap.get(req.id)
     if (!transitions) continue
 

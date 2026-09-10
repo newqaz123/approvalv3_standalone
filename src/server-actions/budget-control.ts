@@ -130,7 +130,7 @@ function mapBudgetCodeSummary(budgetCode: any): NonNullable<BudgetRequestRecord[
     displayCode: budgetCode.displayCode,
     name: typeof budgetCode.name === 'string' ? budgetCode.name : null,
     budgetAmount: decimalToNumber(budgetCode.budgetAmount),
-    department: budgetCode.department ? { id: budgetCode.department.id, name: budgetCode.department.name } : null,
+    department: budgetCode.organizationUnit ? { id: budgetCode.organizationUnit.id, name: budgetCode.organizationUnit.name } : null,
   }
 }
 
@@ -142,7 +142,7 @@ function mapBudgetRequest(request: any): BudgetRequestRecord {
     title: request.title,
     status: request.status,
     createdAt: request.createdAt,
-    department: request.department ? { id: request.department.id, name: request.department.name } : null,
+    department: request.organizationUnit ? { id: request.organizationUnit.id, name: request.organizationUnit.name } : null,
     budgetCode: request.budgetCode ? mapBudgetCodeSummary(request.budgetCode) : null,
     projectEstimateCost: decimalToNumber(request.projectEstimateCost),
     engineeringEstimateCost: decimalToNumber(latestSolution?.costEstimate),
@@ -169,7 +169,7 @@ function mergeBudgetCodes(
     displayCode: string
     name?: string | null
     budgetAmount: unknown
-    department: { id: string; name: string } | null
+    organizationUnit: { id: string; name: string } | null
   }>,
 ) {
   const budgetCodesById = new Map<string, NonNullable<BudgetRequestRecord['budgetCode']>>()
@@ -218,7 +218,7 @@ export async function getBudgetMonitorData(input: BudgetMonitorFilters = {}): Pr
         status: true,
         createdAt: true,
         projectEstimateCost: true,
-        department: { select: { id: true, name: true } },
+        organizationUnit: { select: { id: true, name: true } },
         budgetCode: {
           select: {
             id: true,
@@ -226,7 +226,7 @@ export async function getBudgetMonitorData(input: BudgetMonitorFilters = {}): Pr
             displayCode: true,
             name: true,
             budgetAmount: true,
-            department: { select: { id: true, name: true } },
+            organizationUnit: { select: { id: true, name: true } },
           },
         },
         solutions: {
@@ -237,7 +237,11 @@ export async function getBudgetMonitorData(input: BudgetMonitorFilters = {}): Pr
       },
       orderBy: { createdAt: 'desc' },
     }),
-    prisma.departments.findMany({ select: { id: true, name: true }, orderBy: { name: 'asc' } }),
+    prisma.organization_units.findMany({
+      where: { isActive: true },
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' },
+    }),
     prisma.budget_codes.findMany({
       where: { createdById: user.id },
       select: {
@@ -246,7 +250,7 @@ export async function getBudgetMonitorData(input: BudgetMonitorFilters = {}): Pr
         displayCode: true,
         name: true,
         budgetAmount: true,
-        department: { select: { id: true, name: true } },
+        organizationUnit: { select: { id: true, name: true } },
       },
       orderBy: { displayCode: 'asc' },
     }),

@@ -838,7 +838,8 @@ export async function getRequest(id: string) {
 }
 
 /**
- * Get filter options (departments and requesters)
+ * Get filter options (organization units and requesters).
+ * unitId values are organization_units.id so descendantUnitIds can consume them.
  */
 export async function getRequestFilterOptions() {
   const currentUser = await getCurrentUser()
@@ -853,8 +854,8 @@ export async function getRequestFilterOptions() {
   })
 
   const [departments, requesters] = await Promise.all([
-    prisma.departments.findMany({
-      where: { requests: { some: visibilityWhere } },
+    prisma.organization_units.findMany({
+      where: { isActive: true },
       select: {
         id: true,
         name: true,
@@ -1794,7 +1795,7 @@ export async function getRequestsNeedingEngineeringAction(userId: string): Promi
       AND: [visibilityWhere, { status: 'SentToEngineer' }],
     },
     include: {
-      department: {
+      organizationUnit: {
         select: {
           id: true,
           name: true,
@@ -1844,7 +1845,7 @@ export async function getRequestsNeedingEngineeringAction(userId: string): Promi
         title: request.title,
         status: request.status,
         createdAt: request.createdAt,
-        department: request.department,
+        department: request.organizationUnit,
         requester: request.requester,
         hasRejection: requestIdsWithSolution.includes(request.id),
       },

@@ -129,7 +129,7 @@ async function getNotificationRequestDetails(
 					email: true,
 				},
 			},
-			department: {
+			organizationUnit: {
 				select: {
 					name: true,
 				},
@@ -161,7 +161,7 @@ async function getNotificationRequestDetails(
 		createdAt: request.createdAt,
 		requesterName: request.requester.name,
 		requesterEmail: request.requester.email,
-		departmentName: request.department?.name ?? "",
+		departmentName: request.organizationUnit?.name ?? "",
 		projectEstimateCost:
 			request.projectEstimateCost === null
 				? null

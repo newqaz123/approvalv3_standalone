@@ -70,7 +70,6 @@ export async function getUsers() {
 
   const users = await prisma.user.findMany({
     include: {
-      department: true,
       departmentApproverRoles: {
         include: {
           department: {
@@ -100,6 +99,7 @@ export async function getUsers() {
     const { organizationPositionAssignments, ...rest } = user
     return {
       ...rest,
+      department: primary ? { id: primary.unit.id, name: primary.unit.name } : null,
       organizationAssignment: primary
         ? {
             unitId: primary.unit.id,
@@ -121,11 +121,24 @@ export async function getUser(id: string) {
   const user = await prisma.user.findUnique({
     where: { id },
     include: {
-      department: true,
+      organizationPositionAssignments: {
+        where: { isActive: true, isPrimary: true },
+        include: {
+          unit: {
+            select: { id: true, name: true },
+          },
+        },
+      },
     },
   })
 
-  return user
+  if (!user) return user
+  const primary = user.organizationPositionAssignments[0]
+  const { organizationPositionAssignments, ...rest } = user
+  return {
+    ...rest,
+    department: primary ? { id: primary.unit.id, name: primary.unit.name } : null,
+  }
 }
 
 /**
@@ -374,11 +387,17 @@ export async function getCurrentUserProfile(): Promise<CurrentUserProfile> {
       email: true,
       role: true,
       isActive: true,
-      department: {
+      organizationAssignments: {
+        where: { isActive: true },
         select: {
-          id: true,
-          name: true,
+          unit: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
         },
+        take: 1,
       },
     },
   })
@@ -392,7 +411,7 @@ export async function getCurrentUserProfile(): Promise<CurrentUserProfile> {
     name: user.name,
     email: user.email,
     role: user.role,
-    department: user.department,
+    department: user.organizationAssignments[0]?.unit ?? null,
   }
 }
 

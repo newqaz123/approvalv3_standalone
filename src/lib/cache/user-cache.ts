@@ -4,6 +4,33 @@ import { cache } from 'react'
 import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
 
+const assignmentInclude = {
+  organizationAssignments: {
+    where: { isActive: true },
+    select: {
+      unit: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+    },
+    take: 1,
+  },
+} as const
+
+function withAssignmentDepartment<T extends {
+  organizationAssignments: Array<{ unit: { id: string; name: string } }>
+}>(user: T | null) {
+  if (!user) return null
+  const { organizationAssignments, ...rest } = user
+  const unit = organizationAssignments[0]?.unit ?? null
+  return {
+    ...rest,
+    department: unit,
+  }
+}
+
 /**
  * Get current authenticated user with caching
  * Multiple calls within the same request execute the query only once
@@ -11,7 +38,7 @@ import prisma from '@/lib/prisma'
  * Uses React.cache() for per-request deduplication.
  * If called multiple times in a single request, the database query executes only once.
  *
- * @returns User with department, or null if not authenticated
+ * @returns User with department aliased from the active organization assignment, or null if not authenticated
  */
 export const getCurrentUser = cache(async () => {
   const session = await auth()
@@ -20,10 +47,11 @@ export const getCurrentUser = cache(async () => {
     return null
   }
 
-  return await prisma.user.findUnique({
+  const user = await prisma.user.findUnique({
     where: { id: session.user.id },
-    include: { department: true }
+    include: assignmentInclude,
   })
+  return withAssignmentDepartment(user)
 })
 
 /**
@@ -34,11 +62,12 @@ export const getCurrentUser = cache(async () => {
  * Using primitive string argument ensures cache works correctly.
  *
  * @param userId - User ID (primitive string for proper cache hits)
- * @returns User with department, or null if not found
+ * @returns User with department aliased from the active organization assignment, or null if not found
  */
 export const getUserById = cache(async (userId: string) => {
-  return await prisma.user.findUnique({
+  const user = await prisma.user.findUnique({
     where: { id: userId },
-    include: { department: true }
+    include: assignmentInclude,
   })
+  return withAssignmentDepartment(user)
 })
