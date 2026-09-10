@@ -198,6 +198,11 @@ function createFakeTx(input: {
         instances.push(row)
         return { id }
       },
+      async update(args) {
+        const row = instances.find((instance) => instance.id === args.where.id)
+        if (row) row.supersededAt = args.data.supersededAt
+        return {}
+      },
     },
     approval_instance_skips: {
       async create(args) {

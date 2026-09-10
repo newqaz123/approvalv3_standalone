@@ -41,7 +41,7 @@ describe('approval-chain level generation contracts', () => {
     assert.match(view, /getApprovalLevelLabel/)
   })
 
-  it('targets solution submit/resubmit notifications from first pending approval data, not arithmetic [0]', { skip: 'B6-A2: needs SNAPSHOT_GROUP/position-id harness seeds. Named replacement: tests/regression/clean-start-attempts.test.ts (origins/custom/gate) and B10 clean-start-policy/action-harness.' }, () => {
+  it('targets solution submit/resubmit notifications from first pending approval data, not arithmetic [0]', { skip: 'B6-fix1: source-contract test (no SNAPSHOT_GROUP seeds). B6 rewired solution submit/resubmit; needs B11 participants-only notification targeting. Named replacement: tests/regression/clean-start-attempts.test.ts.' }, () => {
     const solutions = read('src/server-actions/solutions.ts')
     const requests = read('src/server-actions/requests.ts')
 

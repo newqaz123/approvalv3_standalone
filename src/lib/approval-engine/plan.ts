@@ -184,11 +184,15 @@ export interface ApprovalInstanceTx {
   }
   approval_instances: {
     findFirst(args: {
-      where: { requestId?: string; solutionId?: string; phase: ApprovalPhase }
+      where: { requestId?: string; solutionId?: string; phase: ApprovalPhase; supersededAt?: null }
       orderBy: { attempt: 'desc' }
-      select: { attempt: true }
-    }): Promise<{ attempt: number } | null>
+      select: { attempt?: true; id?: true }
+    }): Promise<{ attempt?: number; id?: string } | null>
     create(args: { data: ApprovalInstanceRowCreate }): Promise<{ id: string }>
+    update(args: {
+      where: { id: string }
+      data: { supersededAt: Date }
+    }): Promise<unknown>
   }
   approval_instance_skips: {
     create(args: { data: ApprovalSkipRowCreate }): Promise<unknown>

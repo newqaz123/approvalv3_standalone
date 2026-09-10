@@ -2409,10 +2409,30 @@ export async function resubmitRequest(input: {
       })
     }
 
-    await createRequestApprovalAttempt(
+    const attempt = await createRequestApprovalAttempt(
       createCleanStartPhaseAttemptTx(tx as unknown as CleanStartAttemptStore),
       { requestId: input.requestId, phase: 'REQUEST', originUserId: userId },
     )
+    if (attempt.statusChange) {
+      await updateRequestStatusExpecting(tx, {
+        requestId: input.requestId,
+        expectedStatuses: ['ImprovementRequest'],
+        data: { status: attempt.statusChange.to },
+        actionLabel: 'resubmit request',
+      })
+      await tx.request_activities.create({
+        data: {
+          requestId: input.requestId,
+          userId,
+          action: 'status_changed',
+          fromStatus: attempt.statusChange.from,
+          toStatus: attempt.statusChange.to,
+          comments: attempt.completedWithoutSteps
+            ? 'Auto-completed: NO_ELIGIBLE_APPROVAL_STEPS (no eligible approval steps)'
+            : 'Auto-approved by position ceiling',
+        },
+      })
+    }
 
     // Log resubmit activity
     await tx.request_activities.create({

@@ -2401,7 +2401,10 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
       if (isAutoApproved && attempt.statusChange) {
         await tx.requests.update({
           where: { id: validated.requestId },
-          data: { projectEstimateCost: validated.cost },
+          data: {
+            projectEstimateCost: validated.cost,
+            status: attempt.statusChange.to,
+          },
         })
         await tx.request_activities.create({
           data: {

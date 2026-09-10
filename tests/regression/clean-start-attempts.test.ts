@@ -18,6 +18,7 @@ import {
   type PhaseOriginRepository,
 } from '@/lib/approval-engine/attempts'
 import type { PhaseOrigin } from '@/lib/approval-engine/plan'
+import { CURRENT_INSTANCE_ROW_FILTER } from '@/lib/approval-engine/current-instance'
 import type { AssignmentNode, PositionNode, ReportingPath } from '@/lib/organization/model'
 import type { ResolvedApprovalRoute } from '@/lib/approval-routes/selection'
 
@@ -97,10 +98,23 @@ const publishedRoute: ResolvedApprovalRoute = {
 
 type RecordedTx = PhaseAttemptTx & {
   instances: Array<Record<string, unknown>>
+  instanceUpdates: Array<{ where: { id: string }; data: Record<string, unknown> }>
   requestApprovals: Array<Record<string, unknown>>
   solutionApprovals: Array<Record<string, unknown>>
   routeCalls: number
   originCalls: Array<Record<string, unknown>>
+}
+
+function currentRejectionAuthorizesResubmit(
+  instances: Array<Record<string, unknown>>,
+  approvals: Array<Record<string, unknown>>,
+): boolean {
+  return approvals.some((approval) => {
+    if (approval.status !== 'rejected' || approval.isFinalApproval) return false
+    if (approval.instanceId == null) return true
+    const instance = instances.find((row) => row.id === approval.instanceId)
+    return instance != null && instance.supersededAt == null
+  })
 }
 
 function createAttemptTx(input: {
@@ -113,7 +127,9 @@ function createAttemptTx(input: {
     attempt,
     requestId: input.origin.requestId,
     phase: input.origin.phase,
+    supersededAt: null,
   }))
+  const instanceUpdates: Array<{ where: { id: string }; data: Record<string, unknown> }> = []
   const requestApprovals: Array<Record<string, unknown>> = []
   const solutionApprovals: Array<Record<string, unknown>> = []
   const groups: Array<Record<string, unknown>> = []
@@ -124,6 +140,7 @@ function createAttemptTx(input: {
   const ownTeam: AssignmentNode[] = []
   const tx: RecordedTx = {
     instances,
+    instanceUpdates,
     requestApprovals,
     solutionApprovals,
     originCalls,
@@ -156,16 +173,32 @@ function createAttemptTx(input: {
     },
     approval_instances: {
       async findFirst(args) {
-        const matching = instances.filter((row) => row.phase === args.where.phase)
+        const matching = instances.filter((row) => {
+          if (args.where.phase !== undefined && row.phase !== args.where.phase) return false
+          if (args.where.requestId !== undefined && row.requestId !== args.where.requestId) return false
+          if (args.where.solutionId !== undefined && row.solutionId !== args.where.solutionId) return false
+          if (Object.prototype.hasOwnProperty.call(args.where, 'supersededAt') && row.supersededAt != null) return false
+          return true
+        })
         matching.sort((a, b) => Number(b.attempt) - Number(a.attempt))
         const top = matching[0]
-        return top ? { attempt: Number(top.attempt) } : null
+        if (!top) return null
+        const result: { attempt?: number; id?: string } = {}
+        if (args.select.attempt) result.attempt = Number(top.attempt)
+        if (args.select.id) result.id = String(top.id)
+        return result
       },
       async create(args) {
         const id = `inst-${instances.length + 1}`
         const row = { ...args.data, id }
         instances.push(row)
         return { id }
+      },
+      async update(args) {
+        instanceUpdates.push({ where: { ...args.where }, data: { ...args.data } })
+        const row = instances.find((instance) => instance.id === args.where.id)
+        if (row) row.supersededAt = args.data.supersededAt
+        return {}
       },
     },
     approval_instance_skips: {
@@ -376,6 +409,112 @@ describe('normal attempt creators use B4 builder+persist', () => {
   })
 })
 
+describe('attempt creators supersede the prior current instance', () => {
+  const requesterOrigin: PhaseOrigin = {
+    phase: 'REQUEST',
+    originUserId: 'u-requester',
+    originUnitId: 'ops',
+    path: requesterPath,
+    requestId: 'r1',
+    source: 'REQUESTER',
+  }
+  const submitterOrigin: PhaseOrigin = {
+    phase: 'SOLUTION',
+    originUserId: 'u-submitter',
+    originUnitId: 'eng',
+    path: submitterPath,
+    requestId: 'r1',
+    source: 'SOLUTION_SUBMITTER',
+  }
+
+  it('second createRequestApprovalAttempt writes only supersededAt on the prior current row; pending current attempt does not authorize resubmit', async () => {
+    assert.deepEqual(CURRENT_INSTANCE_ROW_FILTER, [
+      { instanceId: null },
+      { instance: { supersededAt: null } },
+    ])
+    const tx = createAttemptTx({ origin: requesterOrigin })
+    const first = await createRequestApprovalAttempt(tx, {
+      requestId: 'r1',
+      phase: 'REQUEST',
+      originUserId: 'u-requester',
+    })
+    for (const row of tx.requestApprovals) {
+      if (row.instanceId === first.instance.id) row.status = 'rejected'
+    }
+    assert.equal(currentRejectionAuthorizesResubmit(tx.instances, tx.requestApprovals), true)
+
+    const second = await createRequestApprovalAttempt(tx, {
+      requestId: 'r1',
+      phase: 'REQUEST',
+      originUserId: 'u-requester',
+    })
+    const prior = tx.instances.find((row) => row.id === first.instance.id)
+    assert.ok(prior?.supersededAt instanceof Date)
+    assert.deepEqual(tx.instanceUpdates.map((update) => Object.keys(update.data)), [['supersededAt']])
+    assert.equal(tx.instanceUpdates[0]?.where.id, first.instance.id)
+    const current = tx.instances.find((row) => row.id === second.instance.id)
+    assert.equal(current?.supersededAt, undefined)
+    assert.equal(tx.instances.filter((row) => row.supersededAt == null).length, 1)
+    assert.equal(currentRejectionAuthorizesResubmit(tx.instances, tx.requestApprovals), false)
+  })
+
+  it('second createCustomPersonAttempt supersedes the prior current instance the same way', async () => {
+    const tx = createAttemptTx({ origin: submitterOrigin })
+    const first = await createCustomPersonAttempt(tx, {
+      requestId: 'r1',
+      solutionId: 's1',
+      phase: 'SOLUTION',
+      orderedApproverIds: ['u-approver-a'],
+      actorId: 'u-submitter',
+    })
+    for (const row of tx.solutionApprovals) {
+      if (row.instanceId === first.instance.id) row.status = 'rejected'
+    }
+    assert.equal(currentRejectionAuthorizesResubmit(tx.instances, tx.solutionApprovals), true)
+
+    const second = await createCustomPersonAttempt(tx, {
+      requestId: 'r1',
+      solutionId: 's1',
+      phase: 'SOLUTION',
+      orderedApproverIds: ['u-approver-b'],
+      actorId: 'u-submitter',
+    })
+    const prior = tx.instances.find((row) => row.id === first.instance.id)
+    assert.ok(prior?.supersededAt instanceof Date)
+    assert.deepEqual(Object.keys(tx.instanceUpdates[0]?.data ?? {}), ['supersededAt'])
+    assert.equal(tx.instances.find((row) => row.id === second.instance.id)?.supersededAt, undefined)
+    assert.equal(currentRejectionAuthorizesResubmit(tx.instances, tx.solutionApprovals), false)
+  })
+})
+
+describe('resubmit statusChange source contract', () => {
+  it('resubmitRequest applies attempt.statusChange like createRequest in the same transaction', () => {
+    const source = readFileSync('src/server-actions/requests.ts', 'utf8')
+    const start = source.indexOf('export async function resubmitRequest')
+    assert.ok(start >= 0)
+    const rest = source.slice(start)
+    const next = rest.search(/\nexport async function /)
+    const body = next === -1 ? rest : rest.slice(0, next)
+    assert.match(body, /createRequestApprovalAttempt/)
+    assert.match(body, /attempt\.statusChange/)
+    assert.match(body, /updateRequestStatusExpecting[\s\S]*status:\s*attempt\.statusChange\.to/)
+    assert.match(body, /action:\s*'status_changed'/)
+  })
+
+  it('resubmitSolution auto-approve branch persists status: attempt.statusChange.to', () => {
+    const source = readFileSync('src/server-actions/solutions.ts', 'utf8')
+    const start = source.indexOf('export async function resubmitSolution')
+    assert.ok(start >= 0)
+    const rest = source.slice(start)
+    const next = rest.search(/\nexport async function /)
+    const body = next === -1 ? rest : rest.slice(0, next)
+    assert.match(
+      body,
+      /isAutoApproved && attempt\.statusChange[\s\S]*?data:\s*\{\s*projectEstimateCost:\s*validated\.cost,\s*status:\s*attempt\.statusChange\.to/,
+    )
+  })
+})
+
 describe('attempts source contract', () => {
   it('is Prisma-free, uses definition ApprovalPhase, and does not invent OrganizationPositionCode', () => {
     const source = readFileSync('src/lib/approval-engine/attempts.ts', 'utf8')
@@ -385,5 +524,6 @@ describe('attempts source contract', () => {
     assert.match(source, /buildNormalApprovalInstance/)
     assert.match(source, /persistApprovalInstance/)
     assert.match(source, /resolveReportingPath/)
+    assert.match(source, /supersededAt/)
   })
 })

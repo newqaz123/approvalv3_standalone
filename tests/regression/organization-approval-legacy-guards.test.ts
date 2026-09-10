@@ -134,7 +134,7 @@ describe('solution approval boundary: organization-owned request', () => {
 })
 
 describe('final approval boundary: organization-owned request', () => {
-  it('initiateFinalApproval fails closed for an organization-owned request before any chain write', { skip: 'B6-A2: needs SNAPSHOT_GROUP/position-id harness seeds. Named replacement: tests/regression/clean-start-attempts.test.ts (origins/custom/gate) and B10 clean-start-policy/action-harness.' }, async () => {
+  it('initiateFinalApproval fails closed for an organization-owned request before any chain write', { skip: 'B6-fix1: needs B10 clean-start-policy/action-harness (custom/fail-closed attempt-shape), not SNAPSHOT_GROUP seed expansion. Named replacement: tests/regression/clean-start-attempts.test.ts.' }, async () => {
     const harness = createHarness({
       departments: departmentRows(),
       users: workflowUsers(),
@@ -222,7 +222,7 @@ describe('department notification boundary', () => {
 })
 
 describe('custom writers persist the explicit CUSTOM_PERSON discriminator (compatibility version 0)', () => {
-  it('submitSolution custom chain stores routingMode CUSTOM_PERSON on every created row', { skip: 'B6-A2: needs SNAPSHOT_GROUP/position-id harness seeds. Named replacement: tests/regression/clean-start-attempts.test.ts (origins/custom/gate) and B10 clean-start-policy/action-harness.' }, async () => {
+  it('submitSolution custom chain stores routingMode CUSTOM_PERSON on every created row', { skip: 'B6-fix1: needs B10 clean-start-policy/action-harness (custom/fail-closed attempt-shape), not SNAPSHOT_GROUP seed expansion. Named replacement: tests/regression/clean-start-attempts.test.ts.' }, async () => {
     const harness = createHarness({
       departments: departmentRows(),
       users: workflowUsers(),
@@ -261,7 +261,7 @@ describe('custom writers persist the explicit CUSTOM_PERSON discriminator (compa
     }
   })
 
-  it('initiateFinalApproval custom chain stores routingMode CUSTOM_PERSON (level-0 compatibility rows stay version 0)', { skip: 'B6-A2: needs SNAPSHOT_GROUP/position-id harness seeds. Named replacement: tests/regression/clean-start-attempts.test.ts (origins/custom/gate) and B10 clean-start-policy/action-harness.' }, async () => {
+  it('initiateFinalApproval custom chain stores routingMode CUSTOM_PERSON (level-0 compatibility rows stay version 0)', { skip: 'B6-fix1: needs B10 clean-start-policy/action-harness (custom/fail-closed attempt-shape), not SNAPSHOT_GROUP seed expansion. Named replacement: tests/regression/clean-start-attempts.test.ts.' }, async () => {
     const harness = createHarness({
       departments: departmentRows(),
       users: workflowUsers(),
@@ -291,7 +291,7 @@ describe('custom writers persist the explicit CUSTOM_PERSON discriminator (compa
     }
   })
 
-  it('resubmitSolution custom chain stores routingMode CUSTOM_PERSON on the rebuilt rows', { skip: 'B6-A2: needs SNAPSHOT_GROUP/position-id harness seeds. Named replacement: tests/regression/clean-start-attempts.test.ts (origins/custom/gate) and B10 clean-start-policy/action-harness.' }, async () => {
+  it('resubmitSolution custom chain stores routingMode CUSTOM_PERSON on the rebuilt rows', { skip: 'B6-fix1: needs B10 clean-start-policy/action-harness (custom/fail-closed attempt-shape), not SNAPSHOT_GROUP seed expansion. Named replacement: tests/regression/clean-start-attempts.test.ts.' }, async () => {
     const harness = createHarness({
       departments: departmentRows(),
       users: workflowUsers(),

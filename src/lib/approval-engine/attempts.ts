@@ -189,8 +189,34 @@ function toResult(plan: ApprovalInstancePlan & { id: string }): PhaseAttemptResu
   }
 }
 
+async function supersedeCurrentInstance(
+  tx: ApprovalInstanceTx,
+  input: { phase: ApprovalPhase; requestId?: string; solutionId?: string },
+): Promise<void> {
+  const where = input.phase === 'SOLUTION'
+    ? { solutionId: input.solutionId, phase: input.phase, supersededAt: null }
+    : { requestId: input.requestId, phase: input.phase, supersededAt: null }
+  const current = await tx.approval_instances.findFirst({
+    where,
+    orderBy: { attempt: 'desc' },
+    select: { id: true },
+  })
+  if (!current?.id) return
+  // Only `supersededAt` is written: the prior terminal state stays the durable
+  // audit proof, matching phase-adapters beginAttemptHistory.
+  await tx.approval_instances.update({
+    where: { id: current.id },
+    data: { supersededAt: new Date() },
+  })
+}
+
 async function persistNormalAttempt(tx: PhaseAttemptTx, input: BuildApprovalInstanceInput): Promise<PhaseAttemptResult> {
   const plan = await buildNormalApprovalInstance(tx, input)
+  await supersedeCurrentInstance(tx, {
+    phase: plan.phase,
+    requestId: plan.requestId,
+    solutionId: plan.solutionId,
+  })
   const persisted = await persistApprovalInstance(tx, plan)
   return toResult(persisted)
 }
@@ -249,6 +275,12 @@ export async function createCustomPersonAttempt(
   })
   const path = origin.path
   if (!path) originError('Custom attempt origin path is missing')
+
+  await supersedeCurrentInstance(tx, {
+    phase: input.phase,
+    requestId: input.requestId,
+    solutionId: input.solutionId,
+  })
 
   const where = input.phase === 'SOLUTION'
     ? { solutionId: input.solutionId, phase: input.phase }
