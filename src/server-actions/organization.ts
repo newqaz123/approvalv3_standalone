@@ -352,9 +352,16 @@ export interface OrganizationMutationDb {
   updateTeamName(id: string, name: string): Promise<void>
   writeAudit(entry: { action: string; comments: string }): Promise<void>
   revalidateOrganization(): Promise<void>
+  runSerializable<T>(fn: (tx: OrganizationMutationDb) => Promise<T>): Promise<T>
 }
 
+const ORGANIZATION_MUTATION_ISOLATION = 'Serializable' as const
+
 type MutationPrisma = {
+  $transaction?: (
+    fn: (tx: MutationPrisma) => Promise<unknown>,
+    options: { isolationLevel: typeof ORGANIZATION_MUTATION_ISOLATION },
+  ) => Promise<unknown>
   organization_units: {
     findMany: (args?: object) => Promise<Array<{
       id: string
@@ -390,15 +397,21 @@ function requireTrimmedName(name: string): string {
   return trimmed
 }
 
-async function createProductionMutationDb(): Promise<OrganizationMutationDb> {
-  const { requireAdmin } = await import('@/lib/auth')
-  const adminId = await requireAdmin()
-  if (!adminId) {
-    throw new Error('Admin authorization is required for organization actions')
-  }
-  const { default: prisma } = await import('@/lib/prisma')
-  const client = prisma as unknown as MutationPrisma
-  return {
+function isUniqueOrSerializationConflict(error: unknown): boolean {
+  const code = typeof error === 'object' && error !== null && 'code' in error
+    ? String((error as { code: unknown }).code)
+    : ''
+  if (code === 'P2002' || code === 'P2034' || code === '40001') return true
+  const message = error instanceof Error ? error.message : String(error)
+  return /could not serialize|serialization failure|40001/i.test(message)
+}
+
+function createMutationStore(
+  client: MutationPrisma,
+  adminId: string,
+  serializable: boolean,
+): OrganizationMutationDb {
+  const store: OrganizationMutationDb = {
     adminUserId: adminId,
     async loadUnits() {
       const rows = await client.organization_units.findMany()
@@ -441,14 +454,55 @@ async function createProductionMutationDb(): Promise<OrganizationMutationDb> {
       const { revalidatePath } = await import('next/cache')
       revalidatePath('/admin/organization')
     },
+    async runSerializable(fn) {
+      if (!serializable || client.$transaction === undefined) {
+        return fn(store)
+      }
+      return await client.$transaction(
+        async (tx) => fn(createMutationStore(tx, adminId, false)),
+        { isolationLevel: 'Serializable' },
+      ) as ReturnType<typeof fn>
+    },
+  }
+  return store
+}
+
+async function createProductionMutationDb(): Promise<OrganizationMutationDb> {
+  const { requireAdmin } = await import('@/lib/auth')
+  const adminId = await requireAdmin()
+  if (!adminId) {
+    throw new Error('Admin authorization is required for organization actions')
+  }
+  const { default: prisma } = await import('@/lib/prisma')
+  const client = prisma as unknown as MutationPrisma
+  return createMutationStore(client, adminId, true)
+}
+
+async function runExclusiveRename<T>(
+  store: OrganizationMutationDb,
+  uniqueMessage: string,
+  body: (tx: OrganizationMutationDb) => Promise<T>,
+): Promise<T> {
+  try {
+    const result = await store.runSerializable(body)
+    await store.revalidateOrganization()
+    return result
+  } catch (error) {
+    if (error instanceof OrganizationValidationError) throw error
+    if (isUniqueOrSerializationConflict(error)) {
+      throw new OrganizationValidationError(uniqueMessage)
+    }
+    throw error
   }
 }
 
 /**
  * Rename an organization unit. Production (no db argument) runs requireAdmin,
  * trims, rejects empty/duplicate-sibling names, writes an audit row, and
- * revalidates. Tests inject OrganizationMutationDb. Never touches attempts
- * or snapshots. No name normalization beyond trim.
+ * revalidates. Validation+write run in a Serializable transaction. Unique and
+ * serialization conflicts surface as OrganizationValidationError /unique/i.
+ * Tests inject OrganizationMutationDb. Never touches attempts or snapshots.
+ * No name normalization beyond trim.
  */
 export async function renameOrganizationUnit(
   input: { id: string; name: string },
@@ -456,32 +510,35 @@ export async function renameOrganizationUnit(
 ): Promise<{ success: true }> {
   const store = db ?? await createProductionMutationDb()
   const name = requireTrimmedName(input.name)
-  const units = await store.loadUnits()
-  const current = units.find((unit) => unit.id === input.id)
-  if (current === undefined) {
-    throw new OrganizationValidationError(`organization unit "${input.id}" was not found`)
-  }
-  const duplicate = units.some((unit) => (
-    unit.isActive
-    && unit.id !== current.id
-    && unit.parentId === current.parentId
-    && unit.name === name
-  ))
-  if (duplicate) {
-    throw new OrganizationValidationError('Name must be unique among sibling units')
-  }
-  await store.updateUnitName(current.id, name)
-  await store.writeAudit({
-    action: 'organization_unit_renamed',
-    comments: `Renamed unit ${current.id}: "${current.name}" → "${name}"`,
+  return runExclusiveRename(store, 'Name must be unique among sibling units', async (tx) => {
+    const units = await tx.loadUnits()
+    const current = units.find((unit) => unit.id === input.id)
+    if (current === undefined) {
+      throw new OrganizationValidationError(`organization unit "${input.id}" was not found`)
+    }
+    const duplicate = units.some((unit) => (
+      unit.isActive
+      && unit.id !== current.id
+      && unit.parentId === current.parentId
+      && unit.name === name
+    ))
+    if (duplicate) {
+      throw new OrganizationValidationError('Name must be unique among sibling units')
+    }
+    await tx.updateUnitName(current.id, name)
+    await tx.writeAudit({
+      action: 'organization_unit_renamed',
+      comments: `Renamed unit ${current.id}: "${current.name}" → "${name}"`,
+    })
+    return { success: true as const }
   })
-  await store.revalidateOrganization()
-  return { success: true }
 }
 
 /**
  * Rename a team. Unique among active teams in the same unit (A3 duplicate-name
- * rule). Never touches attempts or snapshots. No name normalization beyond trim.
+ * rule). Validation+write run in a Serializable transaction. Unique and
+ * serialization conflicts surface as OrganizationValidationError /unique/i.
+ * Never touches attempts or snapshots. No name normalization beyond trim.
  */
 export async function renameTeam(
   input: { id: string; name: string },
@@ -489,25 +546,26 @@ export async function renameTeam(
 ): Promise<{ success: true }> {
   const store = db ?? await createProductionMutationDb()
   const name = requireTrimmedName(input.name)
-  const teams = await store.loadTeams()
-  const current = teams.find((row) => row.id === input.id)
-  if (current === undefined) {
-    throw new OrganizationValidationError(`team "${input.id}" was not found`)
-  }
-  const duplicate = teams.some((row) => (
-    row.isActive
-    && row.id !== current.id
-    && row.unitId === current.unitId
-    && row.name === name
-  ))
-  if (duplicate) {
-    throw new OrganizationValidationError('Team name must be unique within the unit')
-  }
-  await store.updateTeamName(current.id, name)
-  await store.writeAudit({
-    action: 'team_renamed',
-    comments: `Renamed team ${current.id}: "${current.name}" → "${name}"`,
+  return runExclusiveRename(store, 'Team name must be unique within the unit', async (tx) => {
+    const teams = await tx.loadTeams()
+    const current = teams.find((row) => row.id === input.id)
+    if (current === undefined) {
+      throw new OrganizationValidationError(`team "${input.id}" was not found`)
+    }
+    const duplicate = teams.some((row) => (
+      row.isActive
+      && row.id !== current.id
+      && row.unitId === current.unitId
+      && row.name === name
+    ))
+    if (duplicate) {
+      throw new OrganizationValidationError('Team name must be unique within the unit')
+    }
+    await tx.updateTeamName(current.id, name)
+    await tx.writeAudit({
+      action: 'team_renamed',
+      comments: `Renamed team ${current.id}: "${current.name}" → "${name}"`,
+    })
+    return { success: true as const }
   })
-  await store.revalidateOrganization()
-  return { success: true }
 }

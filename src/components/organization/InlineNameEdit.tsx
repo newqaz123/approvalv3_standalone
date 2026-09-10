@@ -1,27 +1,42 @@
 'use client'
 
-import React, { useEffect, useId, useState } from 'react'
+import React, { useEffect, useId, useRef, useState } from 'react'
 import { Pencil } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 
+/**
+ * epoch is the current editor identity. pendingEpoch is the in-flight save's
+ * epoch, or null. Pending keeps the input enabled so the user can type or
+ * Escape; stale completions must not restore a canceled editor or overwrite
+ * newer input. Duplicate Enter is ignored while pendingEpoch !== null.
+ */
 export type InlineNameEditSession = {
   original: string
   draft: string
   error: string | null
   editing: boolean
+  epoch: number
+  pendingEpoch: number | null
 }
 
-export function startInlineNameEdit(original: string): InlineNameEditSession {
-  return { original, draft: original, error: null, editing: true }
+function idleSession(original: string, epoch = 0): InlineNameEditSession {
+  return { original, draft: original, error: null, editing: false, epoch, pendingEpoch: null }
+}
+
+export function startInlineNameEdit(original: string, priorEpoch = 0): InlineNameEditSession {
+  return { original, draft: original, error: null, editing: true, epoch: priorEpoch + 1, pendingEpoch: null }
 }
 
 export function typeInlineNameEdit(session: InlineNameEditSession, draft: string): InlineNameEditSession {
+  if (session.pendingEpoch !== null) {
+    return { ...session, draft, epoch: session.epoch + 1 }
+  }
   return { ...session, draft }
 }
 
 export function cancelInlineNameEdit(session: InlineNameEditSession): InlineNameEditSession {
-  return { original: session.original, draft: session.original, error: null, editing: false }
+  return idleSession(session.original, session.epoch + 1)
 }
 
 export async function submitInlineNameEdit(
@@ -31,11 +46,36 @@ export async function submitInlineNameEdit(
   const next = session.draft.trim()
   try {
     await onSave(next)
-    return { original: next, draft: next, error: null, editing: false }
+    return { original: next, draft: next, error: null, editing: false, epoch: session.epoch, pendingEpoch: session.pendingEpoch }
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err)
     return { ...session, error, editing: true }
   }
+}
+
+export function handleInlineNameEditKeyDown(
+  session: InlineNameEditSession,
+  key: string,
+): { session: InlineNameEditSession; submit: boolean } {
+  if (key === 'Escape') {
+    return { session: cancelInlineNameEdit(session), submit: false }
+  }
+  if (key !== 'Enter' || !session.editing || session.pendingEpoch !== null) {
+    return { session, submit: false }
+  }
+  return { session: { ...session, pendingEpoch: session.epoch }, submit: true }
+}
+
+export function applyInlineNameEditResult(
+  session: InlineNameEditSession,
+  epoch: number,
+  result: InlineNameEditSession,
+): InlineNameEditSession {
+  if (session.pendingEpoch !== epoch) return session
+  if (session.epoch !== epoch) {
+    return { ...session, pendingEpoch: null }
+  }
+  return { ...result, epoch: session.epoch, pendingEpoch: null }
 }
 
 export function InlineNameEditView({
@@ -105,19 +145,20 @@ export function InlineNameEdit(props: {
   disabled?: boolean
 }): React.JSX.Element {
   const errorId = useId()
-  const [session, setSession] = useState<InlineNameEditSession>({
-    original: props.value,
-    draft: props.value,
-    error: null,
-    editing: false,
-  })
+  const [session, setSession] = useState<InlineNameEditSession>(() => idleSession(props.value))
+  const sessionRef = useRef(session)
+  sessionRef.current = session
+
+  function commit(next: InlineNameEditSession) {
+    sessionRef.current = next
+    setSession(next)
+  }
 
   useEffect(() => {
-    setSession((current) => {
-      if (current.editing) return current
-      if (current.original === props.value) return current
-      return { original: props.value, draft: props.value, error: null, editing: false }
-    })
+    const current = sessionRef.current
+    if (current.editing) return
+    if (current.original === props.value) return
+    commit(idleSession(props.value, current.epoch))
   }, [props.value])
 
   return (
@@ -127,18 +168,25 @@ export function InlineNameEdit(props: {
       disabled={props.disabled}
       onStart={() => {
         if (props.disabled) return
-        setSession((current) => startInlineNameEdit(current.original))
+        const current = sessionRef.current
+        commit(startInlineNameEdit(current.original, current.epoch))
       }}
       onDraftChange={(draft) => {
-        setSession((current) => typeInlineNameEdit(current, draft))
+        commit(typeInlineNameEdit(sessionRef.current, draft))
       }}
       onKeyDown={(event) => {
         if (event.key === 'Enter') {
           event.preventDefault()
-          void submitInlineNameEdit(session, props.onSave).then(setSession)
+          const next = handleInlineNameEditKeyDown(sessionRef.current, 'Enter')
+          commit(next.session)
+          if (!next.submit) return
+          const epoch = next.session.epoch
+          void submitInlineNameEdit(next.session, props.onSave).then((result) => {
+            commit(applyInlineNameEditResult(sessionRef.current, epoch, result))
+          })
         } else if (event.key === 'Escape') {
           event.preventDefault()
-          setSession((current) => cancelInlineNameEdit(current))
+          commit(handleInlineNameEditKeyDown(sessionRef.current, 'Escape').session)
         }
       }}
     />
