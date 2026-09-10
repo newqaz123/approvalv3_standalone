@@ -35,10 +35,13 @@ function indexById<T extends { id: string }>(kind: string, rows: readonly T[]): 
  * (7) duplicate ACTIVE team names within one unit; (8) the units fail
  * assertSingleAcyclicRoot (wrapped so callers only see this error type).
  *
- * Inactive rows are history and never fail validation: they are skipped by
- * every rule, mirroring the spec's deactivate-rather-than-delete model.
- * Duplicate position/assignment/team ids are rejected up front so id lookups
- * stay unambiguous, matching assertSingleAcyclicRoot's duplicate-unit check.
+ * Inactive rows are history and are exempt only from the CURRENT-RELATIONSHIP
+ * rules above (rules 1–7): an inactive assignment, unit, team, or position
+ * never fails those rules, mirroring the spec's deactivate-rather-than-delete
+ * model. The GLOBAL invariants still apply to every row regardless of active
+ * state: rule 8's tree validation (duplicate unit ids, missing parents,
+ * cycles) and the up-front duplicate position/assignment/team id rejection,
+ * which keep id lookups unambiguous.
  */
 export function validateOrganization(
   units: readonly OrganizationUnitNode[],
