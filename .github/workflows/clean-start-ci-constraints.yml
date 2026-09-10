@@ -1,0 +1,105 @@
+# Clean-start disposable-CI constraint and race verification (Plan B Task 13).
+#
+# Inspected 2026-09-11: this repository had no existing CI workflow
+# (.github/ missing; no GitLab/Circle/Azure pipeline files). This file is
+# therefore created here rather than adjusted in place.
+#
+# CLEAN_START_CI_DATABASE_URL points ONLY at the ephemeral GitHub Actions
+# postgres service database `app_cleanstart_ci`. It must never point at
+# production or local protected databases: app_db, app_org_manual_7abcdf3,
+# app_cleanstart_dev.
+#
+# `npm run check` is intentionally unchanged and still runs only
+# tests/regression. This workflow is the sole runner of
+# tests/integration/clean-start-constraints.integration.test.ts.
+name: clean-start-ci-constraints
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  constraints:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-disposable
+          POSTGRES_DB: app_cleanstart_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d app_cleanstart_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # Disposable CI database only. Distinct from DATABASE_URL so the suite
+      # equality guard remains armed.
+      CLEAN_START_CI_DATABASE_URL: postgresql://postgres:ci-disposable@localhost:5432/app_cleanstart_ci?schema=public
+      DATABASE_URL: postgresql://unusable:unusable@127.0.0.1:1/ci_app_placeholder_not_connected
+    steps:
+      - name: Guard disposable CI database URL
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import sys
+          from urllib.parse import urlparse, unquote
+
+          url = os.environ.get("CLEAN_START_CI_DATABASE_URL", "")
+          app = os.environ.get("DATABASE_URL", "")
+          if not url:
+              sys.exit("CLEAN_START_CI_DATABASE_URL is missing")
+          if url == app:
+              sys.exit("CLEAN_START_CI_DATABASE_URL must not equal DATABASE_URL")
+          parsed = urlparse(url)
+          db = unquote((parsed.path or "").lstrip("/").split("/")[0])
+          protected = {"app_db", "app_org_manual_7abcdf3", "app_cleanstart_dev"}
+          if db in protected:
+              sys.exit(f"REFUSING protected database name: {db}")
+          if db != "app_cleanstart_ci":
+              sys.exit(f"REFUSING unexpected CI database name: {db}")
+          if parsed.hostname not in {"localhost", "127.0.0.1"}:
+              sys.exit(f"REFUSING non-local CI database host: {parsed.hostname}")
+          print(f"CI database guard ok db={db} host={parsed.hostname}")
+          PY
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Push schema to disposable CI database only
+        env:
+          DATABASE_URL: ${{ env.CLEAN_START_CI_DATABASE_URL }}
+        run: npx prisma db push --skip-generate
+
+      - name: Apply partial unique indexes Prisma cannot express
+        env:
+          DATABASE_URL: ${{ env.CLEAN_START_CI_DATABASE_URL }}
+        run: |
+          npx prisma db execute --url "$DATABASE_URL" --stdin <<'SQL'
+          CREATE UNIQUE INDEX IF NOT EXISTS one_active_assignment_per_user
+            ON "organization_assignments" ("userId") WHERE "isActive";
+          CREATE UNIQUE INDEX IF NOT EXISTS one_active_company_root
+            ON "organization_units" ((1)) WHERE "parentId" IS NULL AND "isActive";
+          CREATE UNIQUE INDEX IF NOT EXISTS one_published_route_per_scope_phase
+            ON "approval_route_versions" ("scopeUnitId", "phase") WHERE "status" = 'PUBLISHED';
+          CREATE UNIQUE INDEX IF NOT EXISTS one_active_team_name_per_unit
+            ON "teams" ("unitId", "name") WHERE "isActive";
+          SQL
+
+      - name: Run clean-start constraint suite
+        run: npx tsx --test tests/integration/clean-start-constraints.integration.test.ts
