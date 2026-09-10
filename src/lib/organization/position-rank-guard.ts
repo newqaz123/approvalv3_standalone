@@ -46,8 +46,8 @@ export interface RankChangeImpact {
  * id map never silently overwrites duplicates; an ACTIVE team's
  * missing/inactive/wrong-unit/self-member reports-to throws; live
  * relationships must reference existing ACTIVE positions with finite ranks;
- * supplied routes' missing step/limit position refs and duplicate stepOrder
- * throw; finiteness is required only for consulted ranks — irrelevant
+ * supplied routes' missing step/limit position refs, non-finite stepOrder,
+ * and duplicate stepOrder throw; finiteness is required only for consulted ranks — irrelevant
  * inactive historical position ranks are tolerated. A VALID proposed change
  * that merely creates a rank/order/limit violation is never malformed: it is
  * the principal blocked-and-listed result.
@@ -105,9 +105,12 @@ export function assessPositionRankChange(input: {
 
   // Rank under the proposed change: the target uses proposedRank (applied to
   // a copy — the input arrays are never mutated); every other position keeps
-  // its current rank, finiteness-checked at consultation time only.
+  // its current rank, finiteness-checked at consultation time only. The
+  // referenced position is resolved and validated BEFORE the substitution so
+  // the change target cannot bypass live-reference activity validation
+  // (fix1 P1-1): an inactive target throws when a live relationship consults
+  // it and stays changeable when only routes (or nothing) reference it.
   const rankOf = (referencer: string, refPositionId: string, requireActivePosition: boolean): number => {
-    if (refPositionId === positionId) return proposedRank
     const position = positionById.get(refPositionId)
     if (position === undefined) {
       throw new OrganizationValidationError(`${referencer} references missing position id "${refPositionId}"`)
@@ -118,7 +121,7 @@ export function assessPositionRankChange(input: {
     if (!Number.isFinite(position.rank)) {
       throw new OrganizationValidationError(`${referencer} references position "${refPositionId}" with non-finite rank ${position.rank}`)
     }
-    return position.rank
+    return refPositionId === positionId ? proposedRank : position.rank
   }
 
   // Active teams: reports-to must stay strictly above every active member.
@@ -153,6 +156,11 @@ export function assessPositionRankChange(input: {
       reportsTo.positionId,
       true,
     )
+    let memberViolates = false
+    // EVERY active member is validated (fix1 P1-3): no early break, so a
+    // malformed later reference always throws regardless of whether an
+    // earlier member already violates the relationship; the team is listed
+    // once afterward.
     for (const member of assignments) {
       if (!member.isActive || member.teamId !== team.id) continue
       const memberRank = rankOf(
@@ -160,10 +168,10 @@ export function assessPositionRankChange(input: {
         member.positionId,
         true,
       )
-      if (reportsToRank <= memberRank) {
-        affectedReportingRelationships.push({ teamId: team.id, teamName: team.name, unitId: team.unitId })
-        break
-      }
+      if (reportsToRank <= memberRank) memberViolates = true
+    }
+    if (memberViolates) {
+      affectedReportingRelationships.push({ teamId: team.id, teamName: team.name, unitId: team.unitId })
     }
   }
 
@@ -174,6 +182,15 @@ export function assessPositionRankChange(input: {
     problem: 'STEP_NOT_ASCENDING' | 'STEP_EXCEEDS_LIMIT'
   }> = []
   for (const route of publishedRoutes) {
+    // Non-finite stepOrder is malformed consulted ordering input and throws
+    // BEFORE duplicate detection and sorting (fix1 P1-2, parent adjudication:
+    // fail-closed, no new business constraints) — even a single such step
+    // cannot establish the persisted ordering.
+    for (const step of route.steps) {
+      if (!Number.isFinite(step.stepOrder)) {
+        throw new OrganizationValidationError(`published route "${route.id}" has non-finite stepOrder ${step.stepOrder}`)
+      }
+    }
     const seenStepOrder = new Set<number>()
     for (const step of route.steps) {
       if (seenStepOrder.has(step.stepOrder)) {

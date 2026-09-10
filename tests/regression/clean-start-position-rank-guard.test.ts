@@ -208,6 +208,25 @@ describe('purity — assessment only', () => {
     assert.equal(impact.blocked, true)
     assert.deepEqual(input, snapshot)
   })
+
+  it('performs no mutation attempt on frozen inputs (Object.freeze guard; strict mode would throw)', () => {
+    const frozenInput = {
+      positions: Object.freeze([...positions]),
+      teams: Object.freeze([...teams]),
+      assignments: Object.freeze([...assignments]),
+      publishedRoutes: Object.freeze([{
+        ...publishedRoutes[0],
+        steps: Object.freeze([...publishedRoutes[0].steps]),
+      }]),
+      positionId: 'p3',
+      proposedRank: 1,
+    }
+    let impact: ReturnType<typeof assessPositionRankChange> | undefined
+    assert.doesNotThrow(() => {
+      impact = assessPositionRankChange(frozenInput)
+    })
+    assert.equal(impact?.blocked, true)
+  })
 })
 
 describe('malformed consulted input throws OrganizationValidationError (parent A4 ruling)', () => {
@@ -314,6 +333,86 @@ describe('malformed consulted input throws OrganizationValidationError (parent A
       }),
       /duplicate stepOrder/,
     )
+  })
+})
+
+describe('fix1 P1-1 — the change target must not bypass live-reference validation', () => {
+  it('throws when an active reports-to holds the INACTIVE change target position', () => {
+    const inactiveTarget = positions.map((p) => (p.id === 'p3' ? { ...p, isActive: false } : p))
+    expectGuardError(() => assess({ positions: inactiveTarget, positionId: 'p3', proposedRank: 3 }), /inactive position/)
+  })
+
+  it('throws when an active member holds the INACTIVE change target position', () => {
+    const inactiveTarget = positions.map((p) => (p.id === 'p2' ? { ...p, isActive: false } : p))
+    expectGuardError(() => assess({ positions: inactiveTarget, positionId: 'p2', proposedRank: 5 }), /inactive position/)
+  })
+
+  it('still allows changing an inactive target that no live relationship consults (route-only reference)', () => {
+    const withInactive = [...positions, { id: 'p9', name: 'Old Title', rank: 9, isActive: false }]
+    const routeOnInactive = [{
+      id: 'rv9', scopeUnitId: 'company', phase: 'REQUEST' as const,
+      approvalLimitPositionId: 'p4',
+      steps: [{ stepOrder: 1, positionId: 'p9' }],
+    }]
+    const impact = assess({ positions: withInactive, publishedRoutes: routeOnInactive, positionId: 'p9', proposedRank: 2 })
+    assert.equal(impact.blocked, false)
+  })
+})
+
+describe('fix1 P1-2 — non-finite stepOrder is malformed consulted input and throws', () => {
+  const singleBadStep = (stepOrder: number) => [{
+    ...publishedRoutes[0],
+    steps: [{ stepOrder, positionId: 'p1' }],
+  }]
+
+  it('throws on a NaN stepOrder even for a single step, naming the route and value', () => {
+    expectGuardError(() => assess({ publishedRoutes: singleBadStep(Number.NaN), positionId: 'p4', proposedRank: 5 }), /rv1/, /stepOrder/)
+  })
+
+  it('throws on +Infinity stepOrder', () => {
+    expectGuardError(() => assess({ publishedRoutes: singleBadStep(Number.POSITIVE_INFINITY), positionId: 'p4', proposedRank: 5 }), /Infinity/)
+  })
+
+  it('throws on -Infinity stepOrder', () => {
+    expectGuardError(() => assess({ publishedRoutes: singleBadStep(Number.NEGATIVE_INFINITY), positionId: 'p4', proposedRank: 5 }), /-Infinity/)
+  })
+})
+
+describe('fix1 P1-3 — every active member is validated regardless of input order', () => {
+  const badMember = (positionId: string): AssignmentNode =>
+    ({ id: 'a-bad', userId: 'u-bad', unitId: 'eng', positionId, teamId: 't1', isActive: true })
+
+  it('throws on a missing member position appearing AFTER a valid proposed violation (no early break)', () => {
+    const withBad = [...assignments, badMember('p-gone')]
+    expectGuardError(() => assess({ assignments: withBad, positionId: 'p2', proposedRank: 4 }), /p-gone/)
+  })
+
+  it('throws on an inactive member position appearing after a valid proposed violation', () => {
+    const withRetired = [...positions, { id: 'p9', name: 'Old Title', rank: 9, isActive: false }]
+    const withBad = [...assignments, badMember('p9')]
+    expectGuardError(() => assess({ positions: withRetired, assignments: withBad, positionId: 'p2', proposedRank: 4 }), /inactive position/)
+  })
+
+  it('throws on a non-finite member rank appearing after a valid proposed violation', () => {
+    const withNan = [...positions, { id: 'p-nan9', name: 'Broken', rank: Number.NaN, isActive: true }]
+    const withBad = [...assignments, badMember('p-nan9')]
+    expectGuardError(() => assess({ positions: withNan, assignments: withBad, positionId: 'p2', proposedRank: 4 }), /non-finite/)
+  })
+
+  it('is order-independent: the same typed error fires when the malformed member comes first', () => {
+    const reordered = [badMember('p-gone'), ...assignments]
+    expectGuardError(() => assess({ assignments: reordered, positionId: 'p2', proposedRank: 4 }), /p-gone/)
+  })
+
+  it('still lists the team exactly once when several members violate', () => {
+    const twoViolators = [
+      ...assignments,
+      { id: 'a-v1', userId: 'u-v1', unitId: 'eng', positionId: 'p2', teamId: 't1', isActive: true },
+      { id: 'a-v2', userId: 'u-v2', unitId: 'eng', positionId: 'p2', teamId: 't1', isActive: true },
+    ]
+    const impact = assess({ assignments: twoViolators, publishedRoutes: [], positionId: 'p2', proposedRank: 4 })
+    assert.equal(impact.blocked, true)
+    assert.deepEqual(impact.affectedReportingRelationships, [{ teamId: 't1', teamName: 'Crew', unitId: 'eng' }])
   })
 })
 
