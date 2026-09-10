@@ -27,6 +27,10 @@ playwright-report/
 test-results/
 image*.png
 
+# Clean-start worktree local runtime state (A1 fix: durable non-env runtime location + isolated uploads)
+/.local-runtime/
+/uploads/
+
 # Playwright MCP session logs
 .playwright-mcp/
 
