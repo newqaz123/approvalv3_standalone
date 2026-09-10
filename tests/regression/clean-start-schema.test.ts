@@ -44,14 +44,17 @@ describe('clean-start additive schema', () => {
   })
   it('carries the partial unique contracts in migration SQL', () => {
     const sql = readFileSync('prisma/migrations/00000000000001_clean_start_additive/migration.sql', 'utf8').replace(/\s+/g, ' ')
-    assert.match(sql, /CREATE UNIQUE INDEX one_active_assignment_per_user ON organization_assignments \(userId\) WHERE isActive/i)
-    assert.match(sql, /CREATE UNIQUE INDEX one_active_company_root ON organization_units \(\(1\)\) WHERE parentId IS NULL AND isActive/i)
+    // Quoted identifiers are required: Prisma stores camelCase columns quoted.
+    // Unquoted userId folds to userid and would fail a real SQL apply.
+    // These regexes must not match unquoted SQL (no /i; quotes are mandatory).
+    assert.match(sql, /CREATE UNIQUE INDEX one_active_assignment_per_user ON "organization_assignments" \("userId"\) WHERE "isActive"/)
+    assert.match(sql, /CREATE UNIQUE INDEX one_active_company_root ON "organization_units" \(\(1\)\) WHERE "parentId" IS NULL AND "isActive"/)
     // R1 (plan-vs-source defect): this index does NOT pre-exist from the prior
     // redesign — B1 CREATES it, so the full contract is asserted by name.
-    assert.match(sql, /CREATE UNIQUE INDEX one_published_route_per_scope_phase ON approval_route_versions \(scopeUnitId, phase\) WHERE status = 'PUBLISHED'/i)
+    assert.match(sql, /CREATE UNIQUE INDEX one_published_route_per_scope_phase ON "approval_route_versions" \("scopeUnitId", "phase"\) WHERE "status" = 'PUBLISHED'/)
     // Team names: partial unique on ACTIVE rows per unit (accepted A3 rule 7),
     // deliberately NOT an unqualified UNIQUE (unitId, name) — inactive
     // historical team names must remain reusable.
-    assert.match(sql, /CREATE UNIQUE INDEX one_active_team_name_per_unit ON teams \(unitId, name\) WHERE isActive/i)
+    assert.match(sql, /CREATE UNIQUE INDEX one_active_team_name_per_unit ON "teams" \("unitId", "name"\) WHERE "isActive"/)
   })
 })

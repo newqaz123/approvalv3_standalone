@@ -233,28 +233,27 @@ ALTER TABLE "teams" ADD CONSTRAINT "teams_reportsToAssignmentId_fkey" FOREIGN KE
 
 -- ------------------------------------------------------------------
 -- Partial unique indexes Prisma cannot express (hand-appended).
--- Unquoted lowercase identifiers on purpose: the schema regression test
--- asserts these exact contract shapes against whitespace-normalized SQL.
+-- Identifiers quoted to match Prisma camelCase columns.
 -- ------------------------------------------------------------------
 
 -- At most ONE ACTIVE organization assignment per user; inactive rows are
 -- history and may repeat (accepted A3 rule 1).
 CREATE UNIQUE INDEX one_active_assignment_per_user
-  ON organization_assignments (userId) WHERE isActive;
+  ON "organization_assignments" ("userId") WHERE "isActive";
 
 -- Constant-expression unique index: at most ONE ACTIVE root row may exist
 -- (parentId IS NULL); inactive historical roots are tolerated (A2/A3).
 CREATE UNIQUE INDEX one_active_company_root
-  ON organization_units ((1)) WHERE parentId IS NULL AND isActive;
+  ON "organization_units" ((1)) WHERE "parentId" IS NULL AND "isActive";
 
 -- At most ONE PUBLISHED route version per (scope unit, phase). Preflight
 -- ruling R1: this index does NOT pre-exist from the prior redesign --
 -- verified absent at base -- so B1 CREATES it.
 CREATE UNIQUE INDEX one_published_route_per_scope_phase
-  ON approval_route_versions (scopeUnitId, phase) WHERE status = 'PUBLISHED';
+  ON "approval_route_versions" ("scopeUnitId", "phase") WHERE "status" = 'PUBLISHED';
 
 -- Duplicate ACTIVE team names within one unit are forbidden; inactive
 -- historical team names stay reusable (accepted A3 rule 7). Deliberately
 -- NOT an unqualified UNIQUE (unitId, name).
 CREATE UNIQUE INDEX one_active_team_name_per_unit
-  ON teams (unitId, name) WHERE isActive;
+  ON "teams" ("unitId", "name") WHERE "isActive";
