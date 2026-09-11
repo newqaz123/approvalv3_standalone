@@ -77,6 +77,7 @@ export function RouteEditorPanel({
   users,
   unitNames = new Map(),
   initial,
+  seedVersionId = null,
   readOnly = false,
   onDraftSaved,
   onPublished,
@@ -88,6 +89,7 @@ export function RouteEditorPanel({
   users: ReadonlyArray<{ id: string; name: string }>
   unitNames?: ReadonlyMap<string, string>
   initial?: { approvalLimitPositionId: string; steps: ReadonlyArray<EditorStep> } | null
+  seedVersionId?: string | null
   readOnly?: boolean
   onDraftSaved?: (result: { versionId: string }) => void
   onPublished?: (result: { versionId: string }) => void
@@ -185,6 +187,7 @@ export function RouteEditorPanel({
   return (
     <section
       data-testid={`route-editor-${scopeUnitId}-${phase}`}
+      data-editor-version={seedVersionId ?? ''}
       className="space-y-4 rounded-lg border bg-card p-4"
     >
       <h3 className="text-base font-semibold">{`Customize ${scopeName} — ${phase}`}</h3>

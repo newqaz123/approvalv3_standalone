@@ -11,6 +11,10 @@
 //   deduplicated), auto-approves an at-limit origin, reports noEligibleSteps
 //   for all-vacant routes;
 // - root-default publication copy is NOT a global activation switch.
+// C9-fix1 pins (review 9814796e):
+// - View seeds the effective PUBLISHED route (inherited ancestor, never a draft);
+// - Restart requires a successfully loaded preview for the current instance;
+// - Continue editing retains the selected draft version id.
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -38,6 +42,7 @@ import {
 import {
   ApprovalChainsPanel,
 } from '@/components/organization/ApprovalChainsPanel'
+import * as ChainsPanel from '@/components/organization/ApprovalChainsPanel'
 import {
   RouteEditorPanel,
   draftLimitConflicts,
@@ -50,6 +55,8 @@ import {
   RestartAttemptDialog,
   restartReasonValid,
 } from '@/components/organization/RestartAttemptDialog'
+import * as RestartMod from '@/components/organization/RestartAttemptDialog'
+import type { ReplacementChainPreview } from '@/server-actions/approvals'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
@@ -1050,6 +1057,269 @@ describe('RestartAttemptDialog markup and reason gating', () => {
       html.includes('data-testid="restart-confirm" disabled'),
       'Restart button must render disabled with an empty reason',
     )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// C9-fix1: View published source, restart preview gate, selected draft
+// ---------------------------------------------------------------------------
+
+const replacementPreview = (): ReplacementChainPreview => ({
+  routeVersionId: 'route-ops-request',
+  scopeUnitId: 'ops',
+  phase: 'REQUEST',
+  autoApproved: false,
+  steps: [
+    {
+      order: 1,
+      requiredPositionId: 'p-manager',
+      candidates: [{ id: 'pat', name: 'Pat' }],
+      skipped: false,
+    },
+  ],
+})
+
+describe('C9-fix1 View seeds the effective published route', () => {
+  it('inherited-route View opens the ancestor published route, not an empty editor', () => {
+    assert.equal(typeof ChainsPanel.resolveEditorVersion, 'function')
+    const data = chainsData()
+    const seed = ChainsPanel.resolveEditorVersion(data.versions, data.units, {
+      scopeUnitId: 'section-b',
+      phase: 'REQUEST',
+      readOnly: true,
+    })
+    assert.equal(seed?.versionId, 'ops-request')
+    assert.equal(seed?.status, 'PUBLISHED')
+    assert.equal(seed?.scopeUnitId, 'ops')
+
+    const html = renderToStaticMarkup(createElement(ApprovalChainsPanel, {
+      data,
+      initialEditor: { scopeUnitId: 'section-b', phase: 'REQUEST', readOnly: true },
+    }))
+    assert.match(html, /data-testid="route-editor-section-b-REQUEST"/)
+    assert.match(html, /data-editor-version="ops-request"/)
+    assert.match(html, /data-testid="route-editor-step-1"/)
+    assert.match(html, /data-testid="route-editor-step-2"/)
+    assert.match(html, /data-testid="route-editor-step-3"/)
+    assert.doesNotMatch(html, /EXCEEDS_LIMIT/)
+  })
+
+  it('published-plus-draft View opens the published route, not the draft', () => {
+    assert.equal(typeof ChainsPanel.resolveEditorVersion, 'function')
+    const data = chainsData()
+    const seed = ChainsPanel.resolveEditorVersion(data.versions, data.units, {
+      scopeUnitId: 'company',
+      phase: 'REQUEST',
+      readOnly: true,
+    })
+    assert.equal(seed?.versionId, 'root-request')
+    assert.equal(seed?.status, 'PUBLISHED')
+    assert.equal(seed?.approvalLimitPositionId, 'p-director')
+
+    const html = renderToStaticMarkup(createElement(ApprovalChainsPanel, {
+      data,
+      initialEditor: { scopeUnitId: 'company', phase: 'REQUEST', readOnly: true },
+    }))
+    assert.match(html, /data-testid="route-editor-company-REQUEST"/)
+    assert.match(html, /data-editor-version="root-request"/)
+    assert.doesNotMatch(html, /data-editor-version="draft-1"/)
+    // The company draft lowers the limit to Manager, which would flag Director.
+    assert.doesNotMatch(html, /EXCEEDS_LIMIT/)
+    assert.doesNotMatch(html, /data-testid="route-editor-conflicts"/)
+    assert.match(html, /data-testid="route-editor-step-3"/)
+  })
+
+  it('remount key changes when the viewed version identity changes', () => {
+    assert.equal(typeof ChainsPanel.editorRemountKey, 'function')
+    const data = chainsData()
+    const published = data.versions.find((row) => row.versionId === 'root-request') ?? null
+    const draft = data.versions.find((row) => row.versionId === 'draft-1') ?? null
+    const viewKey = ChainsPanel.editorRemountKey(
+      { scopeUnitId: 'company', phase: 'REQUEST', readOnly: true },
+      published,
+    )
+    const draftKey = ChainsPanel.editorRemountKey(
+      { scopeUnitId: 'company', phase: 'REQUEST', versionId: 'draft-1' },
+      draft,
+    )
+    const inheritedKey = ChainsPanel.editorRemountKey(
+      { scopeUnitId: 'section-b', phase: 'REQUEST', readOnly: true },
+      data.versions.find((row) => row.versionId === 'ops-request') ?? null,
+    )
+    assert.notEqual(viewKey, draftKey)
+    assert.notEqual(viewKey, inheritedKey)
+    assert.match(viewKey, /root-request/)
+    assert.match(draftKey, /draft-1/)
+  })
+})
+
+describe('C9-fix1 Continue editing retains the selected draft', () => {
+  it('opens the selected older draft, not the newest/first draft', () => {
+    const data: ApprovalChainsData = {
+      ...chainsData(),
+      versions: [
+        ...chainsData().versions,
+        {
+          versionId: 'draft-older',
+          scopeUnitId: 'company',
+          phase: 'REQUEST',
+          version: 3,
+          approvalLimitPositionId: 'p-staff',
+          status: 'DRAFT',
+          steps: [{ order: 1, positionId: 'p-staff' }],
+        },
+      ],
+    }
+    assert.equal(typeof ChainsPanel.resolveEditorVersion, 'function')
+    const seed = ChainsPanel.resolveEditorVersion(data.versions, data.units, {
+      scopeUnitId: 'company',
+      phase: 'REQUEST',
+      versionId: 'draft-older',
+    })
+    assert.equal(seed?.versionId, 'draft-older')
+    assert.equal(seed?.approvalLimitPositionId, 'p-staff')
+    assert.deepEqual(seed?.steps, [{ order: 1, positionId: 'p-staff' }])
+
+    const html = renderToStaticMarkup(createElement(ApprovalChainsPanel, {
+      data,
+      initialEditor: { scopeUnitId: 'company', phase: 'REQUEST', versionId: 'draft-older' },
+    }))
+    assert.match(html, /data-editor-version="draft-older"/)
+    assert.match(html, /data-testid="route-editor-step-1"/)
+    assert.doesNotMatch(html, /data-testid="route-editor-step-2"/)
+    assert.doesNotMatch(html, /data-editor-version="draft-1"/)
+  })
+
+  it('Continue editing buttons pass the selected draft version id and remount key uses it', () => {
+    const source = read('src/components/organization/ApprovalChainsPanel.tsx')
+    assert.match(source, /versionId: version\.versionId/)
+    assert.match(source, /editorRemountKey\(/)
+    assert.match(source, /resolveEditorVersion\(/)
+  })
+})
+
+describe('C9-fix1 Restart requires a current-instance preview', () => {
+  it('pending preview: restart stays disabled even with a valid reason', () => {
+    assert.equal(typeof RestartMod.restartConfirmEnabled, 'function')
+    assert.equal(RestartMod.restartConfirmEnabled({
+      reason: 'approvers all left',
+      instanceId: 'inst-1',
+      preview: null,
+      previewInstanceId: null,
+      loading: true,
+      restarting: false,
+      restarted: false,
+    }), false)
+    assert.equal(typeof RestartMod.RestartAttemptDialogView, 'function')
+    const html = renderToStaticMarkup(createElement(RestartMod.RestartAttemptDialogView, {
+      instanceId: 'inst-1',
+      reason: 'approvers all left',
+      preview: null,
+      previewInstanceId: null,
+      loading: true,
+      error: null,
+      restarting: false,
+      restarted: false,
+    }))
+    assert.match(html, /Loading replacement chain preview/)
+    assert.ok(
+      html.includes('data-testid="restart-confirm" disabled'),
+      'Restart must stay disabled while the preview is pending',
+    )
+  })
+
+  it('rejected preview: restart stays disabled and the handler must not mutate', () => {
+    assert.equal(typeof RestartMod.restartConfirmEnabled, 'function')
+    assert.equal(typeof RestartMod.canSubmitRestart, 'function')
+    const rejected = {
+      reason: 'approvers all left',
+      instanceId: 'inst-1',
+      preview: null as ReplacementChainPreview | null,
+      previewInstanceId: null as string | null,
+      loading: false,
+      restarting: false,
+      restarted: false,
+    }
+    assert.equal(RestartMod.restartConfirmEnabled(rejected), false)
+    assert.equal(RestartMod.canSubmitRestart(rejected), false)
+    const html = renderToStaticMarkup(createElement(RestartMod.RestartAttemptDialogView, {
+      instanceId: 'inst-1',
+      reason: 'approvers all left',
+      preview: null,
+      previewInstanceId: null,
+      loading: false,
+      error: 'preview failed',
+      restarting: false,
+      restarted: false,
+    }))
+    assert.match(html, /preview failed/)
+    assert.ok(
+      html.includes('data-testid="restart-confirm" disabled'),
+      'Restart must stay disabled after a rejected preview',
+    )
+  })
+
+  it('ready preview for the current instance enables restart; a stale other-instance preview does not', () => {
+    assert.equal(typeof RestartMod.restartConfirmEnabled, 'function')
+    assert.equal(typeof RestartMod.canSubmitRestart, 'function')
+    const preview = replacementPreview()
+    assert.equal(RestartMod.restartConfirmEnabled({
+      reason: 'approvers all left',
+      instanceId: 'inst-1',
+      preview,
+      previewInstanceId: 'inst-1',
+      loading: false,
+      restarting: false,
+      restarted: false,
+    }), true)
+    assert.equal(RestartMod.canSubmitRestart({
+      reason: 'approvers all left',
+      instanceId: 'inst-1',
+      preview,
+      previewInstanceId: 'inst-1',
+      loading: false,
+      restarting: false,
+      restarted: false,
+    }), true)
+    assert.equal(RestartMod.restartConfirmEnabled({
+      reason: 'approvers all left',
+      instanceId: 'inst-2',
+      preview,
+      previewInstanceId: 'inst-1',
+      loading: false,
+      restarting: false,
+      restarted: false,
+    }), false)
+    assert.equal(RestartMod.canSubmitRestart({
+      reason: 'approvers all left',
+      instanceId: 'inst-2',
+      preview,
+      previewInstanceId: 'inst-1',
+      loading: false,
+      restarting: false,
+      restarted: false,
+    }), false)
+  })
+
+  it('changing instance clears the stale preview', () => {
+    assert.equal(typeof RestartMod.restartPreviewAfterInstanceChange, 'function')
+    const reset = RestartMod.restartPreviewAfterInstanceChange()
+    assert.equal(reset.preview, null)
+    assert.equal(reset.previewInstanceId, null)
+    assert.equal(reset.loading, true)
+    assert.equal(reset.error, null)
+    assert.equal(reset.restarted, false)
+  })
+
+  it('dialog source gates the confirm button and handler on current-instance preview', () => {
+    const source = read('src/components/organization/RestartAttemptDialog.tsx')
+    assert.match(source, /function restartConfirmEnabled/)
+    assert.match(source, /function canSubmitRestart/)
+    assert.match(source, /function restartPreviewAfterInstanceChange/)
+    assert.match(source, /restartConfirmEnabled\(/)
+    assert.match(source, /canSubmitRestart\(/)
+    assert.match(source, /restartPreviewAfterInstanceChange\(/)
+    assert.match(source, /previewInstanceId/)
   })
 })
 

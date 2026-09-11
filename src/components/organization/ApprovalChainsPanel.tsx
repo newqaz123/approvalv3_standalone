@@ -15,11 +15,103 @@
 import React, { useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import type { ApprovalPhase } from '@/lib/approval-routes/definition'
+import { ancestorUnitIds } from '@/lib/organization/hierarchy'
 import type { ApprovalChainsData } from '@/server-actions/approval-routes'
 import { RouteEditorPanel } from '@/components/organization/RouteEditorPanel'
 import { RestartAttemptDialog } from '@/components/organization/RestartAttemptDialog'
 
 const PHASES: readonly ApprovalPhase[] = ['REQUEST', 'SOLUTION', 'FINAL']
+
+export type ChainsEditorTarget = {
+  scopeUnitId: string
+  phase: ApprovalPhase
+  readOnly?: boolean
+  versionId?: string
+}
+
+function publishedAtScope(
+  versions: ApprovalChainsData['versions'],
+  scopeUnitId: string,
+  phase: ApprovalPhase,
+): Array<ApprovalChainsData['versions'][number]> {
+  return versions.filter(
+    (row) =>
+      row.scopeUnitId === scopeUnitId
+      && row.phase === phase
+      && row.status === 'PUBLISHED',
+  )
+}
+
+/** Effective PUBLISHED route for View: self, then ancestors. Drafts never win. */
+export function resolvePublishedSourceVersion(
+  versions: ApprovalChainsData['versions'],
+  units: ApprovalChainsData['units'],
+  scopeUnitId: string,
+  phase: ApprovalPhase,
+): ApprovalChainsData['versions'][number] | null {
+  let path: string[]
+  try {
+    path = ancestorUnitIds(units, scopeUnitId)
+  } catch {
+    return null
+  }
+  for (const id of path) {
+    const published = publishedAtScope(versions, id, phase)
+    if (published.length === 1) return published[0]
+    if (published.length > 1) return null
+  }
+  return null
+}
+
+/** Seed for the route editor. Read-only View excludes drafts. */
+export function resolveEditorVersion(
+  versions: ApprovalChainsData['versions'],
+  units: ApprovalChainsData['units'],
+  editor: ChainsEditorTarget,
+): ApprovalChainsData['versions'][number] | null {
+  if (editor.readOnly === true) {
+    if (editor.versionId) {
+      const row = versions.find((candidate) => candidate.versionId === editor.versionId) ?? null
+      if (row === null || row.status !== 'PUBLISHED') return null
+      return row
+    }
+    return resolvePublishedSourceVersion(versions, units, editor.scopeUnitId, editor.phase)
+  }
+  if (editor.versionId) {
+    const row = versions.find((candidate) => candidate.versionId === editor.versionId) ?? null
+    if (
+      row === null
+      || row.scopeUnitId !== editor.scopeUnitId
+      || row.phase !== editor.phase
+    ) {
+      return null
+    }
+    return row
+  }
+  const published = versions.find(
+    (row) =>
+      row.scopeUnitId === editor.scopeUnitId
+      && row.phase === editor.phase
+      && row.status === 'PUBLISHED',
+  )
+  const draft = versions.find(
+    (row) =>
+      row.scopeUnitId === editor.scopeUnitId
+      && row.phase === editor.phase
+      && row.status === 'DRAFT',
+  )
+  return draft ?? published ?? null
+}
+
+/** Remount the editor when the viewed/edited version identity changes. */
+export function editorRemountKey(
+  editor: ChainsEditorTarget,
+  version: ApprovalChainsData['versions'][number] | null,
+): string {
+  const versionPart = editor.versionId ?? version?.versionId ?? 'empty'
+  const mode = editor.readOnly === true ? 'view' : 'edit'
+  return `${editor.scopeUnitId}-${editor.phase}-${mode}-${versionPart}`
+}
 
 export function ChainsVersionSummary({
   version,
@@ -46,7 +138,7 @@ export function ApprovalChainsPanel({
   initialEditor = null,
 }: {
   data: ApprovalChainsData
-  initialEditor?: { scopeUnitId: string; phase: ApprovalPhase; readOnly?: boolean } | null
+  initialEditor?: ChainsEditorTarget | null
 }) {
   const [editor, setEditor] = useState(initialEditor)
   const [strandedId, setStrandedId] = useState<string | null>(null)
@@ -70,28 +162,16 @@ export function ApprovalChainsPanel({
   const editorUnit = editor
     ? data.units.find((row) => row.id === editor.scopeUnitId) ?? null
     : null
-  const editorInitial = useMemo(() => {
+  const seed = useMemo(() => {
     if (!editor) return null
-    const published = data.versions.find(
-      (row) =>
-        row.scopeUnitId === editor.scopeUnitId
-        && row.phase === editor.phase
-        && row.status === 'PUBLISHED',
-    )
-    const draft = data.versions.find(
-      (row) =>
-        row.scopeUnitId === editor.scopeUnitId
-        && row.phase === editor.phase
-        && row.status === 'DRAFT',
-    )
-    const seed = draft ?? published ?? null
-    return seed && seed.approvalLimitPositionId
-      ? {
-          approvalLimitPositionId: seed.approvalLimitPositionId,
-          steps: seed.steps.map((step) => ({ order: step.order, positionId: step.positionId })),
-        }
-      : null
-  }, [data.versions, editor])
+    return resolveEditorVersion(data.versions, data.units, editor)
+  }, [data.versions, data.units, editor])
+  const editorInitial = seed && seed.approvalLimitPositionId
+    ? {
+        approvalLimitPositionId: seed.approvalLimitPositionId,
+        steps: seed.steps.map((step) => ({ order: step.order, positionId: step.positionId })),
+      }
+    : null
 
   const exceptions = useMemo(
     () => data.units
@@ -195,7 +275,11 @@ export function ApprovalChainsPanel({
                           variant="outline"
                           size="sm"
                           data-testid={`chains-draft-edit-${version.versionId}`}
-                          onClick={() => setEditor({ scopeUnitId: rootUnit.id, phase })}
+                          onClick={() => setEditor({
+                            scopeUnitId: rootUnit.id,
+                            phase,
+                            versionId: version.versionId,
+                          })}
                         >
                           Continue editing
                         </Button>
@@ -288,7 +372,7 @@ export function ApprovalChainsPanel({
 
       {editor && editorUnit ? (
         <RouteEditorPanel
-          key={`${editor.scopeUnitId}-${editor.phase}`}
+          key={editorRemountKey(editor, seed)}
           scopeUnitId={editor.scopeUnitId}
           scopeName={editorUnit.name}
           phase={editor.phase}
@@ -296,6 +380,7 @@ export function ApprovalChainsPanel({
           users={activeUsers}
           unitNames={unitNames}
           initial={editorInitial}
+          seedVersionId={seed?.versionId ?? null}
           readOnly={editor.readOnly === true}
         />
       ) : null}
