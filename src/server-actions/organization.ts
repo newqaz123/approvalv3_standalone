@@ -6,7 +6,7 @@ import { selectNearestRoute } from '@/lib/approval-routes/selection'
 import type { ApprovalRouteVersionDefinition } from '@/lib/approval-routes/definition'
 import { verifyCleanStartReadiness } from '@/lib/clean-start-readiness'
 import type { ReadinessReport } from '@/lib/clean-start-readiness'
-import { OrganizationValidationError } from '@/lib/organization/assignments'
+import { OrganizationValidationError, validateOrganization } from '@/lib/organization/assignments'
 import type {
   AssignmentNode,
   OrganizationUnitNode,
@@ -355,6 +355,14 @@ export interface OrganizationMutationDb {
   runSerializable<T>(fn: (tx: OrganizationMutationDb) => Promise<T>): Promise<T>
 }
 
+export interface OrganizationUnitMutationDb extends OrganizationMutationDb {
+  loadAssignments(): Promise<AssignmentNode[]>
+  loadPositions(): Promise<PositionNode[]>
+  createUnit(input: { name: string; parentId: string }): Promise<{ id: string }>
+  updateUnitSettings(id: string, shareRequests: boolean, canWorkOnSolutions: boolean): Promise<void>
+  updateUnitManager(unitId: string, managerUserId: string | null): Promise<void>
+}
+
 const ORGANIZATION_MUTATION_ISOLATION = 'Serializable' as const
 
 type MutationPrisma = {
@@ -372,7 +380,26 @@ type MutationPrisma = {
       canWorkOnSolutions: boolean
       managerUserId: string | null
     }>>
-    update: (args: { where: { id: string }; data: { name: string } }) => Promise<unknown>
+    update: (args: {
+      where: { id: string }
+      data: {
+        name?: string
+        shareRequests?: boolean
+        canWorkOnSolutions?: boolean
+        managerUserId?: string | null
+      }
+    }) => Promise<unknown>
+    create: (args: {
+      data: {
+        name: string
+        parentId: string
+        // Leftover NOT NULL until B15; never shown in UI.
+        unitType: 'SECTION'
+        shareRequests: boolean
+        canWorkOnSolutions: boolean
+        isActive: boolean
+      }
+    }) => Promise<{ id: string }>
   }
   teams: {
     findMany: (args?: object) => Promise<Array<{
@@ -383,6 +410,24 @@ type MutationPrisma = {
       isActive: boolean
     }>>
     update: (args: { where: { id: string }; data: { name: string } }) => Promise<unknown>
+  }
+  organization_assignments: {
+    findMany: (args?: object) => Promise<Array<{
+      id: string
+      userId: string
+      unitId: string
+      positionId: string
+      teamId: string | null
+      isActive: boolean
+    }>>
+  }
+  positions: {
+    findMany: (args?: object) => Promise<Array<{
+      id: string
+      name: string
+      rank: number
+      isActive: boolean
+    }>>
   }
   request_activities: {
     create: (args: { data: { action: string; comments: string; userId: string } }) => Promise<unknown>
@@ -410,8 +455,8 @@ function createMutationStore(
   client: MutationPrisma,
   adminId: string,
   serializable: boolean,
-): OrganizationMutationDb {
-  const store: OrganizationMutationDb = {
+): OrganizationUnitMutationDb {
+  const store: OrganizationUnitMutationDb = {
     adminUserId: adminId,
     async loadUnits() {
       const rows = await client.organization_units.findMany()
@@ -435,11 +480,56 @@ function createMutationStore(
         isActive: row.isActive,
       }))
     },
+    async loadAssignments() {
+      const rows = await client.organization_assignments.findMany()
+      return rows.map((row) => ({
+        id: row.id,
+        userId: row.userId,
+        unitId: row.unitId,
+        positionId: row.positionId,
+        teamId: row.teamId,
+        isActive: row.isActive,
+      }))
+    },
+    async loadPositions() {
+      const rows = await client.positions.findMany()
+      return rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        rank: row.rank,
+        isActive: row.isActive,
+      }))
+    },
     async updateUnitName(id, name) {
       await client.organization_units.update({ where: { id }, data: { name } })
     },
     async updateTeamName(id, name) {
       await client.teams.update({ where: { id }, data: { name } })
+    },
+    async createUnit(input) {
+      const row = await client.organization_units.create({
+        data: {
+          name: input.name,
+          parentId: input.parentId,
+          unitType: 'SECTION',
+          shareRequests: true,
+          canWorkOnSolutions: false,
+          isActive: true,
+        },
+      })
+      return { id: row.id }
+    },
+    async updateUnitSettings(id, shareRequests, canWorkOnSolutions) {
+      await client.organization_units.update({
+        where: { id },
+        data: { shareRequests, canWorkOnSolutions },
+      })
+    },
+    async updateUnitManager(unitId, managerUserId) {
+      await client.organization_units.update({
+        where: { id: unitId },
+        data: { managerUserId },
+      })
     },
     async writeAudit(entry) {
       await client.request_activities.create({
@@ -467,7 +557,7 @@ function createMutationStore(
   return store
 }
 
-async function createProductionMutationDb(): Promise<OrganizationMutationDb> {
+async function createProductionMutationDb(): Promise<OrganizationUnitMutationDb> {
   const { requireAdmin } = await import('@/lib/auth')
   const adminId = await requireAdmin()
   if (!adminId) {
@@ -478,9 +568,9 @@ async function createProductionMutationDb(): Promise<OrganizationMutationDb> {
   return createMutationStore(client, adminId, true)
 }
 
-async function runExclusiveRename<T>(
+async function runExclusiveWrite<T>(
   store: OrganizationMutationDb,
-  uniqueMessage: string,
+  uniqueMessage: string | null,
   body: (tx: OrganizationMutationDb) => Promise<T>,
 ): Promise<T> {
   try {
@@ -489,11 +579,19 @@ async function runExclusiveRename<T>(
     return result
   } catch (error) {
     if (error instanceof OrganizationValidationError) throw error
-    if (isUniqueOrSerializationConflict(error)) {
+    if (uniqueMessage && isUniqueOrSerializationConflict(error)) {
       throw new OrganizationValidationError(uniqueMessage)
     }
     throw error
   }
+}
+
+async function runExclusiveRename<T>(
+  store: OrganizationMutationDb,
+  uniqueMessage: string,
+  body: (tx: OrganizationMutationDb) => Promise<T>,
+): Promise<T> {
+  return runExclusiveWrite(store, uniqueMessage, body)
 }
 
 /**
@@ -565,6 +663,124 @@ export async function renameTeam(
     await tx.writeAudit({
       action: 'team_renamed',
       comments: `Renamed team ${current.id}: "${current.name}" → "${name}"`,
+    })
+    return { success: true as const }
+  })
+}
+
+function requireParentId(parentId: string | undefined | null): string {
+  const trimmed = typeof parentId === 'string' ? parentId.trim() : ''
+  if (trimmed.length === 0) {
+    throw new OrganizationValidationError('Parent required')
+  }
+  return trimmed
+}
+
+function asUnitWriter(tx: OrganizationMutationDb): OrganizationUnitMutationDb {
+  return tx as OrganizationUnitMutationDb
+}
+
+/**
+ * Create an organization unit under an existing parent. The company root exists
+ * from setup only; parentId is required. Duplicate active sibling names are
+ * rejected. Validation+write run in a Serializable transaction. Leftover
+ * Prisma unitType is SECTION until B15 and is never shown in the UI.
+ */
+export async function createOrganizationUnit(
+  input: { name: string; parentId: string },
+  db?: OrganizationUnitMutationDb,
+): Promise<{ id: string }> {
+  const store = db ?? await createProductionMutationDb()
+  const name = requireTrimmedName(input.name)
+  const parentId = requireParentId(input.parentId)
+  return runExclusiveWrite(store, 'Name must be unique among sibling units', async (tx) => {
+    const writer = asUnitWriter(tx)
+    const units = await writer.loadUnits()
+    const parent = units.find((row) => row.id === parentId)
+    if (parent === undefined || !parent.isActive) {
+      throw new OrganizationValidationError(`parent unit "${parentId}" was not found`)
+    }
+    const duplicate = units.some((row) => (
+      row.isActive
+      && row.parentId === parentId
+      && row.name === name
+    ))
+    if (duplicate) {
+      throw new OrganizationValidationError('Name must be unique among sibling units')
+    }
+    const created = await writer.createUnit({ name, parentId })
+    await writer.writeAudit({
+      action: 'organization_unit_created',
+      comments: `Created unit ${created.id} "${name}" under parent ${parentId}`,
+    })
+    return created
+  })
+}
+
+/**
+ * Persist unit sharing and solution-work flags. Audit + revalidate.
+ */
+export async function updateUnitSettings(
+  input: { id: string; shareRequests: boolean; canWorkOnSolutions: boolean },
+  db?: OrganizationUnitMutationDb,
+): Promise<{ success: true }> {
+  const store = db ?? await createProductionMutationDb()
+  return runExclusiveWrite(store, null, async (tx) => {
+    const writer = asUnitWriter(tx)
+    const units = await writer.loadUnits()
+    const current = units.find((row) => row.id === input.id)
+    if (current === undefined) {
+      throw new OrganizationValidationError(`organization unit "${input.id}" was not found`)
+    }
+    await writer.updateUnitSettings(current.id, input.shareRequests, input.canWorkOnSolutions)
+    await writer.writeAudit({
+      action: 'organization_unit_settings_updated',
+      comments: `Updated unit ${current.id} shareRequests=${input.shareRequests} canWorkOnSolutions=${input.canWorkOnSolutions}`,
+    })
+    return { success: true as const }
+  })
+}
+
+/**
+ * Set the unit manager from active DIRECT assignments in that unit.
+ * Non-direct and inactive candidates are rejected. validateOrganization runs
+ * on the proposed state before write.
+ */
+export async function setUnitManager(
+  input: { unitId: string; managerUserId: string | null },
+  db?: OrganizationUnitMutationDb,
+): Promise<{ success: true }> {
+  const store = db ?? await createProductionMutationDb()
+  return runExclusiveWrite(store, null, async (tx) => {
+    const writer = asUnitWriter(tx)
+    const [units, assignments, positions, teams] = await Promise.all([
+      writer.loadUnits(),
+      writer.loadAssignments(),
+      writer.loadPositions(),
+      writer.loadTeams(),
+    ])
+    const current = units.find((row) => row.id === input.unitId)
+    if (current === undefined) {
+      throw new OrganizationValidationError(`organization unit "${input.unitId}" was not found`)
+    }
+    if (input.managerUserId !== null) {
+      const direct = assignments.some((row) => (
+        row.isActive
+        && row.unitId === current.id
+        && row.userId === input.managerUserId
+      ))
+      if (!direct) {
+        throw new OrganizationValidationError('User must be assigned directly to this unit')
+      }
+    }
+    const nextUnits = units.map((row) => (
+      row.id === current.id ? { ...row, managerUserId: input.managerUserId } : row
+    ))
+    validateOrganization(nextUnits, positions, assignments, teams)
+    await writer.updateUnitManager(current.id, input.managerUserId)
+    await writer.writeAudit({
+      action: 'organization_unit_manager_set',
+      comments: `Set manager of unit ${current.id} to ${input.managerUserId ?? 'none'}`,
     })
     return { success: true as const }
   })

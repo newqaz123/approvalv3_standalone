@@ -159,6 +159,13 @@ export function TreeNodeRow({
         data-testid={`unit-header-${unit.id}`}
         className="group flex flex-wrap items-center gap-2"
         tabIndex={0}
+        onClick={() => onSelectUnit?.(unit.id)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            onSelectUnit?.(unit.id)
+          }
+        }}
       >
         <span
           ref={nameRef}

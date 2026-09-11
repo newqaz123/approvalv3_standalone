@@ -177,6 +177,7 @@ const CS = {
     request: "cs-route-root-request",
     solution: "cs-route-root-solution",
     final: "cs-route-root-final",
+    opsRequest: "cs-route-ops-request",
   },
 } as const;
 
@@ -474,6 +475,49 @@ async function seedCleanStartFixture(input: {
     }
   }
 
+  // C5: published REQUEST exception at Operations so Section A REQUEST is
+  // Inherited from Operations. Steps copy the root default (leftover columns as B14).
+  await prisma.approval_route_versions.upsert({
+    where: { id: CS.route.opsRequest },
+    update: {
+      scopeUnitId: CS.unit.operations,
+      phase: ApprovalPhase.REQUEST,
+      version: 1,
+      maximumPositionLevel: 6,
+      approvalLimitPositionId: directorId,
+      status: ApprovalRouteStatus.PUBLISHED,
+      publishedAt: input.now,
+      createdById: input.adminId,
+    },
+    create: {
+      id: CS.route.opsRequest,
+      scopeUnitId: CS.unit.operations,
+      phase: ApprovalPhase.REQUEST,
+      version: 1,
+      maximumPositionLevel: 6,
+      approvalLimitPositionId: directorId,
+      status: ApprovalRouteStatus.PUBLISHED,
+      publishedAt: input.now,
+      createdById: input.adminId,
+    },
+  });
+  await prisma.approval_route_steps.deleteMany({ where: { routeVersionId: CS.route.opsRequest } });
+  const opsStepPositions = [
+    { order: 1, positionId: leadId },
+    { order: 2, positionId: managerId },
+    { order: 3, positionId: directorId },
+  ];
+  for (const step of opsStepPositions) {
+    await prisma.approval_route_steps.create({
+      data: {
+        routeVersionId: CS.route.opsRequest,
+        stepOrder: step.order,
+        positionId: step.positionId,
+        positionCode: leftoverPositionCode[step.positionId],
+      },
+    });
+  }
+
   const unitCount = await prisma.organization_units.count({
     where: { id: { in: Object.values(CS.unit) } },
   });
@@ -485,13 +529,19 @@ async function seedCleanStartFixture(input: {
   });
   const teamCount = await prisma.teams.count({ where: { id: CS.team.lineA, isActive: true } });
   const routeCount = await prisma.approval_route_versions.count({
-    where: { id: { in: Object.values(CS.route) }, status: ApprovalRouteStatus.PUBLISHED },
+    where: {
+      id: { in: [CS.route.request, CS.route.solution, CS.route.final] },
+      status: ApprovalRouteStatus.PUBLISHED,
+    },
+  });
+  const opsRequestCount = await prisma.approval_route_versions.count({
+    where: { id: CS.route.opsRequest, status: ApprovalRouteStatus.PUBLISHED },
   });
   const userCount = await prisma.user.count({
     where: { email: { in: fixtureUsers.map((row) => row.email) } },
   });
   console.log(
-    `Clean-start fixture counts: units=${unitCount} positions=${positionCount} users=${userCount} assignments=${assignmentCount} teams=${teamCount} publishedRootRoutes=${routeCount}`,
+    `Clean-start fixture counts: units=${unitCount} positions=${positionCount} users=${userCount} assignments=${assignmentCount} teams=${teamCount} publishedRootRoutes=${routeCount} publishedOpsRequest=${opsRequestCount}`,
   );
   console.log(`Clean-start fixture emails: ${fixtureUsers.map((row) => row.email).join(", ")}`);
 }

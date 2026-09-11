@@ -3,6 +3,8 @@ import { expect, test, type Browser, type BrowserContext, type Page } from "@pla
 const REQUIRED_BASE = "http://localhost:3100";
 const LOCAL_PASSWORD = process.env.E2E_PASSWORD || "changeme";
 const OPERATIONS_ID = "cs-unit-operations";
+const SECTION_A_ID = "cs-unit-section-a";
+const SECTION_A_CHILD_ID = "cs-unit-section-a-child";
 
 test.beforeAll(() => {
 	if (process.env.TEST_BASE_URL !== REQUIRED_BASE) {
@@ -101,6 +103,73 @@ test.describe("clean-start organization tree hover/focus/overflow", () => {
 			await expect(session.page.getByRole("menuitem", { name: "Rename" })).toBeVisible();
 			await expect(session.page.getByRole("menuitem", { name: "Manage" })).toBeVisible();
 		} finally {
+			await session.context.close();
+		}
+	});
+});
+
+test.describe("clean-start unit side panel", () => {
+	test("selecting a unit opens the panel; sharing badge updates after save; Section A REQUEST is Inherited from Operations", async ({
+		browser,
+	}) => {
+		test.setTimeout(120_000);
+		const session = await openSignedIn(browser, EMAIL.admin);
+		const page = session.page;
+		const childBadge = page.getByTestId(`sharing-badge-${SECTION_A_CHILD_ID}`);
+		let restored = false;
+		try {
+			await page.setViewportSize({ width: 1280, height: 720 });
+			await page.goto("/admin/organization");
+			await expect(page.getByTestId("organization-tree")).toBeVisible({ timeout: 20_000 });
+
+			const operationsHeader = page.getByTestId(`unit-header-${OPERATIONS_ID}`);
+			await operationsHeader.hover();
+			await page.getByTestId(`unit-manage-${OPERATIONS_ID}`).click();
+			const panel = page.getByTestId("unit-side-panel");
+			await expect(panel).toBeVisible();
+			await expect(panel.getByRole("heading", { name: "Manage Operations" })).toBeVisible();
+
+			const sectionAHeader = page.getByTestId(`unit-header-${SECTION_A_ID}`);
+			await sectionAHeader.hover();
+			await page.getByTestId(`unit-manage-${SECTION_A_ID}`).click();
+			await expect(panel.getByRole("heading", { name: "Manage Section A" })).toBeVisible();
+			await expect(page.getByTestId("route-source-REQUEST")).toHaveText("Inherited from Operations");
+			await expect(panel.getByText("Share requests within this unit and all its descendants")).toBeVisible();
+
+			const childHeader = page.getByTestId(`unit-header-${SECTION_A_CHILD_ID}`);
+			await childHeader.hover();
+			await page.getByTestId(`unit-manage-${SECTION_A_CHILD_ID}`).click();
+			await expect(panel.getByRole("heading", { name: "Manage Section A Child" })).toBeVisible();
+			await expect(childBadge).toBeVisible();
+
+			const sharingSwitch = page.getByTestId("unit-share-requests");
+			await expect(sharingSwitch).toBeChecked();
+			await sharingSwitch.click();
+			await page.getByTestId("unit-settings-save").click();
+			await expect(childBadge).toHaveCount(0);
+
+			await expect(sharingSwitch).not.toBeChecked();
+			await sharingSwitch.click();
+			await page.getByTestId("unit-settings-save").click();
+			await expect(childBadge).toBeVisible();
+			restored = true;
+		} finally {
+			if (!restored) {
+				try {
+					await page.goto("/admin/organization");
+					const childHeader = page.getByTestId(`unit-header-${SECTION_A_CHILD_ID}`);
+					await childHeader.hover();
+					await page.getByTestId(`unit-manage-${SECTION_A_CHILD_ID}`).click();
+					const sharingSwitch = page.getByTestId("unit-share-requests");
+					if (!(await sharingSwitch.isChecked())) {
+						await sharingSwitch.click();
+						await page.getByTestId("unit-settings-save").click();
+						await expect(childBadge).toBeVisible({ timeout: 10_000 });
+					}
+				} catch {
+					// restore best-effort; fixture reseed covers leftover state
+				}
+			}
 			await session.context.close();
 		}
 	});
