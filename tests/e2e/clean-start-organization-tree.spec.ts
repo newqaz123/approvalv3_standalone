@@ -1,4 +1,5 @@
 import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
+import { PrismaClient } from "@prisma/client";
 
 const REQUIRED_BASE = "http://localhost:3100";
 const LOCAL_PASSWORD = process.env.E2E_PASSWORD || "changeme";
@@ -6,6 +7,29 @@ const OPERATIONS_ID = "cs-unit-operations";
 const SECTION_A_ID = "cs-unit-section-a";
 const SECTION_A_CHILD_ID = "cs-unit-section-a-child";
 const LINE_A_TEAM_ID = "cs-team-section-a-line";
+const ALICE_ASSIGNMENT_ID = "cs-asg-alice";
+const CASEY_ASSIGNMENT_ID = "cs-asg-casey";
+
+/**
+ * The team-panel test mutates the shared dev database (creates the Night Line
+ * team), so it needs the same guarded direct connection the approval-flow
+ * specs use for fixture isolation: app_cleanstart_dev only, never a protected
+ * or CI database.
+ */
+function guardedDatabaseUrl(): string {
+	const url = process.env.DATABASE_URL ?? "";
+	if (/app_db|app_org_manual_7abcdf3|app_cleanstart_ci/.test(url)) {
+		throw new Error("URL-GUARD: refused protected or CI database");
+	}
+	if (!/\/app_cleanstart_dev(\?|$)/.test(url)) {
+		throw new Error("URL-GUARD: DATABASE_URL must target app_cleanstart_dev only");
+	}
+	return url;
+}
+
+function prismaClient(): PrismaClient {
+	return new PrismaClient({ datasources: { db: { url: guardedDatabaseUrl() } } });
+}
 
 test.beforeAll(() => {
 	if (process.env.TEST_BASE_URL !== REQUIRED_BASE) {
@@ -13,15 +37,7 @@ test.beforeAll(() => {
 			`C4 organization-tree specs require TEST_BASE_URL=${REQUIRED_BASE} (got ${String(process.env.TEST_BASE_URL)})`,
 		);
 	}
-	const url = process.env.DATABASE_URL ?? "";
-	if (url) {
-		if (/app_db|app_org_manual_7abcdf3|app_cleanstart_ci/.test(url)) {
-			throw new Error("URL-GUARD: refused protected or CI database");
-		}
-		if (!/\/app_cleanstart_dev(\?|$)/.test(url)) {
-			throw new Error("URL-GUARD: DATABASE_URL must target app_cleanstart_dev only");
-		}
-	}
+	guardedDatabaseUrl();
 });
 
 const EMAIL = {
@@ -230,15 +246,63 @@ test.describe("clean-start person assignment panel", () => {
 });
 
 test.describe("clean-start team panel", () => {
+	const NIGHT_LINE_NAME = "Night Line";
+
+	async function activeNightLineTeamIds(prisma: PrismaClient): Promise<string[]> {
+		const rows = await prisma.teams.findMany({
+			where: { unitId: SECTION_A_ID, name: NIGHT_LINE_NAME, isActive: true },
+			select: { id: true },
+		});
+		return rows.map((row) => row.id);
+	}
+
+	/**
+	 * Isolate the created fixture: move every Night Line member back to Line A,
+	 * deactivate the team itself, then await and verify the restored state. Runs
+	 * before the test body (drops contamination from earlier runs) and after it
+	 * (leaves nothing behind), so consecutive reruns need no manual reseeding.
+	 * Failures throw instead of being swallowed: a broken cleanup must fail the
+	 * run rather than silently poisoning the next one.
+	 */
+	async function deactivateNightLineTeams(): Promise<void> {
+		const prisma = prismaClient();
+		try {
+			for (const teamId of await activeNightLineTeamIds(prisma)) {
+				await prisma.$transaction([
+					prisma.organization_assignments.updateMany({
+						where: { teamId },
+						data: { teamId: LINE_A_TEAM_ID },
+					}),
+					prisma.teams.update({
+						where: { id: teamId },
+						data: { isActive: false },
+					}),
+				]);
+			}
+			expect(await activeNightLineTeamIds(prisma)).toHaveLength(0);
+			const strays = await prisma.organization_assignments.findMany({
+				where: {
+					id: { in: [ALICE_ASSIGNMENT_ID, CASEY_ASSIGNMENT_ID] },
+					teamId: { not: LINE_A_TEAM_ID },
+				},
+				select: { id: true, teamId: true },
+			});
+			expect(strays).toHaveLength(0);
+		} finally {
+			await prisma.$disconnect();
+		}
+	}
+
 	test("create a team in Section A with two members under one reports-to without duplicating the person", async ({
 		browser,
 	}) => {
 		test.setTimeout(120_000);
 		const session = await openSignedIn(browser, EMAIL.admin);
 		const page = session.page;
-		const teamName = "Night Line";
-		let created = false;
 		try {
+			// Rerun isolation: drop any Night Line a previous run left active.
+			await deactivateNightLineTeams();
+
 			await page.setViewportSize({ width: 1280, height: 720 });
 			await page.goto("/admin/organization");
 			await expect(page.getByTestId("organization-tree")).toBeVisible({ timeout: 20_000 });
@@ -251,41 +315,47 @@ test.describe("clean-start team panel", () => {
 			const panel = page.getByTestId("team-panel");
 			await expect(panel).toBeVisible();
 			await expect(panel.getByText("Create team")).toBeVisible();
-			await page.getByTestId("team-name-input").fill(teamName);
+			await page.getByTestId("team-name-input").fill(NIGHT_LINE_NAME);
 			await page.getByTestId("team-reports-to-select").click();
 			await page.getByRole("option", { name: /Riley/ }).click();
 			await page.getByRole("checkbox", { name: /Alice/ }).check();
 			await page.getByRole("checkbox", { name: /Casey/ }).check();
 			await page.getByTestId("team-save").click();
-			created = true;
 
+			// Await successful persistence: the created team group renders beneath its reports-to.
 			const rileyChip = page.locator('[data-testid^="person-chip-"]').filter({ hasText: "Riley — Manager" });
 			await expect(rileyChip).toHaveCount(1);
-			await expect(rileyChip.getByText(teamName)).toBeVisible();
+			const nightLineGroup = rileyChip.locator('[data-testid^="team-group-"]').filter({ hasText: NIGHT_LINE_NAME });
+			await expect(nightLineGroup).toHaveCount(1, { timeout: 15_000 });
+
+			// Both members render INSIDE the newly created team group, not merely anywhere under Riley.
+			await expect(nightLineGroup.getByText("Alice — Staff")).toBeVisible();
+			await expect(nightLineGroup.getByText("Casey — Lead")).toBeVisible();
 			await expect(rileyChip.getByText("Line A")).toBeVisible();
-			await expect(rileyChip.getByText("Alice — Staff")).toBeVisible();
-			await expect(rileyChip.getByText("Casey — Lead")).toBeVisible();
-		} finally {
-			if (created) {
-				try {
-					await page.goto("/admin/organization");
-					await expect(page.getByTestId("organization-tree")).toBeVisible({ timeout: 20_000 });
-					for (const person of ["Alice — Staff", "Casey — Lead"] as const) {
-						await page.getByRole("button", { name: person }).click();
-						const teamTrigger = page.getByTestId("assignment-team-select");
-						await teamTrigger.click();
-						await page.getByRole("option", { name: "Line A" }).click();
-						await page.getByTestId("assignment-save").click();
-						const confirm = page.getByTestId("assignment-move-confirm");
-						if (await confirm.count()) {
-							await confirm.click();
-						}
-					}
-				} catch {
-					// restore best-effort; fixture reseed covers leftover state
-				}
+
+			// Persistence is real in the database: the new team owns exactly both memberships.
+			const prisma = prismaClient();
+			try {
+				const created = await prisma.teams.findFirstOrThrow({
+					where: { unitId: SECTION_A_ID, name: NIGHT_LINE_NAME, isActive: true },
+					select: { id: true },
+				});
+				const members = await prisma.organization_assignments.findMany({
+					where: { id: { in: [ALICE_ASSIGNMENT_ID, CASEY_ASSIGNMENT_ID] } },
+					select: { id: true, teamId: true },
+				});
+				expect(members.map((row) => row.teamId).sort()).toEqual([created.id, created.id]);
+				await expect(page.getByTestId(`team-group-${created.id}`)).toBeVisible();
+			} finally {
+				await prisma.$disconnect();
 			}
-			await session.context.close();
+		} finally {
+			try {
+				// Isolate the created fixture for the next run; a failure here fails the test.
+				await deactivateNightLineTeams();
+			} finally {
+				await session.context.close();
+			}
 		}
 	});
 });
