@@ -429,29 +429,36 @@ test.describe("clean-start unit side panel", () => {
 
 test.describe("clean-start position administration", () => {
 	const LEAD_ID = "cs-pos-lead";
-	const NIGHT_SHIFT_NAME = "Night Shift";
+	const NIGHT_SHIFT_BASE_NAME = "Night Shift";
+	/**
+	 * positions.name is globally unique at the schema level INCLUDING inactive
+	 * rows, while createPosition only rejects duplicates among ACTIVE
+	 * positions, and this spec deactivates its fixture instead of deleting it
+	 * so captured history is preserved. Reusing the base name would collide
+	 * with the deactivated row an earlier run left behind, so every run gets
+	 * its own uniquely named fixture; cleanup and assertions stay scoped to
+	 * the Night Shift family.
+	 */
+	const NIGHT_SHIFT_NAME = `${NIGHT_SHIFT_BASE_NAME} #${process.pid.toString(36)}-${Date.now().toString(36)}`;
 
 	/**
-	 * Isolate the created fixture: deactivate every active Night Shift position
-	 * (created by this spec or an earlier interrupted run), then verify the
-	 * restored state. Runs before and after the create test; failures throw so
-	 * a broken cleanup fails the run instead of poisoning the next one.
+	 * Isolate the created fixture family: deactivate every active Night Shift
+	 * position (this run's unique name, an interrupted earlier run's, or the
+	 * legacy exact name), then verify the restored state. Deactivated history
+	 * is never deleted. Runs before and after the create test; failures throw
+	 * so a broken cleanup fails the run instead of poisoning the next one.
 	 */
 	async function deactivateNightShiftPositions(): Promise<void> {
 		const prisma = prismaClient();
 		try {
-			const rows = await prisma.positions.findMany({
-				where: { name: NIGHT_SHIFT_NAME, isActive: true },
-				select: { id: true },
+			await prisma.positions.updateMany({
+				where: { name: { startsWith: NIGHT_SHIFT_BASE_NAME }, isActive: true },
+				data: { isActive: false },
 			});
-			for (const row of rows) {
-				await prisma.positions.update({
-					where: { id: row.id },
-					data: { isActive: false },
-				});
-			}
 			expect(
-				await prisma.positions.count({ where: { name: NIGHT_SHIFT_NAME, isActive: true } }),
+				await prisma.positions.count({
+					where: { name: { startsWith: NIGHT_SHIFT_BASE_NAME }, isActive: true },
+				}),
 			).toBe(0);
 		} finally {
 			await prisma.$disconnect();
