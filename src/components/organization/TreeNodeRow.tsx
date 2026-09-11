@@ -1,7 +1,15 @@
 'use client'
 
-import React from 'react'
+import React, { useRef } from 'react'
+import { MoreHorizontal } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { InlineNameEdit } from '@/components/organization/InlineNameEdit'
 import type { AssignmentNode, OrganizationUnitNode, PositionNode, TeamNode } from '@/lib/organization/model'
 import { renameOrganizationUnit, renameTeam, type WorkspaceSnapshot } from '@/server-actions/organization'
@@ -118,11 +126,14 @@ export function TreeNodeRow({
   unit,
   snapshot,
   childrenByParentId,
+  onSelectUnit,
 }: {
   unit: OrganizationUnitNode
   snapshot: WorkspaceSnapshot
   childrenByParentId: Map<string, OrganizationUnitNode[]>
+  onSelectUnit?: (unitId: string) => void
 }) {
+  const nameRef = useRef<HTMLSpanElement>(null)
   const usersById = indexById(snapshot.users)
   const positionsById = indexById(snapshot.positions)
   const people = assignmentsByUserId(snapshot.assignments, unit.id)
@@ -137,10 +148,23 @@ export function TreeNodeRow({
     .slice()
     .sort(byName)
 
+  function startRename() {
+    const pencil = nameRef.current?.querySelector('[data-testid="inline-name-edit-pencil"]')
+    if (pencil instanceof HTMLElement) pencil.click()
+  }
+
   return (
     <div data-testid={`unit-row-${unit.id}`} className="space-y-2">
-      <div data-testid={`unit-header-${unit.id}`} className="flex flex-wrap items-center gap-2">
-        <span data-testid={`unit-name-${unit.id}`} className="font-medium">
+      <div
+        data-testid={`unit-header-${unit.id}`}
+        className="group flex flex-wrap items-center gap-2"
+        tabIndex={0}
+      >
+        <span
+          ref={nameRef}
+          data-testid={`unit-name-${unit.id}`}
+          className="font-medium [&_[data-testid=inline-name-edit-pencil]]:hidden"
+        >
           <InlineNameEdit
             value={unit.name}
             onSave={async (next) => {
@@ -153,6 +177,49 @@ export function TreeNodeRow({
             Request sharing
           </Badge>
         ) : null}
+        <div
+          data-testid={`unit-hover-actions-${unit.id}`}
+          className="hidden items-center gap-1 group-hover:flex group-focus-within:flex max-md:!hidden pointer-coarse:!hidden"
+        >
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            data-testid={`unit-rename-${unit.id}`}
+            onClick={startRename}
+          >
+            Rename
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            data-testid={`unit-manage-${unit.id}`}
+            onClick={() => onSelectUnit?.(unit.id)}
+          >
+            Manage
+          </Button>
+        </div>
+        <div className="flex md:hidden pointer-coarse:!flex">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 min-h-8 min-w-8"
+                data-testid={`unit-overflow-${unit.id}`}
+                aria-label="Open unit actions"
+              >
+                <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={startRename}>Rename</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => onSelectUnit?.(unit.id)}>Manage</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
       <div data-testid={`unit-people-${unit.id}`} className="space-y-2 pl-4">
         {peopleList.map((assignment) => {
@@ -184,6 +251,7 @@ export function TreeNodeRow({
             unit={child}
             snapshot={snapshot}
             childrenByParentId={childrenByParentId}
+            onSelectUnit={onSelectUnit}
           />
         ))}
       </div>
