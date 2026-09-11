@@ -5,6 +5,7 @@ const LOCAL_PASSWORD = process.env.E2E_PASSWORD || "changeme";
 const OPERATIONS_ID = "cs-unit-operations";
 const SECTION_A_ID = "cs-unit-section-a";
 const SECTION_A_CHILD_ID = "cs-unit-section-a-child";
+const LINE_A_TEAM_ID = "cs-team-section-a-line";
 
 test.beforeAll(() => {
 	if (process.env.TEST_BASE_URL !== REQUIRED_BASE) {
@@ -186,6 +187,42 @@ test.describe("clean-start person assignment panel", () => {
 			await page.getByTestId("assignment-move-cancel").click();
 			await expect(confirmation).toHaveCount(0);
 			await expect(page.getByRole("button", { name: "Alice — Staff" })).toBeVisible();
+		} finally {
+			await session.context.close();
+		}
+	});
+
+	test("promoting Casey to Manager while remaining on Line A requires explicit reports-to correction", async ({
+		browser,
+	}) => {
+		test.setTimeout(120_000);
+		const session = await openSignedIn(browser, EMAIL.admin);
+		const page = session.page;
+		try {
+			await page.setViewportSize({ width: 1280, height: 720 });
+			await page.goto("/admin/organization");
+			await expect(page.getByTestId("organization-tree")).toBeVisible({ timeout: 20_000 });
+
+			await page.getByRole("button", { name: "Casey — Lead" }).click();
+			const panel = page.getByTestId("person-assignment-panel");
+			await expect(panel).toBeVisible();
+			await expect(panel.getByText("Casey")).toBeVisible();
+
+			await page.getByTestId("assignment-position-select").click();
+			await page.getByRole("option", { name: "Manager" }).click();
+			await page.getByTestId("assignment-save").click();
+
+			const confirmation = page.getByTestId("assignment-move-confirmation");
+			await expect(confirmation).toBeVisible();
+			const correction = page.getByTestId("assignment-reports-to-correction");
+			await expect(correction).toBeVisible();
+			await expect(correction).toContainText(/explicit correction/i);
+			await expect(page.getByTestId(`assignment-reports-to-${LINE_A_TEAM_ID}`)).toBeVisible();
+			await expect(page.getByTestId("assignment-move-confirm")).toBeDisabled();
+
+			await page.getByTestId("assignment-move-cancel").click();
+			await expect(confirmation).toHaveCount(0);
+			await expect(page.getByRole("button", { name: "Casey — Lead" })).toBeVisible();
 		} finally {
 			await session.context.close();
 		}

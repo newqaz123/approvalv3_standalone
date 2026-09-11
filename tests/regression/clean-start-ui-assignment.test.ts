@@ -22,6 +22,7 @@ import {
 import {
   AssignmentChangeSummary,
   PersonAssignmentPanel,
+  reportsToTeamsInvalidatedByMove,
   teamBelongsToUnit,
 } from '@/components/organization/PersonAssignmentPanel'
 
@@ -280,6 +281,49 @@ function makeSnapshot(over: Partial<WorkspaceSnapshot> = {}): WorkspaceSnapshot 
   }
 }
 
+function makeAlphaMemberSnapshot(): WorkspaceSnapshot {
+  return makeSnapshot({
+    positions: [
+      { id: 'p-staff', name: 'Staff', rank: 1, isActive: true },
+      { id: 'p-manager', name: 'Manager', rank: 3, isActive: true },
+      { id: 'p-director', name: 'Director', rank: 5, isActive: true },
+    ],
+    assignments: [
+      assignment('asg-pat', 'pat', 'ops', { positionId: 'p-manager' }),
+      assignment('asg-casey', 'casey', 'ops', { teamId: 'team-alpha' }),
+      assignment('asg-quinn', 'quinn', 'ops', { positionId: 'p-manager' }),
+      assignment('asg-riley', 'riley', 'ops', { positionId: 'p-director' }),
+    ],
+    teams: [
+      {
+        id: 'team-alpha',
+        unitId: 'ops',
+        name: 'Alpha Team',
+        reportsToAssignmentId: 'asg-pat',
+        isActive: true,
+      },
+    ],
+    users: [
+      { id: 'pat', name: 'Pat', email: 'pat@example.com', role: 'general_dept', isActive: true },
+      { id: 'casey', name: 'Casey', email: 'casey@example.com', role: 'general_dept', isActive: true },
+      { id: 'quinn', name: 'Quinn', email: 'quinn@example.com', role: 'general_dept', isActive: true },
+      { id: 'riley', name: 'Riley', email: 'riley@example.com', role: 'general_dept', isActive: true },
+    ],
+  })
+}
+
+function addDirector(db: ReturnType<typeof makeMutationDb>) {
+  db.positions.push({ id: 'p-director', name: 'Director', rank: 5, isActive: true })
+  db.assignments.push(assignment('asg-riley', 'riley', 'ops', { positionId: 'p-director' }))
+  db.users.push({
+    id: 'riley',
+    name: 'Riley',
+    email: 'riley@example.com',
+    role: 'general_dept',
+    isActive: true,
+  })
+}
+
 describe('PersonAssignmentPanel component harness', () => {
   it('confirmation dialog lists old and new unit, position, and team', () => {
     const html = renderToStaticMarkup(createElement(AssignmentChangeSummary, {
@@ -331,6 +375,46 @@ describe('PersonAssignmentPanel component harness', () => {
     assert.equal(teamBelongsToUnit('team-line', 'section-a', snapshot.teams), true)
     assert.equal(teamBelongsToUnit('team-line', 'ops', snapshot.teams), false)
     assert.equal(teamBelongsToUnit(null, 'ops', snapshot.teams), true)
+  })
+
+  it('member promotion to equal the reports-to rank invalidates the team and surfaces explicit correction', () => {
+    const snapshot = makeAlphaMemberSnapshot()
+    const casey = snapshot.assignments.find((row) => row.id === 'asg-casey')
+    assert.ok(casey)
+    const invalidated = reportsToTeamsInvalidatedByMove(
+      casey,
+      { unitId: 'ops', positionId: 'p-manager', teamId: 'team-alpha' },
+      snapshot,
+    )
+    assert.deepEqual(invalidated.map((row) => row.id), ['team-alpha'])
+    const html = renderToStaticMarkup(createElement(AssignmentChangeSummary, {
+      before: { unitName: 'Operations', positionName: 'Staff', teamName: 'Alpha Team' },
+      after: { unitName: 'Operations', positionName: 'Manager', teamName: 'Alpha Team' },
+      invalidatedTeams: invalidated,
+    }))
+    assert.match(html, /explicit correction/i)
+    assert.match(html, /Alpha Team/)
+    assert.match(html, /data-testid="assignment-reports-to-correction"/)
+  })
+
+  it('senior-member entry into a team invalidates the team and surfaces explicit correction', () => {
+    const snapshot = makeAlphaMemberSnapshot()
+    const quinn = snapshot.assignments.find((row) => row.id === 'asg-quinn')
+    assert.ok(quinn)
+    const invalidated = reportsToTeamsInvalidatedByMove(
+      quinn,
+      { unitId: 'ops', positionId: 'p-manager', teamId: 'team-alpha' },
+      snapshot,
+    )
+    assert.deepEqual(invalidated.map((row) => row.id), ['team-alpha'])
+    const html = renderToStaticMarkup(createElement(AssignmentChangeSummary, {
+      before: { unitName: 'Operations', positionName: 'Manager', teamName: 'None' },
+      after: { unitName: 'Operations', positionName: 'Manager', teamName: 'Alpha Team' },
+      invalidatedTeams: invalidated,
+    }))
+    assert.match(html, /explicit correction/i)
+    assert.match(html, /Alpha Team/)
+    assert.match(html, /data-testid="assignment-reports-to-correction"/)
   })
 })
 
@@ -520,6 +604,82 @@ describe('assignPerson / moveAssignment / removeAssignment fake db', () => {
     assert.deepEqual(result, { success: true })
     assert.equal(db.assignments.find((row) => row.id === 'asg-pat')?.unitId, 'section-a')
     assert.equal(db.teams.find((row) => row.id === 'team-alpha')?.reportsToAssignmentId, 'asg-quinn')
+    assert.equal(db.audits.length, 1)
+    assert.match(db.audits[0].action, /organization_assignment_moved/)
+    assert.deepEqual(db.userRoleWrites, [])
+  })
+
+  it('rejects promoting a team member to equal the reports-to rank matching /explicit correction/i', async () => {
+    const db = makeMutationDb()
+    await assert.rejects(
+      () => moveAssignment({
+        assignmentId: 'asg-casey',
+        unitId: 'ops',
+        positionId: 'p-manager',
+        teamId: 'team-alpha',
+      }, db),
+      /explicit correction/i,
+    )
+    assert.equal(db.assignments.find((row) => row.id === 'asg-casey')?.positionId, 'p-staff')
+    assert.equal(db.assignments.find((row) => row.id === 'asg-casey')?.teamId, 'team-alpha')
+    assert.equal(db.teams.find((row) => row.id === 'team-alpha')?.reportsToAssignmentId, 'asg-pat')
+    assert.equal(db.audits.length, 0)
+  })
+
+  it('applies an explicit reports-to correction when promoting a member in the same save', async () => {
+    const db = makeMutationDb()
+    addDirector(db)
+    const result = await moveAssignment({
+      assignmentId: 'asg-casey',
+      unitId: 'ops',
+      positionId: 'p-manager',
+      teamId: 'team-alpha',
+      teamReportsToCorrections: [
+        { teamId: 'team-alpha', reportsToAssignmentId: 'asg-riley' },
+      ],
+    }, db)
+    assert.deepEqual(result, { success: true })
+    const casey = db.assignments.find((row) => row.id === 'asg-casey')
+    assert.equal(casey?.positionId, 'p-manager')
+    assert.equal(casey?.teamId, 'team-alpha')
+    assert.equal(db.teams.find((row) => row.id === 'team-alpha')?.reportsToAssignmentId, 'asg-riley')
+    assert.equal(db.audits.length, 1)
+    assert.match(db.audits[0].action, /organization_assignment_moved/)
+    assert.deepEqual(db.userRoleWrites, [])
+  })
+
+  it('rejects a senior member entering a team matching /explicit correction/i', async () => {
+    const db = makeMutationDb()
+    await assert.rejects(
+      () => moveAssignment({
+        assignmentId: 'asg-quinn',
+        unitId: 'ops',
+        positionId: 'p-manager',
+        teamId: 'team-alpha',
+      }, db),
+      /explicit correction/i,
+    )
+    assert.equal(db.assignments.find((row) => row.id === 'asg-quinn')?.teamId, null)
+    assert.equal(db.teams.find((row) => row.id === 'team-alpha')?.reportsToAssignmentId, 'asg-pat')
+    assert.equal(db.audits.length, 0)
+  })
+
+  it('applies an explicit reports-to correction when a senior member enters a team in the same save', async () => {
+    const db = makeMutationDb()
+    addDirector(db)
+    const result = await moveAssignment({
+      assignmentId: 'asg-quinn',
+      unitId: 'ops',
+      positionId: 'p-manager',
+      teamId: 'team-alpha',
+      teamReportsToCorrections: [
+        { teamId: 'team-alpha', reportsToAssignmentId: 'asg-riley' },
+      ],
+    }, db)
+    assert.deepEqual(result, { success: true })
+    assert.equal(db.assignments.find((row) => row.id === 'asg-quinn')?.teamId, 'team-alpha')
+    assert.equal(db.assignments.find((row) => row.id === 'asg-quinn')?.positionId, 'p-manager')
+    assert.equal(db.teams.find((row) => row.id === 'team-alpha')?.reportsToAssignmentId, 'asg-riley')
     assert.equal(db.audits.length, 1)
     assert.match(db.audits[0].action, /organization_assignment_moved/)
     assert.deepEqual(db.userRoleWrites, [])

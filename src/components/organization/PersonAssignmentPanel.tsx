@@ -30,34 +30,47 @@ export function teamBelongsToUnit(
   return team !== undefined && team.unitId === unitId
 }
 
+function teamReportsToValidAgainstProposed(
+  team: TeamNode,
+  assignments: readonly AssignmentNode[],
+  positionById: Map<string, { rank: number }>,
+): boolean {
+  const reportsTo = assignments.find((row) => row.id === team.reportsToAssignmentId)
+  if (reportsTo === undefined || !reportsTo.isActive) return false
+  if (reportsTo.unitId !== team.unitId) return false
+  if (reportsTo.teamId === team.id) return false
+  const reportsToRank = positionById.get(reportsTo.positionId)?.rank
+  if (reportsToRank === undefined) return false
+  for (const member of assignments) {
+    if (!member.isActive || member.teamId !== team.id) continue
+    const memberRank = positionById.get(member.positionId)?.rank
+    if (memberRank === undefined || reportsToRank <= memberRank) return false
+  }
+  return true
+}
+
 export function reportsToTeamsInvalidatedByMove(
   assignment: AssignmentNode,
   next: { unitId: string; positionId: string; teamId: string | null },
   snapshot: WorkspaceSnapshot,
 ): TeamNode[] {
   const positionById = new Map(snapshot.positions.map((row) => [row.id, row]))
-  const nextRank = positionById.get(next.positionId)?.rank
+  const proposedAssignments = snapshot.assignments.map((row) => (
+    row.id === assignment.id
+      ? { ...row, unitId: next.unitId, positionId: next.positionId, teamId: next.teamId }
+      : row
+  ))
   const invalidated: TeamNode[] = []
   for (const team of snapshot.teams) {
-    if (!team.isActive || team.reportsToAssignmentId !== assignment.id) continue
-    if (next.unitId !== team.unitId || next.teamId === team.id) {
+    if (!team.isActive) continue
+    const affectedMembership =
+      team.reportsToAssignmentId === assignment.id
+      || assignment.teamId === team.id
+      || next.teamId === team.id
+    if (!affectedMembership) continue
+    if (!teamReportsToValidAgainstProposed(team, proposedAssignments, positionById)) {
       invalidated.push(team)
-      continue
     }
-    if (nextRank === undefined) {
-      invalidated.push(team)
-      continue
-    }
-    let rankOk = true
-    for (const member of snapshot.assignments) {
-      if (!member.isActive || member.teamId !== team.id) continue
-      const memberRank = positionById.get(member.positionId)?.rank
-      if (memberRank === undefined || nextRank <= memberRank) {
-        rankOk = false
-        break
-      }
-    }
-    if (!rankOk) invalidated.push(team)
   }
   return invalidated
 }
