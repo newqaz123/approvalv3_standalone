@@ -358,6 +358,7 @@ export interface OrganizationMutationDb {
 export interface OrganizationUnitMutationDb extends OrganizationMutationDb {
   loadAssignments(): Promise<AssignmentNode[]>
   loadPositions(): Promise<PositionNode[]>
+  loadUsers(): Promise<WorkspaceUser[]>
   createUnit(input: { name: string; parentId: string }): Promise<{ id: string }>
   updateUnitSettings(id: string, shareRequests: boolean, canWorkOnSolutions: boolean): Promise<void>
   updateUnitManager(unitId: string, managerUserId: string | null): Promise<void>
@@ -429,6 +430,15 @@ type MutationPrisma = {
       isActive: boolean
     }>>
   }
+  user: {
+    findMany: (args?: object) => Promise<Array<{
+      id: string
+      name: string
+      email: string
+      role: string
+      isActive: boolean
+    }>>
+  }
   request_activities: {
     create: (args: { data: { action: string; comments: string; userId: string } }) => Promise<unknown>
   }
@@ -497,6 +507,16 @@ function createMutationStore(
         id: row.id,
         name: row.name,
         rank: row.rank,
+        isActive: row.isActive,
+      }))
+    },
+    async loadUsers() {
+      const rows = await client.user.findMany()
+      return rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        email: row.email,
+        role: row.role,
         isActive: row.isActive,
       }))
     },
@@ -743,8 +763,10 @@ export async function updateUnitSettings(
 
 /**
  * Set the unit manager from active DIRECT assignments in that unit.
- * Non-direct and inactive candidates are rejected. validateOrganization runs
- * on the proposed state before write.
+ * Non-direct assignments are rejected matching /directly/i. Inactive users are
+ * rejected matching /inactive/i even when their direct assignment is still
+ * active. Check user.isActive inside the mutation transaction.
+ * validateOrganization runs on the proposed state before write.
  */
 export async function setUnitManager(
   input: { unitId: string; managerUserId: string | null },
@@ -753,11 +775,12 @@ export async function setUnitManager(
   const store = db ?? await createProductionMutationDb()
   return runExclusiveWrite(store, null, async (tx) => {
     const writer = asUnitWriter(tx)
-    const [units, assignments, positions, teams] = await Promise.all([
+    const [units, assignments, positions, teams, users] = await Promise.all([
       writer.loadUnits(),
       writer.loadAssignments(),
       writer.loadPositions(),
       writer.loadTeams(),
+      writer.loadUsers(),
     ])
     const current = units.find((row) => row.id === input.unitId)
     if (current === undefined) {
@@ -771,6 +794,10 @@ export async function setUnitManager(
       ))
       if (!direct) {
         throw new OrganizationValidationError('User must be assigned directly to this unit')
+      }
+      const user = users.find((row) => row.id === input.managerUserId)
+      if (!user || !user.isActive) {
+        throw new OrganizationValidationError('User is inactive')
       }
     }
     const nextUnits = units.map((row) => (

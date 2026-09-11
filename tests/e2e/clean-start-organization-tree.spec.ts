@@ -85,6 +85,49 @@ test.describe("clean-start organization tree hover/focus/overflow", () => {
 		}
 	});
 
+	test("keyboard activates Rename; real key events type a multiword unit name", async ({
+		browser,
+	}) => {
+		test.setTimeout(120_000);
+		const session = await openSignedIn(browser, EMAIL.admin);
+		const page = session.page;
+		try {
+			await page.setViewportSize({ width: 1280, height: 720 });
+			await page.goto("/admin/organization");
+			await expect(page.getByTestId("organization-tree")).toBeVisible({ timeout: 20_000 });
+
+			const header = page.getByTestId(`unit-header-${SECTION_A_CHILD_ID}`);
+			const rename = page.getByTestId(`unit-rename-${SECTION_A_CHILD_ID}`);
+			await header.hover();
+			await expect(rename).toBeVisible();
+			await rename.focus();
+			await expect(rename).toBeFocused();
+			await rename.press("Space");
+
+			const input = header.getByTestId("inline-name-edit-input");
+			await expect(input).toBeVisible();
+			await input.click({ clickCount: 3 });
+			await input.pressSequentially("West", { delay: 25 });
+			await input.press("Space");
+			await input.pressSequentially("Operations", { delay: 25 });
+			await expect(input).toHaveValue("West Operations");
+
+			await input.press("Escape");
+			await expect(input).toHaveCount(0);
+			await expect(page.getByTestId(`unit-name-${SECTION_A_CHILD_ID}`)).toContainText("Section A Child");
+		} finally {
+			try {
+				const input = page.getByTestId("inline-name-edit-input");
+				if (await input.count()) {
+					await input.press("Escape");
+				}
+			} catch {
+				// cancel best-effort; fixture reseed covers leftover state
+			}
+			await session.context.close();
+		}
+	});
+
 	test("mobile 390x844 overflow is visible without hover", async ({ browser }) => {
 		test.setTimeout(120_000);
 		const session = await openSignedIn(browser, EMAIL.admin);

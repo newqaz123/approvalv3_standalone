@@ -67,6 +67,7 @@ function makeMutationDb(over: {
   teams?: TeamNode[]
   assignments?: AssignmentNode[]
   positions?: PositionNode[]
+  users?: WorkspaceSnapshot['users'][number][]
 } = {}) {
   const units = (over.units ?? [
     unit('company', 'Company', null),
@@ -85,6 +86,12 @@ function makeMutationDb(over: {
     assignment('asg-alice', 'alice', 'section-a'),
     assignment('asg-old', 'old', 'ops', { isActive: false }),
   ]).map((row) => ({ ...row }))
+  const users = (over.users ?? [
+    { id: 'pat', name: 'Pat', email: 'pat@example.com', role: 'general_dept', isActive: true },
+    { id: 'casey', name: 'Casey', email: 'casey@example.com', role: 'general_dept', isActive: true },
+    { id: 'alice', name: 'Alice', email: 'alice@example.com', role: 'general_dept', isActive: true },
+    { id: 'old', name: 'Old', email: 'old@example.com', role: 'general_dept', isActive: false },
+  ]).map((row) => ({ ...row }))
   const audits: Array<{ action: string; comments: string }> = []
   const revalidated: string[] = []
   let created = 0
@@ -94,6 +101,7 @@ function makeMutationDb(over: {
     teams: TeamNode[]
     assignments: AssignmentNode[]
     positions: PositionNode[]
+    users: WorkspaceSnapshot['users'][number][]
     audits: Array<{ action: string; comments: string }>
     revalidated: string[]
   } = {
@@ -102,6 +110,7 @@ function makeMutationDb(over: {
     teams,
     assignments,
     positions,
+    users,
     audits,
     revalidated,
     async loadUnits() {
@@ -115,6 +124,9 @@ function makeMutationDb(over: {
     },
     async loadPositions() {
       return positions.map((row) => ({ ...row }))
+    },
+    async loadUsers() {
+      return users.map((row) => ({ ...row }))
     },
     async updateUnitName(id, name) {
       const row = units.find((candidate) => candidate.id === id)
@@ -330,6 +342,22 @@ describe('createOrganizationUnit / updateUnitSettings / setUnitManager fake db',
     assert.equal(db.units.find((row) => row.id === 'ops')?.managerUserId, 'pat')
   })
 
+  it('rejects setUnitManager with an inactive user who has an active direct assignment matching /inactive/i', async () => {
+    const db = makeMutationDb()
+    const casey = db.users.find((row) => row.id === 'casey')
+    assert.ok(casey)
+    casey.isActive = false
+    const direct = db.assignments.find((row) => row.userId === 'casey' && row.unitId === 'ops')
+    assert.equal(direct?.isActive, true)
+    await assert.rejects(
+      () => setUnitManager({ unitId: 'ops', managerUserId: 'casey' }, db),
+      /inactive/i,
+    )
+    assert.equal(db.units.find((row) => row.id === 'ops')?.managerUserId, 'pat')
+    assert.equal(db.audits.length, 0)
+    assert.deepEqual(db.revalidated, [])
+  })
+
   it('persists sharing and solutions toggles in the fake db', async () => {
     const db = makeMutationDb()
     const result = await updateUnitSettings({
@@ -413,6 +441,12 @@ describe('C5 source contracts', () => {
     assert.match(actions, /validateOrganization/)
     assert.match(actions, /Parent required/)
     assert.match(actions, /unitType: 'SECTION'/)
+    const setManagerFn = actions.slice(actions.indexOf('export async function setUnitManager'))
+    assert.match(setManagerFn, /loadUsers/)
+    assert.match(setManagerFn, /inactive/i)
+
+    const tree = read('src/components/organization/TreeNodeRow.tsx')
+    assert.match(tree, /event\.target === event\.currentTarget/)
 
     const seed = read('prisma/seed.ts')
     assert.match(seed, /cs-route-ops-request/)

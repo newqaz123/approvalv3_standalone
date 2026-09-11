@@ -162,8 +162,10 @@ export function TreeNodeRow({
         onClick={() => onSelectUnit?.(unit.id)}
         onKeyDown={(event) => {
           if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault()
-            onSelectUnit?.(unit.id)
+            if (event.target === event.currentTarget) {
+              event.preventDefault()
+              onSelectUnit?.(unit.id)
+            }
           }
         }}
       >
