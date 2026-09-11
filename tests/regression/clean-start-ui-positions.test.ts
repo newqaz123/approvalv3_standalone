@@ -28,6 +28,13 @@ import {
   PositionAdminPanel,
   PositionRankEditor,
   PositionRankImpactList,
+  applyRankSaveOutcome,
+  cancelRankEditSession,
+  idleRankEditSession,
+  requestRankSave,
+  startRankEditSession,
+  typeRankDraft,
+  type PositionRankEditSession,
 } from '@/components/organization/PositionAdminPanel'
 
 const read = (path: string) => readFileSync(path, 'utf8')
@@ -119,6 +126,109 @@ interface PublishedRouteFixture {
   steps: ReadonlyArray<{ stepOrder: number; positionId: string | null }>
 }
 
+// Historical approval attempt snapshots (option A immutable instances):
+// rows reference positions by id and capture display strings at request time.
+// Position administration must never rewrite them — captured labels outlive
+// renames, rank changes, and deactivation.
+interface CapturedApprovalInstance {
+  id: string
+  requestId: string | null
+  solutionId: string | null
+  phase: 'REQUEST' | 'SOLUTION' | 'FINAL'
+  state: string
+  attempt: number
+  originPositionId: string | null
+}
+
+interface CapturedApprovalRow {
+  id: string
+  requestId: string | null
+  solutionId: string | null
+  instanceId: string | null
+  order: number
+  status: string
+  requiredPositionId: string | null
+}
+
+interface CapturedCandidateGroup {
+  id: string
+  approvalInstanceId: string
+  scopeUnitId: string
+  requiredPositionId: string | null
+  capturedAt: string
+}
+
+interface CapturedCandidateGroupMember {
+  candidateGroupId: string
+  userId: string
+  capturedAt: string
+  capturedDisplayName: string
+}
+
+function fixtureApprovalSnapshots() {
+  return {
+    approvalInstances: [
+      {
+        id: 'inst-req-1',
+        requestId: 'req-1',
+        solutionId: null,
+        phase: 'REQUEST',
+        state: 'APPROVED',
+        attempt: 1,
+        originPositionId: 'p-coordinator',
+      },
+      {
+        id: 'inst-sol-1',
+        requestId: null,
+        solutionId: 'sol-1',
+        phase: 'SOLUTION',
+        state: 'APPROVED',
+        attempt: 1,
+        originPositionId: 'p-manager',
+      },
+    ] satisfies CapturedApprovalInstance[],
+    requestApprovals: [
+      {
+        id: 'ra-req-1',
+        requestId: 'req-1',
+        solutionId: null,
+        instanceId: 'inst-req-1',
+        order: 1,
+        status: 'approved',
+        requiredPositionId: 'p-coordinator',
+      },
+    ] satisfies CapturedApprovalRow[],
+    solutionApprovals: [
+      {
+        id: 'sa-sol-1',
+        requestId: null,
+        solutionId: 'sol-1',
+        instanceId: 'inst-sol-1',
+        order: 1,
+        status: 'approved',
+        requiredPositionId: 'p-manager',
+      },
+    ] satisfies CapturedApprovalRow[],
+    candidateGroups: [
+      {
+        id: 'cg-req-1',
+        approvalInstanceId: 'inst-req-1',
+        scopeUnitId: 'section-b',
+        requiredPositionId: 'p-coordinator',
+        capturedAt: '2026-01-05T09:15:00.000Z',
+      },
+    ] satisfies CapturedCandidateGroup[],
+    candidateGroupMembers: [
+      {
+        candidateGroupId: 'cg-req-1',
+        userId: 'bob',
+        capturedAt: '2026-01-05T09:15:00.000Z',
+        capturedDisplayName: 'Bob — Coordinator',
+      },
+    ] satisfies CapturedCandidateGroupMember[],
+  }
+}
+
 const fixturePublishedRoutes = (): PublishedRouteFixture[] => [
   {
     id: 'route-root-request',
@@ -157,6 +267,12 @@ function makePositionMutationDb(over: {
   const teams = (over.teams ?? fixtureTeams()).map((row) => ({ ...row }))
   const publishedRoutes = (over.publishedRoutes ?? fixturePublishedRoutes())
     .map((row) => ({ ...row, steps: row.steps.map((step) => ({ ...step })) }))
+  const snapshots = fixtureApprovalSnapshots()
+  const approvalInstances = snapshots.approvalInstances.map((row) => ({ ...row }))
+  const requestApprovals = snapshots.requestApprovals.map((row) => ({ ...row }))
+  const solutionApprovals = snapshots.solutionApprovals.map((row) => ({ ...row }))
+  const candidateGroups = snapshots.candidateGroups.map((row) => ({ ...row }))
+  const candidateGroupMembers = snapshots.candidateGroupMembers.map((row) => ({ ...row }))
   const audits: Array<{ action: string; comments: string }> = []
   const revalidated: string[] = []
   const instanceWrites: string[] = []
@@ -173,6 +289,21 @@ function makePositionMutationDb(over: {
     revalidated: string[]
     instanceWrites: string[]
     userRoleWrites: Array<{ userId: string; role: string }>
+    approvalInstances: CapturedApprovalInstance[]
+    requestApprovals: CapturedApprovalRow[]
+    solutionApprovals: CapturedApprovalRow[]
+    candidateGroups: CapturedCandidateGroup[]
+    candidateGroupMembers: CapturedCandidateGroupMember[]
+    updateApprovalInstance(id: string, patch: Partial<CapturedApprovalInstance>): Promise<void>
+    updateRequestApproval(id: string, patch: Partial<CapturedApprovalRow>): Promise<void>
+    updateSolutionApproval(id: string, patch: Partial<CapturedApprovalRow>): Promise<void>
+    updateApprovalCandidateGroup(id: string, patch: Partial<CapturedCandidateGroup>): Promise<void>
+    updateApprovalCandidateGroupMember(
+      candidateGroupId: string,
+      userId: string,
+      patch: Partial<CapturedCandidateGroupMember>,
+    ): Promise<void>
+    updateUserRole(userId: string, role: string): Promise<void>
   } = {
     adminUserId: 'admin-1',
     units,
@@ -184,6 +315,11 @@ function makePositionMutationDb(over: {
     revalidated,
     instanceWrites,
     userRoleWrites,
+    approvalInstances,
+    requestApprovals,
+    solutionApprovals,
+    candidateGroups,
+    candidateGroupMembers,
     async loadUnits() {
       return units.map((row) => ({ ...row }))
     },
@@ -259,6 +395,45 @@ function makePositionMutationDb(over: {
       if (!row) throw new Error(`missing position ${id}`)
       row.isActive = false
     },
+    // Forbidden persistence recorders (C8-fix1 P2): position administration
+    // must never write historical approval rows or user roles. These surface
+    // the forbidden write into instanceWrites/userRoleWrites — and mutate the
+    // captured fixtures — so the zero-write assertions can actually fail.
+    async updateApprovalInstance(id, patch) {
+      const row = approvalInstances.find((candidate) => candidate.id === id)
+      if (!row) throw new Error(`missing approval instance ${id}`)
+      instanceWrites.push(`approval_instances.update:${id}`)
+      Object.assign(row, patch)
+    },
+    async updateRequestApproval(id, patch) {
+      const row = requestApprovals.find((candidate) => candidate.id === id)
+      if (!row) throw new Error(`missing request approval ${id}`)
+      instanceWrites.push(`request_approvals.update:${id}`)
+      Object.assign(row, patch)
+    },
+    async updateSolutionApproval(id, patch) {
+      const row = solutionApprovals.find((candidate) => candidate.id === id)
+      if (!row) throw new Error(`missing solution approval ${id}`)
+      instanceWrites.push(`solution_approvals.update:${id}`)
+      Object.assign(row, patch)
+    },
+    async updateApprovalCandidateGroup(id, patch) {
+      const row = candidateGroups.find((candidate) => candidate.id === id)
+      if (!row) throw new Error(`missing candidate group ${id}`)
+      instanceWrites.push(`approval_candidate_groups.update:${id}`)
+      Object.assign(row, patch)
+    },
+    async updateApprovalCandidateGroupMember(candidateGroupId, userId, patch) {
+      const row = candidateGroupMembers.find((candidate) => (
+        candidate.candidateGroupId === candidateGroupId && candidate.userId === userId
+      ))
+      if (!row) throw new Error(`missing candidate group member ${candidateGroupId}:${userId}`)
+      instanceWrites.push(`approval_candidate_group_members.update:${candidateGroupId}:${userId}`)
+      Object.assign(row, patch)
+    },
+    async updateUserRole(userId, role) {
+      userRoleWrites.push({ userId, role })
+    },
     async writeAudit(entry) {
       audits.push({ ...entry })
     },
@@ -320,7 +495,26 @@ function cloneFixture(db: ReturnType<typeof makePositionMutationDb>) {
       ...row,
       steps: row.steps.map((step) => ({ ...step })),
     })),
+    approvalInstances: db.approvalInstances.map((row) => ({ ...row })),
+    requestApprovals: db.requestApprovals.map((row) => ({ ...row })),
+    solutionApprovals: db.solutionApprovals.map((row) => ({ ...row })),
+    candidateGroups: db.candidateGroups.map((row) => ({ ...row })),
+    candidateGroupMembers: db.candidateGroupMembers.map((row) => ({ ...row })),
   }
+}
+
+// C8-fix1 P2: compare the captured snapshot fixture across successful
+// mutations — renames/rank changes/deactivations must leave every captured
+// row byte-identical (labels keep the strings captured at request time).
+function assertCapturedSnapshotsUnchanged(
+  db: ReturnType<typeof makePositionMutationDb>,
+  before: ReturnType<typeof cloneFixture>,
+) {
+  assert.deepEqual(db.approvalInstances, before.approvalInstances)
+  assert.deepEqual(db.requestApprovals, before.requestApprovals)
+  assert.deepEqual(db.solutionApprovals, before.solutionApprovals)
+  assert.deepEqual(db.candidateGroups, before.candidateGroups)
+  assert.deepEqual(db.candidateGroupMembers, before.candidateGroupMembers)
 }
 
 describe('PositionAdminPanel component harness', () => {
@@ -440,8 +634,9 @@ describe('createPosition fake db', () => {
     assert.equal(db.audits.length, 0)
   })
 
-  it('creates a position, audits, and revalidates', async () => {
+  it('creates a position, audits, and revalidates; captured snapshots untouched', async () => {
     const db = makePositionMutationDb()
+    const before = cloneFixture(db)
     const result = await createPosition({ name: 'Night Shift', rank: 7 }, db)
     assert.equal(typeof result.positionId, 'string')
     const created = db.positions.find((row) => row.id === result.positionId)
@@ -455,6 +650,7 @@ describe('createPosition fake db', () => {
     assert.deepEqual(db.revalidated, ['/admin/organization'])
     assert.deepEqual(db.instanceWrites, [])
     assert.deepEqual(db.userRoleWrites, [])
+    assertCapturedSnapshotsUnchanged(db, before)
   })
 })
 
@@ -489,6 +685,12 @@ describe('renamePosition fake db', () => {
     assert.deepEqual(db.teams, before.teams)
     assert.deepEqual(db.publishedRoutes, before.publishedRoutes)
     assert.deepEqual(db.instanceWrites, [])
+    assertCapturedSnapshotsUnchanged(db, before)
+    // the captured display string outlives the rename
+    assert.equal(
+      db.candidateGroupMembers.find((row) => row.candidateGroupId === 'cg-req-1')?.capturedDisplayName,
+      'Bob — Coordinator',
+    )
   })
 })
 
@@ -511,6 +713,7 @@ describe('changePositionRank fake db', () => {
     assert.deepEqual(db.publishedRoutes, before.publishedRoutes)
     assert.equal(db.audits.length, 0)
     assert.deepEqual(db.instanceWrites, [])
+    assertCapturedSnapshotsUnchanged(db, before)
   })
 
   it('rejects a proposed rank already held by another active position matching /unique/i', async () => {
@@ -523,7 +726,7 @@ describe('changePositionRank fake db', () => {
     assert.equal(db.audits.length, 0)
   })
 
-  it('success writes the rank, audits, and leaves teams/assignments/routes untouched', async () => {
+  it('success writes the rank, audits, and leaves teams/assignments/routes and snapshots untouched', async () => {
     const db = makePositionMutationDb()
     const before = cloneFixture(db)
     const result = await changePositionRank(
@@ -540,6 +743,7 @@ describe('changePositionRank fake db', () => {
     assert.deepEqual(db.teams, before.teams)
     assert.deepEqual(db.publishedRoutes, before.publishedRoutes)
     assert.deepEqual(db.instanceWrites, [])
+    assertCapturedSnapshotsUnchanged(db, before)
   })
 
   it('rejects a missing position and a non-positive proposed rank', async () => {
@@ -581,16 +785,18 @@ describe('deactivatePosition fake db', () => {
     assert.equal(db.audits.length, 0)
   })
 
-  it('deactivates an unreferenced position, audits, and never touches attempts', async () => {
+  it('deactivates an unreferenced position, audits, and never touches attempts or snapshots', async () => {
     const db = makePositionMutationDb()
+    const before = cloneFixture(db)
     const result = await deactivatePosition({ positionId: 'p-coordinator' }, db)
     assert.deepEqual(result, { success: true })
     assert.equal(db.positions.find((row) => row.id === 'p-coordinator')?.isActive, false)
     assert.equal(db.audits.length, 1)
     assert.equal(db.audits[0].action, 'position_deactivated')
     assert.match(db.audits[0].comments, /Coordinator/)
-    assert.deepEqual(db.assignments.map((row) => ({ ...row })), db.assignments)
+    assert.deepEqual(db.assignments, before.assignments)
     assert.deepEqual(db.instanceWrites, [])
+    assertCapturedSnapshotsUnchanged(db, before)
   })
 
   it('rejects a missing position', async () => {
@@ -599,6 +805,167 @@ describe('deactivatePosition fake db', () => {
       () => deactivatePosition({ positionId: 'p-missing' }, db),
       /not found/i,
     )
+  })
+})
+
+describe('captured snapshot fixtures and forbidden-persistence instrumentation', () => {
+  it('fake exposes captured approval snapshot rows that reference live positions', () => {
+    const db = makePositionMutationDb()
+    assert.ok(db.approvalInstances.length > 0, 'captured instance fixture must exist')
+    const instance = db.approvalInstances.find((row) => row.id === 'inst-req-1')
+    assert.equal(instance?.originPositionId, 'p-coordinator')
+    const approval = db.requestApprovals.find((row) => row.id === 'ra-req-1')
+    assert.equal(approval?.requiredPositionId, 'p-coordinator')
+    assert.ok(db.solutionApprovals.length > 0, 'captured solution approval fixture must exist')
+    const group = db.candidateGroups.find((row) => row.id === 'cg-req-1')
+    assert.equal(group?.requiredPositionId, 'p-coordinator')
+    const member = db.candidateGroupMembers.find((row) => row.candidateGroupId === 'cg-req-1')
+    assert.equal(member?.capturedDisplayName, 'Bob — Coordinator')
+  })
+
+  it('forbidden approval-instance persistence records into instanceWrites so zero-write assertions can observe it', async () => {
+    const db = makePositionMutationDb()
+    await db.updateApprovalInstance('inst-req-1', { state: 'SUPERSEDED' })
+    assert.deepEqual(db.instanceWrites, ['approval_instances.update:inst-req-1'])
+    assert.equal(db.approvalInstances.find((row) => row.id === 'inst-req-1')?.state, 'SUPERSEDED')
+  })
+
+  it('forbidden approval-row and candidate-group persistence record into instanceWrites', async () => {
+    const db = makePositionMutationDb()
+    await db.updateRequestApproval('ra-req-1', { status: 'skipped' })
+    await db.updateSolutionApproval('sa-sol-1', { status: 'skipped' })
+    await db.updateApprovalCandidateGroup('cg-req-1', { requiredPositionId: 'p-lead' })
+    await db.updateApprovalCandidateGroupMember('cg-req-1', 'bob', { capturedDisplayName: 'Bob — Lead' })
+    assert.deepEqual(db.instanceWrites, [
+      'request_approvals.update:ra-req-1',
+      'solution_approvals.update:sa-sol-1',
+      'approval_candidate_groups.update:cg-req-1',
+      'approval_candidate_group_members.update:cg-req-1:bob',
+    ])
+  })
+
+  it('forbidden user-role persistence records into userRoleWrites', async () => {
+    const db = makePositionMutationDb()
+    await db.updateUserRole('bob', 'admin')
+    assert.deepEqual(db.userRoleWrites, [{ userId: 'bob', role: 'admin' }])
+  })
+
+  it('every successful mutation keeps the captured snapshot fixture identical', async () => {
+    const before = cloneFixture(makePositionMutationDb())
+    const renameDb = makePositionMutationDb()
+    await renamePosition({ positionId: 'p-coordinator', name: 'Coordinator Prime' }, renameDb)
+    assertCapturedSnapshotsUnchanged(renameDb, before)
+    assert.deepEqual(renameDb.instanceWrites, [])
+    const rankDb = makePositionMutationDb()
+    await changePositionRank({ positionId: 'p-coordinator', proposedRank: 7 }, rankDb)
+    assertCapturedSnapshotsUnchanged(rankDb, before)
+    assert.deepEqual(rankDb.instanceWrites, [])
+    const createDb = makePositionMutationDb()
+    await createPosition({ name: 'Night Shift', rank: 5 }, createDb)
+    assertCapturedSnapshotsUnchanged(createDb, before)
+    assert.deepEqual(createDb.instanceWrites, [])
+    const deactivateDb = makePositionMutationDb()
+    await deactivatePosition({ positionId: 'p-coordinator' }, deactivateDb)
+    assertCapturedSnapshotsUnchanged(deactivateDb, before)
+    assert.deepEqual(deactivateDb.instanceWrites, [])
+  })
+})
+
+describe('rank edit session — delayed responses (C3-fix1 epoch pattern)', () => {
+  it('stale blocked response after switching editors must not disable the new editor', () => {
+    // Review a04044a7 P1: submit Lead→5, switch to another position's editor,
+    // then let the Lead→5 assessment land — it must not render its problems
+    // against the new editor or disable its Save.
+    let session = startRankEditSession('p-lead', 2)
+    session = typeRankDraft(session, '5')
+    const request = requestRankSave(session)
+    assert.equal(request.submit, true)
+    session = request.session
+    assert.equal(session.pendingEpoch, session.epoch)
+    const staleEpoch = session.epoch
+    // switch editor before completion
+    session = startRankEditSession('p-coordinator', 6, session.epoch)
+    assert.equal(session.positionId, 'p-coordinator')
+    assert.equal(session.draftRank, '6')
+    // the stale Lead→5 blocked assessment resolves late
+    session = applyRankSaveOutcome(session, staleEpoch, { kind: 'blocked', impact: leadToFiveImpact })
+    assert.equal(session.positionId, 'p-coordinator')
+    assert.equal(session.draftRank, '6')
+    assert.equal(session.blockedImpact, null, 'stale impact must not attach to the new editor')
+    assert.equal(session.error, null)
+    assert.equal(session.pendingEpoch, null, 'saving must clear so the new editor Save re-enables')
+  })
+
+  it('stale success must not close the editor now open', () => {
+    let session = startRankEditSession('p-coordinator', 6)
+    session = typeRankDraft(session, '7')
+    const request = requestRankSave(session)
+    session = request.session
+    const staleEpoch = session.epoch
+    session = startRankEditSession('p-lead', 2, session.epoch)
+    session = applyRankSaveOutcome(session, staleEpoch, { kind: 'success' })
+    assert.equal(session.positionId, 'p-lead', 'stale success must not cancel the new editor')
+    assert.equal(session.draftRank, '2')
+    assert.equal(session.pendingEpoch, null)
+  })
+
+  it('typing while pending invalidates the response: stale blocked impact does not attach', () => {
+    let session = startRankEditSession('p-lead', 2)
+    session = typeRankDraft(session, '5')
+    const request = requestRankSave(session)
+    session = request.session
+    const staleEpoch = session.epoch
+    session = typeRankDraft(session, '6')
+    assert.equal(session.epoch, staleEpoch + 1)
+    session = applyRankSaveOutcome(session, staleEpoch, { kind: 'blocked', impact: leadToFiveImpact })
+    assert.equal(session.positionId, 'p-lead')
+    assert.equal(session.draftRank, '6', 'newer draft kept')
+    assert.equal(session.blockedImpact, null)
+    assert.equal(session.pendingEpoch, null)
+  })
+
+  it('cancel while pending: a later error for the old editor is ignored and the editor stays closed', () => {
+    let session = startRankEditSession('p-lead', 2)
+    session = typeRankDraft(session, '5')
+    const request = requestRankSave(session)
+    session = request.session
+    const staleEpoch = session.epoch
+    session = cancelRankEditSession(session)
+    assert.equal(session.positionId, null)
+    session = applyRankSaveOutcome(session, staleEpoch, { kind: 'error', message: 'network failed' })
+    assert.equal(session.positionId, null, 'stale error must not restore the canceled editor')
+    assert.equal(session.error, null)
+    assert.equal(session.pendingEpoch, null)
+  })
+
+  it('a second save while one is pending is ignored', () => {
+    let session = startRankEditSession('p-lead', 2)
+    session = typeRankDraft(session, '5')
+    session = requestRankSave(session).session
+    assert.equal(session.pendingEpoch, session.epoch)
+    assert.equal(requestRankSave(session).submit, false)
+    assert.equal(session.pendingEpoch, session.epoch)
+  })
+
+  it('fresh blocked response attaches to its own editor; fresh success closes it', () => {
+    let session = startRankEditSession('p-lead', 2)
+    session = typeRankDraft(session, '5')
+    const blocked = requestRankSave(session)
+    assert.equal(blocked.submit, true)
+    session = applyRankSaveOutcome(blocked.session, blocked.session.epoch, {
+      kind: 'blocked',
+      impact: leadToFiveImpact,
+    })
+    assert.equal(session.positionId, 'p-lead')
+    assert.equal(session.blockedImpact, leadToFiveImpact)
+    assert.equal(session.pendingEpoch, null)
+
+    const retry: PositionRankEditSession = typeRankDraft(session, '1')
+    const success = requestRankSave(retry)
+    assert.equal(success.submit, true)
+    const done = applyRankSaveOutcome(success.session, success.session.epoch, { kind: 'success' })
+    assert.deepEqual(done, idleRankEditSession(done.epoch))
+    assert.equal(done.positionId, null)
   })
 })
 
@@ -624,6 +991,10 @@ describe('C8 source contracts', () => {
 
     for (const fn of [createOnly, renameOnly, rankOnly, deactivateOnly]) {
       assert.doesNotMatch(fn, /approval_instances/)
+      assert.doesNotMatch(fn, /approval_instance_skips/)
+      assert.doesNotMatch(fn, /approval_candidate_group/)
+      assert.doesNotMatch(fn, /request_approvals/)
+      assert.doesNotMatch(fn, /solution_approvals/)
       assert.doesNotMatch(fn, /OrganizationPositionCode/)
       assert.doesNotMatch(fn, /users?\.update/)
     }
@@ -662,6 +1033,12 @@ describe('C8 source contracts', () => {
     assert.match(panel, /deactivatePosition/)
     assert.match(panel, /position-rank-impact/)
     assert.doesNotMatch(panel, /users\.role/)
+    // C8-fix1 P1: rank save completions are epoch-scoped; no raw shared impact
+    // state a late assessment can overwrite another editor with.
+    assert.match(panel, /requestRankSave\(/)
+    assert.match(panel, /applyRankSaveOutcome\(/)
+    assert.match(panel, /startRankEditSession\(/)
+    assert.doesNotMatch(panel, /setBlockedImpact/)
 
     const page = read('src/app/admin/organization/page.tsx')
     assert.match(page, /requireAdmin/)

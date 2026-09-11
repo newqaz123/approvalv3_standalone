@@ -6,7 +6,7 @@
 // (no auto-repair — the admin corrects the listed records first), creation,
 // and /in use/-guarded deactivation. Attempt snapshots are never touched.
 
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -80,6 +80,83 @@ export function PositionRankImpactList({
       ) : null}
     </div>
   )
+}
+
+/**
+ * Rank-edit session (C8-fix1, C3-fix1 epoch pattern). epoch is the current
+ * editor/draft identity: it is bumped by opening an editor, by every draft
+ * change while a save is pending, and by cancel. pendingEpoch is the
+ * in-flight save's epoch, or null. A rank assessment is applied only when
+ * pendingEpoch still equals epoch — a draft change, cancel, or switch to
+ * another position's editor invalidates the response, so a late blocked
+ * impact or success can never disable or cancel a different draft/position.
+ */
+export type PositionRankEditSession = {
+  positionId: string | null
+  draftRank: string
+  blockedImpact: RankChangeImpact | null
+  error: string | null
+  epoch: number
+  pendingEpoch: number | null
+}
+
+export function idleRankEditSession(epoch = 0): PositionRankEditSession {
+  return { positionId: null, draftRank: '', blockedImpact: null, error: null, epoch, pendingEpoch: null }
+}
+
+export function startRankEditSession(
+  positionId: string,
+  rank: number,
+  priorEpoch = 0,
+): PositionRankEditSession {
+  return { positionId, draftRank: String(rank), blockedImpact: null, error: null, epoch: priorEpoch + 1, pendingEpoch: null }
+}
+
+export function typeRankDraft(session: PositionRankEditSession, draft: string): PositionRankEditSession {
+  const next = { ...session, draftRank: draft, blockedImpact: null }
+  if (session.pendingEpoch !== null) {
+    return { ...next, epoch: session.epoch + 1 }
+  }
+  return next
+}
+
+export function cancelRankEditSession(session: PositionRankEditSession): PositionRankEditSession {
+  return idleRankEditSession(session.epoch + 1)
+}
+
+export function requestRankSave(
+  session: PositionRankEditSession,
+): { session: PositionRankEditSession; submit: boolean } {
+  if (session.positionId === null || session.pendingEpoch !== null) {
+    return { session, submit: false }
+  }
+  if (session.blockedImpact !== null || session.draftRank.trim().length === 0) {
+    return { session, submit: false }
+  }
+  return { session: { ...session, pendingEpoch: session.epoch }, submit: true }
+}
+
+export type PositionRankSaveOutcome =
+  | { kind: 'blocked'; impact: RankChangeImpact }
+  | { kind: 'error'; message: string }
+  | { kind: 'success' }
+
+export function applyRankSaveOutcome(
+  session: PositionRankEditSession,
+  epoch: number,
+  outcome: PositionRankSaveOutcome,
+): PositionRankEditSession {
+  if (session.pendingEpoch !== epoch) return session
+  if (session.epoch !== epoch) {
+    return { ...session, pendingEpoch: null }
+  }
+  if (outcome.kind === 'blocked') {
+    return { ...session, blockedImpact: outcome.impact, pendingEpoch: null }
+  }
+  if (outcome.kind === 'error') {
+    return { ...session, error: outcome.message, pendingEpoch: null }
+  }
+  return idleRankEditSession(session.epoch)
 }
 
 /**
@@ -170,16 +247,19 @@ export function PositionAdminPanel({
   snapshot: WorkspaceSnapshot
 }) {
   const [rows, setRows] = useState<PositionNode[]>(() => activePositionsSorted(snapshot.positions))
-  const [rankEditId, setRankEditId] = useState<string | null>(null)
-  const [draftRank, setDraftRank] = useState('')
-  const [blockedImpact, setBlockedImpact] = useState<RankChangeImpact | null>(null)
-  const [rankError, setRankError] = useState<string | null>(null)
-  const [savingRank, setSavingRank] = useState(false)
+  const [rankSession, setRankSession] = useState<PositionRankEditSession>(() => idleRankEditSession())
+  const sessionRef = useRef(rankSession)
+  sessionRef.current = rankSession
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({})
   const [createName, setCreateName] = useState('')
   const [createRank, setCreateRank] = useState('')
   const [createError, setCreateError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
+
+  function commitRankSession(next: PositionRankEditSession) {
+    sessionRef.current = next
+    setRankSession(next)
+  }
 
   useEffect(() => {
     setRows(activePositionsSorted(snapshot.positions))
@@ -199,40 +279,38 @@ export function PositionAdminPanel({
   }, [snapshot.assignments])
 
   function startRankEdit(row: PositionNode) {
-    setRankEditId(row.id)
-    setDraftRank(String(row.rank))
-    setBlockedImpact(null)
-    setRankError(null)
+    commitRankSession(startRankEditSession(row.id, row.rank, sessionRef.current.epoch))
   }
 
   function cancelRankEdit() {
-    setRankEditId(null)
-    setDraftRank('')
-    setBlockedImpact(null)
-    setRankError(null)
+    commitRankSession(cancelRankEditSession(sessionRef.current))
   }
 
   async function handleSaveRank(row: PositionNode) {
-    setRankError(null)
-    setSavingRank(true)
+    const request = requestRankSave(sessionRef.current)
+    commitRankSession(request.session)
+    if (!request.submit) return
+    const epoch = request.session.epoch
+    const proposedRank = Number(request.session.draftRank)
+    let outcome: PositionRankSaveOutcome
     try {
       const result = await changePositionRank({
         positionId: row.id,
-        proposedRank: Number(draftRank),
+        proposedRank,
       })
-      if ('blocked' in result && result.blocked) {
-        setBlockedImpact(result.impact)
-        return
-      }
-      const rank = Number(draftRank)
-      setRows((current) => current.map((candidate) => (
-        candidate.id === row.id ? { ...candidate, rank } : candidate
-      )))
-      cancelRankEdit()
+      outcome = 'blocked' in result && result.blocked
+        ? { kind: 'blocked', impact: result.impact }
+        : { kind: 'success' }
     } catch (err) {
-      setRankError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setSavingRank(false)
+      outcome = { kind: 'error', message: err instanceof Error ? err.message : String(err) }
+    }
+    const current = sessionRef.current
+    const fresh = current.pendingEpoch === epoch && current.epoch === epoch
+    commitRankSession(applyRankSaveOutcome(current, epoch, outcome))
+    if (outcome.kind === 'success' && fresh) {
+      setRows((rowsNow) => rowsNow.map((candidate) => (
+        candidate.id === row.id ? { ...candidate, rank: proposedRank } : candidate
+      )))
     }
   }
 
@@ -327,7 +405,7 @@ export function PositionAdminPanel({
                   {`${count} active assignment(s)`}
                 </span>
                 <span className="flex-1" />
-                {rankEditId !== row.id ? (
+                {rankSession.positionId !== row.id ? (
                   <Button
                     type="button"
                     variant="outline"
@@ -350,17 +428,16 @@ export function PositionAdminPanel({
                   Deactivate
                 </Button>
               </div>
-              {rankEditId === row.id ? (
+              {rankSession.positionId === row.id ? (
                 <PositionRankEditor
                   position={row}
-                  draftRank={draftRank}
-                  blockedImpact={blockedImpact}
-                  saving={savingRank}
-                  error={rankError}
+                  draftRank={rankSession.draftRank}
+                  blockedImpact={rankSession.blockedImpact}
+                  saving={rankSession.pendingEpoch !== null}
+                  error={rankSession.error}
                   unitNames={unitNames}
                   onDraftRankChange={(value) => {
-                    setDraftRank(value)
-                    if (blockedImpact !== null) setBlockedImpact(null)
+                    commitRankSession(typeRankDraft(sessionRef.current, value))
                   }}
                   onSave={() => {
                     void handleSaveRank(row)
