@@ -572,3 +572,44 @@ test.describe("clean-start position administration", () => {
 		}
 	});
 });
+
+test.describe("clean-start approval chains panel", () => {
+	test("Approval chains header opens the panel; root defaults are per phase; publication copy is not a global switch; lowering the limit disables Publish", async ({
+		browser,
+	}) => {
+		test.setTimeout(120_000);
+		const session = await openSignedIn(browser, EMAIL.admin);
+		const page = session.page;
+		try {
+			await page.setViewportSize({ width: 1280, height: 720 });
+			await page.goto("/admin/organization");
+			await expect(page.getByTestId("organization-tree")).toBeVisible({ timeout: 20_000 });
+
+			await page.getByTestId("header-approval-chains").click();
+			const panel = page.getByTestId("chains-panel");
+			await expect(panel).toBeVisible({ timeout: 20_000 });
+			await expect(page.getByTestId("chains-root-REQUEST")).toBeVisible();
+			await expect(page.getByTestId("chains-root-SOLUTION")).toBeVisible();
+			await expect(page.getByTestId("chains-root-FINAL")).toBeVisible();
+			await expect(panel).toContainText(/not a global on\/off switch/i);
+			await expect(panel).toContainText(/affects future attempts only/i);
+			await expect(page.getByTestId("chains-draft-list-REQUEST")).toBeVisible();
+			await expect(page.getByTestId("chains-published-list-REQUEST")).toBeVisible();
+
+			await page.getByTestId("chains-root-customize-REQUEST").click();
+			await expect(page.getByTestId("route-editor-limit-select")).toBeVisible();
+			await expect(page.getByTestId("route-editor-add-step")).toBeVisible();
+			await expect(page.getByTestId("route-editor-publish")).toBeEnabled();
+
+			await page.getByTestId("route-editor-limit-select").click();
+			await page.getByRole("option", { name: /Manager \(rank 3\)/ }).click();
+			await expect(page.getByTestId("route-editor-publish")).toBeDisabled();
+			const conflicts = page.getByTestId("route-editor-conflicts");
+			await expect(conflicts).toBeVisible();
+			await expect(conflicts).toContainText("Director");
+			await expect(conflicts).toContainText("EXCEEDS_LIMIT");
+		} finally {
+			await session.context.close();
+		}
+	});
+});

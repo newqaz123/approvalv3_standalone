@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useEffect, useState } from 'react'
+import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import {
@@ -182,12 +183,22 @@ export function UnitSidePanel({
                 {label}
               </p>
               <div className="flex gap-2">
-                {/* C9: View/Customize will open the company-wide chains panel. Stubs only. */}
-                <Button type="button" variant="outline" size="sm" data-testid={`route-view-${phase}`}>
-                  View
+                {/* C9: View/Customize open the company-wide Approval chains panel. */}
+                <Button type="button" variant="outline" size="sm" asChild>
+                  <Link
+                    href={`/admin/organization?panel=chains&scope=${unit.id}&phase=${phase}&mode=view`}
+                    data-testid={`route-view-${phase}`}
+                  >
+                    View
+                  </Link>
                 </Button>
-                <Button type="button" variant="outline" size="sm" data-testid={`route-customize-${phase}`}>
-                  Customize
+                <Button type="button" variant="outline" size="sm" asChild>
+                  <Link
+                    href={`/admin/organization?panel=chains&scope=${unit.id}&phase=${phase}`}
+                    data-testid={`route-customize-${phase}`}
+                  >
+                    Customize
+                  </Link>
                 </Button>
               </div>
             </div>
