@@ -7,12 +7,16 @@ import type { ApprovalRouteVersionDefinition } from '@/lib/approval-routes/defin
 import { verifyCleanStartReadiness } from '@/lib/clean-start-readiness'
 import type { ReadinessReport } from '@/lib/clean-start-readiness'
 import { OrganizationValidationError, validateOrganization } from '@/lib/organization/assignments'
+import { assessPositionRankChange } from '@/lib/organization/position-rank-guard'
+import type { RankChangeImpact } from '@/lib/organization/position-rank-guard'
 import type {
   AssignmentNode,
   OrganizationUnitNode,
   PositionNode,
   TeamNode,
 } from '@/lib/organization/model'
+
+export type { RankChangeImpact }
 
 const PHASES: readonly ApprovalPhase[] = ['REQUEST', 'SOLUTION', 'FINAL']
 
@@ -389,6 +393,21 @@ export interface OrganizationTeamMutationDb extends OrganizationAssignmentMutati
   setAssignmentTeam(id: string, teamId: string | null): Promise<void>
 }
 
+export interface OrganizationPositionMutationDb extends OrganizationTeamMutationDb {
+  createPosition(input: { name: string; rank: number }): Promise<{ id: string }>
+  updatePositionName(id: string, name: string): Promise<void>
+  updatePositionRank(id: string, rank: number): Promise<void>
+  deactivatePosition(id: string): Promise<void>
+  /** PUBLISHED route versions only (guard caller contract: drafts never block). */
+  loadPublishedRoutes(): Promise<ReadonlyArray<{
+    id: string
+    scopeUnitId: string
+    phase: ApprovalPhase
+    approvalLimitPositionId: string | null
+    steps: ReadonlyArray<{ stepOrder: number; positionId: string | null }>
+  }>>
+}
+
 const ORGANIZATION_MUTATION_ISOLATION = 'Serializable' as const
 
 type MutationPrisma = {
@@ -484,6 +503,29 @@ type MutationPrisma = {
       rank: number
       isActive: boolean
     }>>
+    create: (args: {
+      data: { name: string; rank: number; isActive: boolean }
+    }) => Promise<{ id: string }>
+    update: (args: {
+      where: { id: string }
+      data: { name?: string; rank?: number; isActive?: boolean }
+    }) => Promise<unknown>
+  }
+  approval_route_versions: {
+    findMany: (args?: object) => Promise<Array<{
+      id: string
+      scopeUnitId: string
+      phase: string
+      status: string
+      approvalLimitPositionId: string | null
+    }>>
+  }
+  approval_route_steps: {
+    findMany: (args?: object) => Promise<Array<{
+      routeVersionId: string
+      stepOrder: number
+      positionId: string | null
+    }>>
   }
   user: {
     findMany: (args?: object) => Promise<Array<{
@@ -520,8 +562,8 @@ function createMutationStore(
   client: MutationPrisma,
   adminId: string,
   serializable: boolean,
-): OrganizationTeamMutationDb {
-  const store: OrganizationTeamMutationDb = {
+): OrganizationPositionMutationDb {
+  const store: OrganizationPositionMutationDb = {
     adminUserId: adminId,
     async loadUnits() {
       const rows = await client.organization_units.findMany()
@@ -657,6 +699,43 @@ function createMutationStore(
         data: { teamId },
       })
     },
+    async createPosition(input) {
+      const row = await client.positions.create({
+        data: {
+          name: input.name,
+          rank: input.rank,
+          isActive: true,
+        },
+      })
+      return { id: row.id }
+    },
+    async updatePositionName(id, name) {
+      await client.positions.update({ where: { id }, data: { name } })
+    },
+    async updatePositionRank(id, rank) {
+      await client.positions.update({ where: { id }, data: { rank } })
+    },
+    async deactivatePosition(id) {
+      await client.positions.update({ where: { id }, data: { isActive: false } })
+    },
+    async loadPublishedRoutes() {
+      const versions = await client.approval_route_versions.findMany({ where: { status: 'PUBLISHED' } })
+      const published = versions.filter((row) => row.status === 'PUBLISHED')
+      const steps = await client.approval_route_steps.findMany()
+      const stepsByRoute = new Map<string, Array<{ stepOrder: number; positionId: string | null }>>()
+      for (const step of steps) {
+        const list = stepsByRoute.get(step.routeVersionId) ?? []
+        list.push({ stepOrder: step.stepOrder, positionId: step.positionId })
+        stepsByRoute.set(step.routeVersionId, list)
+      }
+      return published.map((row) => ({
+        id: row.id,
+        scopeUnitId: row.scopeUnitId,
+        phase: row.phase as ApprovalPhase,
+        approvalLimitPositionId: row.approvalLimitPositionId,
+        steps: (stepsByRoute.get(row.id) ?? []).sort((left, right) => left.stepOrder - right.stepOrder),
+      }))
+    },
     async writeAudit(entry) {
       await client.request_activities.create({
         data: {
@@ -683,7 +762,7 @@ function createMutationStore(
   return store
 }
 
-async function createProductionMutationDb(): Promise<OrganizationTeamMutationDb> {
+async function createProductionMutationDb(): Promise<OrganizationPositionMutationDb> {
   const { requireAdmin } = await import('@/lib/auth')
   const adminId = await requireAdmin()
   if (!adminId) {
@@ -812,6 +891,10 @@ function asAssignmentWriter(tx: OrganizationMutationDb): OrganizationAssignmentM
 
 function asTeamWriter(tx: OrganizationMutationDb): OrganizationTeamMutationDb {
   return tx as OrganizationTeamMutationDb
+}
+
+function asPositionWriter(tx: OrganizationMutationDb): OrganizationPositionMutationDb {
+  return tx as OrganizationPositionMutationDb
 }
 
 const ONE_ACTIVE_ASSIGNMENT_MESSAGE = 'A user may have only one active assignment'
@@ -1455,6 +1538,242 @@ export async function updateTeam(
     await writer.writeAudit({
       action: 'team_updated',
       comments: `Updated team ${current.id} "${name}" in unit ${checked.unit.id} reports-to ${input.reportsToAssignmentId}`,
+    })
+    return { success: true as const }
+  })
+}
+
+const POSITION_NAME_UNIQUE_MESSAGE = 'Position name must be unique among active positions'
+const POSITION_RANK_UNIQUE_MESSAGE = 'Position rank must be unique among active positions'
+
+function requirePositiveIntegerRank(rank: number): number {
+  if (!Number.isInteger(rank) || rank <= 0) {
+    throw new OrganizationValidationError('Rank must be a positive integer')
+  }
+  return rank
+}
+
+function requirePosition(
+  positions: readonly PositionNode[],
+  positionId: string,
+): PositionNode {
+  const current = positions.find((row) => row.id === positionId)
+  if (current === undefined || !current.isActive) {
+    throw new OrganizationValidationError(`position "${positionId}" was not found`)
+  }
+  return current
+}
+
+// Guard caller contract: the published-route input carries no status field and
+// every consulted reference must resolve. A null approval-limit position or a
+// step without a position is malformed consulted input and fails closed with a
+// named error instead of being silently dropped or invented.
+function asGuardPublishedRoutes(
+  publishedRoutes: ReadonlyArray<{
+    id: string
+    scopeUnitId: string
+    phase: ApprovalPhase
+    approvalLimitPositionId: string | null
+    steps: ReadonlyArray<{ stepOrder: number; positionId: string | null }>
+  }>,
+): ReadonlyArray<{
+  id: string
+  scopeUnitId: string
+  phase: ApprovalPhase
+  approvalLimitPositionId: string
+  steps: ReadonlyArray<{ stepOrder: number; positionId: string }>
+}> {
+  return publishedRoutes.map((route) => {
+    if (route.approvalLimitPositionId === null) {
+      throw new OrganizationValidationError(
+        `published route "${route.id}" has no approval limit position`,
+      )
+    }
+    return {
+      id: route.id,
+      scopeUnitId: route.scopeUnitId,
+      phase: route.phase,
+      approvalLimitPositionId: route.approvalLimitPositionId,
+      steps: route.steps.map((step) => {
+        if (step.positionId === null) {
+          throw new OrganizationValidationError(
+            `published route "${route.id}" has a step (stepOrder ${step.stepOrder}) without a position`,
+          )
+        }
+        return { stepOrder: step.stepOrder, positionId: step.positionId }
+      }),
+    }
+  })
+}
+
+/**
+ * Create a position with a company-wide approval rank. Name must be unique
+ * among active positions and rank must be a positive integer unique among
+ * active positions. Validation+write run in a Serializable transaction; name
+ * unique/serialization conflicts surface as OrganizationValidationError
+ * /unique/i. Audit + revalidate. Never touches attempts or snapshots.
+ */
+export async function createPosition(
+  input: { name: string; rank: number },
+  db?: OrganizationPositionMutationDb,
+): Promise<{ positionId: string }> {
+  const store = db ?? await createProductionMutationDb()
+  const name = requireTrimmedName(input.name)
+  const rank = requirePositiveIntegerRank(input.rank)
+  return runExclusiveWrite(store, POSITION_NAME_UNIQUE_MESSAGE, async (tx) => {
+    const writer = asPositionWriter(tx)
+    const positions = await writer.loadPositions()
+    if (positions.some((row) => row.isActive && row.name === name)) {
+      throw new OrganizationValidationError(POSITION_NAME_UNIQUE_MESSAGE)
+    }
+    if (positions.some((row) => row.isActive && row.rank === rank)) {
+      throw new OrganizationValidationError(POSITION_RANK_UNIQUE_MESSAGE)
+    }
+    const created = await writer.createPosition({ name, rank })
+    await writer.writeAudit({
+      action: 'position_created',
+      comments: `Created position ${created.id} "${name}" rank ${rank}`,
+    })
+    return { positionId: created.id }
+  })
+}
+
+/**
+ * Rename a position. Rename only: the rank never changes and approval
+ * snapshots keep their captured strings (attempts/snapshots are never read or
+ * written here). Duplicate active names are rejected /unique/i. Validation+write
+ * run in a Serializable transaction. Audit + revalidate.
+ */
+export async function renamePosition(
+  input: { positionId: string; name: string },
+  db?: OrganizationPositionMutationDb,
+): Promise<{ success: true }> {
+  const store = db ?? await createProductionMutationDb()
+  const name = requireTrimmedName(input.name)
+  return runExclusiveRename(store, POSITION_NAME_UNIQUE_MESSAGE, async (tx) => {
+    const writer = asPositionWriter(tx)
+    const positions = await writer.loadPositions()
+    const current = requirePosition(positions, input.positionId)
+    const duplicate = positions.some((row) => (
+      row.isActive
+      && row.id !== current.id
+      && row.name === name
+    ))
+    if (duplicate) {
+      throw new OrganizationValidationError(POSITION_NAME_UNIQUE_MESSAGE)
+    }
+    await writer.updatePositionName(current.id, name)
+    await writer.writeAudit({
+      action: 'position_renamed',
+      comments: `Renamed position ${current.id}: "${current.name}" → "${name}"`,
+    })
+    return { success: true as const }
+  })
+}
+
+/**
+ * Change a position's company-wide rank. assessPositionRankChange runs FIRST:
+ * a blocked response returns the guard's full affected-record lists verbatim
+ * and writes NOTHING — no auto-repair, no attempt changes, snapshots keep
+ * their captured ranks. A proposed rank already held by another ACTIVE
+ * position is rejected /unique/i (the createPosition invariant). On success
+ * the rank write, validateOrganization over the proposed state, and the audit
+ * run in one Serializable transaction.
+ */
+export async function changePositionRank(
+  input: { positionId: string; proposedRank: number },
+  db?: OrganizationPositionMutationDb,
+): Promise<{ success: true } | { blocked: true; impact: RankChangeImpact }> {
+  const store = db ?? await createProductionMutationDb()
+  const proposedRank = requirePositiveIntegerRank(input.proposedRank)
+  return runExclusiveWrite(store, null, async (tx) => {
+    const writer = asPositionWriter(tx)
+    const [units, positions, assignments, teams, publishedRoutes] = await Promise.all([
+      writer.loadUnits(),
+      writer.loadPositions(),
+      writer.loadAssignments(),
+      writer.loadTeams(),
+      writer.loadPublishedRoutes(),
+    ])
+    const current = requirePosition(positions, input.positionId)
+    const rankHeld = positions.some((row) => (
+      row.isActive
+      && row.id !== current.id
+      && row.rank === proposedRank
+    ))
+    if (rankHeld) {
+      throw new OrganizationValidationError(POSITION_RANK_UNIQUE_MESSAGE)
+    }
+    const impact = assessPositionRankChange({
+      positions,
+      teams,
+      assignments,
+      publishedRoutes: asGuardPublishedRoutes(publishedRoutes),
+      positionId: current.id,
+      proposedRank,
+    })
+    if (impact.blocked) {
+      return { blocked: true as const, impact }
+    }
+    const nextPositions = positions.map((row) => (
+      row.id === current.id ? { ...row, rank: proposedRank } : row
+    ))
+    validateOrganization(units, nextPositions, assignments, teams)
+    await writer.updatePositionRank(current.id, proposedRank)
+    await writer.writeAudit({
+      action: 'position_rank_changed',
+      comments: `Changed rank of position ${current.id} "${current.name}" ${current.rank} → ${proposedRank}`,
+    })
+    return { success: true as const }
+  })
+}
+
+/**
+ * Deactivate a position (isActive=false; positions are never destructively
+ * deleted). Refused /in use/i while any ACTIVE assignment or any PUBLISHED
+ * route step/approval limit references the position — correct those records
+ * first. Audit + revalidate. Attempts/snapshots untouched.
+ */
+export async function deactivatePosition(
+  input: { positionId: string },
+  db?: OrganizationPositionMutationDb,
+): Promise<{ success: true }> {
+  const store = db ?? await createProductionMutationDb()
+  return runExclusiveWrite(store, null, async (tx) => {
+    const writer = asPositionWriter(tx)
+    const [units, positions, assignments, teams, publishedRoutes] = await Promise.all([
+      writer.loadUnits(),
+      writer.loadPositions(),
+      writer.loadAssignments(),
+      writer.loadTeams(),
+      writer.loadPublishedRoutes(),
+    ])
+    const current = requirePosition(positions, input.positionId)
+    const activeAssignments = assignments.filter((row) => (
+      row.isActive && row.positionId === current.id
+    ))
+    if (activeAssignments.length > 0) {
+      throw new OrganizationValidationError(
+        `Position "${current.name}" is in use by ${activeAssignments.length} active assignment(s); move or remove them first`,
+      )
+    }
+    const referencingRoutes = publishedRoutes.filter((route) => (
+      route.approvalLimitPositionId === current.id
+      || route.steps.some((step) => step.positionId === current.id)
+    ))
+    if (referencingRoutes.length > 0) {
+      throw new OrganizationValidationError(
+        `Position "${current.name}" is in use by ${referencingRoutes.length} published route(s); update or retire them first`,
+      )
+    }
+    const nextPositions = positions.map((row) => (
+      row.id === current.id ? { ...row, isActive: false } : row
+    ))
+    validateOrganization(units, nextPositions, assignments, teams)
+    await writer.deactivatePosition(current.id)
+    await writer.writeAudit({
+      action: 'position_deactivated',
+      comments: `Deactivated position ${current.id} "${current.name}"; history and snapshots keep their captured values`,
     })
     return { success: true as const }
   })

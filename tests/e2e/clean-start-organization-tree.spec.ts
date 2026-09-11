@@ -426,3 +426,142 @@ test.describe("clean-start unit side panel", () => {
 		}
 	});
 });
+
+test.describe("clean-start position administration", () => {
+	const LEAD_ID = "cs-pos-lead";
+	const NIGHT_SHIFT_NAME = "Night Shift";
+
+	/**
+	 * Isolate the created fixture: deactivate every active Night Shift position
+	 * (created by this spec or an earlier interrupted run), then verify the
+	 * restored state. Runs before and after the create test; failures throw so
+	 * a broken cleanup fails the run instead of poisoning the next one.
+	 */
+	async function deactivateNightShiftPositions(): Promise<void> {
+		const prisma = prismaClient();
+		try {
+			const rows = await prisma.positions.findMany({
+				where: { name: NIGHT_SHIFT_NAME, isActive: true },
+				select: { id: true },
+			});
+			for (const row of rows) {
+				await prisma.positions.update({
+					where: { id: row.id },
+					data: { isActive: false },
+				});
+			}
+			expect(
+				await prisma.positions.count({ where: { name: NIGHT_SHIFT_NAME, isActive: true } }),
+			).toBe(0);
+		} finally {
+			await prisma.$disconnect();
+		}
+	}
+
+	test("Positions header opens the panel; a blocked Lead rank change lists Line A and route problems with save disabled and persists nothing", async ({ browser }) => {
+		test.setTimeout(120_000);
+		const session = await openSignedIn(browser, EMAIL.admin);
+		const page = session.page;
+		try {
+			await page.setViewportSize({ width: 1280, height: 720 });
+			await page.goto("/admin/organization");
+			await expect(page.getByTestId("organization-tree")).toBeVisible({ timeout: 20_000 });
+
+			await page.getByTestId("header-positions").click();
+			const panel = page.getByTestId("position-admin-panel");
+			await expect(panel).toBeVisible({ timeout: 20_000 });
+			await expect(panel.getByText("Staff")).toBeVisible();
+			await expect(panel.getByText("Lead")).toBeVisible();
+			await expect(panel.getByText("Manager")).toBeVisible();
+			await expect(panel.getByText("Director")).toBeVisible();
+
+			await page.getByTestId(`position-rank-edit-${LEAD_ID}`).click();
+			const rankInput = page.getByTestId(`position-rank-input-${LEAD_ID}`);
+			await expect(rankInput).toBeVisible();
+			await rankInput.fill("5");
+			await page.getByTestId(`position-rank-save-${LEAD_ID}`).click();
+
+			const impact = page.getByTestId("position-rank-impact");
+			await expect(impact).toBeVisible({ timeout: 20_000 });
+			await expect(impact.getByTestId("position-rank-impact-teams")).toContainText("Line A");
+			await expect(impact.getByTestId("position-rank-impact-routes")).toContainText(/REQUEST/);
+			await expect(impact).toContainText("STEP_NOT_ASCENDING");
+			await expect(impact).toContainText("STEP_EXCEEDS_LIMIT");
+			await expect(page.getByTestId(`position-rank-save-${LEAD_ID}`)).toBeDisabled();
+
+			const prisma = prismaClient();
+			try {
+				const lead = await prisma.positions.findUniqueOrThrow({
+					where: { id: LEAD_ID },
+					select: { rank: true },
+				});
+				expect(lead.rank).toBe(2);
+			} finally {
+				await prisma.$disconnect();
+			}
+
+			await page.getByTestId(`position-rank-cancel-${LEAD_ID}`).click();
+			await expect(page.getByTestId(`position-rank-editor-${LEAD_ID}`)).toHaveCount(0);
+		} finally {
+			await session.context.close();
+		}
+	});
+
+	test("create Night Shift position, deactivate it from the panel, leave nothing active behind", async ({ browser }) => {
+		test.setTimeout(120_000);
+		const session = await openSignedIn(browser, EMAIL.admin);
+		const page = session.page;
+		try {
+			// Rerun isolation: drop any Night Shift a previous run left active.
+			await deactivateNightShiftPositions();
+
+			await page.setViewportSize({ width: 1280, height: 720 });
+			await page.goto("/admin/organization");
+			await expect(page.getByTestId("organization-tree")).toBeVisible({ timeout: 20_000 });
+
+			await page.getByTestId("header-positions").click();
+			const panel = page.getByTestId("position-admin-panel");
+			await expect(panel).toBeVisible({ timeout: 20_000 });
+			await page.getByTestId("position-create-name").fill(NIGHT_SHIFT_NAME);
+			await page.getByTestId("position-create-rank").fill("7");
+			await page.getByTestId("position-create-save").click();
+			await expect(panel.getByTestId("position-list")).toContainText(NIGHT_SHIFT_NAME, {
+				timeout: 15_000,
+			});
+
+			const prisma = prismaClient();
+			let createdId = "";
+			try {
+				const created = await prisma.positions.findFirstOrThrow({
+					where: { name: NIGHT_SHIFT_NAME, isActive: true },
+					select: { id: true, rank: true },
+				});
+				expect(created.rank).toBe(7);
+				createdId = created.id;
+			} finally {
+				await prisma.$disconnect();
+			}
+
+			await page.getByTestId(`position-deactivate-${createdId}`).click();
+			await expect(panel.getByTestId("position-list")).not.toContainText(NIGHT_SHIFT_NAME, {
+				timeout: 15_000,
+			});
+
+			const verify = prismaClient();
+			try {
+				expect(
+					await verify.positions.count({ where: { name: NIGHT_SHIFT_NAME, isActive: true } }),
+				).toBe(0);
+			} finally {
+				await verify.$disconnect();
+			}
+		} finally {
+			try {
+				// Isolate for the next run; a failure here fails the test.
+				await deactivateNightShiftPositions();
+			} finally {
+				await session.context.close();
+			}
+		}
+	});
+});

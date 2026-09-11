@@ -1,15 +1,23 @@
+import Link from 'next/link'
 import { Network } from 'lucide-react'
 import { requireAdmin } from '@/lib/auth'
 import { BackButton } from '@/components/admin/back-button'
 import { Button } from '@/components/ui/button'
 import { OrganizationWorkspace } from '@/components/organization/OrganizationWorkspace'
+import { PositionAdminPanel } from '@/components/organization/PositionAdminPanel'
 import { getOrganizationWorkspaceData } from '@/server-actions/organization'
 
 export const metadata = { title: 'Organization | Admin' }
 
-export default async function OrganizationPage() {
+export default async function OrganizationPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>
+}) {
   await requireAdmin()
+  const params = await searchParams
   const snapshot = await getOrganizationWorkspaceData()
+  const showPositions = params.panel === 'positions'
 
   return (
     <div className="w-full space-y-8 py-8">
@@ -26,9 +34,13 @@ export default async function OrganizationPage() {
 
       <div className="flex flex-wrap gap-2">
         <Button type="button" variant="outline">Approval chains</Button>
-        <Button type="button" variant="outline">Positions</Button>
+        <Button type="button" variant="outline" asChild>
+          <Link href="/admin/organization?panel=positions" data-testid="header-positions">Positions</Link>
+        </Button>
         <Button type="button">Create unit</Button>
       </div>
+
+      {showPositions ? <PositionAdminPanel snapshot={snapshot} /> : null}
 
       <OrganizationWorkspace snapshot={snapshot} />
     </div>
