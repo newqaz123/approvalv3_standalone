@@ -1045,7 +1045,7 @@ describe('C8 source contracts', () => {
     assert.match(page, /getOrganizationWorkspaceData/)
     assert.match(page, /Approval chains/)
     assert.match(page, /Positions/)
-    assert.match(page, /Create unit/)
+    assert.match(page, /CreateUnitDialog/)
     assert.match(page, /PositionAdminPanel/)
     assert.match(page, /panel=positions/)
     assert.match(page, /header-positions/)

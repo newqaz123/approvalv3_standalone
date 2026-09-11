@@ -4,6 +4,7 @@ import { requireAdmin } from '@/lib/auth'
 import { BackButton } from '@/components/admin/back-button'
 import { Button } from '@/components/ui/button'
 import { ApprovalChainsPanel } from '@/components/organization/ApprovalChainsPanel'
+import { CreateUnitDialog } from '@/components/organization/CreateUnitDialog'
 import { OrganizationWorkspace } from '@/components/organization/OrganizationWorkspace'
 import { PositionAdminPanel } from '@/components/organization/PositionAdminPanel'
 import { getApprovalChainsData } from '@/server-actions/approval-routes'
@@ -53,7 +54,7 @@ export default async function OrganizationPage({
         <Button type="button" variant="outline" asChild>
           <Link href="/admin/organization?panel=positions" data-testid="header-positions">Positions</Link>
         </Button>
-        <Button type="button">Create unit</Button>
+        <CreateUnitDialog units={snapshot.units} />
       </div>
 
       {showPositions ? <PositionAdminPanel snapshot={snapshot} /> : null}

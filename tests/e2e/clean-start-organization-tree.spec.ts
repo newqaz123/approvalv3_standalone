@@ -6,7 +6,9 @@ const LOCAL_PASSWORD = process.env.E2E_PASSWORD || "changeme";
 const OPERATIONS_ID = "cs-unit-operations";
 const SECTION_A_ID = "cs-unit-section-a";
 const SECTION_A_CHILD_ID = "cs-unit-section-a-child";
+const SECTION_B_ID = "cs-unit-section-b";
 const LINE_A_TEAM_ID = "cs-team-section-a-line";
+const LEAD_ID = "cs-pos-lead";
 const ALICE_ASSIGNMENT_ID = "cs-asg-alice";
 const CASEY_ASSIGNMENT_ID = "cs-asg-casey";
 
@@ -610,6 +612,635 @@ test.describe("clean-start approval chains panel", () => {
 			await expect(conflicts).toContainText("EXCEEDS_LIMIT");
 		} finally {
 			await session.context.close();
+		}
+	});
+});
+
+test.describe("clean-start C10 full journey", () => {
+	/**
+	 * Per-run unique suffix: every persistent row this journey creates (unit,
+	 * draft/published route versions, stranded-restart fixture family) carries
+	 * it, and cleanup is prefix-scoped so two consecutive full-spec runs both
+	 * pass without reseeding (the C7/C8 Night Line / Night Shift pattern:
+	 * deactivate or supersede, never hard-delete).
+	 */
+	const RUN = `${process.pid.toString(36)}-${Date.now().toString(36)}`;
+	const JOURNEY_UNIT_NAME = `C10 Journey Unit #${RUN}`;
+	const JOURNEY_UNIT_RENAMED = `C10 Journey Renamed #${RUN}`;
+	const JOURNEY_UNIT_PREFIX = "C10 Journey";
+	const STRANDED_EMAIL = `c10-stranded-${RUN}@example.com`;
+	const STRANDED_NAME = `C10 Stranded ${RUN}`;
+	const STRANDED_REQUEST_ID = `c10-req-${RUN}`;
+	const STRANDED_INSTANCE_ID = `c10-inst-${RUN}`;
+	const STRANDED_GROUP_ID = `c10-grp-${RUN}`;
+	const STRANDED_REQUEST_TITLE = `C10 Stranded Request ${RUN}`;
+	const RESTART_REASON = `C10 journey restart ${RUN}`;
+
+	async function userIdByEmail(prisma: PrismaClient, email: string): Promise<string> {
+		const row = await prisma.user.findUniqueOrThrow({
+			where: { email },
+			select: { id: true },
+		});
+		return row.id;
+	}
+
+	/** Rerun isolation: deactivate any journey unit an earlier run left active. */
+	async function deactivateJourneyUnits(): Promise<void> {
+		const prisma = prismaClient();
+		try {
+			await prisma.organization_units.updateMany({
+				where: { name: { startsWith: JOURNEY_UNIT_PREFIX }, isActive: true },
+				data: { isActive: false },
+			});
+			expect(
+				await prisma.organization_units.count({
+					where: { name: { startsWith: JOURNEY_UNIT_PREFIX }, isActive: true },
+				}),
+			).toBe(0);
+		} finally {
+			await prisma.$disconnect();
+		}
+	}
+
+	/**
+	 * Rerun isolation for the assign/move/remove leg: the journey assigns the
+	 * admin account (the only seeded unassigned user) and ends by removing it.
+	 * A failed earlier run may have left the assignment active; deactivate it
+	 * (deactivation is the removal path; history is preserved).
+	 */
+	async function deactivateAdminAssignments(): Promise<void> {
+		const prisma = prismaClient();
+		try {
+			const adminId = await userIdByEmail(prisma, EMAIL.admin);
+			await prisma.organization_assignments.updateMany({
+				where: { userId: adminId, isActive: true },
+				data: { isActive: false },
+			});
+			expect(
+				await prisma.organization_assignments.count({
+					where: { userId: adminId, isActive: true },
+				}),
+			).toBe(0);
+		} finally {
+			await prisma.$disconnect();
+		}
+	}
+
+	/**
+	 * Rerun isolation for the stranded-restart fixture: supersede any
+	 * non-superseded journey instance, deactivate journey fixture users, and
+	 * soft-delete journey fixture requests. Rows are history-preserving
+	 * (supersede/deactivate/soft-delete); nothing is hard-deleted.
+	 */
+	async function retireJourneyStrandedFixtures(): Promise<void> {
+		const prisma = prismaClient();
+		try {
+			await prisma.approval_instances.updateMany({
+				where: { id: { startsWith: "c10-inst-" }, supersededAt: null },
+				data: { supersededAt: new Date() },
+			});
+			expect(
+				await prisma.approval_instances.count({
+					where: { id: { startsWith: "c10-inst-" }, supersededAt: null },
+				}),
+			).toBe(0);
+			await prisma.user.updateMany({
+				where: { email: { startsWith: "c10-stranded-" }, isActive: true },
+				data: { isActive: false },
+			});
+			await prisma.requests.updateMany({
+				where: { title: { startsWith: "C10 Stranded" }, isDeleted: false },
+				data: { isDeleted: true, deletedAt: new Date() },
+			});
+		} finally {
+			await prisma.$disconnect();
+		}
+	}
+
+	/**
+	 * Creates a stranded REQUEST attempt directly in the guarded dev database:
+	 * there is no admin UI that can strand an attempt (stranding happens when
+	 * every saved approver later goes inactive). The candidate group's single
+	 * member is a per-run fixture user created inactive, so the B5 stranded
+	 * predicate holds. The restart itself runs through the REAL dialog and the
+	 * REAL server action (live persist).
+	 */
+	async function createStrandedAttemptFixture(): Promise<void> {
+		const prisma = prismaClient();
+		try {
+			const aliceId = await userIdByEmail(prisma, "alice@example.com");
+			await prisma.user.create({
+				data: {
+					email: STRANDED_EMAIL,
+					name: STRANDED_NAME,
+					passwordHash: null,
+					isActive: false,
+				},
+			});
+			const strandedUserId = await userIdByEmail(prisma, STRANDED_EMAIL);
+			await prisma.requests.create({
+				data: {
+					id: STRANDED_REQUEST_ID,
+					title: STRANDED_REQUEST_TITLE,
+					description: "C10 journey stranded-restart fixture request",
+					requesterId: aliceId,
+				},
+			});
+			await prisma.approval_instances.create({
+				data: {
+					id: STRANDED_INSTANCE_ID,
+					requestId: STRANDED_REQUEST_ID,
+					phase: "REQUEST",
+					originUserId: aliceId,
+					originUnitId: SECTION_A_ID,
+					originContext: {},
+					routingMode: "SNAPSHOT_GROUP",
+					state: "PENDING",
+					attempt: 1,
+				},
+			});
+			await prisma.approval_candidate_groups.create({
+				data: {
+					id: STRANDED_GROUP_ID,
+					approvalInstanceId: STRANDED_INSTANCE_ID,
+					scopeUnitId: SECTION_A_ID,
+					requiredPositionId: LEAD_ID,
+					members: {
+						create: [
+							{
+								userId: strandedUserId,
+								capturedDisplayName: STRANDED_NAME,
+							},
+						],
+					},
+				},
+			});
+		} finally {
+			await prisma.$disconnect();
+		}
+	}
+
+	test("create unit under Operations, inline rename, sharing toggle and badge", async ({
+		browser,
+	}) => {
+		test.setTimeout(240_000);
+		await deactivateJourneyUnits();
+		const session = await openSignedIn(browser, EMAIL.admin);
+		const page = session.page;
+		try {
+			await page.setViewportSize({ width: 1280, height: 720 });
+			await page.goto("/admin/organization");
+			await expect(page.getByTestId("organization-tree")).toBeVisible({ timeout: 20_000 });
+
+			// Create unit under Operations through the real header dialog.
+			await page.getByTestId("create-unit-open").click();
+			const dialog = page.getByTestId("create-unit-dialog");
+			await expect(dialog).toBeVisible();
+			await page.getByTestId("create-unit-name-input").fill(JOURNEY_UNIT_NAME);
+			await page.getByTestId("create-unit-parent-select").click();
+			await page.getByRole("option", { name: "Operations" }).click();
+			await page.getByTestId("create-unit-save").click();
+			await expect(dialog).toHaveCount(0);
+
+			const prisma = prismaClient();
+			let unitId = "";
+			try {
+				const created = await prisma.organization_units.findFirstOrThrow({
+					where: { name: JOURNEY_UNIT_NAME, isActive: true },
+					select: { id: true, parentId: true },
+				});
+				expect(created.parentId).toBe(OPERATIONS_ID);
+				unitId = created.id;
+			} finally {
+				await prisma.$disconnect();
+			}
+			await expect(page.getByTestId(`unit-name-${unitId}`)).toBeVisible({ timeout: 15_000 });
+
+			// Inline rename: Enter saves.
+			const header = page.getByTestId(`unit-header-${unitId}`);
+			await header.hover();
+			await page.getByTestId(`unit-rename-${unitId}`).click();
+			const input = header.getByTestId("inline-name-edit-input");
+			await expect(input).toBeVisible();
+			await input.click({ clickCount: 3 });
+			await input.pressSequentially(JOURNEY_UNIT_RENAMED, { delay: 15 });
+			await input.press("Enter");
+			await expect(page.getByTestId(`unit-name-${unitId}`)).toContainText(JOURNEY_UNIT_RENAMED);
+			await expect(header.getByTestId("inline-name-edit-input")).toHaveCount(0);
+
+			// Inline rename: Escape cancels without persisting.
+			await header.hover();
+			await page.getByTestId(`unit-rename-${unitId}`).click();
+			const escapeInput = header.getByTestId("inline-name-edit-input");
+			await escapeInput.click({ clickCount: 3 });
+			await escapeInput.pressSequentially("Discard This", { delay: 15 });
+			await escapeInput.press("Escape");
+			await expect(header.getByTestId("inline-name-edit-input")).toHaveCount(0);
+			await expect(page.getByTestId(`unit-name-${unitId}`)).toContainText(JOURNEY_UNIT_RENAMED);
+
+			// Inline rename: duplicate sibling name shows the adjacent error and
+			// retains the typed input; Escape leaves the original name.
+			await header.hover();
+			await page.getByTestId(`unit-rename-${unitId}`).click();
+			const duplicateInput = header.getByTestId("inline-name-edit-input");
+			await duplicateInput.click({ clickCount: 3 });
+			await duplicateInput.pressSequentially("Section A", { delay: 15 });
+			await duplicateInput.press("Enter");
+			const error = header.getByTestId("inline-name-edit-error");
+			await expect(error).toBeVisible({ timeout: 15_000 });
+			await expect(error).toContainText(/unique/i);
+			await expect(duplicateInput).toHaveValue("Section A");
+			await duplicateInput.press("Escape");
+			await expect(page.getByTestId(`unit-name-${unitId}`)).toContainText(JOURNEY_UNIT_RENAMED);
+
+			// Toggle sharing on the new unit and observe the badge. New units are
+			// created sharing-on (C5 writer default): the badge is present first,
+			// then disappears when sharing is toggled off and saved.
+			await expect(page.getByTestId(`sharing-badge-${unitId}`)).toBeVisible();
+			await header.click();
+			const panel = page.getByTestId("unit-side-panel");
+			await expect(panel.getByRole("heading", { name: `Manage ${JOURNEY_UNIT_RENAMED}` })).toBeVisible();
+			const sharingSwitch = page.getByTestId("unit-share-requests");
+			await expect(sharingSwitch).toBeChecked();
+			await sharingSwitch.click();
+			await page.getByTestId("unit-settings-save").click();
+			await expect(page.getByTestId(`sharing-badge-${unitId}`)).toHaveCount(0, { timeout: 15_000 });
+
+			const verify = prismaClient();
+			try {
+				const saved = await verify.organization_units.findUniqueOrThrow({
+					where: { id: unitId },
+					select: { shareRequests: true, isActive: true },
+				});
+				expect(saved.shareRequests).toBe(false);
+				expect(saved.isActive).toBe(true);
+			} finally {
+				await verify.$disconnect();
+			}
+		} finally {
+			try {
+				await deactivateJourneyUnits();
+			} finally {
+				await session.context.close();
+			}
+		}
+	});
+
+	test("assign person with a team, move with confirmation, remove to Unassigned", async ({
+		browser,
+	}) => {
+		test.setTimeout(240_000);
+		await deactivateAdminAssignments();
+		const session = await openSignedIn(browser, EMAIL.admin);
+		const page = session.page;
+		let adminId = "";
+		{
+			const prisma = prismaClient();
+			try {
+				adminId = await userIdByEmail(prisma, EMAIL.admin);
+			} finally {
+				await prisma.$disconnect();
+			}
+		}
+		try {
+			await page.setViewportSize({ width: 1280, height: 720 });
+			await page.goto("/admin/organization");
+			await expect(page.getByTestId("organization-tree")).toBeVisible({ timeout: 20_000 });
+
+			// Assign the unassigned admin to Section A with Line A and Staff.
+			await page.getByTestId(`unassigned-person-${adminId}`).click();
+			const assignPanel = page.getByTestId("person-assignment-panel");
+			await expect(assignPanel).toBeVisible();
+			await expect(assignPanel.getByRole("heading", { name: "Assign person" })).toBeVisible();
+			await expect(assignPanel.getByText("System Admin")).toBeVisible();
+
+			await page.getByTestId("assignment-unit-select").click();
+			await page.getByRole("option", { name: "Section A", exact: true }).click();
+			await page.getByTestId("assignment-position-select").click();
+			await page.getByRole("option", { name: "Staff" }).click();
+			await page.getByTestId("assignment-team-select").click();
+			await page.getByRole("option", { name: "Line A" }).click();
+			await page.getByTestId("assignment-save").click();
+			await expect(assignPanel.getByRole("heading", { name: "Manage assignment" })).toBeVisible({
+				timeout: 15_000,
+			});
+
+			const personChip = page.getByTestId(`person-chip-${adminId}`);
+			await expect(personChip).toBeVisible({ timeout: 15_000 });
+			await expect(personChip).toContainText("System Admin — Staff");
+
+			{
+				const prisma = prismaClient();
+				try {
+					const row = await prisma.organization_assignments.findFirstOrThrow({
+						where: { userId: adminId, isActive: true },
+						select: { unitId: true, positionId: true, teamId: true },
+					});
+					expect(row.unitId).toBe(SECTION_A_ID);
+					expect(row.teamId).toBe(LINE_A_TEAM_ID);
+				} finally {
+					await prisma.$disconnect();
+				}
+			}
+
+			// Move to Section B with the before/after confirmation; changing unit
+			// cleared the incompatible team explicitly.
+			await personChip.click();
+			await page.getByTestId("assignment-unit-select").click();
+			await page.getByRole("option", { name: "Section B" }).click();
+			await page.getByTestId("assignment-team-select").click();
+			await page.getByRole("option", { name: "No team" }).click();
+			await page.getByTestId("assignment-save").click();
+			const confirmation = page.getByTestId("assignment-move-confirmation");
+			await expect(confirmation).toBeVisible();
+			await expect(confirmation.getByTestId("assignment-change-before")).toContainText("Section A");
+			await expect(confirmation.getByTestId("assignment-change-before")).toContainText("Line A");
+			await expect(confirmation.getByTestId("assignment-change-after")).toContainText("Section B");
+			await expect(confirmation.getByTestId("assignment-change-after")).toContainText("None");
+			await page.getByTestId("assignment-move-confirm").click();
+			await expect(confirmation).toHaveCount(0, { timeout: 15_000 });
+			await expect(
+				page.getByTestId(`unit-people-${SECTION_B_ID}`).getByTestId(`person-chip-${adminId}`),
+			).toBeVisible({ timeout: 15_000 });
+
+			{
+				const prisma = prismaClient();
+				try {
+					const row = await prisma.organization_assignments.findFirstOrThrow({
+						where: { userId: adminId, isActive: true },
+						select: { unitId: true, teamId: true },
+					});
+					expect(row.unitId).toBe(SECTION_B_ID);
+					expect(row.teamId).toBeNull();
+				} finally {
+					await prisma.$disconnect();
+				}
+			}
+
+			// Remove the assignment; the account reappears under Unassigned people.
+			await page.getByTestId(`person-chip-${adminId}`).click();
+			await page.getByTestId("assignment-remove").click();
+			await expect(page.getByTestId(`person-chip-${adminId}`)).toHaveCount(0, { timeout: 15_000 });
+			await expect(page.getByTestId(`unassigned-person-${adminId}`)).toBeVisible({ timeout: 15_000 });
+
+			{
+				const prisma = prismaClient();
+				try {
+					expect(
+						await prisma.organization_assignments.count({
+							where: { userId: adminId, isActive: true },
+						}),
+					).toBe(0);
+				} finally {
+					await prisma.$disconnect();
+				}
+			}
+		} finally {
+			try {
+				await deactivateAdminAssignments();
+			} finally {
+				await session.context.close();
+			}
+		}
+	});
+
+	test("Positions blocked rank change lists affected teams and routes and persists nothing", async ({
+		browser,
+	}) => {
+		test.setTimeout(180_000);
+		const session = await openSignedIn(browser, EMAIL.admin);
+		const page = session.page;
+		try {
+			await page.setViewportSize({ width: 1280, height: 720 });
+			await page.goto("/admin/organization");
+			await expect(page.getByTestId("organization-tree")).toBeVisible({ timeout: 20_000 });
+
+			await page.getByTestId("header-positions").click();
+			const panel = page.getByTestId("position-admin-panel");
+			await expect(panel).toBeVisible({ timeout: 20_000 });
+
+			await page.getByTestId(`position-rank-edit-${LEAD_ID}`).click();
+			const rankInput = page.getByTestId(`position-rank-input-${LEAD_ID}`);
+			await rankInput.fill("5");
+			await page.getByTestId(`position-rank-save-${LEAD_ID}`).click();
+
+			const impact = page.getByTestId("position-rank-impact");
+			await expect(impact).toBeVisible({ timeout: 20_000 });
+			await expect(impact.getByTestId("position-rank-impact-teams")).toContainText("Line A");
+			await expect(impact.getByTestId("position-rank-impact-routes")).toContainText(/REQUEST/);
+			await expect(page.getByTestId(`position-rank-save-${LEAD_ID}`)).toBeDisabled();
+
+			const prisma = prismaClient();
+			try {
+				const lead = await prisma.positions.findUniqueOrThrow({
+					where: { id: LEAD_ID },
+					select: { rank: true },
+				});
+				expect(lead.rank).toBe(2);
+			} finally {
+				await prisma.$disconnect();
+			}
+
+			await page.getByTestId(`position-rank-cancel-${LEAD_ID}`).click();
+			await expect(page.getByTestId(`position-rank-editor-${LEAD_ID}`)).toHaveCount(0);
+		} finally {
+			await session.context.close();
+		}
+	});
+
+	test("Approval chains: root default draft, limit conflict blocks publish, submitter tests, publish, drafts distinct", async ({
+		browser,
+	}) => {
+		test.setTimeout(240_000);
+		const session = await openSignedIn(browser, EMAIL.admin);
+		const page = session.page;
+		try {
+			await page.setViewportSize({ width: 1280, height: 720 });
+			await page.goto("/admin/organization");
+			await expect(page.getByTestId("organization-tree")).toBeVisible({ timeout: 20_000 });
+
+			await page.getByTestId("header-approval-chains").click();
+			const panel = page.getByTestId("chains-panel");
+			await expect(panel).toBeVisible({ timeout: 20_000 });
+
+			// Edit the root REQUEST default: save a draft first.
+			await page.getByTestId("chains-root-customize-REQUEST").click();
+			const editor = page.getByTestId("route-editor-cs-unit-company-REQUEST");
+			await expect(editor).toBeVisible({ timeout: 15_000 });
+			await expect(editor).toContainText("Lead");
+			await expect(editor).toContainText("Director");
+
+			await page.getByTestId("route-editor-save-draft").click();
+			await expect(editor.getByText(/Draft saved \(version/)).toBeVisible({ timeout: 15_000 });
+			const draftList = page.getByTestId("chains-draft-list-REQUEST");
+			await expect(draftList.locator('[data-testid^="chains-draft-"]')).not.toHaveCount(0, {
+				timeout: 15_000,
+			});
+
+			// Lower the approval limit below a step: Publish disabled with the
+			// conflict list.
+			await page.getByTestId("route-editor-limit-select").click();
+			await page.getByRole("option", { name: /Manager \(rank 3\)/ }).click();
+			await expect(page.getByTestId("route-editor-publish")).toBeDisabled();
+			const conflicts = page.getByTestId("route-editor-conflicts");
+			await expect(conflicts).toBeVisible();
+			await expect(conflicts).toContainText("Director");
+			await expect(conflicts).toContainText("EXCEEDS_LIMIT");
+			await expect(conflicts.getByTestId("route-editor-conflict-3")).toContainText("Director");
+
+			// Restore the limit before the side-effect-free submitter test: the
+		// server refuses to resolve a draft whose steps exceed its limit, so the
+		// test runs on the corrected draft.
+			await page.getByTestId("route-editor-limit-select").click();
+			await page.getByRole("option", { name: /Director \(rank 4\)/ }).click();
+			await expect(page.getByTestId("route-editor-conflicts")).toHaveCount(0);
+
+			// Test with a submitter: ungrouped Bob (path only, vacant Lead step).
+			await page.getByTestId("route-editor-test-submitter").click();
+			const testDialog = page.getByTestId("submitter-test-dialog");
+			await expect(testDialog).toBeVisible();
+			await page.getByTestId("submitter-test-user-select").click();
+			await page.getByRole("option", { name: "Bob" }).click();
+			await page.getByTestId("submitter-test-run").click();
+			const bobResult = page.getByTestId("submitter-test-result");
+			await expect(bobResult).toBeVisible({ timeout: 15_000 });
+			// The dialog tests the CURRENT editor draft: it substitutes at the
+			// nearest published scope on the submitter's branch (Operations).
+			await expect(page.getByTestId("submitter-test-source")).toContainText(
+				"Draft (would substitute at Operations)",
+			);
+			await expect(page.getByTestId("submitter-test-skip-1")).toContainText("VACANT_POSITION");
+			await expect(page.getByTestId("submitter-test-step-2")).toContainText("Pat");
+			await expect(page.getByTestId("submitter-test-step-3")).toContainText("Dana");
+			await expect(page.getByTestId("submitter-test-auto-approved")).toHaveCount(0);
+			await page.getByTestId("submitter-test-close").click();
+
+			// Test with a team submitter: option-A candidates for Casey (Lead on
+			// Line A) — own-team + reports-to + own-unit + ancestor managers.
+			await page.getByTestId("route-editor-test-submitter").click();
+			await page.getByTestId("submitter-test-user-select").click();
+			await page.getByRole("option", { name: "Casey" }).click();
+			await page.getByTestId("submitter-test-run").click();
+			const caseyResult = page.getByTestId("submitter-test-result");
+			await expect(caseyResult).toBeVisible({ timeout: 15_000 });
+			await expect(page.getByTestId("submitter-test-step-2")).toContainText("Riley");
+			await expect(page.getByTestId("submitter-test-step-2")).toContainText("Morgan");
+			await expect(page.getByTestId("submitter-test-step-2")).toContainText("Pat");
+			await expect(page.getByTestId("submitter-test-step-2")).not.toContainText("Casey");
+			await expect(page.getByTestId("submitter-test-step-3")).toContainText("Dana");
+			await expect(page.getByTestId("submitter-test-step-1")).toHaveCount(0);
+			await page.getByTestId("submitter-test-close").click();
+
+			// Publish the corrected root default.
+			await expect(page.getByTestId("route-editor-publish")).toBeEnabled();
+			await page.getByTestId("route-editor-publish").click();
+			await expect(editor.getByText(/Published \(version/)).toBeVisible({ timeout: 15_000 });
+
+			const publishedList = page.getByTestId("chains-published-list-REQUEST");
+			await expect(publishedList.locator('[data-testid^="chains-published-route-"]')).toHaveCount(
+				1,
+				{ timeout: 15_000 },
+			);
+			await expect(draftList.locator('[data-testid^="chains-draft-"]')).not.toHaveCount(0);
+
+			const prisma = prismaClient();
+			try {
+				const published = await prisma.approval_route_versions.findMany({
+					where: {
+						scopeUnitId: "cs-unit-company",
+						phase: "REQUEST",
+						status: "PUBLISHED",
+					},
+					select: { id: true, version: true },
+				});
+				expect(published).toHaveLength(1);
+				const retired = await prisma.approval_route_versions.count({
+					where: {
+						scopeUnitId: "cs-unit-company",
+						phase: "REQUEST",
+						status: "RETIRED",
+					},
+				});
+				expect(retired).toBeGreaterThanOrEqual(1);
+			} finally {
+				await prisma.$disconnect();
+			}
+		} finally {
+			await session.context.close();
+		}
+	});
+
+	test("restart a stranded attempt with a reason through the real dialog", async ({ browser }) => {
+		test.setTimeout(240_000);
+		await retireJourneyStrandedFixtures();
+		await createStrandedAttemptFixture();
+		const session = await openSignedIn(browser, EMAIL.admin);
+		const page = session.page;
+		try {
+			await page.setViewportSize({ width: 1280, height: 720 });
+			await page.goto("/admin/organization?panel=chains");
+			const panel = page.getByTestId("chains-panel");
+			await expect(panel).toBeVisible({ timeout: 20_000 });
+
+			const strandedRow = page.getByTestId(`chains-stranded-${STRANDED_INSTANCE_ID}`);
+			await expect(strandedRow).toBeVisible({ timeout: 20_000 });
+			await expect(strandedRow).toContainText("REQUEST");
+			await page.getByTestId(`chains-stranded-restart-${STRANDED_INSTANCE_ID}`).click();
+
+			const dialog = page.getByTestId("restart-attempt-dialog");
+			await expect(dialog).toBeVisible();
+			const preview = page.getByTestId("restart-preview");
+			await expect(preview).toBeVisible({ timeout: 30_000 });
+			await expect(preview).toContainText(/Riley/);
+			await expect(preview).toContainText(/Dana/);
+			await expect(page.getByTestId("restart-confirm")).toBeDisabled();
+
+			await page.getByTestId("restart-reason-input").fill(RESTART_REASON);
+			await expect(page.getByTestId("restart-confirm")).toBeEnabled();
+			await page.getByTestId("restart-confirm").click();
+			await expect(dialog.getByText(/Restarted\. The old attempt is preserved as history\./)).toBeVisible({
+				timeout: 30_000,
+			});
+
+			const prisma = prismaClient();
+			try {
+				const adminId = await userIdByEmail(prisma, EMAIL.admin);
+				const oldInstance = await prisma.approval_instances.findUniqueOrThrow({
+					where: { id: STRANDED_INSTANCE_ID },
+					select: { supersededAt: true },
+				});
+				expect(oldInstance.supersededAt).not.toBeNull();
+				const next = await prisma.approval_instances.findFirstOrThrow({
+					where: { restartOfInstanceId: STRANDED_INSTANCE_ID },
+					select: {
+						id: true,
+						restartReason: true,
+						restartedById: true,
+						state: true,
+						supersededAt: true,
+					},
+				});
+				expect(next.restartReason).toBe(RESTART_REASON);
+				expect(next.restartedById).toBe(adminId);
+				expect(next.supersededAt).toBeNull();
+				const activity = await prisma.request_activities.findFirstOrThrow({
+					where: {
+						action: "restarted_stranded_attempt",
+						requestId: STRANDED_REQUEST_ID,
+						comments: RESTART_REASON,
+					},
+					select: { userId: true },
+				});
+				expect(activity.userId).toBe(adminId);
+			} finally {
+				await prisma.$disconnect();
+			}
+		} finally {
+			try {
+				await retireJourneyStrandedFixtures();
+			} finally {
+				await session.context.close();
+			}
 		}
 	});
 });

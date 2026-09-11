@@ -133,7 +133,7 @@ describe('clean-start organization workspace loader', () => {
     )
     assert.match(page, /Approval chains/)
     assert.match(page, /Positions/)
-    assert.match(page, /Create unit/)
+    assert.match(page, /CreateUnitDialog/)
     assert.doesNotMatch(page, /OrganizationEditor/)
     assert.doesNotMatch(page, /getOrganizationAdminData/)
   })
