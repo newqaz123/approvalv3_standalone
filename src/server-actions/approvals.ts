@@ -4,16 +4,13 @@ import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
 import type { Prisma } from '@prisma/client'
 import { revalidateRequestViews } from './request-view-invalidation'
-import {
-  type RequestStatusChangeResult,
-} from '@/lib/request-approval-transaction'
-import { RequestStatusConflictError } from '@/lib/request-status-transition'
-import { markCurrentInstanceOutcome, CURRENT_INSTANCE_ROW_FILTER } from '@/lib/approval-engine/phase-adapters'
+import { RequestStatusConflictError, type RequestStatusChangeResult } from '@/lib/request-status-transition'
+import { CURRENT_INSTANCE_ROW_FILTER } from '@/lib/approval-engine/current-instance'
 import {
   advanceApprovalAtomically,
   canUserApproveRequest,
   createPrismaApprovalTransactionDb,
-} from '@/lib/approval-engine/transactions'
+} from '@/lib/approval-engine/transaction-adapter'
 import {
   createPrismaNotificationRecipientDb,
   mapEventRecipients,
@@ -27,6 +24,7 @@ import { requireAdmin } from '@/lib/auth'
 import { APPROVAL_ENGINE_TRANSACTION_ISOLATION } from '@/lib/approval-engine/plan'
 import {
   createCleanStartPhaseAttemptTx,
+  markCurrentInstanceOutcome,
   previewReplacementChain as previewReplacementChainOnPorts,
   restartStrandedAttempt as restartStrandedAttemptOnPorts,
   type CleanStartAttemptStore,

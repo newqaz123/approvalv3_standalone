@@ -6,12 +6,19 @@
  * not superseded, so superseded resubmission history never looks current in
  * any pending, action, blocking, or notification query.
  *
- * This module is intentionally dependency-free: both `request-status-transition.ts`
- * and `request-approval-transaction.ts` sit inside the import closure of the
- * approval engine, so a shared import here (instead of from
- * `phase-adapters.ts`) keeps the lib graph acyclic.
+ * This module is intentionally dependency-free so request-status-transition
+ * and server-action query builders can share the filter without importing
+ * the Prisma-backed transaction adapter.
  */
 export const CURRENT_INSTANCE_ROW_FILTER = [
   { instanceId: null },
   { instance: { supersededAt: null } },
 ] as const
+
+/** Prisma predicate for a snapshot-group actionable row: persisted membership. */
+export function snapshotGroupActionWhere(userId: string) {
+  return {
+    routingMode: 'SNAPSHOT_GROUP' as const,
+    candidateGroup: { members: { some: { userId } } },
+  }
+}

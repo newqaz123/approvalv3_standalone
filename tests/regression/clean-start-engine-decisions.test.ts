@@ -1,8 +1,7 @@
 // Clean-start first-decision-wins decisions + stranded detection (Plan B Task 5).
 // In-memory fakes only: NO Prisma, NO database, NO env, NO schema/server ops.
-// Re-bases transaction/post-commit/conflict mechanics from
-// request-approval-transaction.test.ts, approval-concurrency.test.ts, and
-// organization-approval-baseline.test.ts. Permission-branch cases are named
+// Re-bases transaction/post-commit/conflict mechanics from the deleted
+// legacy transaction/concurrency/baseline suites. Permission-branch cases are named
 // B10 clean-start-policy.test.ts coverage (transitional gap until B10).
 // Cancellation remains request-cancellation-transition-guard.test.ts.
 import { describe, it } from 'node:test'

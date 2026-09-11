@@ -5,8 +5,6 @@ import prisma from '@/lib/prisma'
 import { requireAdmin } from '@/lib/auth'
 import { revalidatePath } from 'next/cache'
 import { auth } from '@/lib/auth-config'
-import { validateApprovalLevel } from '@/lib/approval-levels'
-import type { OrganizationPositionCode } from '@/lib/organization/types'
 
 export type UserRole = 'admin' | 'general_dept' | 'engineering'
 
@@ -15,15 +13,13 @@ export interface CreateUserInput {
   email: string
   role: UserRole
   password?: string
-  level?: number | null
 }
 
 export interface UpdateUserInput {
   id: string
   name: string
   email: string
-  role?: UserRole // Optional to allow manual override
-  level?: number | null
+  role?: UserRole
 }
 
 export type UserWithDepartment = {
@@ -32,15 +28,12 @@ export type UserWithDepartment = {
   email: string
   role: UserRole
   department: { id: string; name: string } | null
-  level: number | null
   isActive: boolean
   createdAt: Date
-  departmentApproverRoles?: { id: string; department: { id: string; name: string } }[]
   organizationAssignment?: {
     unitId: string
     unitName: string
-    unitType: string
-    positionCode: OrganizationPositionCode
+    positionName: string
   } | null
 }
 
@@ -60,23 +53,17 @@ export async function getUsers() {
 
   const users = await prisma.user.findMany({
     include: {
-      departmentApproverRoles: {
-        include: {
-          department: {
-            select: {
-              id: true,
-              name: true
-            }
-          }
-        }
-      },
-      organizationPositionAssignments: {
-        where: { isActive: true, isPrimary: true },
+      organizationAssignments: {
+        where: { isActive: true },
         include: {
           unit: {
-            select: { id: true, name: true, unitType: true },
+            select: { id: true, name: true },
+          },
+          position: {
+            select: { name: true },
           },
         },
+        take: 1,
       },
     },
     orderBy: {
@@ -85,8 +72,8 @@ export async function getUsers() {
   })
 
   return users.map((user) => {
-    const primary = user.organizationPositionAssignments[0]
-    const { organizationPositionAssignments, ...rest } = user
+    const primary = user.organizationAssignments[0]
+    const { organizationAssignments, ...rest } = user
     return {
       ...rest,
       department: primary ? { id: primary.unit.id, name: primary.unit.name } : null,
@@ -94,8 +81,7 @@ export async function getUsers() {
         ? {
             unitId: primary.unit.id,
             unitName: primary.unit.name,
-            unitType: primary.unit.unitType,
-            positionCode: primary.positionCode,
+            positionName: primary.position.name,
           }
         : null,
     }
@@ -111,20 +97,21 @@ export async function getUser(id: string) {
   const user = await prisma.user.findUnique({
     where: { id },
     include: {
-      organizationPositionAssignments: {
-        where: { isActive: true, isPrimary: true },
+      organizationAssignments: {
+        where: { isActive: true },
         include: {
           unit: {
             select: { id: true, name: true },
           },
         },
+        take: 1,
       },
     },
   })
 
   if (!user) return user
-  const primary = user.organizationPositionAssignments[0]
-  const { organizationPositionAssignments, ...rest } = user
+  const primary = user.organizationAssignments[0]
+  const { organizationAssignments, ...rest } = user
   return {
     ...rest,
     department: primary ? { id: primary.unit.id, name: primary.unit.name } : null,
@@ -139,9 +126,6 @@ export async function createUser(input: CreateUserInput) {
   if (!adminUserId) {
     throw new Error('Admin authorization is required for user actions')
   }
-  const level = validateApprovalLevel(input.level, { allowNull: true })
-
-  // Check if email already exists
   const existing = await prisma.user.findUnique({
     where: { email: input.email },
   })
@@ -151,7 +135,6 @@ export async function createUser(input: CreateUserInput) {
 
   const finalRole: UserRole = input.role
 
-  // Hash default password (admin sets it, or use default)
   const password = input.password || 'changeme'
   const passwordHash = await hash(password, 12)
 
@@ -161,7 +144,6 @@ export async function createUser(input: CreateUserInput) {
       name: input.name,
       passwordHash,
       role: finalRole,
-      level,
       isActive: true,
       forcePasswordChange: true,
       updatedAt: new Date(),
@@ -179,9 +161,6 @@ export async function createUser(input: CreateUserInput) {
  */
 export async function updateUser(input: UpdateUserInput) {
   const adminUserId = await requireAdmin()
-  const validatedLevel = validateApprovalLevel(input.level, { allowNull: true })
-
-  // Verify admin authentication
   if (!adminUserId) {
     throw new Error('Admin authentication failed')
   }
@@ -194,14 +173,11 @@ export async function updateUser(input: UpdateUserInput) {
     throw new Error('User not found')
   }
 
-  const level = input.level === undefined ? existingUser.level : validatedLevel
   const finalRole: UserRole = input.role || existingUser.role
 
-  // Track original values for audit logging
   const originalName = existingUser.name
   const originalEmail = existingUser.email
   const originalRole = existingUser.role
-  const originalLevel = existingUser.level
 
   // Check if email is being changed to one that already exists
   if (input.email !== originalEmail) {
@@ -217,7 +193,6 @@ export async function updateUser(input: UpdateUserInput) {
   if (input.name !== originalName) changes.push(`name: "${originalName}" → "${input.name}"`)
   if (input.email !== originalEmail) changes.push(`email: "${originalEmail}" → "${input.email}"`)
   if (finalRole !== originalRole) changes.push(`role: "${originalRole}" → "${finalRole}"`)
-  if (level !== originalLevel) changes.push(`level: "${String(originalLevel ?? 'null')}" → "${String(level ?? 'null')}"`)
 
   const user = await prisma.user.update({
     where: { id: input.id },
@@ -225,7 +200,6 @@ export async function updateUser(input: UpdateUserInput) {
       name: input.name,
       email: input.email,
       role: finalRole,
-      level,
       updatedAt: new Date(),
     },
   })

@@ -1,13 +1,11 @@
 // Clean-start approval-route definition + validation (Plan B Task 2).
 // Own step/version types (positionId + named limit). ApprovalPhase is the
-// existing canonical union, type-re-exported only — types.ts is type-only
-// (no runtime values), so this does not pull legacy validation/resolver
-// behavior (ledger R5). Do not import ./validation or ./resolver.
+// canonical union owned here; the old approval-routes/{types,validation,resolver}
+// modules were deleted in Task 15.
 
-import type { ApprovalPhase } from '@/lib/approval-routes/types'
 import type { PositionNode } from '@/lib/organization/model'
 
-export type { ApprovalPhase }
+export type ApprovalPhase = 'REQUEST' | 'SOLUTION' | 'FINAL'
 
 export interface ApprovalRouteStepDefinition {
   order: number

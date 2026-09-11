@@ -27,11 +27,7 @@ function sliceBetween(path: string, start: string, end: string): string {
   return source.slice(startAt, endAt)
 }
 
-const GREP_ALLOWLIST = [
-  'src/lib/approval-engine/transactions.ts',
-  'src/lib/approval-engine/phase-origin.ts',
-  'src/lib/approval-engine/phase-adapters.ts',
-] as const
+const GREP_ALLOWLIST = [] as const
 
 const pickerPaths = [
   'src/components/solutions/custom-approval-picker.tsx',

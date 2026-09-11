@@ -43,7 +43,7 @@ describe('clean-start additive schema', () => {
     assert.ok(fields('budget_codes').includes('unitId'))
   })
   it('carries the partial unique contracts in migration SQL', () => {
-    const sql = readFileSync('prisma/migrations/00000000000001_clean_start_additive/migration.sql', 'utf8').replace(/\s+/g, ' ')
+    const sql = readFileSync('prisma/migrations/00000000000001_clean_start_init/migration.sql', 'utf8').replace(/\s+/g, ' ')
     // Quoted identifiers are required: Prisma stores camelCase columns quoted.
     // Unquoted userId folds to userid and would fail a real SQL apply.
     // These regexes must not match unquoted SQL (no /i; quotes are mandatory).
@@ -56,5 +56,80 @@ describe('clean-start additive schema', () => {
     // deliberately NOT an unqualified UNIQUE (unitId, name) — inactive
     // historical team names must remain reusable.
     assert.match(sql, /CREATE UNIQUE INDEX one_active_team_name_per_unit ON "teams" \("unitId", "name"\) WHERE "isActive"/)
+  })
+})
+
+const enumValues = (name: string) => {
+  const found = Prisma.dmmf.datamodel.enums.find((item) => item.name === name)
+  assert.ok(found, `enum ${name} must exist`)
+  return found.values.map((value) => value.name)
+}
+
+const modelNames = () => Prisma.dmmf.datamodel.models.map((item) => item.name)
+
+describe('clean-start schema finalization removals', () => {
+  it('drops legacy models', () => {
+    const names = modelNames()
+    for (const gone of [
+      'departments',
+      'department_approvers',
+      'hierarchy_change_logs',
+      'organization_import_runs',
+      'reporting_groups',
+      'reporting_group_members',
+      'organization_position_assignments',
+    ]) {
+      assert.equal(names.includes(gone), false, `model ${gone} must be absent`)
+    }
+  })
+
+  it('drops legacy columns from remaining models', () => {
+    assert.equal(fields('User').includes('departmentId'), false, 'users.departmentId must be absent')
+    assert.equal(fields('User').includes('level'), false, 'users.level must be absent')
+    assert.equal(fields('requests').includes('departmentId'), false, 'requests.departmentId must be absent')
+    assert.equal(fields('budget_codes').includes('departmentId'), false, 'budget_codes.departmentId must be absent')
+    for (const gone of ['unitType', 'legacyDepartmentId', 'operationalType']) {
+      assert.equal(fields('organization_units').includes(gone), false, `organization_units.${gone} must be absent`)
+    }
+    assert.equal(fields('approval_route_versions').includes('maximumPositionLevel'), false)
+    assert.equal(fields('approval_route_steps').includes('positionCode'), false)
+    assert.equal(fields('approval_instances').includes('originContext'), false, 'approval_instances legacy context must be absent')
+    for (const model of ['request_approvals', 'solution_approvals']) {
+      for (const gone of ['requiredLevel', 'requiredPosition', 'isCustomChain', 'integrityVersion']) {
+        assert.equal(fields(model).includes(gone), false, `${model}.${gone} must be absent`)
+      }
+    }
+    assert.equal(fields('approval_instance_skips').includes('requiredPosition'), false)
+    assert.equal(fields('approval_candidate_groups').includes('requiredPosition'), false)
+  })
+
+  it('drops leftover enums and keeps ApprovalRoutingMode as CUSTOM_PERSON|SNAPSHOT_GROUP', () => {
+    const enums = Prisma.dmmf.datamodel.enums.map((item) => item.name)
+    assert.equal(enums.includes('DepartmentType'), false)
+    assert.equal(enums.includes('OrganizationUnitType'), false)
+    assert.equal(enums.includes('OrganizationPositionCode'), false)
+    assert.deepEqual(enumValues('ApprovalRoutingMode').slice().sort(), ['CUSTOM_PERSON', 'SNAPSHOT_GROUP'])
+  })
+
+  it('tightens staged columns to required', () => {
+    const required = (modelName: string, fieldName: string) => {
+      const field = model(modelName).fields.find((item) => item.name === fieldName)
+      assert.ok(field, `${modelName}.${fieldName} must exist`)
+      assert.equal(field.isRequired, true, `${modelName}.${fieldName} must be required`)
+    }
+    required('approval_route_versions', 'approvalLimitPositionId')
+    required('approval_route_steps', 'positionId')
+    required('approval_instances', 'originAssignmentId')
+    required('approval_instances', 'originPositionId')
+    required('approval_instance_skips', 'requiredPositionId')
+    required('approval_candidate_groups', 'requiredPositionId')
+  })
+
+  it('carries row-mode CHECKs in the squashed init migration', () => {
+    const sql = readFileSync('prisma/migrations/00000000000001_clean_start_init/migration.sql', 'utf8').replace(/\s+/g, ' ')
+    assert.match(sql, /ADD CONSTRAINT "request_approvals_row_mode_integrity" CHECK/)
+    assert.match(sql, /ADD CONSTRAINT "solution_approvals_row_mode_integrity" CHECK/)
+    assert.match(sql, /"routingMode" = 'SNAPSHOT_GROUP' AND "instanceId" IS NOT NULL AND "requiredPositionId" IS NOT NULL/)
+    assert.match(sql, /ADD CONSTRAINT "approval_instances_one_document_owner" CHECK/)
   })
 })

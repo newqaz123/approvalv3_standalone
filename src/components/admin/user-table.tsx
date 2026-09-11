@@ -46,7 +46,7 @@ interface UserTableProps {
 
 function organizationLabel(user: UserWithDepartment): string {
   if (user.organizationAssignment) {
-    return `${user.organizationAssignment.unitName} · ${user.organizationAssignment.positionCode}`
+    return `${user.organizationAssignment.unitName} · ${user.organizationAssignment.positionName}`
   }
   return 'Unassigned'
 }

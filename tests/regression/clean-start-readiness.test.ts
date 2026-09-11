@@ -1,5 +1,5 @@
 // Clean-start readiness validation (Plan A Task 7) — replaces the legacy
-// cutover/mapping machinery (approval-rollout modes, mapping digests) with
+// cutover/mapping machinery (legacy rollout modes, mapping digests) with
 // explicit organization/route readiness. In-memory fake db and child CLI
 // only: NO Prisma, NO database, NO env-var rollout modes. Pins the parent
 // A7 rulings R-A7-1..R-A7-6 recorded in the SDD ledger before these tests.

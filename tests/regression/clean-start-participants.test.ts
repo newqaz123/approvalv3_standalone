@@ -54,7 +54,7 @@ function fakeParticipantsDb(over: {
 
 function fakeRecipientDb(over: {
   row?: {
-    routingMode: 'SNAPSHOT_GROUP' | 'CUSTOM_PERSON' | 'LEGACY_LEVEL'
+    routingMode: 'SNAPSHOT_GROUP' | 'CUSTOM_PERSON'
     candidateGroupId: string | null
     requiredApproverId: string | null
     requestId: string

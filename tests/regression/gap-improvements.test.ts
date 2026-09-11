@@ -115,7 +115,7 @@ describe("Gapforimprove regressions", () => {
 		assert.match(page, /id: request\.id/);
 		assert.match(page, /title: request\.title/);
 		assert.match(page, /status: request\.status/);
-		assert.match(page, /department: request\.department/);
+		assert.match(page, /department: request\.organizationUnit/);
 		assert.match(page, /requester: request\.requester/);
 		assert.doesNotMatch(
 			requests,

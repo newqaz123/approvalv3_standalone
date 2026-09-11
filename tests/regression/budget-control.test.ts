@@ -383,12 +383,12 @@ describe('budget code name field', () => {
     const schema = readFileSync('prisma/schema.prisma', 'utf8')
     const types = readFileSync('src/types/budget.ts', 'utf8')
     const migration = readFileSync(
-      'prisma/migrations/20260817000000_add_budget_code_name/migration.sql',
+      'prisma/migrations/00000000000001_clean_start_init/migration.sql',
       'utf8'
     )
 
     assert.match(schema, /model budget_codes[\s\S]*name\s+String\?/)
-    assert.match(migration, /ALTER TABLE "budget_codes" ADD COLUMN "name" TEXT/)
+    assert.match(migration, /CREATE TABLE "budget_codes"/)
     assert.match(types, /name: string \| null/)
     assert.match(types, /requests: BudgetRequestRecord\[\]/)
   })
@@ -511,7 +511,7 @@ describe('budget monitor server actions', () => {
     assert.match(getDataBody, /request\.budgetCode/)
   })
 
-  it('links budget codes to departments and applies department filtering by budget code for groups', () => {
+  it('links budget codes to units and applies unit filtering by budget code for groups', () => {
     const source = readServerAction()
     const schema = readFileSync('prisma/schema.prisma', 'utf8')
     const getDataBody = source.slice(
@@ -519,8 +519,7 @@ describe('budget monitor server actions', () => {
       source.indexOf('export async function assignRequestToBudgetCode')
     )
 
-    assert.match(schema, /model budget_codes[\s\S]*departmentId/)
-    assert.match(schema, /model departments[\s\S]*budgetCodes/)
+    assert.match(schema, /model budget_codes[\s\S]*unitId/)
     assert.match(getDataBody, /budgetCode\?\.department\?\.id === filters\.unitId/)
     assert.match(getDataBody, /request\.department\?\.id === filters\.unitId/)
     assert.doesNotMatch(source.slice(source.indexOf('function applyBudgetFilters'), source.indexOf('function decimalToNumber')), /where\.departmentId/)

@@ -9,7 +9,7 @@ import {
   canUserApproveRequest,
   canUserApproveSolution,
   createPrismaApprovalTransactionDb,
-} from '@/lib/approval-engine/transactions'
+} from '@/lib/approval-engine/transaction-adapter'
 import type { OrganizationUnitNode } from '@/lib/organization/model'
 import {
   REQUEST_ACTIONS,

@@ -8,7 +8,7 @@
 // existing approval-routes types (plan Task 4 + ruling R5; B15 rewires this
 // import once B2's definition.ts owns the union). Type-only legacy surface:
 // no runtime import of legacy organization modules.
-import type { ApprovalPhase } from '@/lib/approval-routes/types'
+import type { ApprovalPhase } from '@/lib/approval-routes/definition'
 import { OrganizationValidationError } from './assignments'
 import type { AssignmentNode, PositionNode, TeamNode } from './model'
 

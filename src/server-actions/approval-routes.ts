@@ -21,12 +21,6 @@
 //   attempts only; it is NOT a global activation switch (copy lives in the
 //   ApprovalChainsPanel component).
 //
-// Leftover legacy NOT NULL columns: approval_route_versions.maximumPositionLevel
-// and approval_route_steps.positionCode still exist until the B15 schema
-// finalization. Clean-start runtime reads approvalLimitPositionId/positionId
-// only. The step column is filled by STEP ORDER slots (a fixed positional
-// sequence, NOT a mapping from any position's name/rank/identity), and the
-// version column with a constant; both are documented transitional fills.
 
 import {
   ApprovalRouteConfigurationError,
@@ -49,20 +43,6 @@ import type {
 } from '@/lib/organization/model'
 
 const APPROVAL_PHASES: readonly ApprovalPhase[] = ['REQUEST', 'SOLUTION', 'FINAL']
-
-/** Leftover approval_route_steps.positionCode slots, assigned BY STEP ORDER. */
-const LEFTOVER_STEP_POSITION_CODE_SLOTS = [
-  'STAFF',
-  'SUPERVISOR',
-  'SECTION_MANAGER',
-  'DEPARTMENT_MANAGER',
-  'DIVISION_MANAGER',
-  'FACTORY_MANAGER',
-] as const
-type LeftoverStepPositionCode = (typeof LEFTOVER_STEP_POSITION_CODE_SLOTS)[number]
-
-/** Leftover approval_route_versions.maximumPositionLevel fill (runtime reads the limit position). */
-const LEFTOVER_MAXIMUM_POSITION_LEVEL = 0
 
 export interface RouteStepInput {
   order: number
@@ -226,18 +206,6 @@ function definitionFromInput(
     status,
     steps: input.steps.map((step) => ({ order: step.order, positionId: step.positionId })),
   }
-}
-
-function leftoverStepPositionCode(step: RouteStepInput): LeftoverStepPositionCode {
-  const index = step.order - 1
-  const slot = LEFTOVER_STEP_POSITION_CODE_SLOTS[index]
-  if (slot === undefined) {
-    throw new ApprovalRouteConfigurationError(
-      `Transitional schema limit: route has more than ${LEFTOVER_STEP_POSITION_CODE_SLOTS.length} steps; ` +
-      'the leftover NOT NULL positionCode column (dropped in the schema-finalization task) cannot be filled',
-    )
-  }
-  return slot
 }
 
 // ---------------------------------------------------------------------------
@@ -726,8 +694,6 @@ function createProductionWriteTx(client: ChainsPrisma): ApprovalChainsWriteTx {
           createdById: input.adminUserId,
           publishedAt: input.publishedAt,
           approvalLimitPositionId: input.approvalLimitPositionId,
-          // Leftover NOT NULL column until the schema-finalization drop.
-          maximumPositionLevel: LEFTOVER_MAXIMUM_POSITION_LEVEL,
         },
       })
       if (input.steps.length > 0) {
@@ -736,8 +702,6 @@ function createProductionWriteTx(client: ChainsPrisma): ApprovalChainsWriteTx {
             routeVersionId: route.id,
             stepOrder: step.order,
             positionId: step.positionId,
-            // Leftover NOT NULL column until the schema-finalization drop.
-            positionCode: leftoverStepPositionCode(step),
           })),
         })
       }

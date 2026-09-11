@@ -38,16 +38,13 @@ import {
   canSubmitRequests,
   createCleanStartPhaseAttemptTx,
   createRequestApprovalAttempt,
+  markCurrentInstanceOutcome,
   requireAssignableSubmitter,
   SubmissionDeniedError,
   type CleanStartAttemptStore,
 } from '@/lib/approval-engine/attempts'
-import {
-  CURRENT_INSTANCE_ROW_FILTER,
-  markCurrentInstanceOutcome,
-} from '@/lib/approval-engine/phase-adapters'
+import { CURRENT_INSTANCE_ROW_FILTER, snapshotGroupActionWhere } from '@/lib/approval-engine/current-instance'
 import { ApprovalRouteConfigurationError } from '@/lib/approval-routes/definition'
-import { snapshotGroupActionWhere } from '@/lib/approval-engine/transactions'
 import { buildRequestVisibilityWhere, canUserViewRequest, createRequestVisibilityDb } from '@/lib/request-visibility/scope'
 import { mapEventRecipients } from '@/lib/notification-recipients'
 import { descendantUnitIds } from '@/lib/organization/hierarchy'
@@ -434,8 +431,7 @@ export async function getMyRequests(filters?: GetRequestsFilters) {
               requiredApprover: {
                 select: { name: true },
               },
-              requiredLevel: true,
-              order: true,
+                            order: true,
               approvedAt: true,
               candidateGroup: {
                 select: {
@@ -474,8 +470,7 @@ export async function getMyRequests(filters?: GetRequestsFilters) {
         select: {
           id: true,
           status: true,
-          requiredLevel: true,
-          order: true,
+                    order: true,
           approvedAt: true,
           isFinalApproval: true,
           approver: {
@@ -531,7 +526,7 @@ export async function getMyRequests(filters?: GetRequestsFilters) {
           status: sa.status,
           approver: sa.approver ? { name: sa.approver.name } : null,
           requiredApprover: sa.requiredApprover ? { name: sa.requiredApprover.name } : null,
-          requiredLevel: sa.requiredLevel ?? 0,
+          requiredLevel: sa.order,
           order: sa.order,
           approvedAt: sa.approvedAt,
           isFinalApproval: false, // Solution approvals are not final approvals
@@ -540,7 +535,10 @@ export async function getMyRequests(filters?: GetRequestsFilters) {
       : []
 
     const rawApprovals = useSolutionApprovals ? solutionApprovals : req.approvals
-    const approvals = rawApprovals.map((approval) => withCandidateNames(approval))
+    const approvals = rawApprovals.map((approval) => ({
+      ...withCandidateNames(approval),
+      requiredLevel: approval.order,
+    }))
 
     return {
       id: req.id,
@@ -590,7 +588,7 @@ export async function getRequest(id: string) {
           email: true,
         },
       },
-      department: {
+      organizationUnit: {
         select: {
           name: true,
         },
@@ -683,8 +681,7 @@ export async function getRequest(id: string) {
           status: true,
           comments: true,
           isFinalApproval: true,
-          requiredLevel: true,
-          order: true,
+                    order: true,
           createdAt: true,
           approvedAt: true,
           approver: {
@@ -729,8 +726,7 @@ export async function getRequest(id: string) {
               id: true,
               status: true,
               comments: true,
-              requiredLevel: true,
-              order: true,
+                            order: true,
               createdAt: true,
               approvedAt: true,
               approver: {
@@ -834,7 +830,12 @@ export async function getRequest(id: string) {
     }
   }
 
-  return request
+  if (!request) return null
+
+  return {
+    ...request,
+    department: request.organizationUnit ?? null,
+  }
 }
 
 /**
@@ -920,7 +921,7 @@ export async function getMyActionItems() {
     include: {
       request: {
         include: {
-          department: {
+          organizationUnit: {
             select: {
               name: true,
             },
@@ -972,7 +973,7 @@ export async function getMyActionItems() {
           createdAt: approval.request.createdAt,
           updatedAt: approval.request.updatedAt,
           requesterId: approval.request.requesterId,
-          department: approval.request.department,
+          department: approval.request.organizationUnit,
           requester: approval.request.requester,
           _count: approval.request._count,
         })
@@ -999,7 +1000,7 @@ export async function getMyActionItems() {
         include: {
           request: {
             include: {
-              department: {
+              organizationUnit: {
                 select: {
                   name: true,
                 },
@@ -1055,7 +1056,7 @@ export async function getMyActionItems() {
           createdAt: request.createdAt,
           updatedAt: request.updatedAt,
           requesterId: request.requesterId,
-          department: request.department,
+          department: request.organizationUnit,
           requester: request.requester,
           _count: request._count,
         })
@@ -1354,7 +1355,7 @@ export async function getDeletedRequests() {
           email: true,
         },
       },
-      department: {
+      organizationUnit: {
         select: {
           name: true,
         },
@@ -1677,7 +1678,7 @@ export async function bulkDeleteRequestsByDateRange(input: {
             email: true,
           },
         },
-        department: {
+        organizationUnit: {
           select: {
             name: true,
           },
@@ -1936,9 +1937,9 @@ export async function getRequestsNeedingEngineeringAction(userId: string): Promi
               id: approval.id,
               status: approval.status,
               order: approval.order,
-              requiredLevel: approval.requiredLevel,
+              requiredLevel: approval.order,
               requiredApproverId: approval.requiredApproverId,
-              isCustomChain: approval.isCustomChain,
+              isCustomChain: approval.routingMode === 'CUSTOM_PERSON',
             },
           })
           break // Only add one approval per solution
@@ -2171,7 +2172,7 @@ export async function getRequestsForEngineering(filters?: GetRequestsForEngineer
   const requests = await prisma.requests.findMany({
     where: { AND: [visibilityWhere, engineeringFilters] },
     include: {
-      department: {
+      organizationUnit: {
         select: {
           name: true,
         },
@@ -2244,11 +2245,7 @@ export async function resubmitRequest(input: {
       approvals: {
         where: { OR: [...CURRENT_INSTANCE_ROW_FILTER] },
       },
-      requester: {
-        include: {
-          department: true,
-        },
-      },
+      requester: true,
     },
   })
 
@@ -2603,7 +2600,7 @@ export async function getAllRequestsForRetention(includeArchived: boolean = true
       requester: {
         select: { name: true, email: true },
       },
-      department: {
+      organizationUnit: {
         select: { name: true },
       },
     },

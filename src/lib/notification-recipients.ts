@@ -22,7 +22,7 @@ export interface NotificationRecipientDb {
     approvalId: string
     phase: 'REQUEST' | 'SOLUTION' | 'FINAL'
   }): Promise<{
-    routingMode: 'LEGACY_LEVEL' | 'SNAPSHOT_GROUP' | 'CUSTOM_PERSON'
+    routingMode: 'SNAPSHOT_GROUP' | 'CUSTOM_PERSON'
     candidateGroupId: string | null
     requiredApproverId: string | null
     requestId: string
@@ -141,9 +141,9 @@ export type NotificationRecipientClient = Pick<
 
 function asRoutingMode(
   value: string | null | undefined,
-): 'LEGACY_LEVEL' | 'SNAPSHOT_GROUP' | 'CUSTOM_PERSON' {
-  if (value === 'SNAPSHOT_GROUP' || value === 'CUSTOM_PERSON') return value
-  return 'LEGACY_LEVEL'
+): 'SNAPSHOT_GROUP' | 'CUSTOM_PERSON' {
+  if (value === 'CUSTOM_PERSON') return value
+  return 'SNAPSHOT_GROUP'
 }
 
 export function createPrismaNotificationRecipientDb(

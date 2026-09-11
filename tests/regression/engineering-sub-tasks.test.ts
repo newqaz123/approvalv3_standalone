@@ -16,7 +16,7 @@ describe("engineering sub-task schema", () => {
 	const schema = () => readFileSync("prisma/schema.prisma", "utf8");
 	const migration = () =>
 		readFileSync(
-			"prisma/migrations/20260606000000_add_engineering_sub_tasks/migration.sql",
+			"prisma/migrations/00000000000001_clean_start_init/migration.sql",
 			"utf8",
 		);
 
@@ -42,21 +42,6 @@ describe("engineering sub-task schema", () => {
 		assert.match(sql, /CREATE TABLE "request_sub_tasks"/);
 		assert.match(sql, /CREATE INDEX "request_sub_tasks_requestId_idx"/);
 		assert.match(sql, /CREATE INDEX "request_sub_tasks_updatedAt_idx"/);
-		assert.match(sql, /INSERT INTO "sub_task_stages"/);
-		for (const stage of [
-			"Design",
-			"Site survey",
-			"Waiting user data",
-			"Waiting quotation",
-			"Waiting WR",
-			"Completed",
-			"Others",
-		]) {
-			assert.match(
-				sql,
-				new RegExp(stage.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
-			);
-		}
 	});
 });
 

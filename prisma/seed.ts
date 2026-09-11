@@ -1,8 +1,6 @@
 import {
   ApprovalPhase,
   ApprovalRouteStatus,
-  OrganizationPositionCode,
-  OrganizationUnitType,
   PrismaClient,
   UserRole,
 } from "@prisma/client";
@@ -32,57 +30,10 @@ const defaultSubTaskStages = [
   { name: "Others", sortOrder: 70, isOthers: true },
 ];
 
-// Standard level names for approval hierarchy
-const defaultLevelNames = {
-  "1": "Staff",
-  "2": "Supervisor",
-  "3": "Section Manager",
-  "4": "Department Manager",
-  "5": "Division Manager",
-  "6": "Factory Manager",
-};
-
-const engineeringLevelNames = {
-  "1": "Staff",
-  "2": "Supervisor",
-  "3": "Section Manager",
-  "4": "Department Manager",
-  "5": "Division Manager",
-  "6": "Factory Manager",
-};
-
 async function main() {
   console.log("Seeding database...");
 
-  // ── Departments ──────────────────────────────────────────────────
-  console.log("Creating departments...");
-
   const now = new Date();
-  const departments = [
-    { id: "ENG", name: "Engineering", type: "ENGINEERING" as const, levelNames: engineeringLevelNames, updatedAt: now },
-    { id: "ADMIN", name: "Administration", type: "GENERAL" as const, levelNames: defaultLevelNames, updatedAt: now },
-    { id: "PD2", name: "Production 2", type: "GENERAL" as const, levelNames: defaultLevelNames, updatedAt: now },
-    { id: "QC", name: "Quality Control", type: "GENERAL" as const, levelNames: defaultLevelNames, updatedAt: now },
-    { id: "PD1", name: "Production 1", type: "GENERAL" as const, levelNames: defaultLevelNames, updatedAt: now },
-    { id: "PD3", name: "Production 3", type: "GENERAL" as const, levelNames: defaultLevelNames, updatedAt: now },
-    { id: "MN", name: "Maintenance", type: "GENERAL" as const, levelNames: defaultLevelNames, updatedAt: now },
-    { id: "TTEC", name: "TTEC", type: "GENERAL" as const, levelNames: defaultLevelNames, updatedAt: now },
-    { id: "IC", name: "IC", type: "GENERAL" as const, levelNames: defaultLevelNames, updatedAt: now },
-    { id: "DM", name: "Division Manager", type: "GENERAL" as const, levelNames: defaultLevelNames, updatedAt: now },
-    { id: "FM", name: "Factory Manager", type: "GENERAL" as const, levelNames: defaultLevelNames, updatedAt: now },
-    { id: "UT", name: "Utility", type: "GENERAL" as const, levelNames: defaultLevelNames, updatedAt: now },
-    { id: "WWT", name: "Waste Water Treatment", type: "GENERAL" as const, levelNames: defaultLevelNames, updatedAt: now },
-    { id: "BM", name: "Biomass", type: "GENERAL" as const, levelNames: defaultLevelNames, updatedAt: now },
-  ];
-
-  for (const dept of departments) {
-    await prisma.departments.upsert({
-      where: { id: dept.id },
-      update: { levelNames: dept.levelNames, updatedAt: now },
-      create: dept,
-    });
-  }
-  console.log(`${departments.length} departments created/updated.`);
 
   // ── Default Sub-task Stages ─────────────────────────────────────
   console.log("Creating default sub-task stages...");
@@ -128,7 +79,6 @@ async function main() {
       name: "System Admin",
       passwordHash: adminPasswordHash,
       role: UserRole.admin,
-      departmentId: null,
       isActive: true,
       forcePasswordChange: false,
       updatedAt: now,
@@ -232,42 +182,36 @@ async function seedCleanStartFixture(input: {
     id: string;
     name: string;
     parentId: string | null;
-    unitType: OrganizationUnitType;
     shareRequests: boolean;
   }> = [
     {
       id: CS.unit.company,
       name: "Company",
       parentId: null,
-      unitType: OrganizationUnitType.FACTORY,
       shareRequests: false,
     },
     {
       id: CS.unit.operations,
       name: "Operations",
       parentId: CS.unit.company,
-      unitType: OrganizationUnitType.DIVISION,
       shareRequests: true,
     },
     {
       id: CS.unit.sectionA,
       name: "Section A",
       parentId: CS.unit.operations,
-      unitType: OrganizationUnitType.DEPARTMENT,
       shareRequests: true,
     },
     {
       id: CS.unit.sectionB,
       name: "Section B",
       parentId: CS.unit.operations,
-      unitType: OrganizationUnitType.DEPARTMENT,
       shareRequests: true,
     },
     {
       id: CS.unit.sectionAChild,
       name: "Section A Child",
       parentId: CS.unit.sectionA,
-      unitType: OrganizationUnitType.SECTION,
       shareRequests: true,
     },
   ];
@@ -277,7 +221,6 @@ async function seedCleanStartFixture(input: {
       update: {
         name: unit.name,
         parentId: unit.parentId,
-        unitType: unit.unitType,
         shareRequests: unit.shareRequests,
         canWorkOnSolutions: false,
         isActive: true,
@@ -288,7 +231,6 @@ async function seedCleanStartFixture(input: {
         id: unit.id,
         name: unit.name,
         parentId: unit.parentId,
-        unitType: unit.unitType,
         shareRequests: unit.shareRequests,
         canWorkOnSolutions: false,
         isActive: true,
@@ -419,14 +361,6 @@ async function seedCleanStartFixture(input: {
     },
   });
 
-  // Leftover NOT NULL legacy columns (positionCode / maximumPositionLevel) stay
-  // until B15. Clean-start runtime reads positionId + approvalLimitPositionId.
-  // This is not a persist CHECK mapping and does not invent requiredPosition writes.
-  const leftoverPositionCode: Record<string, OrganizationPositionCode> = {
-    [leadId]: OrganizationPositionCode.SUPERVISOR,
-    [managerId]: OrganizationPositionCode.SECTION_MANAGER,
-    [directorId]: OrganizationPositionCode.DIVISION_MANAGER,
-  };
   const routeDefs: Array<{ id: string; phase: ApprovalPhase }> = [
     { id: CS.route.request, phase: ApprovalPhase.REQUEST },
     { id: CS.route.solution, phase: ApprovalPhase.SOLUTION },
@@ -439,7 +373,6 @@ async function seedCleanStartFixture(input: {
         scopeUnitId: CS.unit.company,
         phase: route.phase,
         version: 1,
-        maximumPositionLevel: 6,
         approvalLimitPositionId: directorId,
         status: ApprovalRouteStatus.PUBLISHED,
         publishedAt: input.now,
@@ -450,7 +383,6 @@ async function seedCleanStartFixture(input: {
         scopeUnitId: CS.unit.company,
         phase: route.phase,
         version: 1,
-        maximumPositionLevel: 6,
         approvalLimitPositionId: directorId,
         status: ApprovalRouteStatus.PUBLISHED,
         publishedAt: input.now,
@@ -469,7 +401,6 @@ async function seedCleanStartFixture(input: {
           routeVersionId: route.id,
           stepOrder: step.order,
           positionId: step.positionId,
-          positionCode: leftoverPositionCode[step.positionId],
         },
       });
     }
@@ -483,7 +414,6 @@ async function seedCleanStartFixture(input: {
       scopeUnitId: CS.unit.operations,
       phase: ApprovalPhase.REQUEST,
       version: 1,
-      maximumPositionLevel: 6,
       approvalLimitPositionId: directorId,
       status: ApprovalRouteStatus.PUBLISHED,
       publishedAt: input.now,
@@ -494,7 +424,6 @@ async function seedCleanStartFixture(input: {
       scopeUnitId: CS.unit.operations,
       phase: ApprovalPhase.REQUEST,
       version: 1,
-      maximumPositionLevel: 6,
       approvalLimitPositionId: directorId,
       status: ApprovalRouteStatus.PUBLISHED,
       publishedAt: input.now,
@@ -513,7 +442,6 @@ async function seedCleanStartFixture(input: {
         routeVersionId: CS.route.opsRequest,
         stepOrder: step.order,
         positionId: step.positionId,
-        positionCode: leftoverPositionCode[step.positionId],
       },
     });
   }

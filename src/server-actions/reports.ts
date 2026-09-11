@@ -96,10 +96,10 @@ async function getExportableRequest(requestId: string) {
       },
       approvals: {
         include: {
-          approver: { select: { id: true, name: true, email: true, role: true, department: { select: { name: true } } } },
-          requiredApprover: { select: { id: true, name: true, email: true, role: true, department: { select: { name: true } } } },
+          approver: { select: { id: true, name: true, email: true, role: true, } },
+          requiredApprover: { select: { id: true, name: true, email: true, role: true, } },
         },
-        orderBy: [{ requiredLevel: 'asc' }, { order: 'asc' }],
+        orderBy: [{ order: 'asc' }],
       },
       solutions: {
         include: {
@@ -110,8 +110,8 @@ async function getExportableRequest(requestId: string) {
           },
           approvals: {
             include: {
-              approver: { select: { id: true, name: true, email: true, role: true, department: { select: { name: true } } } },
-              requiredApprover: { select: { id: true, name: true, email: true, role: true, department: { select: { name: true } } } },
+              approver: { select: { id: true, name: true, email: true, role: true, } },
+              requiredApprover: { select: { id: true, name: true, email: true, role: true, } },
             },
             orderBy: [{ order: 'asc' }],
           },
@@ -140,12 +140,12 @@ function buildApprovalPhases(request: ExportableRequest): RequestPDFData['approv
   const phases: RequestPDFData['approvalPhases'] = []
 
   const initialApprovals = request.approvals
-    .filter((approval) => !approval.isFinalApproval && !approval.isCustomChain)
+    .filter((approval) => !approval.isFinalApproval && approval.routingMode !== 'CUSTOM_PERSON')
     .map((approval, index) => ({
       approverName: approval.approver?.name || approval.requiredApprover?.name || request.requester.name || 'Unknown',
       approverRole: approval.approver?.role || approval.requiredApprover?.role,
-      approverDepartment: approval.approver?.department?.name || approval.requiredApprover?.department?.name,
-      requiredLevel: approval.requiredLevel ?? 1,
+      approverDepartment: '',
+      requiredLevel: approval.order,
       status: approval.status as 'approved' | 'rejected' | 'pending',
       comments: approval.comments || undefined,
       approvedAt: approval.approvedAt || undefined,
@@ -166,8 +166,8 @@ function buildApprovalPhases(request: ExportableRequest): RequestPDFData['approv
       approvals: solution.approvals.map((approval, index) => ({
         approverName: approval.approver?.name || approval.requiredApprover?.name || 'Engineering',
         approverRole: approval.approver?.role || approval.requiredApprover?.role || 'Engineering',
-        approverDepartment: approval.approver?.department?.name || approval.requiredApprover?.department?.name || 'Engineering',
-        requiredLevel: approval.requiredLevel || 1,
+        approverDepartment: 'Engineering',
+        requiredLevel: approval.order,
         status: approval.status as 'approved' | 'rejected' | 'pending',
         comments: approval.comments || undefined,
         approvedAt: approval.approvedAt || undefined,
@@ -183,8 +183,8 @@ function buildApprovalPhases(request: ExportableRequest): RequestPDFData['approv
     .map((approval, index) => ({
       approverName: approval.approver?.name || approval.requiredApprover?.name || 'Pending',
       approverRole: approval.approver?.role || approval.requiredApprover?.role,
-      approverDepartment: approval.approver?.department?.name || approval.requiredApprover?.department?.name,
-      requiredLevel: approval.requiredLevel ?? 1,
+      approverDepartment: '',
+      requiredLevel: approval.order,
       status: approval.status as 'approved' | 'rejected' | 'pending',
       comments: approval.comments || undefined,
       approvedAt: approval.approvedAt || undefined,

@@ -281,7 +281,7 @@ function createPrismaOrganizationWorkspaceDb(prisma: WorkspacePrisma): Organizat
     },
     async loadCustomChainExceptions() {
       const rows = await prisma.requests.findMany({
-        where: { isDeleted: false, approvals: { some: { isCustomChain: true } } },
+        where: { isDeleted: false, approvals: { some: { routingMode: 'CUSTOM_PERSON' } } },
         select: { id: true, title: true },
       })
       return rows.map((row) => ({ requestId: row.id, title: row.title }))
@@ -438,8 +438,6 @@ type MutationPrisma = {
       data: {
         name: string
         parentId: string
-        // Leftover NOT NULL until B15; never shown in UI.
-        unitType: 'SECTION'
         shareRequests: boolean
         canWorkOnSolutions: boolean
         isActive: boolean
@@ -628,7 +626,6 @@ function createMutationStore(
         data: {
           name: input.name,
           parentId: input.parentId,
-          unitType: 'SECTION',
           shareRequests: true,
           canWorkOnSolutions: false,
           isActive: true,
@@ -980,8 +977,7 @@ function requireExplicitReportsToCorrection(
 /**
  * Create an organization unit under an existing parent. The company root exists
  * from setup only; parentId is required. Duplicate active sibling names are
- * rejected. Validation+write run in a Serializable transaction. Leftover
- * Prisma unitType is SECTION until B15 and is never shown in the UI.
+ * rejected. Validation+write run in a Serializable transaction.
  */
 export async function createOrganizationUnit(
   input: { name: string; parentId: string },

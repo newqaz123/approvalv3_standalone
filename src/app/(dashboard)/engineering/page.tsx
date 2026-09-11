@@ -68,7 +68,7 @@ export default async function EngineeringDashboardPage() {
 			],
 		},
 		include: {
-			department: {
+			organizationUnit: {
 				select: {
 					name: true,
 				},
@@ -137,7 +137,7 @@ export default async function EngineeringDashboardPage() {
 		status: request.status,
 		createdAt: request.createdAt.toISOString(),
 		workRequisitionReceived: request.workRequisitionReceived,
-		department: request.department,
+		department: request.organizationUnit,
 		requester: request.requester,
 		hasRejection:
 			request.solutions.some((s) => s.approvals.length > 0) ||

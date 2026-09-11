@@ -177,7 +177,7 @@ export function generateJSONExport(
     approvals: request.approvals.map((approval) => ({
       approvalId: approval.id,
       approverName: approval.approver?.name || null,
-      requiredLevel: approval.requiredLevel || null,
+      requiredLevel: approval.order,
       status: approval.status,
       approvedAt: approval.approvedAt?.toISOString() || null,
       comments: approval.comments || null,

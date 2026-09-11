@@ -20,7 +20,7 @@ import {
   canUserApproveFinal as engineCanUserApproveFinal,
   canUserApproveSolution as engineCanUserApproveSolution,
   createPrismaApprovalTransactionDb,
-} from '@/lib/approval-engine/transactions'
+} from '@/lib/approval-engine/transaction-adapter'
 import {
   runTransactionWithPostCommitNotifications,
   type PostCommitNotificationCollector,
@@ -40,15 +40,13 @@ import {
   createCustomPersonAttempt,
   createFinalApprovalAttempt,
   createSolutionApprovalAttempt,
+  markCurrentInstanceOutcome,
   type CleanStartAttemptStore,
 } from '@/lib/approval-engine/attempts'
 import { canWorkOnSolutions } from '@/lib/solution-eligibility'
 import type { OrganizationUnitNode } from '@/lib/organization/model'
 import { canUserViewRequest } from '@/lib/request-visibility/scope'
-import {
-  CURRENT_INSTANCE_ROW_FILTER,
-  markCurrentInstanceOutcome,
-} from '@/lib/approval-engine/phase-adapters'
+import { CURRENT_INSTANCE_ROW_FILTER } from '@/lib/approval-engine/current-instance'
 import {
   evaluateRequestAction,
   existingApprovalDecision,
@@ -268,7 +266,7 @@ export async function submitSolution(input: SubmitSolutionActionInput) {
   // Get current user with role and level
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, role: true, level: true, isActive: true },
+    select: { id: true, role: true,  isActive: true },
   })
 
   if (!user) {
@@ -548,54 +546,6 @@ export async function submitSolution(input: SubmitSolutionActionInput) {
 }
 
 /**
- * Create a custom approval chain for a solution
- * Filters out submitter and validates uniqueness
- */
-async function createCustomApprovalChain(
-  tx: any,
-  solutionId: string,
-  approverIds: string[],
-  submitterId: string
-) {
-  // Filter out submitter from approver list (auto-skip if included)
-  const filteredApprovers = approverIds.filter(id => id !== submitterId)
-
-  // Validate uniqueness
-  const uniqueApprovers = [...new Set(filteredApprovers)]
-
-  if (uniqueApprovers.length === 0) {
-    throw new Error('Custom approval chain must have at least one approver after removing submitter')
-  }
-
-  // Verify all approvers exist
-  const approvers = await tx.user.findMany({
-    where: { id: { in: uniqueApprovers } },
-    select: { id: true, name: true },
-  })
-
-  if (approvers.length !== uniqueApprovers.length) {
-    throw new Error('One or more approvers not found')
-  }
-
-  // Create approval records with sequential order
-  const approvals = uniqueApprovers.map((approverId, index) => ({
-    solutionId,
-    requiredApproverId: approverId,
-    order: index + 1,
-    status: 'pending' as const,
-    isCustomChain: true,
-    // Explicit discriminator: without it the row would default to LEGACY_LEVEL
-    // and violate the row-mode integrity check. Compatibility version 0 is
-    // kept until NEW instance integration (Task 7/8).
-    routingMode: 'CUSTOM_PERSON' as const,
-  }))
-
-  await tx.solution_approvals.createMany({ data: approvals })
-
-  return approvals
-}
-
-/**
  * Get solution by ID with related data. Authenticated callers must also pass
  * the shared request-visibility policy for the owning request before any
  * solution payload, request context, or attachment list is returned.
@@ -739,7 +689,7 @@ export async function getSolutionApprovals(solutionId: string) {
           id: true,
           name: true,
           email: true,
-          level: true,
+
         },
       },
       requiredApprover: {
@@ -747,7 +697,7 @@ export async function getSolutionApprovals(solutionId: string) {
           id: true,
           name: true,
           email: true,
-          level: true,
+
         },
       },
     },
@@ -1264,7 +1214,7 @@ export async function initiateFinalApproval(
   // Get current user
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, role: true, level: true },
+    select: { id: true, role: true },
   })
 
   if (!user) {
@@ -1415,54 +1365,6 @@ export async function initiateFinalApproval(
   revalidateRequestViews()
 
   return { success: true }
-}
-
-/**
- * Create custom final approval chain
- * Filters out initiator and validates uniqueness
- */
-async function createCustomFinalApprovalChain(
-  tx: any,
-  requestId: string,
-  approverIds: string[],
-  initiatorId: string
-) {
-  // Filter out initiator from approver list
-  const filteredApprovers = approverIds.filter(id => id !== initiatorId)
-
-  // Validate uniqueness
-  const uniqueApprovers = [...new Set(filteredApprovers)]
-
-  if (uniqueApprovers.length === 0) {
-    throw new Error('Custom approval chain must have at least one approver after removing initiator')
-  }
-
-  // Verify all approvers exist
-  const approvers = await tx.user.findMany({
-    where: { id: { in: uniqueApprovers } },
-    select: { id: true, name: true },
-  })
-
-  if (approvers.length !== uniqueApprovers.length) {
-    throw new Error('One or more approvers not found')
-  }
-
-  // Create approval records with sequential order
-  const approvals = uniqueApprovers.map((approverId, index) => ({
-    requestId,
-    requiredApproverId: approverId,
-    requiredLevel: 0, // Not used for custom chains
-    order: index + 1,
-    status: 'pending' as const,
-    isCustomChain: true,
-    isFinalApproval: true,
-    // Explicit discriminator (compatibility version 0 until NEW integration).
-    routingMode: 'CUSTOM_PERSON' as const,
-  }))
-
-  await tx.request_approvals.createMany({ data: approvals })
-
-  return approvals
 }
 
 /**
@@ -1792,7 +1694,7 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
   // Get current user with role and level
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, role: true, level: true, isActive: true },
+    select: { id: true, role: true,  isActive: true },
   })
 
   if (!user) {
@@ -1835,7 +1737,7 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
         orderBy: { createdAt: 'desc' },
         take: 1,
       },
-      department: true,
+      organizationUnit: true,
     },
   })
 

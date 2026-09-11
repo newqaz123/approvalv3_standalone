@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
-import { CURRENT_INSTANCE_ROW_FILTER } from '@/lib/approval-engine/current-instance'
-import { snapshotGroupActionWhere } from '@/lib/approval-engine/transactions'
+import { CURRENT_INSTANCE_ROW_FILTER, snapshotGroupActionWhere } from '@/lib/approval-engine/current-instance'
 
 /**
  * GET /api/actions/pending-count

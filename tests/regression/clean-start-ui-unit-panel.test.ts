@@ -440,7 +440,6 @@ describe('C5 source contracts', () => {
     assert.match(actions, /isolationLevel: 'Serializable'/)
     assert.match(actions, /validateOrganization/)
     assert.match(actions, /Parent required/)
-    assert.match(actions, /unitType: 'SECTION'/)
     const setManagerFn = actions.slice(actions.indexOf('export async function setUnitManager'))
     assert.match(setManagerFn, /loadUsers/)
     assert.match(setManagerFn, /inactive/i)

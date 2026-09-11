@@ -398,14 +398,12 @@ ci('clean-start SQL constraints and races (CI database)', () => {
       data: { id: userId, name: 'B13 assignment user', email: `b13-assign-${userId}@example.test`, isActive: true },
     })
     await db.organization_units.create({
-      data: { id: unitA, name: `B13 unit A ${unitA}`, unitType: 'SECTION', operationalType: 'GENERAL' },
+      data: { id: unitA, name: `B13 unit A ${unitA}`,  },
     })
     await db.organization_units.create({
       data: {
         id: unitB,
         name: `B13 unit B ${unitB}`,
-        unitType: 'SECTION',
-        operationalType: 'GENERAL',
         parentId: unitA,
       },
     })
@@ -440,17 +438,16 @@ ci('clean-start SQL constraints and races (CI database)', () => {
       data: {
         id: firstRootId,
         name: `B13 root ${firstRootId}`,
-        unitType: 'FACTORY',
+
         parentId: null,
         isActive: true,
-        operationalType: 'GENERAL',
       },
     })
 
     await assert.rejects(
       () =>
         db.$executeRawUnsafe(
-          `INSERT INTO "organization_units" ("id", "name", "unitType", "parentId", "isActive", "updatedAt") VALUES ('${secondRootId}', 'B13 root ${secondRootId}', 'FACTORY', NULL, true, NOW())`,
+          `INSERT INTO "organization_units" ("id", "name", "parentId", "isActive", "updatedAt") VALUES ('${secondRootId}', 'B13 root ${secondRootId}', NULL, true, NOW())`,
         ),
       (error: unknown) => {
         assertIndexViolation(error, 'one_active_company_root')
@@ -477,7 +474,7 @@ ci('clean-start SQL constraints and races (CI database)', () => {
       data: { id: createdById, name: 'B13 publisher', email: `b13-pub-${createdById}@example.test`, isActive: true },
     })
     await db.organization_units.create({
-      data: { id: unitId, name: `B13 route unit ${unitId}`, unitType: 'SECTION', operationalType: 'GENERAL' },
+      data: { id: unitId, name: `B13 route unit ${unitId}`,  },
     })
 
     const c1 = newClient()
@@ -563,6 +560,8 @@ ci('clean-start SQL constraints and races (CI database)', () => {
     const instanceId = scenarioId(36)
     const groupId = scenarioId(37)
     const approvalId = scenarioId(38)
+    const positionId = scenarioId(39)
+    const assignmentId = scenarioId(40)
 
     cleanup.trackUser(requesterId)
     cleanup.trackUser(firstCandidateId)
@@ -572,6 +571,8 @@ ci('clean-start SQL constraints and races (CI database)', () => {
     cleanup.trackInstance(instanceId)
     cleanup.trackCandidateGroup(groupId)
     cleanup.trackApprovalRow(approvalId)
+    cleanup.trackPosition(positionId)
+    cleanup.trackAssignment(assignmentId)
 
     await db.user.createMany({
       data: [
@@ -581,7 +582,11 @@ ci('clean-start SQL constraints and races (CI database)', () => {
       ],
     })
     await db.organization_units.create({
-      data: { id: unitId, name: `B13 decision unit ${unitId}`, unitType: 'SECTION', operationalType: 'GENERAL' },
+      data: { id: unitId, name: `B13 decision unit ${unitId}` },
+    })
+    await db.positions.create({ data: { id: positionId, name: `B13 decision pos ${positionId}`, rank: 10, isActive: true } })
+    await db.organization_assignments.create({
+      data: { id: assignmentId, userId: requesterId, unitId, positionId, isActive: true },
     })
     await db.requests.create({
       data: {
@@ -600,7 +605,8 @@ ci('clean-start SQL constraints and races (CI database)', () => {
         phase: 'REQUEST',
         originUserId: requesterId,
         originUnitId: unitId,
-        originContext: {},
+        originAssignmentId: assignmentId,
+        originPositionId: positionId,
         routingMode: 'SNAPSHOT_GROUP',
         state: 'PENDING',
       },
@@ -609,7 +615,7 @@ ci('clean-start SQL constraints and races (CI database)', () => {
       data: {
         id: groupId,
         approvalInstanceId: instanceId,
-        requiredPosition: 'SUPERVISOR',
+        requiredPositionId: positionId,
         scopeUnitId: unitId,
       },
     })
@@ -626,10 +632,10 @@ ci('clean-start SQL constraints and races (CI database)', () => {
         order: 1,
         status: 'pending',
         routingMode: 'SNAPSHOT_GROUP',
-        integrityVersion: 1,
+
         instanceId,
         candidateGroupId: groupId,
-        requiredPosition: 'SUPERVISOR',
+        requiredPositionId: positionId,
       },
     })
 
@@ -739,7 +745,7 @@ ci('clean-start SQL constraints and races (CI database)', () => {
       ],
     })
     await db.organization_units.create({
-      data: { id: unitId, name: `B13 restrict unit ${unitId}`, unitType: 'SECTION', operationalType: 'GENERAL' },
+      data: { id: unitId, name: `B13 restrict unit ${unitId}`,  },
     })
     await db.positions.create({ data: { id: positionId, name: `B13 restrict pos ${positionId}`, rank: 20, isActive: true } })
     await db.organization_assignments.create({
@@ -757,7 +763,6 @@ ci('clean-start SQL constraints and races (CI database)', () => {
         scopeUnitId: unitId,
         phase: 'REQUEST',
         version: 1,
-        maximumPositionLevel: 5,
         status: 'DRAFT',
         createdById,
         approvalLimitPositionId: positionId,
@@ -768,7 +773,7 @@ ci('clean-start SQL constraints and races (CI database)', () => {
         id: routeStepId,
         routeVersionId,
         stepOrder: 1,
-        positionCode: 'SUPERVISOR',
+
         positionId,
       },
     })
@@ -794,7 +799,7 @@ ci('clean-start SQL constraints and races (CI database)', () => {
         phase: 'REQUEST',
         originUserId: userId,
         originUnitId: unitId,
-        originContext: {},
+
         routingMode: 'SNAPSHOT_GROUP',
         state: 'PENDING',
         originAssignmentId: assignmentId,
@@ -805,9 +810,8 @@ ci('clean-start SQL constraints and races (CI database)', () => {
       data: {
         id: groupId,
         approvalInstanceId: instanceId,
-        requiredPosition: 'SUPERVISOR',
-        scopeUnitId: unitId,
         requiredPositionId: positionId,
+        scopeUnitId: unitId,
       },
     })
     await db.request_approvals.create({
@@ -817,10 +821,9 @@ ci('clean-start SQL constraints and races (CI database)', () => {
         order: 1,
         status: 'pending',
         routingMode: 'SNAPSHOT_GROUP',
-        integrityVersion: 1,
+
         instanceId,
         candidateGroupId: groupId,
-        requiredPosition: 'SUPERVISOR',
         requiredPositionId: positionId,
       },
     })
@@ -852,6 +855,10 @@ ci('clean-start SQL constraints and races (CI database)', () => {
     cleanup.trackRequest(requestId)
     cleanup.trackInstance(oldInstanceId)
     cleanup.trackInstance(newInstanceId)
+    const positionId = scenarioId(67)
+    const assignmentId = scenarioId(68)
+    cleanup.trackPosition(positionId)
+    cleanup.trackAssignment(assignmentId)
 
     await db.user.createMany({
       data: [
@@ -860,7 +867,11 @@ ci('clean-start SQL constraints and races (CI database)', () => {
       ],
     })
     await db.organization_units.create({
-      data: { id: unitId, name: `B13 restart unit ${unitId}`, unitType: 'SECTION', operationalType: 'GENERAL' },
+      data: { id: unitId, name: `B13 restart unit ${unitId}` },
+    })
+    await db.positions.create({ data: { id: positionId, name: `B13 restart pos ${positionId}`, rank: 8, isActive: true } })
+    await db.organization_assignments.create({
+      data: { id: assignmentId, userId, unitId, positionId, isActive: true },
     })
     await db.requests.create({
       data: {
@@ -879,7 +890,8 @@ ci('clean-start SQL constraints and races (CI database)', () => {
         phase: 'REQUEST',
         originUserId: userId,
         originUnitId: unitId,
-        originContext: {},
+        originAssignmentId: assignmentId,
+        originPositionId: positionId,
         routingMode: 'SNAPSHOT_GROUP',
         state: 'PENDING',
         attempt: 1,
@@ -892,7 +904,8 @@ ci('clean-start SQL constraints and races (CI database)', () => {
         phase: 'REQUEST',
         originUserId: userId,
         originUnitId: unitId,
-        originContext: {},
+        originAssignmentId: assignmentId,
+        originPositionId: positionId,
         routingMode: 'SNAPSHOT_GROUP',
         state: 'PENDING',
         attempt: 2,

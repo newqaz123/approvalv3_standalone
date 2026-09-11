@@ -5,8 +5,7 @@ import prisma from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/cache/user-cache";
 import { getMyRequests } from "@/server-actions/requests";
 import { buildFollowUpDashboard } from "@/lib/follow-up-dashboard";
-import { CURRENT_INSTANCE_ROW_FILTER } from "@/lib/approval-engine/current-instance";
-import { snapshotGroupActionWhere } from "@/lib/approval-engine/transactions";
+import { CURRENT_INSTANCE_ROW_FILTER, snapshotGroupActionWhere } from "@/lib/approval-engine/current-instance";
 import { buildRequestVisibilityWhere, createRequestVisibilityDb } from "@/lib/request-visibility/scope";
 import type { Prisma } from "@prisma/client";
 export type {
@@ -116,8 +115,7 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
 									requiredApprover: {
 										select: { name: true },
 									},
-									requiredLevel: true,
-									order: true,
+																		order: true,
 									approvedAt: true,
 								},
 							},
@@ -148,8 +146,7 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
 						select: {
 							id: true,
 							status: true,
-							requiredLevel: true,
-							order: true,
+														order: true,
 							approvedAt: true,
 							isFinalApproval: true,
 							approver: {
@@ -222,7 +219,7 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
 					_count: approval.request._count,
 					hasRejection,
 					engineerAssignments: approval.request.engineerAssignments,
-					approvals,
+					approvals: approvals.map((row) => ({ ...row, requiredLevel: row.order })),
 				});
 			}
 		}
@@ -280,8 +277,7 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
 								select: {
 									id: true,
 									status: true,
-									requiredLevel: true,
-									order: true,
+																		order: true,
 									approvedAt: true,
 									isFinalApproval: true,
 									approver: {
@@ -354,7 +350,7 @@ export async function getPendingMyApprovals(): Promise<RequestListRow[]> {
 					_count: request._count,
 					hasRejection,
 					engineerAssignments: request.engineerAssignments,
-					approvals,
+					approvals: approvals.map((row) => ({ ...row, requiredLevel: row.order })),
 				});
 			}
 		}
@@ -423,8 +419,7 @@ export async function getMyCreatedRequests(): Promise<RequestListRow[]> {
 							requiredApprover: {
 								select: { name: true },
 							},
-							requiredLevel: true,
-							order: true,
+														order: true,
 							approvedAt: true,
 						},
 					},
@@ -455,8 +450,7 @@ export async function getMyCreatedRequests(): Promise<RequestListRow[]> {
 				select: {
 					id: true,
 					status: true,
-					requiredLevel: true,
-					order: true,
+										order: true,
 					approvedAt: true,
 					isFinalApproval: true,
 					approver: {
@@ -496,7 +490,7 @@ export async function getMyCreatedRequests(): Promise<RequestListRow[]> {
 							requiredApprover: sa.requiredApprover
 								? { name: sa.requiredApprover.name }
 								: null,
-							requiredLevel: sa.requiredLevel ?? 0,
+							requiredLevel: sa.order,
 							order: sa.order,
 							approvedAt: sa.approvedAt,
 							isFinalApproval: false, // Solution approvals are not final approvals
@@ -507,9 +501,10 @@ export async function getMyCreatedRequests(): Promise<RequestListRow[]> {
 				? solutionApprovals
 				: req.approvals;
 
-			// For solution approvals, use the Engineering department (submitter's department)
-			// For request approvals, use the request's department
-			const approvals = rawApprovals;
+			const approvals = rawApprovals.map((approval) => ({
+				...approval,
+				requiredLevel: approval.order,
+			}));
 
 			return {
 				id: req.id,
@@ -601,8 +596,7 @@ export async function getAllRequests(): Promise<RequestListRow[]> {
 							requiredApprover: {
 								select: { name: true },
 							},
-							requiredLevel: true,
-							order: true,
+														order: true,
 							approvedAt: true,
 						},
 					},
@@ -633,8 +627,7 @@ export async function getAllRequests(): Promise<RequestListRow[]> {
 				select: {
 					id: true,
 					status: true,
-					requiredLevel: true,
-					order: true,
+										order: true,
 					approvedAt: true,
 					isFinalApproval: true,
 					approver: {
@@ -674,7 +667,7 @@ export async function getAllRequests(): Promise<RequestListRow[]> {
 							requiredApprover: sa.requiredApprover
 								? { name: sa.requiredApprover.name }
 								: null,
-							requiredLevel: sa.requiredLevel ?? 0,
+							requiredLevel: sa.order,
 							order: sa.order,
 							approvedAt: sa.approvedAt,
 							isFinalApproval: false, // Solution approvals are not final approvals
@@ -705,7 +698,7 @@ export async function getAllRequests(): Promise<RequestListRow[]> {
 							s.approvals.some((a: any) => a.status === "rejected"),
 					) || req.approvals.some((a: any) => a.status === "rejected"),
 				engineerAssignments: req.engineerAssignments,
-				approvals,
+				approvals: approvals.map((row) => ({ ...row, requiredLevel: row.order })),
 			};
 		}),
 	);
@@ -810,6 +803,6 @@ export async function getFollowUpDashboard() {
 			actorName: activity.user?.name || "Someone",
 		})),
 		currentUserId: user.id,
-		departmentName: user.department?.name || "Your department",
+		departmentName: "Your department",
 	});
 }

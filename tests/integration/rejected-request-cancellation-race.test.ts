@@ -29,11 +29,10 @@ async function createRejectedRequestFixture(): Promise<{
 	requestId: string;
 }> {
 	const owner = await setupDb.user.findFirst({
-		where: { departmentId: { not: null } },
-		select: { id: true, departmentId: true },
+		select: { id: true },
 	});
-	if (!owner?.departmentId) {
-		throw new Error("Race integration test requires a user with a department");
+	if (!owner) {
+		throw new Error("Race integration test requires a user");
 	}
 
 	const request = await setupDb.requests.create({
@@ -42,14 +41,12 @@ async function createRejectedRequestFixture(): Promise<{
 			description: "Rejected cancellation race fixture",
 			status: "ImprovementRequest",
 			requesterId: owner.id,
-			departmentId: owner.departmentId,
 		},
 		select: { id: true },
 	});
 	await setupDb.request_approvals.create({
 		data: {
 			requestId: request.id,
-			requiredLevel: 2,
 			order: 1,
 			status: "rejected",
 			isFinalApproval: false,

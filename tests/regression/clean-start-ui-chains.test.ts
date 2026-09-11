@@ -1339,9 +1339,11 @@ describe('approval-routes server action source contracts', () => {
     assert.doesNotMatch(source, /@\/lib\/organization\/repository/)
   })
 
-  it('never maps OrganizationPositionCode (leftover column slots by step order only)', () => {
+  it('never maps OrganizationPositionCode',
+    () => {
     assert.doesNotMatch(source, /OrganizationPositionCode/)
-    assert.match(source, /leftover/i)
+    assert.doesNotMatch(source, /positionCode/)
+    assert.doesNotMatch(source, /maximumPositionLevel/)
   })
 
   it('wires the workspace page header to the chains panel', () => {

@@ -20,17 +20,8 @@
 // ApprovalEnginePlanError. Serialization conflicts → ApprovalEngineConflictError,
 // no retry.
 //
-// Parent B4 persist ruling: write requiredPositionId (+ candidateGroupId on
-// approval rows); do not invent a legacy position-code enum mapping.
-// Instance row writes originAssignmentId/originPositionId from originContext.
-// B14 persist patch (supervisor): also write the EXISTING required
-// originContext JSON from plan.originContext (positionId, assignmentId,
-// unitPath, labels) so the current NOT NULL column is filled. This is not a
-// new column and not a legacy position-code enum mapping. Labels persist only as
-// capturedDisplayName. Optional restart fields copied when present.
-// Approval rows are B4-named fields only, plus integrityVersion 1 on
-// SNAPSHOT_GROUP rows (B14: version flag, not a position mapping).
-// AUTO_APPROVED is one group-less approved self row.
+// Persist writes originAssignmentId/originPositionId from originContext.
+// AUTO_APPROVED is one group-less approved self row with requiredPositionId.
 
 import type { ApprovalPhase } from '@/lib/approval-routes/definition'
 import type { ResolvedApprovalRoute } from '@/lib/approval-routes/selection'
@@ -141,12 +132,6 @@ interface ApprovalInstanceRowCreate {
   originUnitId: string
   originAssignmentId: string
   originPositionId: string
-  originContext: {
-    positionId: string
-    assignmentId: string
-    unitPath: string[]
-    labels: Record<string, string>
-  }
   routingMode: 'SNAPSHOT_GROUP'
   state: ApprovalInstancePlan['state']
   attempt: number
@@ -184,7 +169,6 @@ interface ApprovalRowCreate {
   requiredPositionId?: string
   candidateGroupId?: string
   approverId?: string
-  integrityVersion: 1
 }
 
 export interface ApprovalInstanceTx {
@@ -417,12 +401,6 @@ function instanceRow(plan: ApprovalInstancePlan, attempt: number): ApprovalInsta
     originUnitId: plan.originUnitId,
     originAssignmentId: plan.originContext.assignmentId,
     originPositionId: plan.originContext.positionId,
-    originContext: {
-      positionId: plan.originContext.positionId,
-      assignmentId: plan.originContext.assignmentId,
-      unitPath: [...plan.originContext.unitPath],
-      labels: { ...plan.originContext.labels },
-    },
     routingMode: 'SNAPSHOT_GROUP',
     state: plan.state,
     attempt,
@@ -467,7 +445,7 @@ export async function persistApprovalInstance(
         status: 'approved',
         approverId: plan.originUserId,
         routingMode: 'SNAPSHOT_GROUP',
-        integrityVersion: 1,
+        requiredPositionId: plan.originContext.positionId,
       })
       return { ...plan, attempt, id: instance.id }
     }
@@ -496,7 +474,6 @@ export async function persistApprovalInstance(
         routingMode: 'SNAPSHOT_GROUP',
         requiredPositionId: step.requiredPositionId,
         candidateGroupId: group.id,
-        integrityVersion: 1,
       })
     }
 

@@ -433,7 +433,7 @@ describe('B7 source contract', () => {
     const approveBody = source.slice(approveStart, rejectStart)
     const rejectBody = source.slice(rejectStart, source.indexOf('async function notifyRequestStatusChange'))
     const canBody = source.slice(canStart, approveStart)
-    assert.match(source, /from '@\/lib\/approval-engine\/transactions'/)
+    assert.match(source, /from '@\/lib\/approval-engine\/transaction-adapter'/)
     assert.match(canBody, /canUserApproveRequest/)
     assert.match(approveBody, /advanceApprovalAtomically/)
     assert.match(rejectBody, /markCurrentInstanceOutcome/)

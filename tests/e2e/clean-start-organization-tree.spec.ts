@@ -9,6 +9,7 @@ const SECTION_A_CHILD_ID = "cs-unit-section-a-child";
 const SECTION_B_ID = "cs-unit-section-b";
 const LINE_A_TEAM_ID = "cs-team-section-a-line";
 const LEAD_ID = "cs-pos-lead";
+const STAFF_ID = "cs-pos-staff";
 const ALICE_ASSIGNMENT_ID = "cs-asg-alice";
 const CASEY_ASSIGNMENT_ID = "cs-asg-casey";
 
@@ -753,7 +754,8 @@ test.describe("clean-start C10 full journey", () => {
 					phase: "REQUEST",
 					originUserId: aliceId,
 					originUnitId: SECTION_A_ID,
-					originContext: {},
+					originAssignmentId: ALICE_ASSIGNMENT_ID,
+					originPositionId: STAFF_ID,
 					routingMode: "SNAPSHOT_GROUP",
 					state: "PENDING",
 					attempt: 1,

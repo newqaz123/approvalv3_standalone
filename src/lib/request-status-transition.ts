@@ -91,6 +91,14 @@ export class RequestStatusConflictError extends Error {
   }
 }
 
+/** Committed status transition, for post-commit notifications. */
+export interface RequestStatusChangeResult {
+  fromStatus: RequestStatus
+  toStatus: RequestStatus
+  requesterId: string
+  title: string
+}
+
 /**
  * Conditionally update the request status, requiring the row to still be in
  * one of `expectedStatuses`. A zero-row update throws so the caller's

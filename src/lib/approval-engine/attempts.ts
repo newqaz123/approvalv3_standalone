@@ -730,3 +730,32 @@ export async function restartStrandedAttempt(
   await ports.request_activities.create({ data: activity })
   return { oldInstanceId: record.id, newInstanceId: persisted.id }
 }
+
+export async function markCurrentInstanceOutcome(
+  tx: {
+    approval_instances: {
+      updateMany(args: {
+        where: Record<string, unknown>
+        data: { state: 'REJECTED' | 'CANCELLED' }
+      }): Promise<unknown>
+    }
+  },
+  input: {
+    requestId?: string
+    solutionId?: string
+    phase: ApprovalPhase
+    outcome: 'REJECTED' | 'CANCELLED'
+  },
+): Promise<void> {
+  const where: Record<string, unknown> = {
+    phase: input.phase,
+    state: 'PENDING',
+    supersededAt: null,
+  }
+  if (input.solutionId) where.solutionId = input.solutionId
+  if (input.requestId && input.phase !== 'SOLUTION') where.requestId = input.requestId
+  if (input.requestId && input.phase === 'SOLUTION' && !input.solutionId) {
+    where.solution = { requestId: input.requestId }
+  }
+  await tx.approval_instances.updateMany({ where, data: { state: input.outcome } })
+}
