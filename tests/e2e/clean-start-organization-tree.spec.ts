@@ -151,6 +151,47 @@ test.describe("clean-start organization tree hover/focus/overflow", () => {
 	});
 });
 
+test.describe("clean-start person assignment panel", () => {
+	test("selecting a person opens assignment management; move confirmation lists old and new unit/position/team", async ({
+		browser,
+	}) => {
+		test.setTimeout(120_000);
+		const session = await openSignedIn(browser, EMAIL.admin);
+		const page = session.page;
+		try {
+			await page.setViewportSize({ width: 1280, height: 720 });
+			await page.goto("/admin/organization");
+			await expect(page.getByTestId("organization-tree")).toBeVisible({ timeout: 20_000 });
+
+			await page.getByRole("button", { name: "Alice — Staff" }).click();
+			const panel = page.getByTestId("person-assignment-panel");
+			await expect(panel).toBeVisible();
+			await expect(panel.getByText("Alice")).toBeVisible();
+
+			await page.getByTestId("assignment-unit-select").click();
+			await page.getByRole("option", { name: "Section B" }).click();
+			await page.getByTestId("assignment-team-select").click();
+			await page.getByRole("option", { name: "No team" }).click();
+			await page.getByTestId("assignment-save").click();
+
+			const confirmation = page.getByTestId("assignment-move-confirmation");
+			await expect(confirmation).toBeVisible();
+			await expect(confirmation.getByTestId("assignment-change-before")).toContainText("Section A");
+			await expect(confirmation.getByTestId("assignment-change-after")).toContainText("Section B");
+			await expect(confirmation.getByTestId("assignment-change-before")).toContainText("Staff");
+			await expect(confirmation.getByTestId("assignment-change-after")).toContainText("Staff");
+			await expect(confirmation.getByTestId("assignment-change-before")).toContainText("Line A");
+			await expect(confirmation.getByTestId("assignment-change-after")).toContainText("None");
+
+			await page.getByTestId("assignment-move-cancel").click();
+			await expect(confirmation).toHaveCount(0);
+			await expect(page.getByRole("button", { name: "Alice — Staff" })).toBeVisible();
+		} finally {
+			await session.context.close();
+		}
+	});
+});
+
 test.describe("clean-start unit side panel", () => {
 	test("selecting a unit opens the panel; sharing badge updates after save; Section A REQUEST is Inherited from Operations", async ({
 		browser,

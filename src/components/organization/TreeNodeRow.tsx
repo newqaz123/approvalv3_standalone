@@ -127,11 +127,13 @@ export function TreeNodeRow({
   snapshot,
   childrenByParentId,
   onSelectUnit,
+  onSelectPerson,
 }: {
   unit: OrganizationUnitNode
   snapshot: WorkspaceSnapshot
   childrenByParentId: Map<string, OrganizationUnitNode[]>
   onSelectUnit?: (unitId: string) => void
+  onSelectPerson?: (assignmentId: string) => void
 }) {
   const nameRef = useRef<HTMLSpanElement>(null)
   const usersById = indexById(snapshot.users)
@@ -237,9 +239,16 @@ export function TreeNodeRow({
           const nestedTeams = teamsByReportsTo.get(assignment.id) ?? []
           return (
             <div key={assignment.userId} data-testid={`person-chip-${assignment.userId}`} className="space-y-1">
-              <span className="inline-flex items-center rounded-md border bg-secondary px-2 py-0.5 text-sm">
+              <button
+                type="button"
+                className="inline-flex items-center rounded-md border bg-secondary px-2 py-0.5 text-sm"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onSelectPerson?.(assignment.id)
+                }}
+              >
                 {label}
-              </span>
+              </button>
               {nestedTeams.map((team) => (
                 <TeamGroup
                   key={team.id}
@@ -261,6 +270,7 @@ export function TreeNodeRow({
             snapshot={snapshot}
             childrenByParentId={childrenByParentId}
             onSelectUnit={onSelectUnit}
+            onSelectPerson={onSelectPerson}
           />
         ))}
       </div>

@@ -4,8 +4,10 @@ import React from 'react'
 
 export function UnassignedPeopleList({
   users,
+  onSelectUser,
 }: {
   users: ReadonlyArray<{ id: string; name: string; email: string }>
+  onSelectUser?: (userId: string) => void
 }) {
   const sorted = users.slice().sort((left, right) => left.name.localeCompare(right.name))
   return (
@@ -16,12 +18,14 @@ export function UnassignedPeopleList({
       ) : (
         <ul className="flex flex-wrap gap-2">
           {sorted.map((user) => (
-            <li
-              key={user.id}
-              data-testid={`unassigned-person-${user.id}`}
-              className="inline-flex items-center rounded-md border px-2 py-0.5 text-sm"
-            >
-              {user.name}
+            <li key={user.id} data-testid={`unassigned-person-${user.id}`}>
+              <button
+                type="button"
+                className="inline-flex items-center rounded-md border px-2 py-0.5 text-sm"
+                onClick={() => onSelectUser?.(user.id)}
+              >
+                {user.name}
+              </button>
             </li>
           ))}
         </ul>

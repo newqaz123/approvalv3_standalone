@@ -364,6 +364,22 @@ export interface OrganizationUnitMutationDb extends OrganizationMutationDb {
   updateUnitManager(unitId: string, managerUserId: string | null): Promise<void>
 }
 
+export interface OrganizationAssignmentMutationDb extends OrganizationUnitMutationDb {
+  createAssignment(input: {
+    userId: string
+    unitId: string
+    positionId: string
+    teamId: string | null
+  }): Promise<{ id: string }>
+  updateAssignment(id: string, input: {
+    unitId: string
+    positionId: string
+    teamId: string | null
+  }): Promise<void>
+  deactivateAssignment(id: string, deactivatedAt: Date): Promise<void>
+  updateTeamReportsTo(teamId: string, reportsToAssignmentId: string): Promise<void>
+}
+
 const ORGANIZATION_MUTATION_ISOLATION = 'Serializable' as const
 
 type MutationPrisma = {
@@ -410,7 +426,10 @@ type MutationPrisma = {
       reportsToAssignmentId: string
       isActive: boolean
     }>>
-    update: (args: { where: { id: string }; data: { name: string } }) => Promise<unknown>
+    update: (args: {
+      where: { id: string }
+      data: { name?: string; reportsToAssignmentId?: string }
+    }) => Promise<unknown>
   }
   organization_assignments: {
     findMany: (args?: object) => Promise<Array<{
@@ -421,6 +440,25 @@ type MutationPrisma = {
       teamId: string | null
       isActive: boolean
     }>>
+    create: (args: {
+      data: {
+        userId: string
+        unitId: string
+        positionId: string
+        teamId: string | null
+        isActive: boolean
+      }
+    }) => Promise<{ id: string }>
+    update: (args: {
+      where: { id: string }
+      data: {
+        unitId?: string
+        positionId?: string
+        teamId?: string | null
+        isActive?: boolean
+        deactivatedAt?: Date | null
+      }
+    }) => Promise<unknown>
   }
   positions: {
     findMany: (args?: object) => Promise<Array<{
@@ -465,8 +503,8 @@ function createMutationStore(
   client: MutationPrisma,
   adminId: string,
   serializable: boolean,
-): OrganizationUnitMutationDb {
-  const store: OrganizationUnitMutationDb = {
+): OrganizationAssignmentMutationDb {
+  const store: OrganizationAssignmentMutationDb = {
     adminUserId: adminId,
     async loadUnits() {
       const rows = await client.organization_units.findMany()
@@ -551,6 +589,40 @@ function createMutationStore(
         data: { managerUserId },
       })
     },
+    async createAssignment(input) {
+      const row = await client.organization_assignments.create({
+        data: {
+          userId: input.userId,
+          unitId: input.unitId,
+          positionId: input.positionId,
+          teamId: input.teamId,
+          isActive: true,
+        },
+      })
+      return { id: row.id }
+    },
+    async updateAssignment(id, input) {
+      await client.organization_assignments.update({
+        where: { id },
+        data: {
+          unitId: input.unitId,
+          positionId: input.positionId,
+          teamId: input.teamId,
+        },
+      })
+    },
+    async deactivateAssignment(id, deactivatedAt) {
+      await client.organization_assignments.update({
+        where: { id },
+        data: { isActive: false, deactivatedAt },
+      })
+    },
+    async updateTeamReportsTo(teamId, reportsToAssignmentId) {
+      await client.teams.update({
+        where: { id: teamId },
+        data: { reportsToAssignmentId },
+      })
+    },
     async writeAudit(entry) {
       await client.request_activities.create({
         data: {
@@ -577,7 +649,7 @@ function createMutationStore(
   return store
 }
 
-async function createProductionMutationDb(): Promise<OrganizationUnitMutationDb> {
+async function createProductionMutationDb(): Promise<OrganizationAssignmentMutationDb> {
   const { requireAdmin } = await import('@/lib/auth')
   const adminId = await requireAdmin()
   if (!adminId) {
@@ -700,6 +772,77 @@ function asUnitWriter(tx: OrganizationMutationDb): OrganizationUnitMutationDb {
   return tx as OrganizationUnitMutationDb
 }
 
+function asAssignmentWriter(tx: OrganizationMutationDb): OrganizationAssignmentMutationDb {
+  return tx as OrganizationAssignmentMutationDb
+}
+
+const ONE_ACTIVE_ASSIGNMENT_MESSAGE = 'A user may have only one active assignment'
+const EXPLICIT_CORRECTION_MESSAGE = "This change requires explicit correction of the team's reports-to person"
+const TEAM_UNIT_MESSAGE = 'Team must belong to the selected unit'
+
+function requireTeamInUnit(
+  teamId: string | null,
+  unitId: string,
+  teams: readonly TeamNode[],
+): void {
+  if (teamId === null) return
+  const team = teams.find((row) => row.id === teamId)
+  if (team === undefined || !team.isActive || team.unitId !== unitId) {
+    throw new OrganizationValidationError(TEAM_UNIT_MESSAGE)
+  }
+}
+
+function teamsNeedingReportsToCorrection(
+  assignment: AssignmentNode,
+  next: { unitId: string; positionId: string; teamId: string | null; isActive: boolean },
+  assignments: readonly AssignmentNode[],
+  teams: readonly TeamNode[],
+  positions: readonly PositionNode[],
+): TeamNode[] {
+  const positionById = new Map(positions.map((row) => [row.id, row]))
+  const nextRank = positionById.get(next.positionId)?.rank
+  const invalidated: TeamNode[] = []
+  for (const team of teams) {
+    if (!team.isActive || team.reportsToAssignmentId !== assignment.id) continue
+    if (!next.isActive || next.unitId !== team.unitId || next.teamId === team.id) {
+      invalidated.push(team)
+      continue
+    }
+    if (nextRank === undefined) {
+      invalidated.push(team)
+      continue
+    }
+    let rankOk = true
+    for (const member of assignments) {
+      if (!member.isActive || member.teamId !== team.id) continue
+      const memberRank = positionById.get(member.positionId)?.rank
+      if (memberRank === undefined || nextRank <= memberRank) {
+        rankOk = false
+        break
+      }
+    }
+    if (!rankOk) invalidated.push(team)
+  }
+  return invalidated
+}
+
+function requireExplicitReportsToCorrection(
+  invalidated: readonly TeamNode[],
+  corrections: readonly { teamId: string; reportsToAssignmentId: string }[] | undefined,
+  currentAssignmentId: string,
+): Map<string, string> {
+  const provided = new Map(
+    (corrections ?? []).map((row) => [row.teamId, row.reportsToAssignmentId]),
+  )
+  for (const team of invalidated) {
+    const nextReportsTo = provided.get(team.id)
+    if (!nextReportsTo || nextReportsTo === currentAssignmentId) {
+      throw new OrganizationValidationError(EXPLICIT_CORRECTION_MESSAGE)
+    }
+  }
+  return provided
+}
+
 /**
  * Create an organization unit under an existing parent. The company root exists
  * from setup only; parentId is required. Duplicate active sibling names are
@@ -808,6 +951,206 @@ export async function setUnitManager(
     await writer.writeAudit({
       action: 'organization_unit_manager_set',
       comments: `Set manager of unit ${current.id} to ${input.managerUserId ?? 'none'}`,
+    })
+    return { success: true as const }
+  })
+}
+
+/**
+ * Assign an existing account to a unit and position, optionally a team in that
+ * unit. Rejects inactive users and a second active assignment. Validation+write
+ * run in a Serializable transaction so one-active-assignment uniqueness maps
+ * unique/serialization conflicts to /one active/i. Never writes users.role.
+ * Never touches attempts or snapshots.
+ */
+export async function assignPerson(
+  input: { userId: string; unitId: string; positionId: string; teamId: string | null },
+  db?: OrganizationAssignmentMutationDb,
+): Promise<{ assignmentId: string }> {
+  const store = db ?? await createProductionMutationDb()
+  return runExclusiveWrite(store, ONE_ACTIVE_ASSIGNMENT_MESSAGE, async (tx) => {
+    const writer = asAssignmentWriter(tx)
+    const [units, assignments, positions, teams, users] = await Promise.all([
+      writer.loadUnits(),
+      writer.loadAssignments(),
+      writer.loadPositions(),
+      writer.loadTeams(),
+      writer.loadUsers(),
+    ])
+    const user = users.find((row) => row.id === input.userId)
+    if (!user || !user.isActive) {
+      throw new OrganizationValidationError('User is inactive')
+    }
+    const targetUnit = units.find((row) => row.id === input.unitId)
+    if (targetUnit === undefined || !targetUnit.isActive) {
+      throw new OrganizationValidationError(`organization unit "${input.unitId}" was not found`)
+    }
+    const targetPosition = positions.find((row) => row.id === input.positionId)
+    if (targetPosition === undefined || !targetPosition.isActive) {
+      throw new OrganizationValidationError(`position "${input.positionId}" was not found`)
+    }
+    requireTeamInUnit(input.teamId, input.unitId, teams)
+    const existing = assignments.find((row) => row.isActive && row.userId === input.userId)
+    if (existing !== undefined) {
+      throw new OrganizationValidationError(ONE_ACTIVE_ASSIGNMENT_MESSAGE)
+    }
+    const preview: AssignmentNode = {
+      id: `preview-assign-${input.userId}`,
+      userId: input.userId,
+      unitId: input.unitId,
+      positionId: input.positionId,
+      teamId: input.teamId,
+      isActive: true,
+    }
+    validateOrganization(units, positions, [...assignments, preview], teams)
+    const created = await writer.createAssignment({
+      userId: input.userId,
+      unitId: input.unitId,
+      positionId: input.positionId,
+      teamId: input.teamId,
+    })
+    await writer.writeAudit({
+      action: 'organization_assignment_created',
+      comments: `Assigned user ${input.userId} to unit ${input.unitId} position ${input.positionId} team ${input.teamId ?? 'none'} as ${created.id}`,
+    })
+    return { assignmentId: created.id }
+  })
+}
+
+/**
+ * Replace the active assignment's unit/position/team in place. Changing unit
+ * with a stale team id is rejected. A move that invalidates a team's reports-to
+ * throws /explicit correction/i unless teamReportsToCorrections covers every
+ * affected team in the same save. Never writes users.role. Never touches
+ * attempts or snapshots.
+ */
+export async function moveAssignment(
+  input: {
+    assignmentId: string
+    unitId: string
+    positionId: string
+    teamId: string | null
+    teamReportsToCorrections?: readonly { teamId: string; reportsToAssignmentId: string }[]
+  },
+  db?: OrganizationAssignmentMutationDb,
+): Promise<{ success: true }> {
+  const store = db ?? await createProductionMutationDb()
+  return runExclusiveWrite(store, null, async (tx) => {
+    const writer = asAssignmentWriter(tx)
+    const [units, assignments, positions, teams] = await Promise.all([
+      writer.loadUnits(),
+      writer.loadAssignments(),
+      writer.loadPositions(),
+      writer.loadTeams(),
+    ])
+    const current = assignments.find((row) => row.id === input.assignmentId)
+    if (current === undefined) {
+      throw new OrganizationValidationError(`assignment "${input.assignmentId}" was not found`)
+    }
+    if (!current.isActive) {
+      throw new OrganizationValidationError('Assignment is not active')
+    }
+    const targetUnit = units.find((row) => row.id === input.unitId)
+    if (targetUnit === undefined || !targetUnit.isActive) {
+      throw new OrganizationValidationError(`organization unit "${input.unitId}" was not found`)
+    }
+    const targetPosition = positions.find((row) => row.id === input.positionId)
+    if (targetPosition === undefined || !targetPosition.isActive) {
+      throw new OrganizationValidationError(`position "${input.positionId}" was not found`)
+    }
+    requireTeamInUnit(input.teamId, input.unitId, teams)
+    const nextAssignment: AssignmentNode = {
+      ...current,
+      unitId: input.unitId,
+      positionId: input.positionId,
+      teamId: input.teamId,
+    }
+    const invalidated = teamsNeedingReportsToCorrection(
+      current,
+      nextAssignment,
+      assignments,
+      teams,
+      positions,
+    )
+    const provided = requireExplicitReportsToCorrection(
+      invalidated,
+      input.teamReportsToCorrections,
+      current.id,
+    )
+    const nextAssignments = assignments.map((row) => (
+      row.id === current.id ? nextAssignment : row
+    ))
+    const invalidatedIds = new Set(invalidated.map((row) => row.id))
+    const nextTeams = teams.map((row) => {
+      if (!invalidatedIds.has(row.id)) return row
+      const nextReportsTo = provided.get(row.id)
+      return nextReportsTo ? { ...row, reportsToAssignmentId: nextReportsTo } : row
+    })
+    validateOrganization(units, positions, nextAssignments, nextTeams)
+    await writer.updateAssignment(current.id, {
+      unitId: input.unitId,
+      positionId: input.positionId,
+      teamId: input.teamId,
+    })
+    for (const team of invalidated) {
+      const nextReportsTo = provided.get(team.id)
+      if (nextReportsTo) {
+        await writer.updateTeamReportsTo(team.id, nextReportsTo)
+      }
+    }
+    await writer.writeAudit({
+      action: 'organization_assignment_moved',
+      comments: `Moved assignment ${current.id} unit ${current.unitId}→${input.unitId} position ${current.positionId}→${input.positionId} team ${current.teamId ?? 'none'}→${input.teamId ?? 'none'}`,
+    })
+    return { success: true as const }
+  })
+}
+
+/**
+ * Deactivate an assignment (isActive=false + deactivatedAt). Never deactivates
+ * the account and never writes users.role. A reports-to assignment cannot be
+ * removed without explicit correction. Attempts/snapshots untouched.
+ */
+export async function removeAssignment(
+  input: { assignmentId: string },
+  db?: OrganizationAssignmentMutationDb,
+): Promise<{ success: true }> {
+  const store = db ?? await createProductionMutationDb()
+  return runExclusiveWrite(store, null, async (tx) => {
+    const writer = asAssignmentWriter(tx)
+    const [units, assignments, positions, teams] = await Promise.all([
+      writer.loadUnits(),
+      writer.loadAssignments(),
+      writer.loadPositions(),
+      writer.loadTeams(),
+    ])
+    const current = assignments.find((row) => row.id === input.assignmentId)
+    if (current === undefined) {
+      throw new OrganizationValidationError(`assignment "${input.assignmentId}" was not found`)
+    }
+    if (!current.isActive) {
+      throw new OrganizationValidationError('Assignment is not active')
+    }
+    const nextAssignment: AssignmentNode = { ...current, isActive: false }
+    const invalidated = teamsNeedingReportsToCorrection(
+      current,
+      nextAssignment,
+      assignments,
+      teams,
+      positions,
+    )
+    if (invalidated.length > 0) {
+      throw new OrganizationValidationError(EXPLICIT_CORRECTION_MESSAGE)
+    }
+    const nextAssignments = assignments.map((row) => (
+      row.id === current.id ? nextAssignment : row
+    ))
+    validateOrganization(units, positions, nextAssignments, teams)
+    const deactivatedAt = new Date()
+    await writer.deactivateAssignment(current.id, deactivatedAt)
+    await writer.writeAudit({
+      action: 'organization_assignment_removed',
+      comments: `Deactivated assignment ${current.id} for user ${current.userId}; account left active`,
     })
     return { success: true as const }
   })

@@ -20,9 +20,11 @@ function childrenByParentId(units: readonly OrganizationUnitNode[]): Map<string,
 export function OrganizationTree({
   snapshot,
   onSelectUnit,
+  onSelectPerson,
 }: {
   snapshot: WorkspaceSnapshot
   onSelectUnit?: (unitId: string) => void
+  onSelectPerson?: (assignmentId: string) => void
 }) {
   const byParent = childrenByParentId(snapshot.units)
   const roots = snapshot.units
@@ -53,6 +55,7 @@ export function OrganizationTree({
           snapshot={snapshot}
           childrenByParentId={byParent}
           onSelectUnit={onSelectUnit}
+          onSelectPerson={onSelectPerson}
         />
       ))}
     </div>
