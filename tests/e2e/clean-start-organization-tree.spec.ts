@@ -229,6 +229,67 @@ test.describe("clean-start person assignment panel", () => {
 	});
 });
 
+test.describe("clean-start team panel", () => {
+	test("create a team in Section A with two members under one reports-to without duplicating the person", async ({
+		browser,
+	}) => {
+		test.setTimeout(120_000);
+		const session = await openSignedIn(browser, EMAIL.admin);
+		const page = session.page;
+		const teamName = "Night Line";
+		let created = false;
+		try {
+			await page.setViewportSize({ width: 1280, height: 720 });
+			await page.goto("/admin/organization");
+			await expect(page.getByTestId("organization-tree")).toBeVisible({ timeout: 20_000 });
+
+			const sectionAHeader = page.getByTestId(`unit-header-${SECTION_A_ID}`);
+			await sectionAHeader.click();
+			await expect(page.getByTestId("unit-side-panel")).toBeVisible();
+			await page.getByTestId("unit-create-team").click();
+
+			const panel = page.getByTestId("team-panel");
+			await expect(panel).toBeVisible();
+			await expect(panel.getByText("Create team")).toBeVisible();
+			await page.getByTestId("team-name-input").fill(teamName);
+			await page.getByTestId("team-reports-to-select").click();
+			await page.getByRole("option", { name: /Riley/ }).click();
+			await page.getByRole("checkbox", { name: /Alice/ }).check();
+			await page.getByRole("checkbox", { name: /Casey/ }).check();
+			await page.getByTestId("team-save").click();
+			created = true;
+
+			const rileyChip = page.locator('[data-testid^="person-chip-"]').filter({ hasText: "Riley — Manager" });
+			await expect(rileyChip).toHaveCount(1);
+			await expect(rileyChip.getByText(teamName)).toBeVisible();
+			await expect(rileyChip.getByText("Line A")).toBeVisible();
+			await expect(rileyChip.getByText("Alice — Staff")).toBeVisible();
+			await expect(rileyChip.getByText("Casey — Lead")).toBeVisible();
+		} finally {
+			if (created) {
+				try {
+					await page.goto("/admin/organization");
+					await expect(page.getByTestId("organization-tree")).toBeVisible({ timeout: 20_000 });
+					for (const person of ["Alice — Staff", "Casey — Lead"] as const) {
+						await page.getByRole("button", { name: person }).click();
+						const teamTrigger = page.getByTestId("assignment-team-select");
+						await teamTrigger.click();
+						await page.getByRole("option", { name: "Line A" }).click();
+						await page.getByTestId("assignment-save").click();
+						const confirm = page.getByTestId("assignment-move-confirm");
+						if (await confirm.count()) {
+							await confirm.click();
+						}
+					}
+				} catch {
+					// restore best-effort; fixture reseed covers leftover state
+				}
+			}
+			await session.context.close();
+		}
+	});
+});
+
 test.describe("clean-start unit side panel", () => {
 	test("selecting a unit opens the panel; sharing badge updates after save; Section A REQUEST is Inherited from Operations", async ({
 		browser,

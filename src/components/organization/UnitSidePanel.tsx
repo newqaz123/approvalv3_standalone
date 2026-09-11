@@ -55,11 +55,13 @@ export function UnitSidePanel({
   snapshot,
   onSettingsSaved,
   onManagerSaved,
+  onCreateTeam,
 }: {
   unit: OrganizationUnitNode
   snapshot: WorkspaceSnapshot
   onSettingsSaved?: (patch: { shareRequests: boolean; canWorkOnSolutions: boolean }) => void
   onManagerSaved?: (managerUserId: string | null) => void
+  onCreateTeam?: (unitId: string) => void
 }) {
   const [shareRequests, setShareRequests] = useState(unit.shareRequests)
   const [canWorkOnSolutions, setCanWorkOnSolutions] = useState(unit.canWorkOnSolutions)
@@ -197,16 +199,28 @@ export function UnitSidePanel({
         <p role="alert" className="text-sm text-destructive">{error}</p>
       ) : null}
 
-      <Button
-        type="button"
-        data-testid="unit-settings-save"
-        onClick={() => {
-          void handleSaveSettings()
-        }}
-        disabled={saving}
-      >
-        Save
-      </Button>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          type="button"
+          data-testid="unit-settings-save"
+          onClick={() => {
+            void handleSaveSettings()
+          }}
+          disabled={saving}
+        >
+          Save
+        </Button>
+        {onCreateTeam ? (
+          <Button
+            type="button"
+            variant="outline"
+            data-testid="unit-create-team"
+            onClick={() => onCreateTeam(unit.id)}
+          >
+            Create team
+          </Button>
+        ) : null}
+      </div>
     </aside>
   )
 }

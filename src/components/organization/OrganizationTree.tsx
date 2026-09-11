@@ -21,10 +21,12 @@ export function OrganizationTree({
   snapshot,
   onSelectUnit,
   onSelectPerson,
+  onSelectTeam,
 }: {
   snapshot: WorkspaceSnapshot
   onSelectUnit?: (unitId: string) => void
   onSelectPerson?: (assignmentId: string) => void
+  onSelectTeam?: (teamId: string) => void
 }) {
   const byParent = childrenByParentId(snapshot.units)
   const roots = snapshot.units
@@ -56,6 +58,7 @@ export function OrganizationTree({
           childrenByParentId={byParent}
           onSelectUnit={onSelectUnit}
           onSelectPerson={onSelectPerson}
+          onSelectTeam={onSelectTeam}
         />
       ))}
     </div>

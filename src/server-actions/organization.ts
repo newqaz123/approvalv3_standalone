@@ -380,6 +380,15 @@ export interface OrganizationAssignmentMutationDb extends OrganizationUnitMutati
   updateTeamReportsTo(teamId: string, reportsToAssignmentId: string): Promise<void>
 }
 
+export interface OrganizationTeamMutationDb extends OrganizationAssignmentMutationDb {
+  createTeam(input: {
+    unitId: string
+    name: string
+    reportsToAssignmentId: string
+  }): Promise<{ id: string }>
+  setAssignmentTeam(id: string, teamId: string | null): Promise<void>
+}
+
 const ORGANIZATION_MUTATION_ISOLATION = 'Serializable' as const
 
 type MutationPrisma = {
@@ -430,6 +439,14 @@ type MutationPrisma = {
       where: { id: string }
       data: { name?: string; reportsToAssignmentId?: string }
     }) => Promise<unknown>
+    create: (args: {
+      data: {
+        unitId: string
+        name: string
+        reportsToAssignmentId: string
+        isActive: boolean
+      }
+    }) => Promise<{ id: string }>
   }
   organization_assignments: {
     findMany: (args?: object) => Promise<Array<{
@@ -503,8 +520,8 @@ function createMutationStore(
   client: MutationPrisma,
   adminId: string,
   serializable: boolean,
-): OrganizationAssignmentMutationDb {
-  const store: OrganizationAssignmentMutationDb = {
+): OrganizationTeamMutationDb {
+  const store: OrganizationTeamMutationDb = {
     adminUserId: adminId,
     async loadUnits() {
       const rows = await client.organization_units.findMany()
@@ -623,6 +640,23 @@ function createMutationStore(
         data: { reportsToAssignmentId },
       })
     },
+    async createTeam(input) {
+      const row = await client.teams.create({
+        data: {
+          unitId: input.unitId,
+          name: input.name,
+          reportsToAssignmentId: input.reportsToAssignmentId,
+          isActive: true,
+        },
+      })
+      return { id: row.id }
+    },
+    async setAssignmentTeam(id, teamId) {
+      await client.organization_assignments.update({
+        where: { id },
+        data: { teamId },
+      })
+    },
     async writeAudit(entry) {
       await client.request_activities.create({
         data: {
@@ -649,7 +683,7 @@ function createMutationStore(
   return store
 }
 
-async function createProductionMutationDb(): Promise<OrganizationAssignmentMutationDb> {
+async function createProductionMutationDb(): Promise<OrganizationTeamMutationDb> {
   const { requireAdmin } = await import('@/lib/auth')
   const adminId = await requireAdmin()
   if (!adminId) {
@@ -774,6 +808,10 @@ function asUnitWriter(tx: OrganizationMutationDb): OrganizationUnitMutationDb {
 
 function asAssignmentWriter(tx: OrganizationMutationDb): OrganizationAssignmentMutationDb {
   return tx as OrganizationAssignmentMutationDb
+}
+
+function asTeamWriter(tx: OrganizationMutationDb): OrganizationTeamMutationDb {
+  return tx as OrganizationTeamMutationDb
 }
 
 const ONE_ACTIVE_ASSIGNMENT_MESSAGE = 'A user may have only one active assignment'
@@ -1164,6 +1202,259 @@ export async function removeAssignment(
     await writer.writeAudit({
       action: 'organization_assignment_removed',
       comments: `Deactivated assignment ${current.id} for user ${current.userId}; account left active`,
+    })
+    return { success: true as const }
+  })
+}
+
+function personName(
+  users: readonly WorkspaceUser[],
+  userId: string,
+  fallback: string,
+): string {
+  return users.find((row) => row.id === userId)?.name ?? fallback
+}
+
+function duplicateTeamMessage(name: string, unitName: string): string {
+  return `Duplicate team name "${name}" among active teams in unit ${unitName}`
+}
+
+function assertTeamWrite(input: {
+  unitId: string
+  name: string
+  reportsToAssignmentId: string
+  memberAssignmentIds: readonly string[]
+  currentTeamId: string | null
+  units: readonly OrganizationUnitNode[]
+  assignments: readonly AssignmentNode[]
+  positions: readonly PositionNode[]
+  teams: readonly TeamNode[]
+  users: readonly WorkspaceUser[]
+}): { unit: OrganizationUnitNode; reportsTo: AssignmentNode; members: AssignmentNode[] } {
+  const unit = input.units.find((row) => row.id === input.unitId)
+  if (unit === undefined || !unit.isActive) {
+    throw new OrganizationValidationError(`organization unit "${input.unitId}" was not found`)
+  }
+  const reportsTo = input.assignments.find((row) => row.id === input.reportsToAssignmentId)
+  const reportsToName = reportsTo
+    ? personName(input.users, reportsTo.userId, reportsTo.id)
+    : input.reportsToAssignmentId
+  if (reportsTo === undefined) {
+    throw new OrganizationValidationError(`Reports-to ${reportsToName} was not found`)
+  }
+  if (!reportsTo.isActive) {
+    throw new OrganizationValidationError(`Reports-to ${reportsToName} is inactive`)
+  }
+  if (reportsTo.unitId !== unit.id) {
+    throw new OrganizationValidationError(`Reports-to ${reportsToName} is not in unit ${unit.name}`)
+  }
+
+  const memberIds = [...new Set(input.memberAssignmentIds)]
+  if (memberIds.includes(reportsTo.id)) {
+    throw new OrganizationValidationError(`Reports-to ${reportsToName} is a member of the team`)
+  }
+
+  const members: AssignmentNode[] = []
+  for (const id of memberIds) {
+    const member = input.assignments.find((row) => row.id === id)
+    const memberName = member ? personName(input.users, member.userId, id) : id
+    if (member === undefined || !member.isActive) {
+      throw new OrganizationValidationError(`Member ${memberName} is inactive`)
+    }
+    if (member.unitId !== unit.id) {
+      throw new OrganizationValidationError(
+        `Member ${memberName} is assigned to a different unit, not ${unit.name}`,
+      )
+    }
+    members.push(member)
+  }
+
+  const positionById = new Map(input.positions.map((row) => [row.id, row]))
+  const reportsToRank = positionById.get(reportsTo.positionId)?.rank
+  if (reportsToRank === undefined) {
+    throw new OrganizationValidationError(`Reports-to ${reportsToName} has no rank`)
+  }
+  for (const member of members) {
+    const memberRank = positionById.get(member.positionId)?.rank
+    const memberName = personName(input.users, member.userId, member.id)
+    if (memberRank === undefined || reportsToRank <= memberRank) {
+      throw new OrganizationValidationError(
+        `Reports-to ${reportsToName} is not strictly above member ${memberName}`,
+      )
+    }
+  }
+
+  const duplicate = input.teams.some((row) => (
+    row.isActive
+    && row.unitId === unit.id
+    && row.name === input.name
+    && row.id !== input.currentTeamId
+  ))
+  if (duplicate) {
+    throw new OrganizationValidationError(duplicateTeamMessage(input.name, unit.name))
+  }
+
+  return { unit, reportsTo, members }
+}
+
+function proposedTeamAssignments(
+  assignments: readonly AssignmentNode[],
+  teamId: string,
+  memberIds: readonly string[],
+): AssignmentNode[] {
+  const members = new Set(memberIds)
+  return assignments.map((row) => {
+    if (members.has(row.id)) return { ...row, teamId }
+    if (row.teamId === teamId) return { ...row, teamId: null }
+    return row
+  })
+}
+
+async function applyTeamMemberships(
+  writer: OrganizationTeamMutationDb,
+  assignments: readonly AssignmentNode[],
+  teamId: string,
+  memberIds: readonly string[],
+): Promise<void> {
+  const members = new Set(memberIds)
+  for (const row of assignments) {
+    if (members.has(row.id)) {
+      if (row.teamId !== teamId) await writer.setAssignmentTeam(row.id, teamId)
+      continue
+    }
+    if (row.teamId === teamId) {
+      await writer.setAssignmentTeam(row.id, null)
+    }
+  }
+}
+
+/**
+ * Create a flat team in a unit with an explicit reports-to assignment outside
+ * membership, ranked strictly above every member. Duplicate active names in the
+ * unit are rejected. Validation+write run in a Serializable transaction; unique
+ * and serialization conflicts surface as /duplicate team/i. Errors name
+ * offenders. Never writes users.role. Never silently replaces reports-to.
+ */
+export async function createTeam(
+  input: {
+    unitId: string
+    name: string
+    reportsToAssignmentId: string
+    memberAssignmentIds: readonly string[]
+  },
+  db?: OrganizationTeamMutationDb,
+): Promise<{ teamId: string }> {
+  const store = db ?? await createProductionMutationDb()
+  const name = requireTrimmedName(input.name)
+  const uniqueMessage = duplicateTeamMessage(name, 'the unit')
+  return runExclusiveWrite(store, uniqueMessage, async (tx) => {
+    const writer = asTeamWriter(tx)
+    const [units, assignments, positions, teams, users] = await Promise.all([
+      writer.loadUnits(),
+      writer.loadAssignments(),
+      writer.loadPositions(),
+      writer.loadTeams(),
+      writer.loadUsers(),
+    ])
+    const checked = assertTeamWrite({
+      unitId: input.unitId,
+      name,
+      reportsToAssignmentId: input.reportsToAssignmentId,
+      memberAssignmentIds: input.memberAssignmentIds,
+      currentTeamId: null,
+      units,
+      assignments,
+      positions,
+      teams,
+      users,
+    })
+    const previewId = `preview-team-${checked.unit.id}-${name}`
+    const previewTeam: TeamNode = {
+      id: previewId,
+      unitId: checked.unit.id,
+      name,
+      reportsToAssignmentId: input.reportsToAssignmentId,
+      isActive: true,
+    }
+    validateOrganization(
+      units,
+      positions,
+      proposedTeamAssignments(assignments, previewId, input.memberAssignmentIds),
+      [...teams, previewTeam],
+    )
+    const created = await writer.createTeam({
+      unitId: checked.unit.id,
+      name,
+      reportsToAssignmentId: input.reportsToAssignmentId,
+    })
+    await applyTeamMemberships(writer, assignments, created.id, input.memberAssignmentIds)
+    await writer.writeAudit({
+      action: 'team_created',
+      comments: `Created team ${created.id} "${name}" in unit ${checked.unit.id} reports-to ${input.reportsToAssignmentId}`,
+    })
+    return { teamId: created.id }
+  })
+}
+
+/**
+ * Update a team's name, reports-to, and membership. Same rejection rules as
+ * createTeam. The supplied reportsToAssignmentId is required; an invalid value
+ * is rejected rather than silently replaced. Never writes users.role.
+ */
+export async function updateTeam(
+  input: {
+    id: string
+    name: string
+    reportsToAssignmentId: string
+    memberAssignmentIds: readonly string[]
+  },
+  db?: OrganizationTeamMutationDb,
+): Promise<{ success: true }> {
+  const store = db ?? await createProductionMutationDb()
+  const name = requireTrimmedName(input.name)
+  const uniqueMessage = duplicateTeamMessage(name, 'the unit')
+  return runExclusiveWrite(store, uniqueMessage, async (tx) => {
+    const writer = asTeamWriter(tx)
+    const [units, assignments, positions, teams, users] = await Promise.all([
+      writer.loadUnits(),
+      writer.loadAssignments(),
+      writer.loadPositions(),
+      writer.loadTeams(),
+      writer.loadUsers(),
+    ])
+    const current = teams.find((row) => row.id === input.id)
+    if (current === undefined) {
+      throw new OrganizationValidationError(`team "${input.id}" was not found`)
+    }
+    const checked = assertTeamWrite({
+      unitId: current.unitId,
+      name,
+      reportsToAssignmentId: input.reportsToAssignmentId,
+      memberAssignmentIds: input.memberAssignmentIds,
+      currentTeamId: current.id,
+      units,
+      assignments,
+      positions,
+      teams,
+      users,
+    })
+    const nextTeams = teams.map((row) => (
+      row.id === current.id
+        ? { ...row, name, reportsToAssignmentId: input.reportsToAssignmentId }
+        : row
+    ))
+    validateOrganization(
+      units,
+      positions,
+      proposedTeamAssignments(assignments, current.id, input.memberAssignmentIds),
+      nextTeams,
+    )
+    await writer.updateTeamName(current.id, name)
+    await writer.updateTeamReportsTo(current.id, input.reportsToAssignmentId)
+    await applyTeamMemberships(writer, assignments, current.id, input.memberAssignmentIds)
+    await writer.writeAudit({
+      action: 'team_updated',
+      comments: `Updated team ${current.id} "${name}" in unit ${checked.unit.id} reports-to ${input.reportsToAssignmentId}`,
     })
     return { success: true as const }
   })

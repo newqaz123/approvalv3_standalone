@@ -3,6 +3,7 @@
 import React, { useMemo, useState } from 'react'
 import { OrganizationTree } from '@/components/organization/OrganizationTree'
 import { PersonAssignmentPanel } from '@/components/organization/PersonAssignmentPanel'
+import { TeamPanel } from '@/components/organization/TeamPanel'
 import { UnassignedPeopleList } from '@/components/organization/UnassignedPeopleList'
 import { UnitSidePanel } from '@/components/organization/UnitSidePanel'
 import type { AssignmentNode, OrganizationUnitNode, TeamNode } from '@/lib/organization/model'
@@ -14,6 +15,8 @@ export function OrganizationWorkspace({ snapshot }: { snapshot: WorkspaceSnapsho
   const [selectedUnitId, setSelectedUnitId] = useState<string | null>(null)
   const [selectedAssignmentId, setSelectedAssignmentId] = useState<string | null>(null)
   const [selectedUnassignedUserId, setSelectedUnassignedUserId] = useState<string | null>(null)
+  const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null)
+  const [creatingTeamUnitId, setCreatingTeamUnitId] = useState<string | null>(null)
   const [overrides, setOverrides] = useState<Record<string, UnitPatch>>({})
   const [assignmentRows, setAssignmentRows] = useState<AssignmentNode[] | null>(null)
   const [teamRows, setTeamRows] = useState<TeamNode[] | null>(null)
@@ -39,18 +42,40 @@ export function OrganizationWorkspace({ snapshot }: { snapshot: WorkspaceSnapsho
     setSelectedUnitId(unitId)
     setSelectedAssignmentId(null)
     setSelectedUnassignedUserId(null)
+    setSelectedTeamId(null)
+    setCreatingTeamUnitId(null)
   }
 
   function selectPerson(assignmentId: string) {
     setSelectedAssignmentId(assignmentId)
     setSelectedUnitId(null)
     setSelectedUnassignedUserId(null)
+    setSelectedTeamId(null)
+    setCreatingTeamUnitId(null)
   }
 
   function selectUnassigned(userId: string) {
     setSelectedUnassignedUserId(userId)
     setSelectedAssignmentId(null)
     setSelectedUnitId(null)
+    setSelectedTeamId(null)
+    setCreatingTeamUnitId(null)
+  }
+
+  function selectTeam(teamId: string) {
+    setSelectedTeamId(teamId)
+    setCreatingTeamUnitId(null)
+    setSelectedUnitId(null)
+    setSelectedAssignmentId(null)
+    setSelectedUnassignedUserId(null)
+  }
+
+  function startCreateTeam(unitId: string) {
+    setCreatingTeamUnitId(unitId)
+    setSelectedTeamId(null)
+    setSelectedUnitId(null)
+    setSelectedAssignmentId(null)
+    setSelectedUnassignedUserId(null)
   }
 
   const currentAssignments = assignmentRows ?? snapshot.assignments
@@ -64,6 +89,7 @@ export function OrganizationWorkspace({ snapshot }: { snapshot: WorkspaceSnapsho
           snapshot={viewSnapshot}
           onSelectUnit={selectUnit}
           onSelectPerson={selectPerson}
+          onSelectTeam={selectTeam}
         />
         <UnassignedPeopleList
           users={viewSnapshot.unassignedUsers}
@@ -84,6 +110,38 @@ export function OrganizationWorkspace({ snapshot }: { snapshot: WorkspaceSnapsho
             setOverrides((current) => ({
               ...current,
               [selectedUnit.id]: { ...current[selectedUnit.id], managerUserId },
+            }))
+          }}
+          onCreateTeam={startCreateTeam}
+        />
+      ) : null}
+      {creatingTeamUnitId || selectedTeamId ? (
+        <TeamPanel
+          snapshot={viewSnapshot}
+          unitId={
+            creatingTeamUnitId
+            ?? viewSnapshot.teams.find((row) => row.id === selectedTeamId)?.unitId
+            ?? ''
+          }
+          teamId={selectedTeamId}
+          onCreated={(team, memberAssignmentIds) => {
+            setTeamRows([...(teamRows ?? snapshot.teams), team])
+            setAssignmentRows(currentAssignments.map((row) => (
+              memberAssignmentIds.includes(row.id) ? { ...row, teamId: team.id } : row
+            )))
+            setSelectedTeamId(team.id)
+            setCreatingTeamUnitId(null)
+          }}
+          onUpdated={(patch) => {
+            setTeamRows(currentTeams.map((row) => (
+              row.id === patch.id
+                ? { ...row, name: patch.name, reportsToAssignmentId: patch.reportsToAssignmentId }
+                : row
+            )))
+            setAssignmentRows(currentAssignments.map((row) => {
+              if (patch.memberAssignmentIds.includes(row.id)) return { ...row, teamId: patch.id }
+              if (row.teamId === patch.id) return { ...row, teamId: null }
+              return row
             }))
           }}
         />

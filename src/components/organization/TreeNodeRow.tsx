@@ -78,11 +78,13 @@ function TeamGroup({
   assignments,
   usersById,
   positionsById,
+  onSelectTeam,
 }: {
   team: TeamNode
   assignments: readonly AssignmentNode[]
   usersById: Map<string, WorkspaceSnapshot['users'][number]>
   positionsById: Map<string, PositionNode>
+  onSelectTeam?: (teamId: string) => void
 }) {
   const members = assignments
     .filter((assignment) => assignment.isActive && assignment.teamId === team.id)
@@ -95,13 +97,26 @@ function TeamGroup({
 
   return (
     <div data-testid={`team-group-${team.id}`} className="ml-4 space-y-1 border-l pl-3">
-      <div className="text-sm font-medium text-muted-foreground">
+      <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
         <InlineNameEdit
           value={team.name}
           onSave={async (next) => {
             await renameTeam({ id: team.id, name: next })
           }}
         />
+        {onSelectTeam ? (
+          <button
+            type="button"
+            data-testid={`team-select-${team.id}`}
+            className="text-xs underline"
+            onClick={(event) => {
+              event.stopPropagation()
+              onSelectTeam(team.id)
+            }}
+          >
+            Manage
+          </button>
+        ) : null}
       </div>
       <div className="flex flex-wrap gap-1">
         {members.map((assignment) => {
@@ -128,12 +143,14 @@ export function TreeNodeRow({
   childrenByParentId,
   onSelectUnit,
   onSelectPerson,
+  onSelectTeam,
 }: {
   unit: OrganizationUnitNode
   snapshot: WorkspaceSnapshot
   childrenByParentId: Map<string, OrganizationUnitNode[]>
   onSelectUnit?: (unitId: string) => void
   onSelectPerson?: (assignmentId: string) => void
+  onSelectTeam?: (teamId: string) => void
 }) {
   const nameRef = useRef<HTMLSpanElement>(null)
   const usersById = indexById(snapshot.users)
@@ -256,6 +273,7 @@ export function TreeNodeRow({
                   assignments={snapshot.assignments}
                   usersById={usersById}
                   positionsById={positionsById}
+                  onSelectTeam={onSelectTeam}
                 />
               ))}
             </div>
@@ -271,6 +289,7 @@ export function TreeNodeRow({
             childrenByParentId={childrenByParentId}
             onSelectUnit={onSelectUnit}
             onSelectPerson={onSelectPerson}
+            onSelectTeam={onSelectTeam}
           />
         ))}
       </div>
