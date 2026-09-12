@@ -14,6 +14,7 @@ import {
 import { Switch } from '@/components/ui/switch'
 import type { OrganizationUnitNode } from '@/lib/organization/model'
 import {
+  deactivateOrganizationUnit,
   setUnitManager,
   updateUnitSettings,
   type WorkspaceSnapshot,
@@ -51,30 +52,107 @@ export function directManagerCandidates(
   return rows
 }
 
+/**
+ * Danger zone for unit deactivation (deactivate-not-delete). Exported for the
+ * component harness: the confirmation step and the adjacent guard error are
+ * state-driven variants tests render directly (PositionRankEditor pattern).
+ */
+export function UnitDeactivationSection({
+  unitName,
+  confirming,
+  saving,
+  error,
+  onStart,
+  onConfirm,
+  onCancel,
+}: {
+  unitName: string
+  confirming: boolean
+  saving: boolean
+  error: string | null
+  onStart: () => void
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  return (
+    <div data-testid="unit-deactivation-section" className="space-y-2 rounded-md border border-destructive/40 p-3">
+      {error ? (
+        <p role="alert" data-testid="unit-deactivate-error" className="text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
+      {confirming ? (
+        <div data-testid="unit-deactivate-confirmation" className="space-y-2">
+          <p className="text-sm">
+            {`Deactivate "${unitName}"? The unit disappears from the tree. People, teams, and history are not removed; deactivate children and clear assignments first if the unit still has them.`}
+          </p>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="destructive"
+              data-testid="unit-deactivate-confirm"
+              onClick={onConfirm}
+              disabled={saving}
+            >
+              Deactivate unit
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              data-testid="unit-deactivate-cancel"
+              onClick={onCancel}
+              disabled={saving}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <Button
+          type="button"
+          variant="destructive"
+          data-testid="unit-deactivate"
+          onClick={onStart}
+          disabled={saving}
+        >
+          Deactivate unit
+        </Button>
+      )}
+    </div>
+  )
+}
+
 export function UnitSidePanel({
   unit,
   snapshot,
   onSettingsSaved,
   onManagerSaved,
   onCreateTeam,
+  onDeactivated,
 }: {
   unit: OrganizationUnitNode
   snapshot: WorkspaceSnapshot
   onSettingsSaved?: (patch: { shareRequests: boolean; canWorkOnSolutions: boolean }) => void
   onManagerSaved?: (managerUserId: string | null) => void
   onCreateTeam?: (unitId: string) => void
+  onDeactivated?: (unitId: string) => void
 }) {
   const [shareRequests, setShareRequests] = useState(unit.shareRequests)
   const [canWorkOnSolutions, setCanWorkOnSolutions] = useState(unit.canWorkOnSolutions)
   const [managerUserId, setManagerUserId] = useState(unit.managerUserId)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [confirmingDeactivate, setConfirmingDeactivate] = useState(false)
+  const [deactivating, setDeactivating] = useState(false)
+  const [deactivateError, setDeactivateError] = useState<string | null>(null)
 
   useEffect(() => {
     setShareRequests(unit.shareRequests)
     setCanWorkOnSolutions(unit.canWorkOnSolutions)
     setManagerUserId(unit.managerUserId)
     setError(null)
+    setConfirmingDeactivate(false)
+    setDeactivateError(null)
   }, [unit.id, unit.shareRequests, unit.canWorkOnSolutions, unit.managerUserId])
 
   const candidates = directManagerCandidates(snapshot, unit.id)
@@ -106,6 +184,20 @@ export function UnitSidePanel({
       onManagerSaved?.(next)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function handleConfirmDeactivate() {
+    setDeactivateError(null)
+    setDeactivating(true)
+    try {
+      await deactivateOrganizationUnit({ unitId: unit.id })
+      onDeactivated?.(unit.id)
+    } catch (err) {
+      // Adjacent error with the confirmation step retained (panel error pattern).
+      setDeactivateError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setDeactivating(false)
     }
   }
 
@@ -209,6 +301,24 @@ export function UnitSidePanel({
       {error ? (
         <p role="alert" className="text-sm text-destructive">{error}</p>
       ) : null}
+
+      <UnitDeactivationSection
+        unitName={unit.name}
+        confirming={confirmingDeactivate}
+        saving={deactivating}
+        error={deactivateError}
+        onStart={() => {
+          setDeactivateError(null)
+          setConfirmingDeactivate(true)
+        }}
+        onConfirm={() => {
+          void handleConfirmDeactivate()
+        }}
+        onCancel={() => {
+          setConfirmingDeactivate(false)
+          setDeactivateError(null)
+        }}
+      />
 
       <div className="flex flex-wrap gap-2">
         <Button

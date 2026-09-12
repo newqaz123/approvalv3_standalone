@@ -9,7 +9,7 @@ import { UnitSidePanel } from '@/components/organization/UnitSidePanel'
 import type { AssignmentNode, OrganizationUnitNode, TeamNode } from '@/lib/organization/model'
 import type { WorkspaceSnapshot } from '@/server-actions/organization'
 
-type UnitPatch = Partial<Pick<OrganizationUnitNode, 'shareRequests' | 'canWorkOnSolutions' | 'managerUserId'>>
+type UnitPatch = Partial<Pick<OrganizationUnitNode, 'shareRequests' | 'canWorkOnSolutions' | 'managerUserId' | 'isActive'>>
 
 export function OrganizationWorkspace({ snapshot }: { snapshot: WorkspaceSnapshot }) {
   const [selectedUnitId, setSelectedUnitId] = useState<string | null>(null)
@@ -113,6 +113,15 @@ export function OrganizationWorkspace({ snapshot }: { snapshot: WorkspaceSnapsho
             }))
           }}
           onCreateTeam={startCreateTeam}
+          onDeactivated={(unitId) => {
+            // Deactivate-not-delete: flip the local row so the tree hides the
+            // unit immediately; the panel closes because nothing is selected.
+            setOverrides((current) => ({
+              ...current,
+              [unitId]: { ...current[unitId], isActive: false },
+            }))
+            setSelectedUnitId(null)
+          }}
         />
       ) : null}
       {creatingTeamUnitId || selectedTeamId ? (

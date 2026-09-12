@@ -368,6 +368,15 @@ export interface OrganizationUnitMutationDb extends OrganizationMutationDb {
   updateUnitManager(unitId: string, managerUserId: string | null): Promise<void>
 }
 
+export interface OrganizationUnitDeactivationDb extends OrganizationMutationDb {
+  loadAssignments(): Promise<AssignmentNode[]>
+  loadPositions(): Promise<PositionNode[]>
+  loadUsers(): Promise<WorkspaceUser[]>
+  /** DRAFT or PUBLISHED route versions scoped to one unit (deactivation guard). */
+  loadRouteVersionsForUnit(unitId: string): Promise<ReadonlyArray<{ id: string; phase: string; status: string }>>
+  deactivateUnit(id: string): Promise<void>
+}
+
 export interface OrganizationAssignmentMutationDb extends OrganizationUnitMutationDb {
   createAssignment(input: {
     userId: string
@@ -432,6 +441,7 @@ type MutationPrisma = {
         shareRequests?: boolean
         canWorkOnSolutions?: boolean
         managerUserId?: string | null
+        isActive?: boolean
       }
     }) => Promise<unknown>
     create: (args: {
@@ -560,8 +570,8 @@ function createMutationStore(
   client: MutationPrisma,
   adminId: string,
   serializable: boolean,
-): OrganizationPositionMutationDb {
-  const store: OrganizationPositionMutationDb = {
+): OrganizationPositionMutationDb & OrganizationUnitDeactivationDb {
+  const store: OrganizationPositionMutationDb & OrganizationUnitDeactivationDb = {
     adminUserId: adminId,
     async loadUnits() {
       const rows = await client.organization_units.findMany()
@@ -644,6 +654,20 @@ function createMutationStore(
         where: { id: unitId },
         data: { managerUserId },
       })
+    },
+    async deactivateUnit(id) {
+      await client.organization_units.update({
+        where: { id },
+        data: { isActive: false },
+      })
+    },
+    async loadRouteVersionsForUnit(unitId) {
+      const rows = await client.approval_route_versions.findMany({
+        where: { scopeUnitId: unitId },
+      })
+      return rows
+        .filter((row) => row.status === 'DRAFT' || row.status === 'PUBLISHED')
+        .map((row) => ({ id: row.id, phase: row.phase, status: row.status }))
     },
     async createAssignment(input) {
       const row = await client.organization_assignments.create({
@@ -759,7 +783,7 @@ function createMutationStore(
   return store
 }
 
-async function createProductionMutationDb(): Promise<OrganizationPositionMutationDb> {
+async function createProductionMutationDb(): Promise<OrganizationPositionMutationDb & OrganizationUnitDeactivationDb> {
   const { requireAdmin } = await import('@/lib/auth')
   const adminId = await requireAdmin()
   if (!adminId) {
@@ -880,6 +904,10 @@ function requireParentId(parentId: string | undefined | null): string {
 
 function asUnitWriter(tx: OrganizationMutationDb): OrganizationUnitMutationDb {
   return tx as OrganizationUnitMutationDb
+}
+
+function asUnitDeactivationWriter(tx: OrganizationMutationDb): OrganizationUnitDeactivationDb {
+  return tx as OrganizationUnitDeactivationDb
 }
 
 function asAssignmentWriter(tx: OrganizationMutationDb): OrganizationAssignmentMutationDb {
@@ -1081,6 +1109,98 @@ export async function setUnitManager(
     await writer.writeAudit({
       action: 'organization_unit_manager_set',
       comments: `Set manager of unit ${current.id} to ${input.managerUserId ?? 'none'}`,
+    })
+    return { success: true as const }
+  })
+}
+
+/**
+ * Deactivate an organization unit (isActive=false only; never a hard delete).
+ * Refused with named offenders while the unit is the active company root, has
+ * ACTIVE child units, ACTIVE assignments directly in the unit, ACTIVE teams in
+ * the unit, or DRAFT/PUBLISHED approval_route_versions scoped to the unit —
+ * correct those records first. On success requests keep their
+ * organizationUnitId reference and the unit's managerUserId stays as stale
+ * history (A3 exempts inactive units). validateOrganization runs on the
+ * proposed state before the write; audit + revalidate.
+ * Attempts/snapshots untouched.
+ */
+export async function deactivateOrganizationUnit(
+  input: { unitId: string },
+  db?: OrganizationUnitDeactivationDb,
+): Promise<{ success: true }> {
+  const store = db ?? await createProductionMutationDb()
+  return runExclusiveWrite(store, null, async (tx) => {
+    const writer = asUnitDeactivationWriter(tx)
+    const [units, assignments, positions, teams, users] = await Promise.all([
+      writer.loadUnits(),
+      writer.loadAssignments(),
+      writer.loadPositions(),
+      writer.loadTeams(),
+      writer.loadUsers(),
+    ])
+    const current = units.find((row) => row.id === input.unitId)
+    if (current === undefined) {
+      throw new OrganizationValidationError(`organization unit "${input.unitId}" was not found`)
+    }
+    if (current.isActive && current.parentId === null) {
+      throw new OrganizationValidationError(
+        `Unit "${current.name}" is the active company root; deactivating the only active root would invalidate the organization`,
+      )
+    }
+    if (!current.isActive) {
+      throw new OrganizationValidationError('Unit is not active')
+    }
+    const activeChildren = units.filter((row) => (
+      row.isActive && row.parentId === current.id
+    ))
+    if (activeChildren.length > 0) {
+      const offenders = activeChildren
+        .map((child) => `"${child.name}" (${child.id})`)
+        .join(', ')
+      throw new OrganizationValidationError(
+        `Unit "${current.name}" has active child units: ${offenders}; deactivate children first`,
+      )
+    }
+    const activeAssignments = assignments.filter((row) => (
+      row.isActive && row.unitId === current.id
+    ))
+    if (activeAssignments.length > 0) {
+      const offenders = activeAssignments
+        .map((row) => `"${personName(users, row.userId, row.id)}" (${row.id})`)
+        .join(', ')
+      throw new OrganizationValidationError(
+        `Unit "${current.name}" has people still assigned: ${offenders}; move or remove people first`,
+      )
+    }
+    const activeTeams = teams.filter((row) => (
+      row.isActive && row.unitId === current.id
+    ))
+    if (activeTeams.length > 0) {
+      const offenders = activeTeams
+        .map((team) => `"${team.name}" (${team.id})`)
+        .join(', ')
+      throw new OrganizationValidationError(
+        `Unit "${current.name}" has active teams: ${offenders}; deactivate or remove them first`,
+      )
+    }
+    const scopedRoutes = await writer.loadRouteVersionsForUnit(current.id)
+    if (scopedRoutes.length > 0) {
+      const offenders = scopedRoutes
+        .map((route) => `${route.id} (${route.phase} ${route.status})`)
+        .join(', ')
+      throw new OrganizationValidationError(
+        `Unit "${current.name}" has approval route versions scoped to it: ${offenders}; retire or move them first`,
+      )
+    }
+    const nextUnits = units.map((row) => (
+      row.id === current.id ? { ...row, isActive: false } : row
+    ))
+    validateOrganization(nextUnits, positions, assignments, teams)
+    await writer.deactivateUnit(current.id)
+    await writer.writeAudit({
+      action: 'organization_unit_deactivated',
+      comments: `Deactivated unit ${current.id} "${current.name}"; history preserved (requests keep their organizationUnitId; manager stays as stale history)`,
     })
     return { success: true as const }
   })
