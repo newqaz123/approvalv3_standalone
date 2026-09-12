@@ -377,6 +377,13 @@ export interface OrganizationUnitDeactivationDb extends OrganizationMutationDb {
   deactivateUnit(id: string): Promise<void>
 }
 
+export interface OrganizationTeamDeactivationDb extends OrganizationMutationDb {
+  loadAssignments(): Promise<AssignmentNode[]>
+  loadPositions(): Promise<PositionNode[]>
+  loadUsers(): Promise<WorkspaceUser[]>
+  deactivateTeam(id: string): Promise<void>
+}
+
 export interface OrganizationAssignmentMutationDb extends OrganizationUnitMutationDb {
   createAssignment(input: {
     userId: string
@@ -464,7 +471,7 @@ type MutationPrisma = {
     }>>
     update: (args: {
       where: { id: string }
-      data: { name?: string; reportsToAssignmentId?: string }
+      data: { name?: string; reportsToAssignmentId?: string; isActive?: boolean }
     }) => Promise<unknown>
     create: (args: {
       data: {
@@ -570,8 +577,8 @@ function createMutationStore(
   client: MutationPrisma,
   adminId: string,
   serializable: boolean,
-): OrganizationPositionMutationDb & OrganizationUnitDeactivationDb {
-  const store: OrganizationPositionMutationDb & OrganizationUnitDeactivationDb = {
+): OrganizationPositionMutationDb & OrganizationUnitDeactivationDb & OrganizationTeamDeactivationDb {
+  const store: OrganizationPositionMutationDb & OrganizationUnitDeactivationDb & OrganizationTeamDeactivationDb = {
     adminUserId: adminId,
     async loadUnits() {
       const rows = await client.organization_units.findMany()
@@ -657,6 +664,12 @@ function createMutationStore(
     },
     async deactivateUnit(id) {
       await client.organization_units.update({
+        where: { id },
+        data: { isActive: false },
+      })
+    },
+    async deactivateTeam(id) {
+      await client.teams.update({
         where: { id },
         data: { isActive: false },
       })
@@ -783,7 +796,7 @@ function createMutationStore(
   return store
 }
 
-async function createProductionMutationDb(): Promise<OrganizationPositionMutationDb & OrganizationUnitDeactivationDb> {
+async function createProductionMutationDb(): Promise<OrganizationPositionMutationDb & OrganizationUnitDeactivationDb & OrganizationTeamDeactivationDb> {
   const { requireAdmin } = await import('@/lib/auth')
   const adminId = await requireAdmin()
   if (!adminId) {
@@ -908,6 +921,10 @@ function asUnitWriter(tx: OrganizationMutationDb): OrganizationUnitMutationDb {
 
 function asUnitDeactivationWriter(tx: OrganizationMutationDb): OrganizationUnitDeactivationDb {
   return tx as OrganizationUnitDeactivationDb
+}
+
+function asTeamDeactivationWriter(tx: OrganizationMutationDb): OrganizationTeamDeactivationDb {
+  return tx as OrganizationTeamDeactivationDb
 }
 
 function asAssignmentWriter(tx: OrganizationMutationDb): OrganizationAssignmentMutationDb {
@@ -1201,6 +1218,61 @@ export async function deactivateOrganizationUnit(
     await writer.writeAudit({
       action: 'organization_unit_deactivated',
       comments: `Deactivated unit ${current.id} "${current.name}"; history preserved (requests keep their organizationUnitId; manager stays as stale history)`,
+    })
+    return { success: true as const }
+  })
+}
+
+/**
+ * Deactivate a flat team (isActive=false only; never a hard delete). Refused
+ * with named offenders while any ACTIVE member assignment still references
+ * the team — move or remove members first. The reports-to assignment may
+ * still be active: the relationship retires WITH the team and is never
+ * silently reassigned (validateOrganization exempts the inactive team's
+ * reports-to/member rules per A3). History (membership teamId references on
+ * inactive assignments) is preserved untouched. Audit + revalidate.
+ * Attempts/snapshots untouched.
+ */
+export async function deactivateTeam(
+  input: { teamId: string },
+  db?: OrganizationTeamDeactivationDb,
+): Promise<{ success: true }> {
+  const store = db ?? await createProductionMutationDb()
+  return runExclusiveWrite(store, null, async (tx) => {
+    const writer = asTeamDeactivationWriter(tx)
+    const [units, assignments, positions, teams, users] = await Promise.all([
+      writer.loadUnits(),
+      writer.loadAssignments(),
+      writer.loadPositions(),
+      writer.loadTeams(),
+      writer.loadUsers(),
+    ])
+    const current = teams.find((row) => row.id === input.teamId)
+    if (current === undefined) {
+      throw new OrganizationValidationError(`team "${input.teamId}" was not found`)
+    }
+    if (!current.isActive) {
+      throw new OrganizationValidationError('Team is not active')
+    }
+    const activeMembers = assignments.filter((row) => (
+      row.isActive && row.teamId === current.id
+    ))
+    if (activeMembers.length > 0) {
+      const offenders = activeMembers
+        .map((row) => `"${personName(users, row.userId, row.id)}" (${row.id})`)
+        .join(', ')
+      throw new OrganizationValidationError(
+        `Team "${current.name}" has members still assigned: ${offenders}; move or remove members first`,
+      )
+    }
+    const nextTeams = teams.map((row) => (
+      row.id === current.id ? { ...row, isActive: false } : row
+    ))
+    validateOrganization(units, positions, assignments, nextTeams)
+    await writer.deactivateTeam(current.id)
+    await writer.writeAudit({
+      action: 'team_deactivated',
+      comments: `Deactivated team ${current.id} "${current.name}"; history preserved (reports-to assignment stays as history; never reassigned)`,
     })
     return { success: true as const }
   })

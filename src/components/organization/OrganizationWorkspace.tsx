@@ -153,6 +153,14 @@ export function OrganizationWorkspace({ snapshot }: { snapshot: WorkspaceSnapsho
               return row
             }))
           }}
+          onDeactivated={(teamId) => {
+            // Deactivate-not-delete: flip the local row so the tree hides the
+            // team group immediately; the panel closes because nothing is selected.
+            setTeamRows((teamRows ?? snapshot.teams).map((row) => (
+              row.id === teamId ? { ...row, isActive: false } : row
+            )))
+            setSelectedTeamId(null)
+          }}
         />
       ) : null}
       {selectedAssignmentId || selectedUnassignedUserId ? (

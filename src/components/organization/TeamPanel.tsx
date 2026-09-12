@@ -15,6 +15,7 @@ import {
 import type { AssignmentNode } from '@/lib/organization/model'
 import {
   createTeam,
+  deactivateTeam,
   updateTeam,
   type WorkspaceSnapshot,
 } from '@/server-actions/organization'
@@ -29,12 +30,83 @@ function assignmentLabel(
   return user?.name ?? assignment.id
 }
 
+/**
+ * Danger zone for team deactivation (deactivate-not-delete). Exported for the
+ * component harness: the confirmation step and the adjacent guard error are
+ * state-driven variants tests render directly (UnitDeactivationSection pattern).
+ */
+export function TeamDeactivationSection({
+  teamName,
+  confirming,
+  saving,
+  error,
+  onStart,
+  onConfirm,
+  onCancel,
+}: {
+  teamName: string
+  confirming: boolean
+  saving: boolean
+  error: string | null
+  onStart: () => void
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  return (
+    <div data-testid="team-deactivation-section" className="space-y-2 rounded-md border border-destructive/40 p-3">
+      {error ? (
+        <p role="alert" data-testid="team-deactivate-error" className="text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
+      {confirming ? (
+        <div data-testid="team-deactivate-confirmation" className="space-y-2">
+          <p className="text-sm">
+            {`Deactivate "${teamName}"? The team disappears from the tree. Members must be moved or removed first; history is preserved and the reports-to person is never reassigned.`}
+          </p>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="destructive"
+              data-testid="team-deactivate-confirm"
+              onClick={onConfirm}
+              disabled={saving}
+            >
+              Deactivate team
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              data-testid="team-deactivate-cancel"
+              onClick={onCancel}
+              disabled={saving}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <Button
+          type="button"
+          variant="destructive"
+          data-testid="team-deactivate"
+          onClick={onStart}
+          disabled={saving}
+        >
+          Deactivate team
+        </Button>
+      )}
+    </div>
+  )
+}
+
 export function TeamPanel({
   snapshot,
   unitId,
   teamId = null,
   onCreated,
   onUpdated,
+  onDeactivated,
 }: {
   snapshot: WorkspaceSnapshot
   unitId: string
@@ -52,6 +124,7 @@ export function TeamPanel({
     reportsToAssignmentId: string
     memberAssignmentIds: readonly string[]
   }) => void
+  onDeactivated?: (teamId: string) => void
 }) {
   const team = teamId ? snapshot.teams.find((row) => row.id === teamId) ?? null : null
   const [name, setName] = useState(team?.name ?? '')
@@ -63,6 +136,9 @@ export function TeamPanel({
   ))
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [confirmingDeactivate, setConfirmingDeactivate] = useState(false)
+  const [deactivating, setDeactivating] = useState(false)
+  const [deactivateError, setDeactivateError] = useState<string | null>(null)
 
   useEffect(() => {
     const current = teamId ? snapshot.teams.find((row) => row.id === teamId) ?? null : null
@@ -74,6 +150,8 @@ export function TeamPanel({
         : [],
     )
     setError(null)
+    setConfirmingDeactivate(false)
+    setDeactivateError(null)
   }, [teamId, unitId, snapshot.teams, snapshot.assignments])
 
   const unitAssignments = useMemo(
@@ -95,6 +173,21 @@ export function TeamPanel({
   function handleReportsToChange(value: string) {
     setReportsToAssignmentId(value)
     setMemberIds((current) => current.filter((id) => id !== value))
+  }
+
+  async function handleConfirmDeactivate() {
+    if (!team) return
+    setDeactivateError(null)
+    setDeactivating(true)
+    try {
+      await deactivateTeam({ teamId: team.id })
+      onDeactivated?.(team.id)
+    } catch (err) {
+      // Adjacent error with the confirmation step retained (panel error pattern).
+      setDeactivateError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setDeactivating(false)
+    }
   }
 
   async function handleSave() {
@@ -205,6 +298,26 @@ export function TeamPanel({
 
       {error ? (
         <p role="alert" className="text-sm text-destructive">{error}</p>
+      ) : null}
+
+      {team ? (
+        <TeamDeactivationSection
+          teamName={team.name}
+          confirming={confirmingDeactivate}
+          saving={deactivating}
+          error={deactivateError}
+          onStart={() => {
+            setDeactivateError(null)
+            setConfirmingDeactivate(true)
+          }}
+          onConfirm={() => {
+            void handleConfirmDeactivate()
+          }}
+          onCancel={() => {
+            setConfirmingDeactivate(false)
+            setDeactivateError(null)
+          }}
+        />
       ) : null}
 
       <Button
