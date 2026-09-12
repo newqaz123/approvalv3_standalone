@@ -1,4 +1,4 @@
-import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
+import { expect, test, type Browser, type BrowserContext, type Page, type Route } from "@playwright/test";
 import { PrismaClient } from "@prisma/client";
 
 const REQUIRED_BASE = "http://localhost:3100";
@@ -69,6 +69,98 @@ async function renameAuditCount(entityId: string, action: string): Promise<numbe
 	} finally {
 		await prisma.$disconnect();
 	}
+}
+
+/**
+ * Holds rename server actions (POST + Next-Action header to the organization
+ * admin page) at the network layer until the test releases them, so an
+ * in-flight save stays pending while the test types a newer draft and blurs
+ * (the review-P1 sequence). Non-action requests pass straight through. At
+ * most one action is in flight at a time: the follow-up save is issued by the
+ * component only AFTER the previous response is delivered, so a second
+ * arrival before releasing proves a defect.
+ */
+class RenameActionGate {
+	private readonly pendingReleases: Array<() => void> = []
+	private arrived = 0
+	private waiter: (() => void) | null = null
+	private readonly seen = new Set<string>()
+
+	async install(page: Page): Promise<void> {
+		await page.route("**/admin/organization**", async (route) => {
+			const request = route.request()
+			// Only rename actions are held: they serialize an object argument
+			// carrying "name" (renameOrganizationUnit/renameTeam/renamePosition).
+			// Other page actions (unit selection, panel data loads) pass through.
+			const isRename = (request.postData() ?? "").includes('"name":')
+			if (request.method() !== "POST" || request.headers()["next-action"] === undefined || !isRename) {
+				await route.continue()
+				return
+			}
+			// Diagnostic trail: which action (and which serialized name argument) is held.
+			console.log(
+				`[gate] arrive #${this.arrived + 1} action=${request.headers()["next-action"]} post=${(request.postData() ?? "").slice(0, 200)}`,
+			)
+			// The network stack can re-pause an already-intercepted request; count
+			// and hold each distinct request exactly once.
+			const key = `${request.url()}|${request.headers()["next-action"]}|${request.postData() ?? ""}`
+			if (this.seen.has(key)) {
+				console.log("[gate] duplicate pause ignored")
+				return
+			}
+			this.seen.add(key)
+			this.arrived += 1
+			if (this.waiter) {
+				const wake = this.waiter
+				this.waiter = null
+				wake()
+			}
+			await new Promise<void>((resolve) => {
+				this.pendingReleases.push(resolve)
+			})
+			try {
+				await route.continue()
+			} catch (error) {
+				console.log(`[gate] continue failed: ${String(error)}`)
+			}
+		})
+	}
+
+	
+	async waitFor(count: number, timeoutMs = 20_000): Promise<void> {
+		const deadline = Date.now() + timeoutMs
+		while (this.arrived < count) {
+			const remaining = deadline - Date.now()
+			if (remaining <= 0) {
+				throw new Error(`rename gate: expected ${count} action(s), saw ${this.arrived}`)
+			}
+			await new Promise<void>((resolve) => {
+				this.waiter = resolve
+				setTimeout(resolve, remaining)
+			})
+		}
+	}
+
+	/** Release the oldest held action so the server processes it. */
+	release(): void {
+		const release = this.pendingReleases.shift()
+		if (release) release()
+	}
+
+	/** Release every held action (failure-path cleanup so contexts can close). */
+	releaseAll(): void {
+		this.pendingReleases.splice(0).forEach((release) => release())
+	}
+
+	get arrivedCount(): number {
+		return this.arrived
+	}
+}
+
+async function openOrganizationPage(page: Page): Promise<void> {
+	await page.setViewportSize({ width: 1280, height: 720 })
+	await page.goto("/admin/organization")
+	await expect(page.getByTestId("organization-tree")).toBeVisible({ timeout: 20_000 })
 }
 
 test.describe.serial("clean-start rename blur and tree flag icons", () => {
@@ -391,6 +483,283 @@ test.describe.serial("clean-start rename blur and tree flag icons", () => {
 			await session.context.close();
 		}
 	});
+
+	test("Tab blur with a changed value saves exactly once", async ({ browser }) => {
+		test.setTimeout(180_000)
+		const baseline = await renameAuditCount(unitAId, "organization_unit_renamed")
+		const session = await openSignedIn(browser, EMAIL.admin)
+		const page = session.page
+		try {
+			await openOrganizationPage(page)
+
+			const header = page.getByTestId(`unit-header-${unitAId}`)
+			await startUnitRename(page, unitAId)
+			const input = header.getByTestId("inline-name-edit-input")
+			const next = `RenameBlur Unit Tabbed ${RUN}`
+			await input.fill(next)
+			await input.press("Tab")
+			await expect(header.getByTestId("inline-name-edit-input")).toHaveCount(0)
+			await expect(page.getByTestId(`unit-name-${unitAId}`)).toContainText(next)
+			expect(await unitName(unitAId)).toBe(next)
+			expect(await renameAuditCount(unitAId, "organization_unit_renamed")).toBe(baseline + 1)
+		} finally {
+			await session.context.close()
+		}
+	})
+
+	test("keyboard Tab traversal focuses the flag icons and opens their tooltips", async ({ browser }) => {
+		test.setTimeout(180_000)
+		const session = await openSignedIn(browser, EMAIL.admin)
+		const page = session.page
+		try {
+			await openOrganizationPage(page)
+
+			const header = page.getByTestId(`unit-header-${unitAId}`)
+			await expect(header).toBeVisible()
+			// Genuine keyboard traversal: start from the focusable row header and
+			// press Tab until the sharing icon itself receives focus.
+			await header.focus()
+			const sharingId = await (async (): Promise<string | null> => {
+				for (let i = 0; i < 15; i += 1) {
+				await page.keyboard.press("Tab")
+				const testId = await page.evaluate(() =>
+					document.activeElement?.getAttribute("data-testid") ?? null,
+				)
+				if (testId === `sharing-badge-${unitAId}`) return testId
+			}
+			return null
+			})()
+			expect(sharingId).toBe(`sharing-badge-${unitAId}`)
+			await expect(page.getByRole("tooltip", { name: "Request sharing" })).toBeVisible()
+
+			// One more genuine Tab reaches the wrench icon and its tooltip.
+			await page.keyboard.press("Tab")
+			const focused = await page.evaluate(() =>
+				document.activeElement?.getAttribute("data-testid") ?? null,
+			)
+			expect(focused).toBe(`solutions-badge-${unitAId}`)
+			await expect(page.getByRole("tooltip", { name: "Can work on solutions" })).toBeVisible()
+		} finally {
+			await session.context.close()
+		}
+	})
+
+	test("deferred save: blur of a newer draft is submitted after B settles", async ({ browser }) => {
+		test.setTimeout(180_000)
+		const baseline = await renameAuditCount(unitAId, "organization_unit_renamed")
+		const session = await openSignedIn(browser, EMAIL.admin)
+		const page = session.page
+		const gate = new RenameActionGate()
+		try {
+			await openOrganizationPage(page)
+			await gate.install(page)
+
+			const header = page.getByTestId(`unit-header-${unitAId}`)
+			await startUnitRename(page, unitAId)
+			const input = header.getByTestId("inline-name-edit-input")
+			const bName = `RenameBlur Unit PendB ${RUN}`
+			const cName = `RenameBlur Unit PendC ${RUN}`
+			await input.fill(bName)
+			await input.press("Enter")
+			await gate.waitFor(1) // B is held in flight
+			await input.fill(cName) // newer draft while B is pending
+			await page.getByRole("heading", { name: "Organization & Approvals" }).click() // blur
+			// The blurred newer draft stays visible with no error and no loss.
+			await expect(header.getByTestId("inline-name-edit-input")).toHaveValue(cName)
+			await expect(header.getByTestId("inline-name-edit-error")).toHaveCount(0)
+			gate.release() // settle B successfully
+			await gate.waitFor(2) // the queued C must be submitted
+			gate.release() // settle C
+			await expect(header.getByTestId("inline-name-edit-input")).toHaveCount(0)
+			await expect(page.getByTestId(`unit-name-${unitAId}`)).toContainText(cName)
+			expect(await unitName(unitAId)).toBe(cName)
+			expect(await renameAuditCount(unitAId, "organization_unit_renamed")).toBe(baseline + 2)
+		} finally {
+			gate.releaseAll()
+			await page.unroute("**/admin/organization**").catch(() => undefined)
+			await session.context.close()
+		}
+	})
+
+	test("deferred save: rejected B then queued C still saves C", async ({ browser }) => {
+		test.setTimeout(180_000)
+		const baseline = await renameAuditCount(unitAId, "organization_unit_renamed")
+		const session = await openSignedIn(browser, EMAIL.admin)
+		const page = session.page
+		const gate = new RenameActionGate()
+		try {
+			await openOrganizationPage(page)
+			await gate.install(page)
+
+			const header = page.getByTestId(`unit-header-${unitAId}`)
+			await startUnitRename(page, unitAId)
+			const input = header.getByTestId("inline-name-edit-input")
+			const cName = `RenameBlur Unit PendRejC ${RUN}`
+			// B duplicates the live sibling fixture: the server must refuse it.
+			await input.fill(UNIT_B_NAME)
+			await input.press("Enter")
+			await gate.waitFor(1)
+			await input.fill(cName)
+			await page.getByRole("heading", { name: "Organization & Approvals" }).click()
+			gate.release() // settle B with a rejection
+			await gate.waitFor(2) // the queued C is still submitted after the failure
+			gate.release()
+			await expect(header.getByTestId("inline-name-edit-input")).toHaveCount(0)
+			await expect(page.getByTestId(`unit-name-${unitAId}`)).toContainText(cName)
+			expect(await unitName(unitAId)).toBe(cName)
+			// Only C wrote: the refused B produced no audit.
+			expect(await renameAuditCount(unitAId, "organization_unit_renamed")).toBe(baseline + 1)
+		} finally {
+			gate.releaseAll()
+			await page.unroute("**/admin/organization**").catch(() => undefined)
+			await session.context.close()
+		}
+	})
+
+	test("deferred save: latest failure retains the newer draft and the adjacent error", async ({ browser }) => {
+		test.setTimeout(180_000)
+		const baseline = await renameAuditCount(unitAId, "organization_unit_renamed")
+		const session = await openSignedIn(browser, EMAIL.admin)
+		const page = session.page
+		const gate = new RenameActionGate()
+		try {
+			await openOrganizationPage(page)
+			await gate.install(page)
+
+			const header = page.getByTestId(`unit-header-${unitAId}`)
+			await startUnitRename(page, unitAId)
+			const input = header.getByTestId("inline-name-edit-input")
+			const bName = `RenameBlur Unit PendFailB ${RUN}`
+			await input.fill(bName)
+			await input.press("Enter")
+			await gate.waitFor(1)
+			// The queued follow-up duplicates the live sibling: it must fail.
+			await input.fill(UNIT_B_NAME)
+			await page.getByRole("heading", { name: "Organization & Approvals" }).click()
+			gate.release() // settle B successfully
+			await gate.waitFor(2)
+			gate.release() // settle C with a rejection
+			const error = header.getByTestId("inline-name-edit-error")
+			await expect(error).toBeVisible()
+			await expect(error).toContainText(/unique/i)
+			// The failed latest draft is retained in the still-open editor.
+			await expect(header.getByTestId("inline-name-edit-input")).toBeVisible()
+			await expect(header.getByTestId("inline-name-edit-input")).toHaveValue(UNIT_B_NAME)
+			expect(await unitName(unitAId)).toBe(bName)
+			expect(await renameAuditCount(unitAId, "organization_unit_renamed")).toBe(baseline + 1)
+		} finally {
+			gate.releaseAll()
+			await page.unroute("**/admin/organization**").catch(() => undefined)
+			await session.context.close()
+		}
+	})
+
+	test("deferred save: Escape cancels the queued follow-up", async ({ browser }) => {
+		test.setTimeout(180_000)
+		const baseline = await renameAuditCount(unitAId, "organization_unit_renamed")
+		const session = await openSignedIn(browser, EMAIL.admin)
+		const page = session.page
+		const gate = new RenameActionGate()
+		try {
+			await openOrganizationPage(page)
+			await gate.install(page)
+
+			const header = page.getByTestId(`unit-header-${unitAId}`)
+			await startUnitRename(page, unitAId)
+			const input = header.getByTestId("inline-name-edit-input")
+			const bName = `RenameBlur Unit PendEsc ${RUN}`
+			const cName = `RenameBlur Unit PendEscC ${RUN}`
+			await input.fill(bName)
+			await input.press("Enter")
+			await gate.waitFor(1)
+			await input.fill(cName)
+			await page.getByRole("heading", { name: "Organization & Approvals" }).click() // blur queues C
+			await input.press("Escape") // Escape invalidates the queued work
+			await expect(header.getByTestId("inline-name-edit-input")).toHaveCount(0)
+			gate.release() // the already-issued B write settles server-side
+			// The queued C never submits: exactly one action was issued.
+			await page.waitForTimeout(1_500)
+			expect(gate.arrivedCount).toBe(1)
+			expect(await unitName(unitAId)).toBe(bName)
+			expect(await renameAuditCount(unitAId, "organization_unit_renamed")).toBe(baseline + 1)
+		} finally {
+			gate.releaseAll()
+			await page.unroute("**/admin/organization**").catch(() => undefined)
+			await session.context.close()
+		}
+	})
+
+	test("deferred save: teardown drops the queued follow-up", async ({ browser }) => {
+		test.setTimeout(180_000)
+		const baseline = await renameAuditCount(unitAId, "organization_unit_renamed")
+		const session = await openSignedIn(browser, EMAIL.admin)
+		const page = session.page
+		const gate = new RenameActionGate()
+		try {
+			await openOrganizationPage(page)
+			await gate.install(page)
+
+			const header = page.getByTestId(`unit-header-${unitAId}`)
+			await startUnitRename(page, unitAId)
+			const input = header.getByTestId("inline-name-edit-input")
+			const bName = `RenameBlur Unit PendTear ${RUN}`
+			const cName = `RenameBlur Unit PendTearC ${RUN}`
+			await input.fill(bName)
+			await input.press("Enter")
+			await gate.waitFor(1)
+			await input.fill(cName)
+			await page.getByRole("heading", { name: "Organization & Approvals" }).click() // blur queues C
+			// Soft-navigate away: the row (and its editor) unmounts with C queued.
+			await page.getByRole("link", { name: "Admin Panel" }).click()
+			await expect(page.getByTestId("organization-tree")).toHaveCount(0)
+			gate.release() // the already-issued B write settles server-side
+			await page.waitForTimeout(1_500)
+			// Teardown invalidated the queued follow-up: C was never submitted.
+			expect(gate.arrivedCount).toBe(1)
+			expect(await unitName(unitAId)).toBe(bName)
+			expect(await renameAuditCount(unitAId, "organization_unit_renamed")).toBe(baseline + 1)
+		} finally {
+			gate.releaseAll()
+			await page.unroute("**/admin/organization**").catch(() => undefined)
+			await session.context.close()
+		}
+	})
+
+	test("deferred save: A to B and back to A writes back to A", async ({ browser }) => {
+		test.setTimeout(180_000)
+		const baseline = await renameAuditCount(unitAId, "organization_unit_renamed")
+		const current = await unitName(unitAId)
+		const session = await openSignedIn(browser, EMAIL.admin)
+		const page = session.page
+		const gate = new RenameActionGate()
+		try {
+			await openOrganizationPage(page)
+			await gate.install(page)
+
+			const header = page.getByTestId(`unit-header-${unitAId}`)
+			await startUnitRename(page, unitAId)
+			const input = header.getByTestId("inline-name-edit-input")
+			const bName = `RenameBlur Unit PendBack ${RUN}`
+			await input.fill(bName)
+			await input.press("Enter")
+			await gate.waitFor(1)
+			// Return the draft to the original name, then blur: the reconciled
+			// baseline (server holds B) must still force the write back to A.
+			await input.fill(current)
+			await page.getByRole("heading", { name: "Organization & Approvals" }).click()
+			gate.release() // settle B
+			await gate.waitFor(2) // the write back to the original must happen
+			gate.release()
+			await expect(header.getByTestId("inline-name-edit-input")).toHaveCount(0)
+			await expect(page.getByTestId(`unit-name-${unitAId}`)).toContainText(current)
+			expect(await unitName(unitAId)).toBe(current)
+			expect(await renameAuditCount(unitAId, "organization_unit_renamed")).toBe(baseline + 2)
+		} finally {
+			gate.releaseAll()
+			await page.unroute("**/admin/organization**").catch(() => undefined)
+			await session.context.close()
+		}
+	})
 
 	test("position rename saves on blur in the positions panel", async ({ browser }) => {
 		test.setTimeout(180_000);
