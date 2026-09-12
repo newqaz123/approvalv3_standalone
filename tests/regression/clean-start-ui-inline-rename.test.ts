@@ -160,6 +160,7 @@ describe('InlineNameEdit component harness', () => {
       onStart: () => undefined,
       onDraftChange: () => undefined,
       onKeyDown: () => undefined,
+      onBlur: () => undefined,
     }))
     assert.match(html, /value="Section A"/)
     assert.match(html, /aria-describedby="inline-name-error"/)

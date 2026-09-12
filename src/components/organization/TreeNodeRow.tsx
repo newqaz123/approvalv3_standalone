@@ -1,9 +1,9 @@
 'use client'
 
 import React, { useRef } from 'react'
-import { MoreHorizontal } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
+import { MoreHorizontal, Share2, Wrench } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -60,6 +60,35 @@ function indexById<T extends { id: string }>(rows: readonly T[]): Map<string, T>
     byId.set(row.id, row)
   }
   return byId
+}
+
+/**
+ * Enabled-flag-only tree icon (formerly text badges). Compact sharing/wrench
+ * glyph with an accessible name and a hover/focus tooltip; focusable so the
+ * tooltip also opens on keyboard focus. The full settings labels and their
+ * business semantics stay in UnitSidePanel — the tree shows the flag only.
+ */
+function UnitFlagIcon({ testId, label, children }: {
+  testId: string
+  label: string
+  children: React.ReactNode
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          data-testid={testId}
+          role="img"
+          aria-label={label}
+          tabIndex={0}
+          className="inline-flex h-6 w-6 min-h-6 min-w-6 items-center justify-center rounded-md border bg-secondary text-secondary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+        >
+          {children}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent className="text-xs">{label}</TooltipContent>
+    </Tooltip>
+  )
 }
 
 function personLabel(
@@ -200,10 +229,19 @@ export function TreeNodeRow({
             }}
           />
         </span>
-        {unit.shareRequests ? (
-          <Badge variant="secondary" data-testid={`sharing-badge-${unit.id}`}>
-            Request sharing
-          </Badge>
+        {unit.shareRequests || unit.canWorkOnSolutions ? (
+          <TooltipProvider delayDuration={200}>
+            {unit.shareRequests ? (
+              <UnitFlagIcon testId={`sharing-badge-${unit.id}`} label="Request sharing">
+                <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
+              </UnitFlagIcon>
+            ) : null}
+            {unit.canWorkOnSolutions ? (
+              <UnitFlagIcon testId={`solutions-badge-${unit.id}`} label="Can work on solutions">
+                <Wrench className="h-3.5 w-3.5" aria-hidden="true" />
+              </UnitFlagIcon>
+            ) : null}
+          </TooltipProvider>
         ) : null}
         <div
           data-testid={`unit-hover-actions-${unit.id}`}

@@ -9,7 +9,10 @@ import { Input } from '@/components/ui/input'
  * epoch is the current editor identity. pendingEpoch is the in-flight save's
  * epoch, or null. Pending keeps the input enabled so the user can type or
  * Escape; stale completions must not restore a canceled editor or overwrite
- * newer input. Duplicate Enter is ignored while pendingEpoch !== null.
+ * newer input. A second Enter OR blur while pendingEpoch !== null is ignored,
+ * so an Enter save followed by the input's blur (outside click or Tab) never
+ * writes twice. Blur on an unchanged draft just closes the editor — an
+ * unchanged value is never written.
  */
 export type InlineNameEditSession = {
   original: string
@@ -60,8 +63,27 @@ export function handleInlineNameEditKeyDown(
   if (key === 'Escape') {
     return { session: cancelInlineNameEdit(session), submit: false }
   }
-  if (key !== 'Enter' || !session.editing || session.pendingEpoch !== null) {
+  if (key !== 'Enter') {
     return { session, submit: false }
+  }
+  return requestInlineNameEditSubmit(session)
+}
+
+/**
+ * Shared save decision for Enter and blur (outside click or Tab). Only an
+ * editing session with no save in flight may submit; an unchanged trimmed
+ * draft closes the editor without calling onSave; anything else is a no-op,
+ * so Escape (which leaves editing=false) can never be followed by a blur
+ * resave and a pending Enter/blur save can never be duplicated by the other.
+ */
+export function requestInlineNameEditSubmit(
+  session: InlineNameEditSession,
+): { session: InlineNameEditSession; submit: boolean } {
+  if (!session.editing || session.pendingEpoch !== null) {
+    return { session, submit: false }
+  }
+  if (session.draft.trim() === session.original) {
+    return { session: cancelInlineNameEdit(session), submit: false }
   }
   return { session: { ...session, pendingEpoch: session.epoch }, submit: true }
 }
@@ -85,6 +107,7 @@ export function InlineNameEditView({
   onStart,
   onDraftChange,
   onKeyDown,
+  onBlur,
 }: {
   session: InlineNameEditSession
   errorId: string
@@ -92,6 +115,7 @@ export function InlineNameEditView({
   onStart: () => void
   onDraftChange: (draft: string) => void
   onKeyDown: (event: React.KeyboardEvent<HTMLInputElement>) => void
+  onBlur: () => void
 }) {
   if (!session.editing) {
     return (
@@ -120,6 +144,7 @@ export function InlineNameEditView({
         value={session.draft}
         onChange={(event) => onDraftChange(event.target.value)}
         onKeyDown={onKeyDown}
+        onBlur={onBlur}
         aria-invalid={session.error ? true : undefined}
         aria-describedby={session.error ? errorId : undefined}
         disabled={disabled}
@@ -154,6 +179,18 @@ export function InlineNameEdit(props: {
     setSession(next)
   }
 
+  // Enter and blur funnel through the same request: one decision function,
+  // one in-flight save, no duplicate writes and no unchanged-value writes.
+  function runSave() {
+    const request = requestInlineNameEditSubmit(sessionRef.current)
+    commit(request.session)
+    if (!request.submit) return
+    const epoch = request.session.epoch
+    void submitInlineNameEdit(request.session, props.onSave).then((result) => {
+      commit(applyInlineNameEditResult(sessionRef.current, epoch, result))
+    })
+  }
+
   useEffect(() => {
     const current = sessionRef.current
     if (current.editing) return
@@ -177,18 +214,13 @@ export function InlineNameEdit(props: {
       onKeyDown={(event) => {
         if (event.key === 'Enter') {
           event.preventDefault()
-          const next = handleInlineNameEditKeyDown(sessionRef.current, 'Enter')
-          commit(next.session)
-          if (!next.submit) return
-          const epoch = next.session.epoch
-          void submitInlineNameEdit(next.session, props.onSave).then((result) => {
-            commit(applyInlineNameEditResult(sessionRef.current, epoch, result))
-          })
+          runSave()
         } else if (event.key === 'Escape') {
           event.preventDefault()
           commit(handleInlineNameEditKeyDown(sessionRef.current, 'Escape').session)
         }
       }}
+      onBlur={runSave}
     />
   )
 }
