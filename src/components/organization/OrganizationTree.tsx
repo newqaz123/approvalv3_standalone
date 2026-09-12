@@ -35,7 +35,7 @@ export function OrganizationTree({
     .sort((left, right) => left.name.localeCompare(right.name))
 
   return (
-    <div data-testid="organization-tree" className="space-y-4">
+    <div data-testid="organization-tree" className="space-y-6">
       {snapshot.customChainExceptions.length > 0 ? (
         <div data-testid="custom-chain-exceptions" className="flex flex-wrap gap-1">
           {snapshot.customChainExceptions.map((exception) => (
