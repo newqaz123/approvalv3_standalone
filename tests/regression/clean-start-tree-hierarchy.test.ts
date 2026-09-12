@@ -189,21 +189,31 @@ describe('clean-start tree hierarchy visuals', () => {
     assert.doesNotMatch(html, /TreeHx Gone/)
   })
 
-  it('keeps hover/focus controls out of flow so appearing controls cannot shift rows', () => {
+  it('reserves permanent in-flow action space beside the name; appearance stays visibility/opacity-only', () => {
     const html = renderWorkspace()
-    // The header band keeps a stable box: controls appear via
-    // visibility/opacity, never by joining the layout.
+    // The header band keeps a stable box: the reserved action area is ALWAYS
+    // laid out (permanent space, md+ fine pointer), so revealing the controls
+    // via visibility/opacity can never resize the band or shift rows.
     const headerClass = classOfTestId(html, 'unit-header-treehx-alpha')
     assert.ok(!headerClass.includes('w-fit'), 'header band must not hug content (hover would resize it)')
     const headerInner = innerByTestId(html, 'unit-header-treehx-alpha')
     const actionsMatch = /data-testid="unit-hover-actions-treehx-alpha"[^>]*class="([^"]*)"/.exec(headerInner)
     assert.ok(actionsMatch, 'hover actions must stay inside the unit header')
     const actionsClass = actionsMatch[1]
-    assert.match(actionsClass, /absolute/, 'hover actions must be out of flow (no layout shift on hover)')
+    assert.ok(
+      !/absolute/.test(actionsClass),
+      'hover actions must NOT overlay content: they reserve real in-flow space',
+    )
     assert.match(actionsClass, /invisible/, 'hidden state must use visibility, not display')
     assert.match(actionsClass, /opacity-0/, 'appearance change must be opacity-based')
     assert.match(actionsClass, /group-hover:visible/, 'hover still reveals the controls')
     assert.match(actionsClass, /group-focus-within:visible/, 'keyboard focus still reveals the controls')
+    // The name reserves wrap room beside the action area: min-w-0 + flex-1 let
+    // a long name shrink and wrap in its own space instead of running under
+    // the reserved actions.
+    const nameClass = classOfTestId(html, 'unit-name-treehx-alpha')
+    assert.match(nameClass, /min-w-0/, 'unit name must be allowed to shrink (no overlap with actions)')
+    assert.match(nameClass, /flex-1/, 'unit name must take the remaining header space (actions stay right)')
   })
 
   it('preserves the view-mode tree (no idle inputs) and the rename wiring', () => {

@@ -242,7 +242,7 @@ export function TreeNodeRow({
     <div data-testid={`unit-row-${unit.id}`} className="space-y-2">
       <div
         data-testid={`unit-header-${unit.id}`}
-        className="group relative flex cursor-pointer flex-wrap items-center gap-2 rounded-md bg-muted/60 px-2.5 py-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+        className="group flex cursor-pointer flex-wrap items-center gap-2 rounded-md bg-muted/60 px-2.5 py-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
         tabIndex={0}
         onClick={() => onSelectUnit?.(unit.id)}
         onKeyDown={(event) => {
@@ -262,7 +262,7 @@ export function TreeNodeRow({
         <span
           ref={nameRef}
           data-testid={`unit-name-${unit.id}`}
-          className="font-medium [&_[data-testid=inline-name-edit-pencil]]:hidden"
+          className="min-w-0 flex-1 font-medium break-words [&_[data-testid=inline-name-edit]]:min-w-0 [&_[data-testid=inline-name-edit-pencil]]:hidden"
         >
           <InlineNameEdit
             value={unit.name}
@@ -285,9 +285,14 @@ export function TreeNodeRow({
             ) : null}
           </TooltipProvider>
         ) : null}
+        {/* Permanently reserved in-flow action area (md+ fine pointer): the
+            strip always owns this space, so revealing it via
+            visibility/opacity can never shift geometry, and the name wraps in
+            its own min-w-0 space instead of running underneath. Narrow and
+            coarse-pointer contexts hand the area to the overflow menu below. */}
         <div
           data-testid={`unit-hover-actions-${unit.id}`}
-          className="invisible absolute inset-y-0 right-1 flex items-center gap-1 rounded-md bg-muted px-1 opacity-0 transition-opacity duration-150 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100 max-md:!invisible pointer-coarse:!invisible"
+          className="invisible flex shrink-0 items-center gap-1 rounded-md bg-muted px-1 opacity-0 transition-opacity duration-150 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100 max-md:!hidden pointer-coarse:!hidden"
         >
           <Button
             type="button"
@@ -308,7 +313,7 @@ export function TreeNodeRow({
             Manage
           </Button>
         </div>
-        <div className="flex md:hidden pointer-coarse:!flex">
+        <div className="flex shrink-0 md:hidden pointer-coarse:!flex">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -329,64 +334,71 @@ export function TreeNodeRow({
           </DropdownMenu>
         </div>
       </div>
-      {expanded ? (
-        <div data-testid={`unit-people-${unit.id}`} className="space-y-2 pl-6 md:pl-8">
-          {peopleList.map((assignment) => {
-            const label = personLabel(assignment, usersById, positionsById)
-            if (!label) return null
-            const nestedTeams = teamsByReportsTo.get(assignment.id) ?? []
-            return (
-              <div key={assignment.userId} data-testid={`person-chip-${assignment.userId}`} className="space-y-1">
-                <button
-                  type="button"
-                  className="inline-flex items-center rounded-md border bg-secondary px-2 py-0.5 text-sm"
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    onSelectPerson?.(assignment.id)
-                  }}
-                >
-                  {label}
-                </button>
-                {nestedTeams.map((team) => (
-                  <TeamGroup
-                    key={team.id}
-                    team={team}
-                    assignments={snapshot.assignments}
-                    usersById={usersById}
-                    positionsById={positionsById}
-                    onSelectTeam={onSelectTeam}
-                  />
-                ))}
-              </div>
-            )
-          })}
-        </div>
-      ) : null}
-      {expanded ? (
-        <div
-          data-testid={`unit-children-${unit.id}`}
-          className="space-y-5 border-l-2 border-border pl-6 md:pl-8"
-        >
-          {childUnits.map((child) => (
-            <div key={child.id} className="relative">
-              {/* Elbow connector: horizontal tick from the ancestry rail to the child branch. */}
-              <span
-                aria-hidden="true"
-                data-testid={`unit-connector-${child.id}`}
-                className="pointer-events-none absolute -left-6 top-[17px] h-px w-5 bg-border md:-left-8 md:w-7"
-              />
-              <TreeNodeRow
-                unit={child}
-                snapshot={snapshot}
-                childrenByParentId={childrenByParentId}
-                onSelectUnit={onSelectUnit}
-                onSelectPerson={onSelectPerson}
-                onSelectTeam={onSelectTeam}
-              />
+      {/* Collapsed branch content stays MOUNTED behind the hidden attribute:
+          unmounting would tear down this unit's people/team editors and every
+          descendant unit editor, canceling a queued follow-up rename save that
+          must settle after an in-flight save (review P1). display:none keeps
+          the subtree out of layout, the accessibility tree, and the focus
+          order, while preserving React entity identity for re-expand. */}
+      <div
+        data-testid={`unit-people-${unit.id}`}
+        hidden={!expanded}
+        className="space-y-2 pl-6 md:pl-8"
+      >
+        {peopleList.map((assignment) => {
+          const label = personLabel(assignment, usersById, positionsById)
+          if (!label) return null
+          const nestedTeams = teamsByReportsTo.get(assignment.id) ?? []
+          return (
+            <div key={assignment.userId} data-testid={`person-chip-${assignment.userId}`} className="space-y-1">
+              <button
+                type="button"
+                className="inline-flex items-center rounded-md border bg-secondary px-2 py-0.5 text-sm"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onSelectPerson?.(assignment.id)
+                }}
+              >
+                {label}
+              </button>
+              {nestedTeams.map((team) => (
+                <TeamGroup
+                  key={team.id}
+                  team={team}
+                  assignments={snapshot.assignments}
+                  usersById={usersById}
+                  positionsById={positionsById}
+                  onSelectTeam={onSelectTeam}
+                />
+              ))}
             </div>
-          ))}
-        </div>
-      ) : null}
+          )
+        })}
+      </div>
+      <div
+        data-testid={`unit-children-${unit.id}`}
+        hidden={!expanded}
+        className="space-y-5 border-l-2 border-border pl-6 md:pl-8"
+      >
+        {childUnits.map((child) => (
+          <div key={child.id} className="relative">
+            {/* Elbow connector: horizontal tick from the ancestry rail to the child branch. */}
+            <span
+              aria-hidden="true"
+              data-testid={`unit-connector-${child.id}`}
+              className="pointer-events-none absolute -left-6 top-[17px] h-px w-5 bg-border md:-left-8 md:w-7"
+            />
+            <TreeNodeRow
+              unit={child}
+              snapshot={snapshot}
+              childrenByParentId={childrenByParentId}
+              onSelectUnit={onSelectUnit}
+              onSelectPerson={onSelectPerson}
+              onSelectTeam={onSelectTeam}
+            />
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
