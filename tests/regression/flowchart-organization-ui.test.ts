@@ -18,6 +18,7 @@ const units: OrganizationUnitNode[] = [
   { id: 'flow-child-b', name: 'Flow Child B Production', parentId: 'flow-root', isActive: true, shareRequests: false, canWorkOnSolutions: true, managerUserId: null },
   { id: 'flow-grand-1', name: 'Flow Grand 1', parentId: 'flow-child-a', isActive: true, shareRequests: false, canWorkOnSolutions: false, managerUserId: null },
   { id: 'flow-grand-2', name: 'Flow Grand 2', parentId: 'flow-child-a', isActive: true, shareRequests: false, canWorkOnSolutions: false, managerUserId: null },
+  { id: 'flow-only', name: 'Flow Only Child', parentId: 'flow-child-b', isActive: true, shareRequests: false, canWorkOnSolutions: false, managerUserId: null },
 ]
 
 const positions: PositionNode[] = [
@@ -77,7 +78,12 @@ function cssRule(source: string, selector: string): string {
 
 type Box = { top: number; left: number; right: number; bottom: number; width: number; height: number }
 
-async function measureDesktopGeometry(): Promise<Record<string, Box | null>> {
+type Geometry = Record<string, Box | string | number | null>
+
+async function measureFlowchartGeometry(options: {
+  viewport: { width: number; height: number }
+  frameWidth: string
+}): Promise<Geometry> {
   const css = readFileSync('src/app/globals.css', 'utf8')
   const start = css.indexOf('.organization-flowchart')
   assert.ok(start >= 0, 'organization flowchart CSS is missing')
@@ -85,13 +91,13 @@ async function measureDesktopGeometry(): Promise<Record<string, Box | null>> {
   const html = renderWorkspace()
   const browser = await chromium.launch({ headless: true })
   try {
-    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } })
+    const page = await browser.newPage({ viewport: options.viewport })
     await page.setContent(`<!DOCTYPE html><html><head><style>
       * { box-sizing: border-box; }
       body { margin: 0; }
       ${orgCss}
     </style></head><body>
-      <div data-testid="geometry-frame" style="width:720px;max-width:720px;">${html}</div>
+      <div data-testid="geometry-frame" style="width:${options.frameWidth};max-width:${options.frameWidth};">${html}</div>
     </body></html>`)
     return await page.evaluate(`(() => {
       const box = (id) => {
@@ -100,14 +106,31 @@ async function measureDesktopGeometry(): Promise<Record<string, Box | null>> {
         const r = el.getBoundingClientRect()
         return { top: r.top, left: r.left, right: r.right, bottom: r.bottom, width: r.width, height: r.height }
       }
+      const pseudo = (id, name) => {
+        const el = document.querySelector('[data-testid="' + id + '"]')
+        if (!el) return null
+        const r = el.getBoundingClientRect()
+        const cs = getComputedStyle(el, name)
+        if (cs.display === 'none' || cs.content === 'none') return null
+        const height = parseFloat(cs.height)
+        if (!height) return null
+        const top = r.top + (parseFloat(cs.top) || 0)
+        const left = r.left + (parseFloat(cs.left) || 0)
+        const width = parseFloat(cs.width) || 0
+        return { top: top, left: left, right: left + width, bottom: top + height, width: width, height: height }
+      }
+      const overflowWrap = document.querySelector('[data-testid="unit-overflow-flow-child-a"]')
+        && document.querySelector('[data-testid="unit-overflow-flow-child-a"]').closest('.organization-unit-header-overflow')
       return {
         parent: box('unit-row-flow-root'),
         parentCard: box('unit-card-flow-root'),
         childA: box('unit-card-flow-child-a'),
         childB: box('unit-card-flow-child-b'),
         childARow: box('unit-row-flow-child-a'),
+        childBRow: box('unit-row-flow-child-b'),
         grand1: box('unit-card-flow-grand-1'),
         grand2: box('unit-card-flow-grand-2'),
+        onlyChild: box('unit-card-flow-only'),
         nameA: box('unit-name-flow-child-a'),
         sharingA: box('sharing-badge-flow-child-a'),
         overflowA: box('unit-overflow-flow-child-a'),
@@ -115,12 +138,59 @@ async function measureDesktopGeometry(): Promise<Record<string, Box | null>> {
         connectorA: box('unit-connector-flow-child-a'),
         connectorB: box('unit-connector-flow-child-b'),
         connectorG1: box('unit-connector-flow-grand-1'),
-        connectorG2: box('unit-connector-flow-grand-2')
+        connectorG2: box('unit-connector-flow-grand-2'),
+        connectorOnly: box('unit-connector-flow-only'),
+        railRoot: pseudo('unit-children-flow-root', '::after'),
+        stemRoot: pseudo('unit-children-flow-root', '::before'),
+        railA: pseudo('unit-children-flow-child-a', '::after'),
+        stemA: pseudo('unit-children-flow-child-a', '::before'),
+        railB: pseudo('unit-children-flow-child-b', '::after'),
+        stemB: pseudo('unit-children-flow-child-b', '::before'),
+        overflowDisplay: overflowWrap ? getComputedStyle(overflowWrap).display : 'missing',
+        cardAWidth: box('unit-card-flow-child-a') ? box('unit-card-flow-child-a').width : 0
       }
     })()`)
   } finally {
     await browser.close()
   }
+}
+
+async function measureDesktopGeometry(): Promise<Geometry> {
+  return measureFlowchartGeometry({ viewport: { width: 1280, height: 900 }, frameWidth: '720px' })
+}
+
+function asBox(value: Box | string | number | null, label: string): Box {
+  assert.ok(value && typeof value === 'object', `expected box for ${label}`)
+  return value as Box
+}
+
+function verticalGap(upperBottom: number, lowerTop: number): number {
+  if (lowerTop <= upperBottom) return 0
+  return lowerTop - upperBottom
+}
+
+function assertConnectorJoinsRailToCard(connector: Box, rail: Box, card: Box, label: string) {
+  const railGap = verticalGap(rail.bottom, connector.top)
+  const overlapOrTouch = connector.top <= rail.bottom + 2 && rail.top <= connector.bottom + 2
+  assert.ok(
+    overlapOrTouch && railGap <= 2,
+    `${label} connector must meet the rail (rail ${rail.top}-${rail.bottom}, stub ${connector.top}-${connector.bottom}, gap=${railGap})`,
+  )
+  assert.ok(
+    Math.abs(connector.bottom - card.top) <= 2,
+    `${label} connector must meet the card (stub bottom ${connector.bottom} vs card top ${card.top})`,
+  )
+}
+
+function assertConnectorJoinsStemToCard(connector: Box, stem: Box, card: Box, label: string) {
+  assert.ok(
+    Math.abs(connector.top - stem.bottom) <= 2,
+    `${label} single-child connector must meet the parent stem (stem bottom ${stem.bottom} vs stub top ${connector.top})`,
+  )
+  assert.ok(
+    Math.abs(connector.bottom - card.top) <= 2,
+    `${label} single-child connector must meet the card (stub bottom ${connector.bottom} vs card top ${card.top})`,
+  )
 }
 
 function assertHorizontalSiblings(left: Box, right: Box, label: string) {
@@ -146,6 +216,7 @@ describe('flowchart organization UI', () => {
     assert.match(html, /data-testid="unit-connector-flow-child-b"[^>]*organization-flowchart-connector/)
     assert.match(html, /data-testid="unit-connector-flow-grand-1"[^>]*organization-flowchart-connector/)
     assert.match(html, /data-testid="unit-connector-flow-grand-2"[^>]*organization-flowchart-connector/)
+    assert.match(html, /data-testid="unit-connector-flow-only"[^>]*organization-flowchart-connector/)
   })
 
   it('keeps desktop sibling rows nowrap with subtree width and horizontal canvas scroll', () => {
@@ -166,25 +237,64 @@ describe('flowchart organization UI', () => {
 
   it('renders desktop sibling geometry: tops aligned, children between parent edges', { timeout: 60_000 }, async () => {
     const g = await measureDesktopGeometry()
-    assert.ok(g.parent && g.childA && g.childB && g.childARow && g.grand1 && g.grand2, 'expected flowchart boxes')
-    assert.ok(g.connectorA && g.connectorB && g.connectorG1 && g.connectorG2, 'expected connectors')
+    const parent = asBox(g.parent, 'parent')
+    const parentCard = asBox(g.parentCard, 'parent card')
+    const childA = asBox(g.childA, 'child A')
+    const childB = asBox(g.childB, 'child B')
+    const childARow = asBox(g.childARow, 'child A row')
+    const grand1 = asBox(g.grand1, 'grand 1')
+    const grand2 = asBox(g.grand2, 'grand 2')
+    const connectorA = asBox(g.connectorA, 'connector A')
+    const connectorB = asBox(g.connectorB, 'connector B')
 
-    assertHorizontalSiblings(g.childA, g.childB, 'root children')
-    assertChildUnderParent(g.childA, g.parent, 'child A')
-    assertChildUnderParent(g.childB, g.parent, 'child B')
-    assert.ok(g.childA.top >= (g.parentCard?.bottom ?? 0) - 1, 'child A must sit below the parent card')
+    assertHorizontalSiblings(childA, childB, 'root children')
+    assertChildUnderParent(childA, parent, 'child A')
+    assertChildUnderParent(childB, parent, 'child B')
+    assert.ok(childA.top >= parentCard.bottom - 1, 'child A must sit below the parent card')
 
-    assertHorizontalSiblings(g.grand1, g.grand2, 'nested grandchildren')
-    assertChildUnderParent(g.grand1, g.childARow, 'grand 1')
-    assertChildUnderParent(g.grand2, g.childARow, 'grand 2')
+    assertHorizontalSiblings(grand1, grand2, 'nested grandchildren')
+    assertChildUnderParent(grand1, childARow, 'grand 1')
+    assertChildUnderParent(grand2, childARow, 'grand 2')
 
-    const parentCenter = (g.parentCard!.left + g.parentCard!.right) / 2
-    assert.ok(g.connectorA.left < parentCenter + g.parentCard!.width, 'child A connector stays under the parent subtree')
-    assert.ok(g.connectorB.left > parentCenter - g.parentCard!.width, 'child B connector stays under the parent subtree')
-    assertChildUnderParent(g.connectorA, g.parent, 'connector A')
-    assertChildUnderParent(g.connectorB, g.parent, 'connector B')
-    assertChildUnderParent(g.connectorG1, g.childARow, 'grand connector 1')
-    assertChildUnderParent(g.connectorG2, g.childARow, 'grand connector 2')
+    const parentCenter = (parentCard.left + parentCard.right) / 2
+    assert.ok(connectorA.left < parentCenter + parentCard.width, 'child A connector stays under the parent subtree')
+    assert.ok(connectorB.left > parentCenter - parentCard.width, 'child B connector stays under the parent subtree')
+    assertChildUnderParent(asBox(g.connectorA, 'connector A'), asBox(g.parent, 'parent'), 'connector A')
+    assertChildUnderParent(asBox(g.connectorB, 'connector B'), asBox(g.parent, 'parent'), 'connector B')
+    assertChildUnderParent(asBox(g.connectorG1, 'grand connector 1'), asBox(g.childARow, 'child A row'), 'grand connector 1')
+    assertChildUnderParent(asBox(g.connectorG2, 'grand connector 2'), asBox(g.childARow, 'child A row'), 'grand connector 2')
+
+    assertConnectorJoinsRailToCard(
+      asBox(g.connectorA, 'connector A'),
+      asBox(g.railRoot, 'root rail'),
+      asBox(g.childA, 'child A'),
+      'child A',
+    )
+    assertConnectorJoinsRailToCard(
+      asBox(g.connectorB, 'connector B'),
+      asBox(g.railRoot, 'root rail'),
+      asBox(g.childB, 'child B'),
+      'child B',
+    )
+    assertConnectorJoinsRailToCard(
+      asBox(g.connectorG1, 'grand connector 1'),
+      asBox(g.railA, 'child A rail'),
+      asBox(g.grand1, 'grand 1'),
+      'grand 1',
+    )
+    assertConnectorJoinsRailToCard(
+      asBox(g.connectorG2, 'grand connector 2'),
+      asBox(g.railA, 'child A rail'),
+      asBox(g.grand2, 'grand 2'),
+      'grand 2',
+    )
+    assert.equal(g.railB, null, 'single-child branch must not paint a horizontal rail')
+    assertConnectorJoinsStemToCard(
+      asBox(g.connectorOnly, 'only-child connector'),
+      asBox(g.stemB, 'child B stem'),
+      asBox(g.onlyChild, 'only child card'),
+      'only child',
+    )
   })
 
   it('renders a manager row with initials, name, and position, plus an unassigned initials dock', () => {
@@ -224,6 +334,7 @@ describe('flowchart organization UI', () => {
     assert.match(css, /\[data-testid="inline-name-edit"\][\s\S]*max-width:\s*100%/)
     assert.match(css, /\[data-testid="inline-name-edit-input"\][\s\S]*max-width:\s*100%/)
     assert.match(css, /@container organization-unit-card \(max-width: 24rem\)[\s\S]*organization-unit-header-overflow[\s\S]*display:\s*flex/)
+    assert.match(css, /@media \(max-width: 767px\)[\s\S]*organization-unit-header-overflow[\s\S]*display:\s*flex/)
 
     const actionsClass = classOfTestId(html, 'unit-hover-actions-flow-child-a')
     assert.ok(!/absolute/.test(actionsClass), 'hover actions must stay in flow')
@@ -236,26 +347,37 @@ describe('flowchart organization UI', () => {
 
   it('keeps compact header labels from overlapping sharing icons', { timeout: 60_000 }, async () => {
     const g = await measureDesktopGeometry()
-    assert.ok(g.nameA && g.sharingA, 'name and sharing badge must render')
+    const nameA = asBox(g.nameA, 'name A')
+    const sharingA = asBox(g.sharingA, 'sharing A')
     assert.ok(
-      g.nameA.right <= g.sharingA.left + 0.5,
-      `name right ${g.nameA.right} overlaps sharing left ${g.sharingA.left}`,
+      nameA.right <= sharingA.left + 0.5,
+      `name right ${nameA.right} overlaps sharing left ${sharingA.left}`,
     )
-    if (g.overflowA && g.overflowA.width > 0) {
+    if (g.overflowA && typeof g.overflowA === 'object' && g.overflowA.width > 0) {
       assert.ok(
-        g.nameA.right <= g.overflowA.left + 0.5,
-        `name right ${g.nameA.right} overlaps overflow left ${g.overflowA.left}`,
+        nameA.right <= g.overflowA.left + 0.5,
+        `name right ${nameA.right} overlaps overflow left ${g.overflowA.left}`,
       )
     }
-    if (g.hoverA && g.hoverA.width > 0 && g.hoverA.height > 0) {
+    if (g.hoverA && typeof g.hoverA === 'object' && g.hoverA.width > 0 && g.hoverA.height > 0) {
       const hoverVisible = g.hoverA.width > 1 && g.hoverA.right - g.hoverA.left > 1
       if (hoverVisible) {
         assert.ok(
-          g.nameA.right <= g.hoverA.left + 0.5,
-          `name right ${g.nameA.right} overlaps hover actions ${g.hoverA.left}`,
+          nameA.right <= g.hoverA.left + 0.5,
+          `name right ${nameA.right} overlaps hover actions ${g.hoverA.left}`,
         )
       }
     }
+  })
+
+  it('exposes overflow actions below md when a fine-pointer card is wider than 24rem', { timeout: 60_000 }, async () => {
+    const css = readFileSync('src/app/globals.css', 'utf8')
+    const row = readFileSync('src/components/organization/TreeNodeRow.tsx', 'utf8')
+    assert.match(row, /max-md:!hidden/)
+    assert.match(css, /@media \(max-width: 767px\)[\s\S]*\.organization-unit-header-overflow[\s\S]*display:\s*flex/)
+    const g = await measureFlowchartGeometry({ viewport: { width: 500, height: 800 }, frameWidth: '500px' })
+    assert.ok(typeof g.cardAWidth === 'number' && g.cardAWidth > 24 * 16, `expected full-width card >24rem, got ${g.cardAWidth}`)
+    assert.equal(g.overflowDisplay, 'flex', `overflow must be exposed below md when the card is wider than 24rem (got ${g.overflowDisplay})`)
   })
 
   it('keeps the manage surface sticky with viewport-bounded internal scrolling', () => {

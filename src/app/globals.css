@@ -860,6 +860,11 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
     display: flex;
   }
 }
+@media (max-width: 767px) {
+  .organization-unit-header-overflow {
+    display: flex;
+  }
+}
 .organization-unit-children {
   position: relative;
   display: flex;
@@ -911,10 +916,13 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
   padding-top: 1.5rem;
 }
 .organization-unit-child > .organization-flowchart-connector {
-  top: 0;
+  /* Reach the child-group rail / parent stem (group padding is 1.5rem above
+     the wrapper) and continue through the child's own 1.5rem padding to the card. */
+  position: absolute;
+  top: -1.5rem;
   left: 50%;
   width: 2px;
-  height: 1.5rem;
+  height: 3rem;
   transform: translateX(-50%);
   background: var(--organization-flowchart-line);
 }
