@@ -19,6 +19,7 @@ import {
   updateUnitSettings,
   type WorkspaceSnapshot,
 } from '@/server-actions/organization'
+import { formatOrganizationErrorForUser } from '@/lib/organization/error-formatting'
 
 const PHASES = ['REQUEST', 'SOLUTION', 'FINAL'] as const
 const NONE_MANAGER = 'none'
@@ -169,7 +170,7 @@ export function UnitSidePanel({
       })
       onSettingsSaved?.({ shareRequests, canWorkOnSolutions })
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(err instanceof Error ? formatOrganizationErrorForUser(err.message, snapshot) : formatOrganizationErrorForUser(String(err), snapshot))
     } finally {
       setSaving(false)
     }
@@ -183,7 +184,7 @@ export function UnitSidePanel({
       await setUnitManager({ unitId: unit.id, managerUserId: next })
       onManagerSaved?.(next)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(err instanceof Error ? formatOrganizationErrorForUser(err.message, snapshot) : formatOrganizationErrorForUser(String(err), snapshot))
     }
   }
 
@@ -195,7 +196,7 @@ export function UnitSidePanel({
       onDeactivated?.(unit.id)
     } catch (err) {
       // Adjacent error with the confirmation step retained (panel error pattern).
-      setDeactivateError(err instanceof Error ? err.message : String(err))
+      setDeactivateError(err instanceof Error ? formatOrganizationErrorForUser(err.message, snapshot) : formatOrganizationErrorForUser(String(err), snapshot))
     } finally {
       setDeactivating(false)
     }

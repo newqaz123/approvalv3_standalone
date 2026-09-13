@@ -17,6 +17,7 @@ import {
   removeAssignment,
   type WorkspaceSnapshot,
 } from '@/server-actions/organization'
+import { formatOrganizationErrorForUser } from '@/lib/organization/error-formatting'
 
 export const NONE_TEAM = 'none'
 
@@ -217,7 +218,7 @@ export function PersonAssignmentPanel({
         isActive: true,
       })
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(err instanceof Error ? formatOrganizationErrorForUser(err.message, snapshot) : formatOrganizationErrorForUser(String(err), snapshot))
     } finally {
       setSaving(false)
     }
@@ -248,7 +249,7 @@ export function PersonAssignmentPanel({
       })
       setConfirming(false)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(err instanceof Error ? formatOrganizationErrorForUser(err.message, snapshot) : formatOrganizationErrorForUser(String(err), snapshot))
     } finally {
       setSaving(false)
     }
@@ -262,7 +263,7 @@ export function PersonAssignmentPanel({
       await removeAssignment({ assignmentId: assignment.id })
       onRemoved?.({ assignmentId: assignment.id, userId: assignment.userId })
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(err instanceof Error ? formatOrganizationErrorForUser(err.message, snapshot) : formatOrganizationErrorForUser(String(err), snapshot))
     } finally {
       setSaving(false)
     }

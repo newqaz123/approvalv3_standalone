@@ -19,6 +19,7 @@ import {
   updateTeam,
   type WorkspaceSnapshot,
 } from '@/server-actions/organization'
+import { formatOrganizationErrorForUser } from '@/lib/organization/error-formatting'
 
 function assignmentLabel(
   assignment: AssignmentNode,
@@ -184,7 +185,7 @@ export function TeamPanel({
       onDeactivated?.(team.id)
     } catch (err) {
       // Adjacent error with the confirmation step retained (panel error pattern).
-      setDeactivateError(err instanceof Error ? err.message : String(err))
+      setDeactivateError(err instanceof Error ? formatOrganizationErrorForUser(err.message, snapshot) : formatOrganizationErrorForUser(String(err), snapshot))
     } finally {
       setDeactivating(false)
     }
@@ -224,7 +225,7 @@ export function TeamPanel({
         }, memberIds)
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(err instanceof Error ? formatOrganizationErrorForUser(err.message, snapshot) : formatOrganizationErrorForUser(String(err), snapshot))
     } finally {
       setSaving(false)
     }
