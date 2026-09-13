@@ -89,6 +89,20 @@ export function OrganizationWorkspace({ snapshot }: { snapshot: WorkspaceSnapsho
     setUnassignedPanelOpen(false)
   }
 
+  function toggleUnassignedPanel() {
+    // Exactly one management drawer: opening Unassigned is a selection, so it
+    // clears unit/person/team selections — mirroring the select* helpers,
+    // which close this panel in return.
+    if (!unassignedPanelOpen) {
+      setSelectedUnitId(null)
+      setSelectedAssignmentId(null)
+      setSelectedUnassignedUserId(null)
+      setSelectedTeamId(null)
+      setCreatingTeamUnitId(null)
+    }
+    setUnassignedPanelOpen(!unassignedPanelOpen)
+  }
+
   const currentAssignments = assignmentRows ?? snapshot.assignments
   const currentUnassigned = unassignedRows ?? snapshot.unassignedUsers
   const currentTeams = teamRows ?? snapshot.teams
@@ -107,7 +121,7 @@ export function OrganizationWorkspace({ snapshot }: { snapshot: WorkspaceSnapsho
               data-testid="unassigned-dock-toggle"
               aria-expanded={unassignedPanelOpen}
               aria-label="Unassigned people"
-              onClick={() => setUnassignedPanelOpen((open) => !open)}
+              onClick={toggleUnassignedPanel}
               className={`inline-flex h-8 max-w-full items-center gap-1.5 rounded-md border px-2.5 text-sm font-medium shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                 unassignedPanelOpen
                   ? 'border-slate-400 bg-accent text-accent-foreground'

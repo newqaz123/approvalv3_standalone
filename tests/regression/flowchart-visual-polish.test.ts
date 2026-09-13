@@ -23,6 +23,7 @@ import { readFileSync } from 'node:fs'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { chromium, type Page } from '@playwright/test'
+import esbuild from 'esbuild'
 import postcss from 'postcss'
 import tailwindcss from 'tailwindcss'
 import autoprefixer from 'autoprefixer'
@@ -616,5 +617,89 @@ describe('drawer heading split', () => {
     // The option row places the short name left and the position right.
     assert.match(source, /personShortName\(candidate\.name\)/)
     assert.match(source, /justify-between/, 'option row must separate name and position')
+  })
+})
+
+describe('exactly one management drawer', () => {
+  // P1 regression: the Unassigned chip previously only toggled
+  // unassignedPanelOpen, so clicking it while a unit/person/team drawer was
+  // open rendered TWO manage drawers side by side (live screenshot in the
+  // visual-polish review). Opening any manage drawer is a selection: it must
+  // close the others. Verified against the REAL hydrated OrganizationWorkspace
+  // (offline chromium harness; no dev server, no database, no writes).
+  it('opening Unassigned closes the unit/person/team drawer and vice versa', { timeout: 180_000 }, async () => {
+    const css = await compiledApplicationCss()
+    await esbuild.build({
+      entryPoints: ['tests/regression/fixtures/unassigned-drawer-harness.ts'],
+      bundle: true,
+      format: 'iife',
+      platform: 'browser',
+      outfile: 'test-results/orgpolishfix1-unassigned-drawer-harness.js',
+      alias: {
+        '@': `${process.cwd()}/src`,
+        '@/server-actions/organization': `${process.cwd()}/tests/regression/fixtures/server-actions-browser-stub.ts`,
+      },
+      define: { 'process.env.NODE_ENV': '"production"' },
+      logLevel: 'silent',
+    })
+    const browser = await chromium.launch({ headless: true })
+    try {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 900 } })
+      // The dev bundle references the `process` global (next/link et al), so
+      // shim it before the harness bundle runs.
+      await page.setContent(`<!DOCTYPE html><html><head>
+        <script>window.process = { env: { NODE_ENV: 'production' } };</script>
+        <style>${css}</style>
+      </head><body>
+        <div data-testid="unassigned-drawer-harness-root" style="width:1280px;max-width:1280px;"></div>
+      </body></html>`)
+      await page.addScriptTag({ path: 'test-results/orgpolishfix1-unassigned-drawer-harness.js' })
+      await page.waitForSelector('[data-testid="unassigned-dock-toggle"]', { timeout: 30_000 })
+
+      const drawers = () => page.evaluate(() => ({
+        count: document.querySelectorAll('[data-testid="organization-manage-drawer"]').length,
+        unassigned: !!document.querySelector('[data-testid="unassigned-people-list"]'),
+        unit: !!document.querySelector('[data-testid="unit-side-panel"]'),
+        person: !!document.querySelector('[data-testid="person-assignment-panel"]'),
+        team: !!document.querySelector('[data-testid="team-panel"]'),
+      }))
+      const chipExpanded = () => page.getByTestId('unassigned-dock-toggle').getAttribute('aria-expanded')
+
+      assert.deepEqual(await drawers(), { count: 0, unassigned: false, unit: false, person: false, team: false })
+
+      // Unit drawer opens alone.
+      await page.getByTestId('unit-header-udh-ga').click()
+      assert.deepEqual(await drawers(), { count: 1, unassigned: false, unit: true, person: false, team: false })
+
+      // THE FIX: the Unassigned chip takes over — exactly one drawer remains.
+      await page.getByTestId('unassigned-dock-toggle').click()
+      assert.deepEqual(await drawers(), { count: 1, unassigned: true, unit: false, person: false, team: false })
+      assert.equal(await chipExpanded(), 'true')
+
+      // A person selection closes Unassigned again.
+      await page.getByTestId('person-chip-udh-ga-staff').locator('button').first().click()
+      assert.deepEqual(await drawers(), { count: 1, unassigned: false, unit: false, person: true, team: false })
+      assert.equal(await chipExpanded(), 'false')
+
+      // Back to Unassigned from the person drawer.
+      await page.getByTestId('unassigned-dock-toggle').click()
+      assert.deepEqual(await drawers(), { count: 1, unassigned: true, unit: false, person: false, team: false })
+
+      // A team selection closes Unassigned.
+      await page.getByTestId('team-select-udh-team-line').click()
+      assert.deepEqual(await drawers(), { count: 1, unassigned: false, unit: false, person: false, team: true })
+      assert.equal(await chipExpanded(), 'false')
+
+      // Back to Unassigned from the team drawer.
+      await page.getByTestId('unassigned-dock-toggle').click()
+      assert.deepEqual(await drawers(), { count: 1, unassigned: true, unit: false, person: false, team: false })
+
+      // A unit selection closes Unassigned (reverse direction).
+      await page.getByTestId('unit-header-udh-ga').click()
+      assert.deepEqual(await drawers(), { count: 1, unassigned: false, unit: true, person: false, team: false })
+      assert.equal(await chipExpanded(), 'false')
+    } finally {
+      await browser.close()
+    }
   })
 })
