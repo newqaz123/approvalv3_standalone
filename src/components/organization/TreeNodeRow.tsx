@@ -235,9 +235,9 @@ function TeamGroup({
               key={assignment.id}
               data-testid={`team-member-${assignment.userId}`}
               title={label}
-              className="inline-flex max-w-full flex-wrap items-center gap-1 rounded-md border bg-background px-2 py-0.5 text-xs"
+              className="inline-flex max-w-full flex-nowrap items-center gap-1 rounded-md border bg-background px-2 py-0.5 text-xs"
             >
-              <span className="min-w-0 break-words">{personShortName(user.name)}</span>
+              <span className="min-w-0 truncate">{personShortName(user.name)}</span>
               <span
                 data-testid={`team-member-position-${assignment.userId}`}
                 className="shrink-0 rounded-full bg-secondary px-1.5 py-0.5 text-[10px] font-medium leading-3 text-muted-foreground"
@@ -280,23 +280,33 @@ function PersonChip({
       data-testid={`person-chip-${assignment.userId}`}
       className={`${manager ? 'organization-manager-person' : 'organization-staff-person'} min-w-0 space-y-2`}
     >
+      {/* One row, never a wrapped chip: name (with initials) on the left,
+          position badge pinned right. The manager/staff marker class stays on
+          the wrapper div only — tests count exactly one per row. */}
       <button
         type="button"
         title={label}
-        className={`inline-flex max-w-full flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-secondary text-left text-sm shadow-sm transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${manager ? 'min-h-10 px-2.5 py-1.5' : 'min-h-8 px-2 py-1'}`}
+        className={`flex w-full max-w-full flex-nowrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-secondary text-left text-sm shadow-sm transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${manager ? 'min-h-10 px-2.5 py-1.5' : 'min-h-8 px-2 py-1'}`}
         onClick={(event) => {
           event.stopPropagation()
           onSelectPerson?.(assignment.id)
         }}
       >
-        <PersonInitials
-          name={user.name}
-          testId={`${manager ? 'manager-avatar' : 'person-avatar'}-${user.id}`}
-        />
-        <span className="min-w-0 break-words">{personShortName(user.name)}</span>
+        <span className="flex min-w-0 items-center gap-2">
+          <PersonInitials
+            name={user.name}
+            testId={`${manager ? 'manager-avatar' : 'person-avatar'}-${user.id}`}
+          />
+          <span
+            data-testid={`person-name-${user.id}`}
+            className="min-w-0 truncate"
+          >
+            {personShortName(user.name)}
+          </span>
+        </span>
         <span
           data-testid={`person-position-${user.id}`}
-          className="organization-person-position-badge shrink-0 rounded-full bg-background px-2 py-0.5 text-[11px] font-medium leading-4 text-muted-foreground ring-1 ring-slate-200"
+          className="organization-person-position-badge shrink-0 whitespace-nowrap rounded-full bg-background px-2 py-0.5 text-[11px] font-medium leading-4 text-muted-foreground ring-1 ring-slate-200"
         >
           {position.name}
         </span>
@@ -359,7 +369,7 @@ export function TreeNodeRow({
   }
 
   return (
-    <div data-testid={`unit-row-${unit.id}`} className="organization-unit-node space-y-2">
+    <div data-testid={`unit-row-${unit.id}`} className="organization-unit-node">
       <article
         data-testid={`unit-card-${unit.id}`}
         className="organization-unit-card w-full rounded-xl border border-slate-200 bg-white shadow-sm"
@@ -523,7 +533,13 @@ export function TreeNodeRow({
       {/* Collapsed branch content stays MOUNTED behind the hidden attribute:
           unmounting would tear down editors and cancel a queued follow-up
           rename. Desktop siblings stay in one horizontal row; the canvas
-          scrolls instead of wrapping into a fake parent/child stack. */}
+          scrolls instead of wrapping into a fake parent/child stack.
+
+          The card→children gap is owned by .organization-unit-children
+          margin-top (1.5rem): that gap must equal the stem height so the
+          stem starts AT the parent card's bottom edge instead of poking
+          through the card body (a space-y utility here would shrink the gap
+          to 8px and overlap the people list). */}
       <div
         data-testid={`unit-children-${unit.id}`}
         hidden={!expanded}

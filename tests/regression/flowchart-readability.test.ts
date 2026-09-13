@@ -5,11 +5,16 @@
 //  - one MANAGER row holds only the persisted unit manager; other assignees
 //    are listed separately under their own People heading
 //  - people chips show a short label + small position badge; full name stays
-//    on the title tooltip
+//    on the title tooltip; each people row is one line with the name on the
+//    left and the position on the right (never a wrapped chip)
 //  - darker flowchart connectors
+//  - child stems leave the parent card's BOTTOM edge and meet the child card
+//    top without crossing the parent card body
 //  - /admin/organization renders exactly one canvas per panel (tabs)
 //  - the Organization tab zooms the flowchart (+ / − / percent / Fit) without
-//    scaling the manage drawer
+//    scaling the manage drawer; Fit places BOTH tree edges inside the frame,
+//    may drop below the manual 25% minimum, and the height shim tracks the
+//    natural tree size (collapse/title rewrap) via ResizeObserver
 // Pure render/source assertions plus short Playwright DOM checks. No Prisma,
 // database, env, or write actions.
 import { describe, it } from 'node:test'
@@ -26,7 +31,7 @@ import type { AssignmentNode, OrganizationUnitNode, PositionNode, TeamNode } fro
 import type { WorkspaceSnapshot } from '@/server-actions/organization'
 import { OrganizationWorkspace } from '@/components/organization/OrganizationWorkspace'
 import { OrganizationTabs } from '@/components/organization/OrganizationTabs'
-import { ZoomableFlowchart, clampZoom, fitScaleFor } from '@/components/organization/ZoomableFlowchart'
+import { ZoomableFlowchart, ZOOM_MIN, clampZoom, fitScaleFor } from '@/components/organization/ZoomableFlowchart'
 import { OrganizationTree } from '@/components/organization/OrganizationTree'
 
 // Fixture mirrors the live shapes called out in the readability report:
@@ -38,6 +43,7 @@ const units: OrganizationUnitNode[] = [
   { id: 'rd-qsec', name: 'QSEC Department', parentId: 'rd-admin', isActive: true, shareRequests: false, canWorkOnSolutions: true, managerUserId: null },
   { id: 'rd-qc', name: 'QC Section', parentId: 'rd-qsec', isActive: true, shareRequests: false, canWorkOnSolutions: false, managerUserId: null },
   { id: 'rd-eng', name: 'Engineering Department', parentId: 'rd-ga', isActive: true, shareRequests: false, canWorkOnSolutions: false, managerUserId: null },
+  { id: 'rd-maint', name: 'Maintenance Section', parentId: 'rd-eng', isActive: true, shareRequests: false, canWorkOnSolutions: false, managerUserId: null },
   // Extra roots make the tree wider than a narrow frame so Fit must reduce.
   { id: 'rd-site-b', name: 'Site B Warehouse', parentId: null, isActive: true, shareRequests: false, canWorkOnSolutions: false, managerUserId: null },
   { id: 'rd-site-c', name: 'Site C Depot', parentId: null, isActive: true, shareRequests: false, canWorkOnSolutions: false, managerUserId: null },
@@ -167,28 +173,30 @@ async function withWorkspaceDom(frameWidth: string, run: (page: Page) => Promise
 }
 
 describe('flowchart card readability', () => {
-  it('widens unit cards and wraps the unit title with a full-name tooltip', async () => {
+  it('widens unit cards and keeps unit titles on one line with a full-name tooltip', async () => {
     const html = renderWorkspace()
     const css = readFileSync('src/app/globals.css', 'utf8')
 
-    // Desktop cards grow past the old 22rem so titles get real space.
+    // Desktop cards grow past the old 22rem so the one-line title has real
+    // space (30rem fits "Engineering Department" without truncation).
     const card = cssRule(css, '.organization-unit-card')
-    assert.match(card, /width:\s*26rem/)
-    assert.match(card, /max-width:\s*26rem/)
-    assert.match(cssRule(css, '.organization-unit-child'), /min-width:\s*26rem/)
+    assert.match(card, /width:\s*30rem/)
+    assert.match(card, /max-width:\s*30rem/)
+    assert.match(cssRule(css, '.organization-unit-child'), /min-width:\s*30rem/)
 
     // Compact-card mode (overflow "…" actions, no reserved hover strip) now
     // covers the standard card width, matching the widened cards.
-    assert.match(css, /@container organization-unit-card \(max-width: 26rem\)[\s\S]*?organization-unit-hover-actions[\s\S]*?display:\s*none/)
-    assert.match(css, /@container organization-unit-card \(max-width: 26rem\)[\s\S]*?organization-unit-header-overflow[\s\S]*?display:\s*flex/)
+    assert.match(css, /@container organization-unit-card \(max-width: 30rem\)[\s\S]*?organization-unit-hover-actions[\s\S]*?display:\s*none/)
+    assert.match(css, /@container organization-unit-card \(max-width: 30rem\)[\s\S]*?organization-unit-header-overflow[\s\S]*?display:\s*flex/)
 
-    // The title uses the remaining header space and wraps instead of
-    // ellipsizing at three letters.
+    // The title stays on ONE line: never a mid-word break ("Engineeri ng"),
+    // never a multi-line wrap. Overflow ends in an ellipsis and the full unit
+    // name remains available as the header tooltip.
     const displaySpanRule = cssRule(css, '.organization-unit-name [data-testid="inline-name-edit"] > span')
-    assert.match(displaySpanRule, /white-space:\s*normal/)
-    assert.match(displaySpanRule, /overflow-wrap:\s*break-word/)
-    assert.doesNotMatch(displaySpanRule, /text-overflow:\s*ellipsis/)
-    assert.doesNotMatch(displaySpanRule, /white-space:\s*nowrap/)
+    assert.match(displaySpanRule, /white-space:\s*nowrap/)
+    assert.match(displaySpanRule, /text-overflow:\s*ellipsis/)
+    assert.doesNotMatch(displaySpanRule, /white-space:\s*normal/)
+    assert.doesNotMatch(displaySpanRule, /break-word/)
 
     // Slightly larger title type.
     assert.match(classOfTestId(html, 'unit-name-rd-admin'), /text-lg/)
@@ -198,14 +206,16 @@ describe('flowchart card readability', () => {
     assert.match(openTag(html, 'unit-name-rd-ga'), /title="GA Department"/)
     assert.match(openTag(html, 'unit-name-rd-qsec'), /title="QSEC Department"/)
     assert.match(openTag(html, 'unit-name-rd-qc'), /title="QC Section"/)
+    assert.match(openTag(html, 'unit-name-rd-eng'), /title="Engineering Department"/)
+    assert.match(openTag(html, 'unit-name-rd-maint'), /title="Maintenance Section"/)
   })
 
-  it('renders the target unit titles untruncated at desktop card width', { timeout: 60_000 }, async () => {
+  it('renders the target unit titles untruncated on one line at desktop card width', { timeout: 60_000 }, async () => {
     await withWorkspaceDom('760px', async (page) => {
       // No named inner functions here: page.evaluate serializes this source,
       // so it must be self-contained plain browser JS.
       const facts = await page.evaluate(() => {
-        const ids = ['rd-admin', 'rd-ga', 'rd-qsec', 'rd-qc', 'rd-eng']
+        const ids = ['rd-admin', 'rd-ga', 'rd-qsec', 'rd-qc', 'rd-eng', 'rd-maint']
         const out: Array<{
           id: string
           text: string
@@ -213,6 +223,7 @@ describe('flowchart card readability', () => {
           cardWidth: number
           clientWidth: number
           scrollWidth: number
+          lineHeight: number
         }> = []
         for (const id of ids) {
           const el = document.querySelector(`[data-testid="unit-name-${id}"]`) as HTMLElement | null
@@ -227,21 +238,28 @@ describe('flowchart card readability', () => {
             cardWidth: card ? card.getBoundingClientRect().width : 0,
             clientWidth: inner.clientWidth,
             scrollWidth: inner.scrollWidth,
+            lineHeight: Math.round(inner.getBoundingClientRect().height),
           })
         }
         return out
       })
-      assert.equal(facts.length, 5, 'every measured unit must render a name span')
+      assert.equal(facts.length, 6, 'every measured unit must render a name span')
       for (const fact of facts) {
         assert.equal(fact.text, fact.title, `${fact.id} tooltip must carry the full name`)
         assert.ok(
           fact.scrollWidth <= fact.clientWidth + 1,
           `${fact.id} title is truncated (scroll ${fact.scrollWidth} > client ${fact.clientWidth})`,
         )
-        assert.ok(fact.cardWidth >= 415, `${fact.id} card must be at least 26rem wide, got ${fact.cardWidth}`)
+        // One line only: a wrapped or mid-word-broken title renders as
+        // multiple 28px line boxes (text-lg).
+        assert.ok(
+          fact.lineHeight <= 32,
+          `${fact.id} title must stay on one line, got line height ${fact.lineHeight}px`,
+        )
+        assert.ok(fact.cardWidth >= 479, `${fact.id} card must be at least 30rem wide, got ${fact.cardWidth}`)
       }
       const names = new Set(facts.map((fact) => fact.text))
-      for (const expected of ['Admin Division', 'GA Department', 'QSEC Department', 'QC Section']) {
+      for (const expected of ['Admin Division', 'GA Department', 'QSEC Department', 'QC Section', 'Engineering Department', 'Maintenance Section']) {
         assert.ok(names.has(expected), `${expected} must be one of the measured full titles`)
       }
     })
@@ -282,6 +300,96 @@ describe('flowchart card readability', () => {
       assert.equal(facts.hasPeopleHeading, true, 'non-manager assignees need their own People heading')
       assert.equal(facts.qsecHasManagerRow, false, 'null persisted manager must not produce a MANAGER row')
       assert.equal(facts.qsecChipInStaffList, true, 'manager-ranked assignee on a None unit stays in the people list')
+    })
+  })
+
+  it('lays each people row out on one line: name left, position right', { timeout: 60_000 }, async () => {
+    const html = renderWorkspace()
+    // Source contract: the chip button is a non-wrapping flex row with
+    // space-between; the visible name truncates instead of wrapping.
+    const managerChip = innerByTestId(html, 'person-chip-rd-ga-manager')
+    assert.match(managerChip, /justify-between/)
+    assert.match(managerChip, /flex-nowrap/)
+    assert.match(managerChip, /w-full/)
+    assert.match(managerChip, /truncate/)
+    assert.match(managerChip, /data-testid="person-name-rd-ga-manager"/)
+
+    await withWorkspaceDom('760px', async (page) => {
+      // Anonymous inline expressions only: page.evaluate serializes this
+      // source, so named inner functions are not allowed here.
+      const facts = await page.evaluate(() => {
+        const manager = document.querySelector('[data-testid="person-chip-rd-ga-manager"] > button') as HTMLElement | null
+        const staff = document.querySelector('[data-testid="person-chip-rd-ga-staff"] > button') as HTMLElement | null
+        const team = document.querySelector('[data-testid="team-member-rd-ga-member"]') as HTMLElement | null
+        const name = document.querySelector('[data-testid="person-name-rd-ga-manager"]') as HTMLElement | null
+        const badge = document.querySelector('[data-testid="person-position-rd-ga-manager"]') as HTMLElement | null
+        if (!manager || !staff || !team || !name || !badge) return null
+        return {
+          managerDisplay: getComputedStyle(manager).display,
+          managerJustify: getComputedStyle(manager).justifyContent,
+          managerWrap: getComputedStyle(manager).flexWrap,
+          staffWrap: getComputedStyle(staff).flexWrap,
+          teamWrap: getComputedStyle(team).flexWrap,
+          managerHeight: Math.round(manager.getBoundingClientRect().height),
+          nameRight: name.getBoundingClientRect().right,
+          nameHeight: Math.round(name.getBoundingClientRect().height),
+          badgeLeft: badge.getBoundingClientRect().left,
+        }
+      })
+      assert.ok(facts, 'manager chip, staff chip, team chip, name and badge must render')
+      assert.equal(facts.managerDisplay, 'flex')
+      assert.equal(facts.managerJustify, 'space-between')
+      assert.equal(facts.managerWrap, 'nowrap')
+      assert.equal(facts.staffWrap, 'nowrap', 'staff rows share the one-line chip layout')
+      assert.equal(facts.teamWrap, 'nowrap', 'team member chips never wrap mid-name')
+      assert.ok(
+        facts.nameRight <= facts.badgeLeft + 1,
+        'name must sit left of the position badge on the same row',
+      )
+      assert.ok(facts.nameHeight <= 24, 'name must stay on one line')
+      assert.ok(facts.managerHeight >= 32, 'manager chip must keep its row height')
+    })
+  })
+
+  it('draws the child stem from the parent card bottom edge to the child card top', { timeout: 60_000 }, async () => {
+    await withWorkspaceDom('760px', async (page) => {
+      // Anonymous inline expressions only: page.evaluate serializes this
+      // source, so named inner functions are not allowed here.
+      const facts = await page.evaluate(() => {
+        const card = document.querySelector('[data-testid="unit-card-rd-qsec"]') as HTMLElement | null
+        const children = document.querySelector('[data-testid="unit-children-rd-qsec"]') as HTMLElement | null
+        const connector = document.querySelector('[data-testid="unit-connector-rd-qc"]') as HTMLElement | null
+        const childCard = document.querySelector('[data-testid="unit-card-rd-qc"]') as HTMLElement | null
+        if (!card || !children || !connector || !childCard) return null
+        return {
+          cardBottom: card.getBoundingClientRect().bottom,
+          childrenTop: children.getBoundingClientRect().top,
+          connectorTop: connector.getBoundingClientRect().top,
+          connectorBottom: connector.getBoundingClientRect().bottom,
+          childCardTop: childCard.getBoundingClientRect().top,
+        }
+      })
+      assert.ok(facts, 'single-child chain must render')
+      // The children box must sit a full stem-height (1.5rem) below the parent
+      // card so the CSS stem (top:-1.5rem) starts AT the bottom edge instead
+      // of punching through the card body over the people list.
+      const gap = facts.childrenTop - facts.cardBottom
+      assert.ok(
+        gap >= 23,
+        `children box must sit ~24px below the parent card bottom (stem starts at the edge), got gap ${gap}px`,
+      )
+      assert.ok(
+        facts.connectorTop >= facts.cardBottom - 1,
+        `stem must not start inside the parent card body (stub top ${facts.connectorTop} vs card bottom ${facts.cardBottom})`,
+      )
+      assert.ok(
+        Math.abs(facts.connectorTop - facts.childrenTop) <= 1,
+        'connector stub must continue the stem from the children-box top',
+      )
+      assert.ok(
+        Math.abs(facts.connectorBottom - facts.childCardTop) <= 1,
+        'connector must meet the child card top',
+      )
     })
   })
 
@@ -363,12 +471,16 @@ describe('organization page tabs', () => {
 })
 
 describe('flowchart zoom', () => {
-  it('clamps zoom and never lets Fit upscale a narrow tree', () => {
+  it('clamps manual zoom, never lets Fit upscale a narrow tree, and lets Fit drop below the manual minimum', () => {
     assert.equal(clampZoom(0.1), 0.25)
     assert.equal(clampZoom(5), 2)
     assert.equal(clampZoom(Number.NaN), 1)
     assert.equal(clampZoom(1.1), 1.1)
     assert.ok(Math.abs(fitScaleFor(1400, 500) - 500 / 1400) < 1e-9)
+    // Fit is NOT clamped to the manual +/- band: a >4:1 width ratio must
+    // produce a scale below the 25% manual minimum so the tree really fits.
+    assert.ok(Math.abs(fitScaleFor(2400, 500) - 500 / 2400) < 1e-9)
+    assert.ok(fitScaleFor(2400, 500) < ZOOM_MIN, `Fit must drop below the manual minimum, got ${fitScaleFor(2400, 500)}`)
     assert.equal(fitScaleFor(300, 500), 1)
     assert.equal(fitScaleFor(0, 500), 1)
     assert.equal(fitScaleFor(500, 0), 1)
@@ -387,10 +499,13 @@ describe('flowchart zoom', () => {
     assert.match(markup, /data-testid="flowchart-zoom-fit"[^>]*aria-label="Fit"/)
     assert.match(markup, /data-testid="flowchart-zoom-label"[^>]*>\s*100%\s*</)
     assert.match(markup, /data-testid="flowchart-zoom-canvas"[^>]*transform:\s*scale\(1\)/)
-    assert.match(markup, /data-testid="flowchart-zoom-canvas"[^>]*transform-origin:\s*top center/)
+    // Top-left scaling inside a scaled-size layout wrapper: a top-center
+    // origin on a natural-width canvas shifts the fitted tree right and clips.
+    assert.match(markup, /data-testid="flowchart-zoom-canvas"[^>]*transform-origin:\s*top left/)
+    assert.match(markup, /data-testid="flowchart-zoom-sizer"/)
   })
 
-  it('scales the flowchart canvas with +/- and Fit shrinks a tree wider than the canvas', { timeout: 120_000 }, async () => {
+  it('scales the canvas with +/-; Fit contains both tree edges below the manual minimum; collapse updates the shim', { timeout: 180_000 }, async () => {
     const css = await compiledApplicationCss()
     // The +/- and Fit behaviors are client state transitions, so this test
     // hydrates the REAL ZoomableFlowchart in chromium via the esbuild harness
@@ -422,6 +537,9 @@ describe('flowchart zoom', () => {
         return { width: tree.getBoundingClientRect().width, height: tree.getBoundingClientRect().height }
       })
       assert.ok(natural.width > 500, `fixture tree must exceed the 500px frame, got ${natural.width}`)
+      // >4:1 width ratio: the fitted scale must land BELOW the manual 25%
+      // minimum (P1-2 regression: Fit clamped to 25% and still overflowed).
+      assert.ok(natural.width / 500 > 4, `fixture tree must exceed a 4:1 width ratio, got ${natural.width}`)
 
       const toolbarBefore = await page.evaluate(() => {
         const button = document.querySelector('[data-testid="flowchart-zoom-in"]') as HTMLElement
@@ -449,16 +567,52 @@ describe('flowchart zoom', () => {
       const fit = await page.evaluate(() => {
         const tree = document.querySelector('[data-testid="organization-tree"]') as HTMLElement
         const canvas = document.querySelector('[data-testid="flowchart-zoom-canvas"]') as HTMLElement
+        const frame = document.querySelector('[data-testid="flowchart-zoom-frame"]') as HTMLElement
+        const frameBox = frame.getBoundingClientRect()
+        const treeBox = tree.getBoundingClientRect()
         return {
           label: (document.querySelector('[data-testid="flowchart-zoom-label"]') as HTMLElement).textContent?.trim(),
-          width: tree.getBoundingClientRect().width,
+          frameLeft: frameBox.left,
+          frameRight: frameBox.right,
+          frameWidth: frameBox.width,
+          frameHeight: Math.round(frameBox.height),
+          treeLeft: treeBox.left,
+          treeRight: treeBox.right,
+          treeWidth: treeBox.width,
+          frameScrollWidth: frame.scrollWidth,
+          frameClientWidth: frame.clientWidth,
           transform: getComputedStyle(canvas).transform,
         }
       })
       const fitPercent = Number((fit.label ?? '').replace('%', ''))
-      assert.ok(fitPercent > 0 && fitPercent < 100, `Fit must reduce the scale for a wide tree, got ${fit.label}`)
-      assert.ok(fit.width <= 502, `fitted tree must fit the 500px frame, got ${fit.width}`)
+      assert.ok(fitPercent > 0 && fitPercent < 25, `Fit must drop below the 25% manual minimum for a >4:1 tree, got ${fit.label}`)
+      // Containment means BOTH tree edges inside the frame edges — fitting the
+      // width alone allowed a top-center origin to shift the tree right and
+      // clip the far edge.
+      assert.ok(fit.treeLeft >= fit.frameLeft - 2, `fitted tree LEFT edge must be inside the frame (tree ${fit.treeLeft} vs frame ${fit.frameLeft})`)
+      assert.ok(fit.treeRight <= fit.frameRight + 2, `fitted tree RIGHT edge must be inside the frame (tree ${fit.treeRight} vs frame ${fit.frameRight})`)
+      assert.ok(fit.treeWidth <= fit.frameWidth + 2, `fitted tree width must fit the frame, got ${fit.treeWidth} vs ${fit.frameWidth}`)
+      assert.ok(fit.frameScrollWidth <= fit.frameClientWidth + 1, 'Fit must not leave dead horizontal scroll space')
       assert.notEqual(fit.transform, 'none')
+
+      // P2: the height shim must track the natural tree size. Collapsing a
+      // branch resizes the tree WITHOUT touching zoom, so the frame must
+      // shrink via ResizeObserver while the zoom label stays put.
+      const labelBefore = fit.label
+      await page.getByTestId('unit-toggle-zh-company').click()
+      await page.waitForTimeout(250)
+      const collapsed = await page.evaluate(() => {
+        const frame = document.querySelector('[data-testid="flowchart-zoom-frame"]') as HTMLElement
+        return {
+          frameHeight: Math.round(frame.getBoundingClientRect().height),
+          label: (document.querySelector('[data-testid="flowchart-zoom-label"]') as HTMLElement).textContent?.trim(),
+        }
+      })
+      assert.ok(
+        collapsed.frameHeight < fit.frameHeight - 10,
+        `collapse must shrink the height shim without a zoom change (${collapsed.frameHeight} vs ${fit.frameHeight})`,
+      )
+      assert.equal(collapsed.label, labelBefore, 'collapse must not change the zoom scale')
     } finally {
       await browser.close()
     }

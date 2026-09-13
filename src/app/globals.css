@@ -796,8 +796,8 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
   min-width: 0;
 }
 .organization-unit-card {
-  width: 26rem;
-  max-width: 26rem;
+  width: 30rem;
+  max-width: 30rem;
   min-width: 0;
   overflow: visible;
   container-type: inline-size;
@@ -820,14 +820,15 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
   max-width: 100%;
   min-width: 0;
 }
-/* The unit title owns the remaining header space and wraps (break-words)
-   instead of ellipsizing at three letters. The full name also stays on the
-   header tooltip. */
+/* The unit title stays on ONE line: it never wraps and never breaks mid-word
+   ("Engineeri ng"); overflow ends in an ellipsis and the full unit name
+   remains on the header tooltip. */
 .organization-unit-name [data-testid="inline-name-edit"] > span {
   min-width: 0;
   max-width: 100%;
-  overflow-wrap: break-word;
-  white-space: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .organization-unit-name [data-testid="inline-name-edit-input"] {
   width: 100%;
@@ -844,7 +845,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
   flex-shrink: 0;
   align-items: center;
 }
-@container organization-unit-card (max-width: 26rem) {
+@container organization-unit-card (max-width: 30rem) {
   .organization-unit-hover-actions {
     display: none !important;
   }
@@ -921,7 +922,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
   position: relative;
   flex: 0 0 auto;
   width: max-content;
-  min-width: 26rem;
+  min-width: 30rem;
   padding-top: 1.5rem;
 }
 .organization-unit-child > .organization-flowchart-connector {

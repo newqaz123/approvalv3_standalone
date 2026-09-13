@@ -16,11 +16,14 @@ export function clampZoom(scale: number): number {
  * Fit scales the whole tree down so it is fully visible inside the available
  * canvas width (the canvas frame already excludes the sticky manage drawer on
  * lg, because the drawer is a flex sibling of the tree column). Fit never
- * upscales: a tree narrower than the canvas stays at 100%.
+ * upscales, and it is deliberately NOT clamped to the manual +/- band: a tree
+ * whose fitted scale is below ZOOM_MIN must still fit, so Fit may return
+ * scales under the manual minimum. The manual − / + buttons stay clamped to
+ * [ZOOM_MIN, ZOOM_MAX].
  */
 export function fitScaleFor(contentWidth: number, availableWidth: number): number {
   if (!(contentWidth > 0) || !(availableWidth > 0)) return 1
-  return clampZoom(Math.min(1, availableWidth / contentWidth))
+  return Math.min(1, availableWidth / contentWidth)
 }
 
 function stepZoom(scale: number, direction: 1 | -1): number {
@@ -32,17 +35,31 @@ function stepZoom(scale: number, direction: 1 | -1): number {
  * scales: the toolbar, the manage drawer, and the unassigned dock live
  * outside the transformed div. The canvas is width:max-content so the tree
  * lays out at its natural width and transform-scaling magnifies the WHOLE
- * tree (the tree's own overflow-x stays inert); the frame scrolls when the
- * scaled canvas exceeds the column. A height shim keeps page flow equal to
- * the scaled height, so zooming never leaves dead space below the canvas.
- * Zoom state is component state on purpose: it persists across drawer/tab
- * interactions within the session and deliberately resets on reload.
+ * tree (the tree's own overflow-x stays inert). The scaled canvas sits inside
+ * a scaled-size layout wrapper ("sizer") so the frame's scrollable area equals
+ * the scaled box: scaling uses transform-origin top left, which keeps BOTH
+ * tree edges inside the frame after Fit (a top-center origin on a
+ * natural-width canvas shifts the fitted tree right by (W − F)/2 and clips
+ * the far edge, and pushes the left edge into unreachable negative scroll
+ * space above 100%). Before the first measurement the sizer mirrors the old
+ * canvas box (w-max min-w-full) so static/SSR markup keeps the frame-anchored
+ * layout; once the ResizeObserver reports the natural tree size the sizer's
+ * explicit scaled width (with minWidth 0, so it can shrink below the frame)
+ * takes over, and mx-auto centers it whenever it is narrower than the frame
+ * (auto margins resolve to 0 when it is wider, so scrolling still starts at
+ * the left edge). A height shim keeps page flow equal to the scaled
+ * height, so zooming never leaves dead space below the canvas. The shim and
+ * sizer derive from the tree's NATURAL size, which a ResizeObserver keeps
+ * current: collapsing a branch or re-wrapping a title resizes the tree
+ * without touching zoom or the children prop. Zoom state is component state
+ * on purpose: it persists across drawer/tab interactions within the session
+ * and deliberately resets on reload.
  */
 export function ZoomableFlowchart({ children }: { children: React.ReactNode }) {
   const frameRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLDivElement>(null)
   const [zoom, setZoom] = useState(1)
-  const [scaledHeight, setScaledHeight] = useState<number | null>(null)
+  const [naturalSize, setNaturalSize] = useState<{ width: number; height: number } | null>(null)
 
   const applyFit = useCallback(() => {
     const frame = frameRef.current
@@ -54,15 +71,31 @@ export function ZoomableFlowchart({ children }: { children: React.ReactNode }) {
   }, [])
 
   // Transform does not affect layout, so the frame needs an explicit height
-  // equal to the scaled canvas; otherwise a shrunk canvas leaves a hole and
-  // an enlarged one overlaps the sections below.
+  // equal to the scaled canvas and the canvas needs the scaled-size wrapper;
+  // both derive from the natural tree size measured here. ResizeObserver (not
+  // a zoom/children effect) tracks collapse and title rewraps.
   useLayoutEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
     const tree = canvas.querySelector('[data-testid="organization-tree"]')
-    const naturalHeight = tree instanceof HTMLElement ? tree.offsetHeight : canvas.offsetHeight
-    setScaledHeight(Math.ceil(naturalHeight * zoom))
-  }, [zoom, children])
+    const target = tree instanceof HTMLElement ? tree : canvas
+    const measure = () => {
+      const width = target.offsetWidth
+      const height = target.offsetHeight
+      setNaturalSize((prev) => (prev && prev.width === width && prev.height === height ? prev : { width, height }))
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(target)
+    return () => observer.disconnect()
+  }, [children])
+
+  // Floor the scaled width so a fitted canvas never becomes wider than the
+  // frame by a rounding pixel (which would reintroduce a horizontal
+  // scrollbar); the height shim keeps the previous ceil headroom for page
+  // flow below the canvas.
+  const scaledWidth = naturalSize ? Math.floor(naturalSize.width * zoom) : null
+  const scaledHeight = naturalSize ? Math.ceil(naturalSize.height * zoom) : null
 
   return (
     <div data-testid="flowchart-zoom" className="organization-flowchart-zoom">
@@ -111,16 +144,27 @@ export function ZoomableFlowchart({ children }: { children: React.ReactNode }) {
       </div>
       <div
         ref={frameRef}
+        data-testid="flowchart-zoom-frame"
         className="organization-flowchart-zoom-frame overflow-x-auto"
         style={scaledHeight !== null ? { height: `${scaledHeight}px` } : undefined}
       >
         <div
-          ref={canvasRef}
-          data-testid="flowchart-zoom-canvas"
-          className="organization-flowchart-zoom-canvas w-max min-w-full"
-          style={{ transform: `scale(${zoom})`, transformOrigin: 'top center' }}
+          data-testid="flowchart-zoom-sizer"
+          className="organization-flowchart-zoom-sizer mx-auto w-max min-w-full"
+          style={
+            scaledWidth !== null && scaledHeight !== null
+              ? { width: `${scaledWidth}px`, height: `${scaledHeight}px`, minWidth: 0 }
+              : undefined
+          }
         >
-          {children}
+          <div
+            ref={canvasRef}
+            data-testid="flowchart-zoom-canvas"
+            className={`organization-flowchart-zoom-canvas w-max${naturalSize ? '' : ' min-w-full'}`}
+            style={{ transform: `scale(${zoom})`, transformOrigin: 'top left' }}
+          >
+            {children}
+          </div>
         </div>
       </div>
     </div>

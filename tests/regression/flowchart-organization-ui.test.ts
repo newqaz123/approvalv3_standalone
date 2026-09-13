@@ -391,7 +391,7 @@ describe('flowchart organization UI', () => {
     assert.match(nameRule, /min-width:\s*0/)
     assert.match(css, /\[data-testid="inline-name-edit"\][\s\S]*max-width:\s*100%/)
     assert.match(css, /\[data-testid="inline-name-edit-input"\][\s\S]*max-width:\s*100%/)
-    assert.match(css, /@container organization-unit-card \(max-width: 26rem\)[\s\S]*organization-unit-header-overflow[\s\S]*display:\s*flex/)
+    assert.match(css, /@container organization-unit-card \(max-width: 30rem\)[\s\S]*organization-unit-header-overflow[\s\S]*display:\s*flex/)
     assert.match(css, /@media \(max-width: 767px\)[\s\S]*organization-unit-header-overflow[\s\S]*display:\s*flex/)
 
     const actionsClass = classOfTestId(html, 'unit-hover-actions-flow-child-a')

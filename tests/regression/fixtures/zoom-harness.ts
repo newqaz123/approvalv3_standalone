@@ -11,11 +11,15 @@ import type { WorkspaceSnapshot } from '@/server-actions/organization'
 
 const units: OrganizationUnitNode[] = [
   { id: 'zh-company', name: 'Factory', parentId: null, isActive: true, shareRequests: false, canWorkOnSolutions: false, managerUserId: null },
-  // Sibling units render in one horizontal row, so three children make the
-  // subtree far wider than the 500px test frame (3 x 26rem + gaps).
+  // Sibling units render in one horizontal row, so six children make the
+  // subtree far wider than the 500px test frame (6 x 30rem + gaps): the
+  // width ratio exceeds 4:1 so Fit must drop below the 25% manual minimum.
   { id: 'zh-site-a', name: 'Site A Warehouse', parentId: 'zh-company', isActive: true, shareRequests: false, canWorkOnSolutions: false, managerUserId: null },
   { id: 'zh-site-b', name: 'Site B Depot', parentId: 'zh-company', isActive: true, shareRequests: false, canWorkOnSolutions: false, managerUserId: null },
   { id: 'zh-site-c', name: 'Site C Plant', parentId: 'zh-company', isActive: true, shareRequests: false, canWorkOnSolutions: false, managerUserId: null },
+  { id: 'zh-site-d', name: 'Site D Mill', parentId: 'zh-company', isActive: true, shareRequests: false, canWorkOnSolutions: false, managerUserId: null },
+  { id: 'zh-site-e', name: 'Site E Yard', parentId: 'zh-company', isActive: true, shareRequests: false, canWorkOnSolutions: false, managerUserId: null },
+  { id: 'zh-site-f', name: 'Site F Pier', parentId: 'zh-company', isActive: true, shareRequests: false, canWorkOnSolutions: false, managerUserId: null },
 ]
 
 const positions: PositionNode[] = [
