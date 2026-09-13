@@ -205,7 +205,7 @@ export function UnitSidePanel({
   return (
     <aside
       data-testid="unit-side-panel"
-      className="w-full shrink-0 space-y-6 rounded-lg border bg-card p-4 lg:w-96"
+      className="max-h-[calc(100vh-2rem)] w-full shrink-0 space-y-6 overflow-y-auto overscroll-contain rounded-lg border bg-card p-4 lg:sticky lg:top-4 lg:w-96"
     >
       <h2 className="text-lg font-semibold">{`Manage ${unit.name}`}</h2>
 

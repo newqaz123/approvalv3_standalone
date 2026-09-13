@@ -83,7 +83,7 @@ export function OrganizationWorkspace({ snapshot }: { snapshot: WorkspaceSnapsho
   const currentTeams = teamRows ?? snapshot.teams
 
   return (
-    <div data-testid="organization-workspace" className="flex flex-col gap-8 lg:flex-row">
+    <div data-testid="organization-workspace" className="flex flex-col items-stretch gap-8 lg:flex-row lg:items-start">
       <div className="min-w-0 flex-1 space-y-8">
         <OrganizationTree
           snapshot={viewSnapshot}
@@ -97,7 +97,11 @@ export function OrganizationWorkspace({ snapshot }: { snapshot: WorkspaceSnapsho
         />
       </div>
       {selectedUnit ? (
-        <UnitSidePanel
+        <aside
+          data-testid="organization-manage-drawer"
+          className="organization-manage-drawer max-h-[calc(100vh-2rem)] w-full shrink-0 overflow-y-auto overscroll-contain lg:sticky lg:top-4 lg:w-96 lg:max-w-full"
+        >
+          <UnitSidePanel
           unit={selectedUnit}
           snapshot={viewSnapshot}
           onSettingsSaved={(patch) => {
@@ -123,9 +127,14 @@ export function OrganizationWorkspace({ snapshot }: { snapshot: WorkspaceSnapsho
             setSelectedUnitId(null)
           }}
         />
+        </aside>
       ) : null}
       {creatingTeamUnitId || selectedTeamId ? (
-        <TeamPanel
+        <aside
+          data-testid="organization-manage-drawer"
+          className="organization-manage-drawer max-h-[calc(100vh-2rem)] w-full shrink-0 overflow-y-auto overscroll-contain lg:sticky lg:top-4 lg:w-96 lg:max-w-full"
+        >
+          <TeamPanel
           snapshot={viewSnapshot}
           unitId={
             creatingTeamUnitId
@@ -162,9 +171,14 @@ export function OrganizationWorkspace({ snapshot }: { snapshot: WorkspaceSnapsho
             setSelectedTeamId(null)
           }}
         />
+        </aside>
       ) : null}
       {selectedAssignmentId || selectedUnassignedUserId ? (
-        <PersonAssignmentPanel
+        <aside
+          data-testid="organization-manage-drawer"
+          className="organization-manage-drawer max-h-[calc(100vh-2rem)] w-full shrink-0 overflow-y-auto overscroll-contain lg:sticky lg:top-4 lg:w-96 lg:max-w-full"
+        >
+          <PersonAssignmentPanel
           snapshot={viewSnapshot}
           assignmentId={selectedAssignmentId}
           userId={selectedUnassignedUserId}
@@ -209,6 +223,7 @@ export function OrganizationWorkspace({ snapshot }: { snapshot: WorkspaceSnapsho
             if (removed) setSelectedUnassignedUserId(userId)
           }}
         />
+        </aside>
       ) : null}
     </div>
   )

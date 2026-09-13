@@ -769,3 +769,114 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
   padding: 0;
   white-space: nowrap;
 }
+
+/*
+ * Organization flowchart surface. Child groups keep the historical Tailwind
+ * class names (border-l-2 / pl-6 / space-y-5) so existing render contracts
+ * still match, but the visual language is a centered card flowchart: compact
+ * white cards, wrapping sibling rows, and slate T-connectors. Semantic
+ * hierarchy stays in the nested DOM and existing test IDs.
+ */
+.organization-flowchart {
+  --organization-flowchart-line: #94a3b8;
+  background-image: radial-gradient(#cbd5e1 1px, transparent 1px);
+  background-size: 16px 16px;
+  padding: 1.25rem 0.5rem 1.5rem;
+  border-radius: 1rem;
+}
+.organization-unit-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+}
+.organization-unit-card {
+  width: min(100%, 22rem);
+  min-width: 0;
+  overflow: visible;
+}
+.organization-unit-children {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1.25rem 1rem;
+  width: 100%;
+  margin-top: 1.5rem;
+  padding: 1.5rem 0.5rem 0;
+  border-left-color: transparent;
+}
+.organization-unit-children:empty,
+.organization-unit-children[hidden],
+.organization-unit-people[hidden] {
+  display: none;
+}
+.organization-unit-children::before {
+  content: "";
+  position: absolute;
+  top: -1.5rem;
+  left: 50%;
+  width: 2px;
+  height: 1.5rem;
+  transform: translateX(-50%);
+  background: var(--organization-flowchart-line);
+}
+.organization-unit-children::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0.5rem;
+  left: 0.5rem;
+  height: 2px;
+  background: var(--organization-flowchart-line);
+}
+.organization-unit-children:has(> .organization-unit-child:only-child)::after {
+  display: none;
+}
+.organization-unit-children > .organization-unit-child {
+  margin-top: 0;
+}
+.organization-unit-child {
+  position: relative;
+  min-width: min(100%, 18rem);
+  flex: 1 1 18rem;
+  padding-top: 1.5rem;
+}
+.organization-unit-child > .organization-flowchart-connector {
+  top: 0;
+  left: 50%;
+  width: 2px;
+  height: 1.5rem;
+  transform: translateX(-50%);
+  background: var(--organization-flowchart-line);
+}
+.organization-unit-people,
+.organization-staff-list,
+.organization-manager-row {
+  min-width: 0;
+}
+.organization-manager-row {
+  border-top: 1px solid #e2e8f0;
+  padding-top: 0.75rem;
+}
+.organization-team-group {
+  border-left-color: #cbd5e1;
+}
+.organization-unassigned-dock {
+  min-width: 0;
+}
+.organization-unassigned-dock-list {
+  scrollbar-width: thin;
+}
+@media (max-width: 640px) {
+  .organization-unit-card {
+    width: 100%;
+  }
+  .organization-unit-child {
+    min-width: 100%;
+    max-width: 100%;
+    flex-basis: 100%;
+  }
+}
