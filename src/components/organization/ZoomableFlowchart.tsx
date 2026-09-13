@@ -55,7 +55,13 @@ function stepZoom(scale: number, direction: 1 | -1): number {
  * on purpose: it persists across drawer/tab interactions within the session
  * and deliberately resets on reload.
  */
-export function ZoomableFlowchart({ children }: { children: React.ReactNode }) {
+export function ZoomableFlowchart({ children, toolbarExtras }: {
+  children: React.ReactNode
+  /** Workspace-provided toolbar content (e.g. the Unassigned chip) rendered
+   *  left of the zoom controls; the toolbar is sticky so it stays visible
+   *  while the canvas and page scroll. */
+  toolbarExtras?: React.ReactNode
+}) {
   const frameRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLDivElement>(null)
   const [zoom, setZoom] = useState(1)
@@ -103,8 +109,12 @@ export function ZoomableFlowchart({ children }: { children: React.ReactNode }) {
         data-testid="flowchart-zoom-toolbar"
         role="group"
         aria-label="Flowchart zoom"
-        className="mb-2 flex items-center justify-end gap-1"
+        className="organization-zoom-toolbar sticky top-0 z-20 mb-2 flex flex-wrap items-center justify-between gap-1 rounded-lg border border-slate-200 bg-background/95 px-1.5 py-1 shadow-sm backdrop-blur"
       >
+        <div className="flex min-w-0 items-center gap-1">
+          {toolbarExtras}
+        </div>
+        <div className="flex items-center gap-1">
         <button
           type="button"
           data-testid="flowchart-zoom-out"
@@ -141,6 +151,7 @@ export function ZoomableFlowchart({ children }: { children: React.ReactNode }) {
         >
           Fit
         </button>
+        </div>
       </div>
       <div
         ref={frameRef}

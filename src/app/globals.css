@@ -911,6 +911,12 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
   left: 0.5rem;
   height: 2px;
   background: var(--organization-flowchart-line);
+  /* Desktop rail is owned by the per-child half-segments below, which span
+     EXACTLY first-child center → last-child center. This group-wide line
+     spans the whole (possibly min-width:100%) group box and dangled past the
+     outer siblings, so it is desktop-off and only re-enabled for the wrapped
+     mobile stack in the max-width: 640px media query. */
+  display: none;
 }
 .organization-unit-children:has(> .organization-unit-child:only-child)::after {
   display: none;
@@ -934,6 +940,34 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
   width: 2px;
   height: 3rem;
   transform: translateX(-50%);
+  background: var(--organization-flowchart-line);
+}
+/* Desktop sibling rail, drawn as two chained half-segments per child so it
+   spans EXACTLY first-child center → last-child center with no dangling
+   overshoot past the outer siblings:
+   - a non-FIRST child draws the left half [wrapper left edge, own center]
+   - a non-LAST child draws the right half [own center, right edge + 1rem
+     column gap], which lands on the next wrapper's left edge where that
+     wrapper's left half picks up
+   A single (only) child draws neither half, so the colinear parent
+   stem → stub join stays rail-free. The vertical stub keeps meeting the
+   card TOP CENTER (both halves sit at the same rail y as the stub top). */
+.organization-unit-child:not(:first-child)::before {
+  content: "";
+  position: absolute;
+  top: -1.5rem;
+  left: 0;
+  width: 50%;
+  height: 2px;
+  background: var(--organization-flowchart-line);
+}
+.organization-unit-child:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: -1.5rem;
+  left: 50%;
+  width: calc(50% + 1rem);
+  height: 2px;
   background: var(--organization-flowchart-line);
 }
 .organization-unit-people,
@@ -968,6 +1002,16 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
   .organization-unit-children {
     flex-wrap: wrap;
     width: 100%;
+  }
+  /* Wrapped mobile stack keeps the historical group-wide top rail; the
+     per-child half-segments are desktop-only and would paint stray
+     horizontal arms next to stacked full-width cards. */
+  .organization-unit-children::after {
+    display: block;
+  }
+  .organization-unit-child:not(:first-child)::before,
+  .organization-unit-child:not(:last-child)::after {
+    display: none;
   }
   .organization-unit-child {
     min-width: 100%;

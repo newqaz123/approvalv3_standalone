@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useMemo, useState } from 'react'
+import { Users } from 'lucide-react'
 import { OrganizationTree } from '@/components/organization/OrganizationTree'
 import { PersonAssignmentPanel } from '@/components/organization/PersonAssignmentPanel'
 import { TeamPanel } from '@/components/organization/TeamPanel'
@@ -18,6 +19,9 @@ export function OrganizationWorkspace({ snapshot }: { snapshot: WorkspaceSnapsho
   const [selectedUnassignedUserId, setSelectedUnassignedUserId] = useState<string | null>(null)
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null)
   const [creatingTeamUnitId, setCreatingTeamUnitId] = useState<string | null>(null)
+  // Owner-approved: the bottom unassigned dock is gone; the toolbar's
+  // Unassigned chip opens the list as a manage drawer.
+  const [unassignedPanelOpen, setUnassignedPanelOpen] = useState(false)
   const [overrides, setOverrides] = useState<Record<string, UnitPatch>>({})
   const [assignmentRows, setAssignmentRows] = useState<AssignmentNode[] | null>(null)
   const [teamRows, setTeamRows] = useState<TeamNode[] | null>(null)
@@ -45,6 +49,7 @@ export function OrganizationWorkspace({ snapshot }: { snapshot: WorkspaceSnapsho
     setSelectedUnassignedUserId(null)
     setSelectedTeamId(null)
     setCreatingTeamUnitId(null)
+    setUnassignedPanelOpen(false)
   }
 
   function selectPerson(assignmentId: string) {
@@ -53,6 +58,7 @@ export function OrganizationWorkspace({ snapshot }: { snapshot: WorkspaceSnapsho
     setSelectedUnassignedUserId(null)
     setSelectedTeamId(null)
     setCreatingTeamUnitId(null)
+    setUnassignedPanelOpen(false)
   }
 
   function selectUnassigned(userId: string) {
@@ -61,6 +67,8 @@ export function OrganizationWorkspace({ snapshot }: { snapshot: WorkspaceSnapsho
     setSelectedUnitId(null)
     setSelectedTeamId(null)
     setCreatingTeamUnitId(null)
+    // The assignment drawer takes over; the unassigned panel closes.
+    setUnassignedPanelOpen(false)
   }
 
   function selectTeam(teamId: string) {
@@ -69,6 +77,7 @@ export function OrganizationWorkspace({ snapshot }: { snapshot: WorkspaceSnapsho
     setSelectedUnitId(null)
     setSelectedAssignmentId(null)
     setSelectedUnassignedUserId(null)
+    setUnassignedPanelOpen(false)
   }
 
   function startCreateTeam(unitId: string) {
@@ -77,6 +86,7 @@ export function OrganizationWorkspace({ snapshot }: { snapshot: WorkspaceSnapsho
     setSelectedUnitId(null)
     setSelectedAssignmentId(null)
     setSelectedUnassignedUserId(null)
+    setUnassignedPanelOpen(false)
   }
 
   const currentAssignments = assignmentRows ?? snapshot.assignments
@@ -85,10 +95,30 @@ export function OrganizationWorkspace({ snapshot }: { snapshot: WorkspaceSnapsho
 
   return (
     <div data-testid="organization-workspace" className="flex flex-col items-stretch gap-8 lg:flex-row lg:items-start">
+      {/* Zoom owns the flowchart canvas only: the sticky toolbar, the manage
+          drawers, and the unassigned panel live outside the scaled surface.
+          The bottom unassigned dock is gone: the toolbar's Unassigned chip
+          opens the list as a manage drawer. */}
       <div className="min-w-0 flex-1 space-y-8">
-        {/* Zoom owns the flowchart canvas only: the manage drawer and the
-            unassigned dock render outside the scaled surface. */}
-        <ZoomableFlowchart>
+        <ZoomableFlowchart
+          toolbarExtras={
+            <button
+              type="button"
+              data-testid="unassigned-dock-toggle"
+              aria-expanded={unassignedPanelOpen}
+              aria-label="Unassigned people"
+              onClick={() => setUnassignedPanelOpen((open) => !open)}
+              className={`inline-flex h-8 max-w-full items-center gap-1.5 rounded-md border px-2.5 text-sm font-medium shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                unassignedPanelOpen
+                  ? 'border-slate-400 bg-accent text-accent-foreground'
+                  : 'border-slate-200 bg-white text-slate-700 hover:bg-accent'
+              }`}
+            >
+              <Users className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span className="truncate">Unassigned · {viewSnapshot.unassignedUsers.length}</span>
+            </button>
+          }
+        >
           <OrganizationTree
             snapshot={viewSnapshot}
             onSelectUnit={selectUnit}
@@ -96,11 +126,18 @@ export function OrganizationWorkspace({ snapshot }: { snapshot: WorkspaceSnapsho
             onSelectTeam={selectTeam}
           />
         </ZoomableFlowchart>
-        <UnassignedPeopleList
-          users={viewSnapshot.unassignedUsers}
-          onSelectUser={selectUnassigned}
-        />
       </div>
+      {unassignedPanelOpen ? (
+        <aside
+          data-testid="organization-manage-drawer"
+          className="organization-manage-drawer max-h-[calc(100vh-2rem)] w-full shrink-0 overflow-y-auto overscroll-contain lg:sticky lg:top-4 lg:w-96 lg:max-w-full"
+        >
+          <UnassignedPeopleList
+            users={viewSnapshot.unassignedUsers}
+            onSelectUser={selectUnassigned}
+          />
+        </aside>
+      ) : null}
       {selectedUnit ? (
         <aside
           data-testid="organization-manage-drawer"

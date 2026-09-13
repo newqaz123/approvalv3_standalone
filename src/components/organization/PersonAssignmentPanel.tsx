@@ -11,6 +11,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import type { AssignmentNode, TeamNode } from '@/lib/organization/model'
+import { personShortName } from '@/lib/organization/person-name'
 import {
   assignPerson,
   moveAssignment,
@@ -18,6 +19,7 @@ import {
   type WorkspaceSnapshot,
 } from '@/server-actions/organization'
 import { formatOrganizationErrorForUser } from '@/lib/organization/error-formatting'
+import { UnitTreeSelect } from '@/components/organization/UnitTreeSelect'
 
 export const NONE_TEAM = 'none'
 
@@ -287,23 +289,41 @@ export function PersonAssignmentPanel({
       data-testid="person-assignment-panel"
       className="max-h-[calc(100vh-2rem)] w-full shrink-0 space-y-6 overflow-y-auto overscroll-contain rounded-lg border bg-card p-4 lg:sticky lg:top-4 lg:w-96"
     >
+      {/* Heading split (owner-approved): the TITLE is the person short name
+          (never the stored "Name — Unit" qualifier string) and the unit vs
+          position summary sits in SEPARATE labeled lines bound to the current
+          select state — not one combined gray "Name — Unit" string. */}
       <div>
-        <h2 className="text-lg font-semibold">{assignment ? 'Manage assignment' : 'Assign person'}</h2>
-        <p className="text-sm text-muted-foreground">{user.name}</p>
+        <h2 className="text-lg font-semibold" data-testid="assignment-panel-title">
+          {assignment ? personShortName(user.name) : 'Assign person'}
+        </h2>
+        {assignment ? (
+          <div className="space-y-0.5 text-sm text-muted-foreground">
+            <p data-testid="assignment-subtitle-unit">
+              <span className="font-medium text-foreground">Unit:</span>{' '}
+              {nameOf(unitId, snapshot.units, unitId || 'None')}
+            </p>
+            <p data-testid="assignment-subtitle-position">
+              <span className="font-medium text-foreground">Position:</span>{' '}
+              {nameOf(positionId, snapshot.positions, positionId || 'None')}
+            </p>
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">{personShortName(user.name)}</p>
+        )}
       </div>
 
       <div className="space-y-2">
         <Label htmlFor="assignment-unit-select">Unit</Label>
-        <Select value={unitId || undefined} onValueChange={handleUnitChange}>
-          <SelectTrigger id="assignment-unit-select" data-testid="assignment-unit-select">
-            <SelectValue placeholder="Select unit" />
-          </SelectTrigger>
-          <SelectContent>
-            {activeUnits.map((row) => (
-              <SelectItem key={row.id} value={row.id}>{row.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {/* Searchable, depth-indented tree-path dropdown (owner-approved):
+            options show "Factory › Production Division › Engineering
+            Department" indented by depth and match on any ancestor name. */}
+        <UnitTreeSelect
+          units={activeUnits}
+          value={unitId || null}
+          onChange={handleUnitChange}
+          triggerId="assignment-unit-select"
+        />
       </div>
 
       <div className="space-y-2">

@@ -250,6 +250,8 @@ test.describe("clean-start team deactivation", () => {
 			] as const) {
 				await page.goto("/admin/organization");
 				await expect(page.getByTestId("organization-tree")).toBeVisible({ timeout: 20_000 });
+				// Bottom dock removed: open the unassigned panel via the toolbar chip.
+				await page.getByTestId("unassigned-dock-toggle").click();
 				await page.getByTestId(`unassigned-person-${userId}`).click();
 				const panel = page.getByTestId("person-assignment-panel");
 				await expect(panel).toBeVisible();

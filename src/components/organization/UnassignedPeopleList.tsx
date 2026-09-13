@@ -1,7 +1,7 @@
 'use client'
 
 import React from 'react'
-import { personInitials, personShortName } from '@/components/organization/TreeNodeRow'
+import { personInitials, personShortName } from '@/lib/organization/person-name'
 
 export function UnassignedPeopleList({
   users,
@@ -14,7 +14,7 @@ export function UnassignedPeopleList({
   return (
     <section
       data-testid="unassigned-people-list"
-      className="organization-unassigned-dock mt-8 space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
+      className="organization-unassigned-dock space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
     >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-sm font-semibold text-slate-800">Unassigned people</h2>

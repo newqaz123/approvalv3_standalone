@@ -10,6 +10,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import type { AssignmentNode, OrganizationUnitNode, PositionNode, TeamNode } from '@/lib/organization/model'
 import type { WorkspaceSnapshot } from '@/server-actions/organization'
 import { OrganizationWorkspace } from '@/components/organization/OrganizationWorkspace'
+import { UnassignedPeopleList } from '@/components/organization/UnassignedPeopleList'
 import { assignmentsByUserId } from '@/components/organization/TreeNodeRow'
 
 const read = (path: string) => readFileSync(path, 'utf8')
@@ -150,9 +151,16 @@ describe('clean-start organization tree UI', () => {
     assert.equal(countTestId(html, 'sharing-badge-section-a'), 0)
   })
 
-  it('lists the fixture unassigned user and compact custom-chain exception badges', () => {
+  it('lists the fixture unassigned user (toolbar chip panel) and compact custom-chain exception badges', () => {
     const html = renderWorkspace()
-    const unassigned = innerByTestId(html, 'unassigned-people-list')
+    // The bottom dock is gone: the workspace shows the toolbar chip and the
+    // list renders inside the panel it opens.
+    assert.doesNotMatch(html, /organization-unassigned-dock/)
+    assert.match(html, /data-testid="unassigned-dock-toggle"/)
+    assert.match(html, /Unassigned · 1</)
+    const unassigned = renderToStaticMarkup(createElement(UnassignedPeopleList, {
+      users: [{ id: 'dana', name: 'Dana', email: 'dana@example.com' }],
+    }))
     assert.match(unassigned, /Unassigned people/)
     assert.match(unassigned, /data-testid="unassigned-person-dana"/)
     assert.match(unassigned, /Dana/)

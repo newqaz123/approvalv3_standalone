@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { Share2, Wrench } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import {
@@ -13,6 +14,12 @@ import {
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import type { OrganizationUnitNode } from '@/lib/organization/model'
+import { personShortName } from '@/lib/organization/person-name'
+import {
+  FLAG_OFF_CLASSES,
+  SHARING_FLAG_ON_CLASSES,
+  SOLUTIONS_FLAG_ON_CLASSES,
+} from '@/lib/organization/position-tone'
 import {
   deactivateOrganizationUnit,
   setUnitManager,
@@ -37,9 +44,10 @@ export function formatRouteSourceLabel(
 export function directManagerCandidates(
   snapshot: WorkspaceSnapshot,
   unitId: string,
-): Array<{ userId: string; name: string }> {
+): Array<{ userId: string; name: string; positionName: string }> {
   const usersById = new Map(snapshot.users.map((user) => [user.id, user]))
-  const rows: Array<{ userId: string; name: string }> = []
+  const positionsById = new Map(snapshot.positions.map((row) => [row.id, row]))
+  const rows: Array<{ userId: string; name: string; positionName: string }> = []
   const seen = new Set<string>()
   for (const assignment of snapshot.assignments) {
     if (!assignment.isActive || assignment.unitId !== unitId) continue
@@ -47,7 +55,11 @@ export function directManagerCandidates(
     seen.add(assignment.userId)
     const user = usersById.get(assignment.userId)
     if (!user || !user.isActive) continue
-    rows.push({ userId: user.id, name: user.name })
+    // Person-once: the first active assignment carries the option's position
+    // so the dropdown row can show "name left, position right" instead of the
+    // stored "Name — Unit" qualifier string.
+    const positionName = positionsById.get(assignment.positionId)?.name ?? ''
+    rows.push({ userId: user.id, name: user.name, positionName })
   }
   rows.sort((left, right) => left.name.localeCompare(right.name))
   return rows
@@ -207,12 +219,24 @@ export function UnitSidePanel({
       data-testid="unit-side-panel"
       className="max-h-[calc(100vh-2rem)] w-full shrink-0 space-y-6 overflow-y-auto overscroll-contain rounded-lg border bg-card p-4 lg:sticky lg:top-4 lg:w-96"
     >
-      <h2 className="text-lg font-semibold">{`Manage ${unit.name}`}</h2>
+      {/* Title is the unit NAME: the drawer is titled by what it manages,
+          matching the tree card header (no "Manage " prefix). */}
+      <h2 className="text-lg font-semibold">{unit.name}</h2>
 
       <div className="flex items-start justify-between gap-4 rounded-md border px-3 py-2">
-        <Label htmlFor="unit-share-requests" className="text-sm font-medium leading-snug">
-          Share requests within this unit and all its descendants
-        </Label>
+        <div className="flex min-w-0 items-start gap-2">
+          {/* Same tone language as the tree header icons: sky when ON,
+              muted when OFF. aria-hidden: the Label carries the words. */}
+          <span
+            aria-hidden="true"
+            className={`mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border ${shareRequests ? SHARING_FLAG_ON_CLASSES : FLAG_OFF_CLASSES}`}
+          >
+            <Share2 className="h-3.5 w-3.5" />
+          </span>
+          <Label htmlFor="unit-share-requests" className="text-sm font-medium leading-snug">
+            Share requests within this unit and all its descendants
+          </Label>
+        </div>
         <Switch
           id="unit-share-requests"
           data-testid="unit-share-requests"
@@ -222,9 +246,17 @@ export function UnitSidePanel({
       </div>
 
       <div className="flex items-start justify-between gap-4 rounded-md border px-3 py-2">
-        <Label htmlFor="unit-can-work-on-solutions" className="text-sm font-medium leading-snug">
-          Can work on solutions
-        </Label>
+        <div className="flex min-w-0 items-start gap-2">
+          <span
+            aria-hidden="true"
+            className={`mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border ${canWorkOnSolutions ? SOLUTIONS_FLAG_ON_CLASSES : FLAG_OFF_CLASSES}`}
+          >
+            <Wrench className="h-3.5 w-3.5" />
+          </span>
+          <Label htmlFor="unit-can-work-on-solutions" className="text-sm font-medium leading-snug">
+            Can work on solutions
+          </Label>
+        </div>
         <Switch
           id="unit-can-work-on-solutions"
           data-testid="unit-can-work-on-solutions"
@@ -248,7 +280,13 @@ export function UnitSidePanel({
             <SelectItem value={NONE_MANAGER}>None</SelectItem>
             {candidates.map((candidate) => (
               <SelectItem key={candidate.userId} value={candidate.userId}>
-                {candidate.name}
+                {/* Name LEFT, position RIGHT (also in the closed trigger via
+                    SelectValue): the stored "Name — Unit" qualifier string is
+                    never the option label. */}
+                <span className="flex w-full items-center justify-between gap-3">
+                  <span className="min-w-0 truncate">{personShortName(candidate.name)}</span>
+                  <span className="shrink-0 text-xs text-muted-foreground">{candidate.positionName}</span>
+                </span>
               </SelectItem>
             ))}
           </SelectContent>

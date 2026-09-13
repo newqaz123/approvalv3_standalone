@@ -441,7 +441,7 @@ test.describe("clean-start tree hierarchy visuals", () => {
 			// stays open (selection is independent of collapse state).
 			await header.click();
 			await expect(page.getByTestId("unit-side-panel")).toBeVisible();
-			await expect(page.getByTestId("unit-side-panel").getByRole("heading", { name: `Manage ${renamed}` })).toBeVisible();
+			await expect(page.getByTestId("unit-side-panel").getByRole("heading", { name: renamed, exact: true })).toBeVisible();
 			await toggle.click();
 			await expect(page.getByTestId(`unit-children-${ids.alphaId}`)).toBeHidden();
 			await expect(page.getByTestId("unit-side-panel")).toBeVisible();

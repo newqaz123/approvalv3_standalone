@@ -30,6 +30,7 @@ import autoprefixer from 'autoprefixer'
 import type { AssignmentNode, OrganizationUnitNode, PositionNode, TeamNode } from '@/lib/organization/model'
 import type { WorkspaceSnapshot } from '@/server-actions/organization'
 import { OrganizationWorkspace } from '@/components/organization/OrganizationWorkspace'
+import { UnassignedPeopleList } from '@/components/organization/UnassignedPeopleList'
 import { OrganizationTabs } from '@/components/organization/OrganizationTabs'
 import { ZoomableFlowchart, ZOOM_MIN, clampZoom, fitScaleFor } from '@/components/organization/ZoomableFlowchart'
 import { OrganizationTree } from '@/components/organization/OrganizationTree'
@@ -422,9 +423,14 @@ describe('flowchart card readability', () => {
     assert.match(teamGroup, />Mock Member<\/span>/)
     assert.match(teamGroup, /data-testid="team-member-position-rd-ga-member"[^>]*>\s*Staff\s*</)
 
-    // Unassigned dock chips also collapse qualifier suffixes; tooltip keeps
-    // the full name.
-    const unassignedChip = innerByTestId(html, 'unassigned-person-rd-unassigned')
+    // Unassigned chips (now in the toolbar-chip panel; the bottom dock is
+    // gone) also collapse qualifier suffixes; tooltip keeps the full name.
+    assert.match(html, /data-testid="unassigned-dock-toggle"/)
+    assert.doesNotMatch(html, /organization-unassigned-dock/)
+    const unassignedList = renderToStaticMarkup(createElement(UnassignedPeopleList, {
+      users: snapshot.unassignedUsers,
+    }))
+    const unassignedChip = innerByTestId(unassignedList, 'unassigned-person-rd-unassigned')
     assert.match(unassignedChip, /title="Pat Unassigned — Temp"/)
     assert.match(unassignedChip, />Pat Unassigned<\/span>/)
   })

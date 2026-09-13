@@ -12,31 +12,20 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { InlineNameEdit } from '@/components/organization/InlineNameEdit'
 import type { AssignmentNode, OrganizationUnitNode, PositionNode, TeamNode } from '@/lib/organization/model'
+import { personInitials, personShortName } from '@/lib/organization/person-name'
+import {
+  SHARING_FLAG_ON_CLASSES,
+  SOLUTIONS_FLAG_ON_CLASSES,
+  positionBadgeClasses,
+} from '@/lib/organization/position-tone'
 import { renameOrganizationUnit, renameTeam, type WorkspaceSnapshot } from '@/server-actions/organization'
+
+// Display-name helpers moved to lib so the manage drawers title the same
+// short-name form as the tree; re-exported to keep the historical seam.
+export { personInitials, personShortName }
 
 function byName<T extends { name: string }>(left: T, right: T): number {
   return left.name.localeCompare(right.name)
-}
-
-/**
- * Chip display label: the first segment of the stored name, dropping em-dash
- * qualifier suffixes ("Mock Staff 1 — GA" displays "Mock Staff 1") so chips
- * never show a truncated "… — Unit — Position" mush. The full stored name
- * stays on the chip tooltip.
- */
-export function personShortName(name: string): string {
-  const first = name.split(' — ')[0]?.trim() ?? ''
-  return first.length > 0 ? first : name.trim()
-}
-
-/** The compact avatar language is shared by managers and unassigned people. */
-export function personInitials(name: string): string {
-  const words = name.trim().split(/\s+/).filter(Boolean)
-  if (words.length === 0) return '??'
-  return words
-    .slice(0, 2)
-    .map((word) => word[0]?.toUpperCase() ?? '')
-    .join('')
 }
 
 function PersonInitials({ name, testId }: { name: string; testId: string }) {
@@ -111,12 +100,16 @@ function managerAssignmentForUnit(
 /**
  * Enabled-flag-only tree icon (formerly text badges). Compact sharing/wrench
  * glyph with an accessible name and a hover/focus tooltip; focusable so the
- * tooltip also opens on keyboard focus. The full settings labels and their
- * business semantics stay in UnitSidePanel — the tree shows the flag only.
+ * tooltip also opens on keyboard focus. The tree renders icons only for ON
+ * flags, so they always carry their owner-approved tone (sharing = sky,
+ * solutions = amber); the unit panel rows reuse the same tones and render
+ * muted for OFF flags. The full settings labels and their business semantics
+ * stay in UnitSidePanel — the tree shows the flag only.
  */
-function UnitFlagIcon({ testId, label, children }: {
+function UnitFlagIcon({ testId, label, tone, children }: {
   testId: string
   label: string
+  tone: string
   children: React.ReactNode
 }) {
   return (
@@ -127,7 +120,7 @@ function UnitFlagIcon({ testId, label, children }: {
           role="img"
           aria-label={label}
           tabIndex={0}
-          className="inline-flex h-6 w-6 min-h-6 min-w-6 items-center justify-center rounded-md border bg-secondary text-secondary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+          className={`inline-flex h-6 w-6 min-h-6 min-w-6 items-center justify-center rounded-md border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 ${tone}`}
         >
           {children}
         </span>
@@ -240,7 +233,7 @@ function TeamGroup({
               <span className="min-w-0 truncate">{personShortName(user.name)}</span>
               <span
                 data-testid={`team-member-position-${assignment.userId}`}
-                className="shrink-0 rounded-full bg-secondary px-1.5 py-0.5 text-[10px] font-medium leading-3 text-muted-foreground"
+                className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium leading-3 ${positionBadgeClasses(position.name)}`}
               >
                 {position.name}
               </span>
@@ -306,7 +299,7 @@ function PersonChip({
         </span>
         <span
           data-testid={`person-position-${user.id}`}
-          className="organization-person-position-badge shrink-0 whitespace-nowrap rounded-full bg-background px-2 py-0.5 text-[11px] font-medium leading-4 text-muted-foreground ring-1 ring-slate-200"
+          className={`organization-person-position-badge shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium leading-4 ring-1 ${positionBadgeClasses(position.name)}`}
         >
           {position.name}
         </span>
@@ -417,12 +410,12 @@ export function TreeNodeRow({
             <span className="organization-unit-flags inline-flex shrink-0 items-center gap-1">
               <TooltipProvider delayDuration={200}>
                 {unit.shareRequests ? (
-                  <UnitFlagIcon testId={`sharing-badge-${unit.id}`} label="Request sharing">
+                  <UnitFlagIcon testId={`sharing-badge-${unit.id}`} label="Request sharing" tone={SHARING_FLAG_ON_CLASSES}>
                     <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
                   </UnitFlagIcon>
                 ) : null}
                 {unit.canWorkOnSolutions ? (
-                  <UnitFlagIcon testId={`solutions-badge-${unit.id}`} label="Can work on solutions">
+                  <UnitFlagIcon testId={`solutions-badge-${unit.id}`} label="Can work on solutions" tone={SOLUTIONS_FLAG_ON_CLASSES}>
                     <Wrench className="h-3.5 w-3.5" aria-hidden="true" />
                   </UnitFlagIcon>
                 ) : null}
@@ -479,12 +472,17 @@ export function TreeNodeRow({
 
         {/* Manager and staff remain mounted during collapse so a queued rename
             can settle after an in-flight save. Teams stay under their
-            reports-to person and never become unit cards. */}
-        <div
-          data-testid={`unit-people-${unit.id}`}
-          hidden={!expanded}
-          className="organization-unit-people space-y-3 px-3 pb-3 pt-3"
-        >
+            reports-to person and never become unit cards. Header-only units
+            (no persisted manager, no people — teams nest under people) render
+            no body at all: an empty padded box read as a huge blank card
+            body. The child stem still leaves the card's BOTTOM edge because
+            the card→children gap is owned by .organization-unit-children. */}
+        {managerAssignment || peopleList.length > 0 ? (
+          <div
+            data-testid={`unit-people-${unit.id}`}
+            hidden={!expanded}
+            className="organization-unit-people space-y-3 px-3 pb-3 pt-3"
+          >
           {managerAssignment ? (
             <div data-testid={`unit-manager-${unit.id}`} className="organization-manager-row space-y-1.5">
               <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Manager</p>
@@ -527,7 +525,8 @@ export function TreeNodeRow({
               {`${peopleList.length} ${peopleList.length === 1 ? 'person' : 'people'}`}
             </p>
           ) : null}
-        </div>
+          </div>
+        ) : null}
       </article>
 
       {/* Collapsed branch content stays MOUNTED behind the hidden attribute:

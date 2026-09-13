@@ -143,7 +143,7 @@ test.describe("clean-start unit deactivation", () => {
 			const header = page.getByTestId(`unit-header-${unitId}`);
 			await header.click();
 			const panel = page.getByTestId("unit-side-panel");
-			await expect(panel.getByRole("heading", { name: `Manage ${UNIT_NAME}` })).toBeVisible();
+			await expect(panel.getByRole("heading", { name: UNIT_NAME, exact: true })).toBeVisible();
 
 			await page.getByTestId("unit-deactivate").click();
 			const confirmation = page.getByTestId("unit-deactivate-confirmation");

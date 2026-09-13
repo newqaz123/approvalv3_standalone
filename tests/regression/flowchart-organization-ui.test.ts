@@ -14,6 +14,7 @@ import type { AssignmentNode, OrganizationUnitNode, PositionNode, TeamNode } fro
 import type { WorkspaceSnapshot } from '@/server-actions/organization'
 import { OrganizationWorkspace } from '@/components/organization/OrganizationWorkspace'
 import { UnitSidePanel } from '@/components/organization/UnitSidePanel'
+import { UnassignedPeopleList } from '@/components/organization/UnassignedPeopleList'
 
 const units: OrganizationUnitNode[] = [
   { id: 'flow-root', name: 'Flow Root', parentId: null, isActive: true, shareRequests: false, canWorkOnSolutions: false, managerUserId: null },
@@ -59,6 +60,14 @@ const snapshot: WorkspaceSnapshot = {
 
 function renderWorkspace(): string {
   return renderToStaticMarkup(createElement(OrganizationWorkspace, { snapshot }))
+}
+
+function openTagByTestId(html: string, testId: string): string {
+  const marker = `data-testid="${testId}"`
+  const attr = html.indexOf(marker)
+  assert.ok(attr >= 0, `missing data-testid="${testId}"`)
+  const open = html.lastIndexOf('<', attr)
+  return html.slice(open, html.indexOf('>', attr) + 1)
 }
 
 function classOfTestId(html: string, testId: string): string {
@@ -150,6 +159,34 @@ async function measureFlowchartGeometry(options: {
         if (!height) return null
         return { top: top, left: left, right: left + width, bottom: top + height, width: width, height: height }
       }
+      // Rail box = union of the per-child half-segments (::before/::after of
+      // each .organization-unit-child wrapper). Chained halves span exactly
+      // first-child center -> last-child center (owner-approved endpoint
+      // contract); the group-wide ::after rail no longer paints on desktop.
+      const railBox = (groupId) => {
+        const group = document.querySelector('[data-testid="' + groupId + '"]')
+        if (!group) return null
+        const wrappers = group.querySelectorAll(':scope > .organization-unit-child')
+        let box = null
+        wrappers.forEach((w) => {
+          ['::before', '::after'].forEach((name) => {
+            const cs = getComputedStyle(w, name)
+            if (cs.display === 'none' || cs.content === 'none') return
+            const r = w.getBoundingClientRect()
+            const host = getComputedStyle(w)
+            const segLeft = r.left + (parseFloat(host.borderLeftWidth) || 0) + usedPx(cs.left, w.clientWidth)
+            const segTop = r.top + (parseFloat(host.borderTopWidth) || 0) + usedPx(cs.top, w.clientHeight)
+            const segWidth = parseFloat(cs.width)
+            const segHeight = parseFloat(cs.height)
+            if (!Number.isFinite(segWidth) || !Number.isFinite(segHeight) || segHeight === 0) return
+            const seg = { top: segTop, left: segLeft, right: segLeft + segWidth, bottom: segTop + segHeight, width: segWidth, height: segHeight }
+            box = box
+              ? { top: Math.min(box.top, seg.top), left: Math.min(box.left, seg.left), right: Math.max(box.right, seg.right), bottom: Math.max(box.bottom, seg.bottom), width: 0, height: 0 }
+              : seg
+          })
+        })
+        return box
+      }
       const overflowWrap = document.querySelector('[data-testid="unit-overflow-flow-child-a"]')
         && document.querySelector('[data-testid="unit-overflow-flow-child-a"]').closest('.organization-unit-header-overflow')
       return {
@@ -171,11 +208,12 @@ async function measureFlowchartGeometry(options: {
         connectorG1: box('unit-connector-flow-grand-1'),
         connectorG2: box('unit-connector-flow-grand-2'),
         connectorOnly: box('unit-connector-flow-only'),
-        railRoot: pseudo('unit-children-flow-root', '::after'),
+        railRoot: railBox('unit-children-flow-root'),
         stemRoot: pseudo('unit-children-flow-root', '::before'),
-        railA: pseudo('unit-children-flow-child-a', '::after'),
+        groupRailRoot: pseudo('unit-children-flow-root', '::after'),
+        railA: railBox('unit-children-flow-child-a'),
         stemA: pseudo('unit-children-flow-child-a', '::before'),
-        railB: pseudo('unit-children-flow-child-b', '::after'),
+        railB: railBox('unit-children-flow-child-b'),
         stemB: pseudo('unit-children-flow-child-b', '::before'),
         overflowDisplay: overflowWrap ? getComputedStyle(overflowWrap).display : 'missing',
         cardAWidth: box('unit-card-flow-child-a') ? box('unit-card-flow-child-a').width : 0
@@ -331,6 +369,19 @@ describe('flowchart organization UI', () => {
       asBox(g.childB, 'child B'),
       'child B',
     )
+    // Rail ENDPOINTS (owner-approved): the rail starts at the FIRST child's
+    // stub center and ends at the LAST child's stub center — no overshoot.
+    const rootRail = asBox(g.railRoot, 'root rail')
+    const stubCenter = (box: Box) => (box.left + box.right) / 2
+    assert.ok(
+      Math.abs(rootRail.left - stubCenter(asBox(g.connectorA, 'connector A'))) <= 1.5,
+      `rail must START at the first child stub center (rail left ${rootRail.left})`,
+    )
+    assert.ok(
+      Math.abs(rootRail.right - stubCenter(asBox(g.connectorB, 'connector B'))) <= 1.5,
+      `rail must END at the last child stub center (rail right ${rootRail.right})`,
+    )
+    assert.equal(g.groupRailRoot, null, 'group-wide rail must not paint on desktop (it dangled past the outer siblings)')
     assertConnectorJoinsRailToCard(
       asBox(g.connectorG1, 'grand connector 1'),
       asBox(g.railA, 'child A rail'),
@@ -352,7 +403,7 @@ describe('flowchart organization UI', () => {
     )
   })
 
-  it('renders a manager row with initials, short name, position badge, plus an unassigned initials dock', () => {
+  it('renders a manager row with initials, short name, position badge; the unassigned list moved into the toolbar chip panel', () => {
     const html = renderWorkspace()
     assert.match(html, /data-testid="unit-manager-flow-child-a"/)
     assert.match(html, /data-testid="manager-avatar-flow-manager"[^>]*>DM<\//)
@@ -360,8 +411,17 @@ describe('flowchart organization UI', () => {
     // name plus a small position badge.
     assert.match(html, /title="Dana Manager — Department manager"/)
     assert.match(html, /data-testid="person-position-flow-manager"[^>]*>\s*Department manager\s*</)
-    assert.match(html, /data-testid="unassigned-people-list"[^>]*organization-unassigned-dock/)
-    assert.match(html, /data-testid="unassigned-avatar-flow-unassigned"[^>]*>AU<\//)
+    // The bottom unassigned dock is gone; the toolbar hosts an
+    // Unassigned · N chip that opens the list as a manage drawer.
+    assert.doesNotMatch(html, /organization-unassigned-dock/)
+    const chip = openTagByTestId(html, 'unassigned-dock-toggle')
+    assert.match(chip, /aria-expanded="false"/)
+    assert.match(html, /Unassigned · 1</)
+    const list = renderToStaticMarkup(createElement(UnassignedPeopleList, {
+      users: snapshot.unassignedUsers,
+    }))
+    assert.match(list, /data-testid="unassigned-people-list"[^>]*organization-unassigned-dock/)
+    assert.match(list, /data-testid="unassigned-avatar-flow-unassigned"[^>]*>AU<\//)
   })
 
   it('treats persisted managerUserId null as None even when a manager-ranked person is assigned', () => {

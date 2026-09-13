@@ -382,19 +382,19 @@ test.describe("clean-start unit side panel", () => {
 			await page.getByTestId(`unit-manage-${OPERATIONS_ID}`).click();
 			const panel = page.getByTestId("unit-side-panel");
 			await expect(panel).toBeVisible();
-			await expect(panel.getByRole("heading", { name: "Manage Operations" })).toBeVisible();
+			await expect(panel.getByRole("heading", { name: "Operations", exact: true })).toBeVisible();
 
 			const sectionAHeader = page.getByTestId(`unit-header-${SECTION_A_ID}`);
 			await sectionAHeader.hover();
 			await page.getByTestId(`unit-manage-${SECTION_A_ID}`).click();
-			await expect(panel.getByRole("heading", { name: "Manage Section A" })).toBeVisible();
+			await expect(panel.getByRole("heading", { name: "Section A", exact: true })).toBeVisible();
 			await expect(page.getByTestId("route-source-REQUEST")).toHaveText("Inherited from Operations");
 			await expect(panel.getByText("Share requests within this unit and all its descendants")).toBeVisible();
 
 			const childHeader = page.getByTestId(`unit-header-${SECTION_A_CHILD_ID}`);
 			await childHeader.hover();
 			await page.getByTestId(`unit-manage-${SECTION_A_CHILD_ID}`).click();
-			await expect(panel.getByRole("heading", { name: "Manage Section A Child" })).toBeVisible();
+			await expect(panel.getByRole("heading", { name: "Section A Child", exact: true })).toBeVisible();
 			await expect(childBadge).toBeVisible();
 
 			const sharingSwitch = page.getByTestId("unit-share-requests");
@@ -861,7 +861,7 @@ test.describe("clean-start C10 full journey", () => {
 			await expect(page.getByTestId(`sharing-badge-${unitId}`)).toBeVisible();
 			await header.click();
 			const panel = page.getByTestId("unit-side-panel");
-			await expect(panel.getByRole("heading", { name: `Manage ${JOURNEY_UNIT_RENAMED}` })).toBeVisible();
+			await expect(panel.getByRole("heading", { name: JOURNEY_UNIT_RENAMED, exact: true })).toBeVisible();
 			const sharingSwitch = page.getByTestId("unit-share-requests");
 			await expect(sharingSwitch).toBeChecked();
 			await sharingSwitch.click();
@@ -910,6 +910,10 @@ test.describe("clean-start C10 full journey", () => {
 			await expect(page.getByTestId("organization-tree")).toBeVisible({ timeout: 20_000 });
 
 			// Assign the unassigned admin to Section A with Line A and Staff.
+			// The bottom dock is gone: open the unassigned panel from the
+			// sticky toolbar's Unassigned chip first.
+			await page.getByTestId("unassigned-dock-toggle").click();
+			await expect(page.getByTestId("unassigned-people-list")).toBeVisible();
 			await page.getByTestId(`unassigned-person-${adminId}`).click();
 			const assignPanel = page.getByTestId("person-assignment-panel");
 			await expect(assignPanel).toBeVisible();
@@ -923,7 +927,7 @@ test.describe("clean-start C10 full journey", () => {
 			await page.getByTestId("assignment-team-select").click();
 			await page.getByRole("option", { name: "Line A" }).click();
 			await page.getByTestId("assignment-save").click();
-			await expect(assignPanel.getByRole("heading", { name: "Manage assignment" })).toBeVisible({
+			await expect(assignPanel.getByRole("heading", { name: "System Admin" })).toBeVisible({
 				timeout: 15_000,
 			});
 
@@ -983,6 +987,8 @@ test.describe("clean-start C10 full journey", () => {
 			await page.getByTestId(`person-chip-${adminId}`).click();
 			await page.getByTestId("assignment-remove").click();
 			await expect(page.getByTestId(`person-chip-${adminId}`)).toHaveCount(0, { timeout: 15_000 });
+			// The unassigned list lives in the toolbar-chip panel now.
+			await page.getByTestId("unassigned-dock-toggle").click();
 			await expect(page.getByTestId(`unassigned-person-${adminId}`)).toBeVisible({ timeout: 15_000 });
 
 			{

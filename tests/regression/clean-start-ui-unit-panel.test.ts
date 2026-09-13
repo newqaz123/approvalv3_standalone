@@ -246,7 +246,7 @@ function makeSnapshot(over: Partial<WorkspaceSnapshot> = {}): WorkspaceSnapshot 
 }
 
 describe('UnitSidePanel component harness', () => {
-  it('titles Manage <unit>, uses exact sharing copy, and shows Inherited from Operations for Section A REQUEST', () => {
+  it('titles the panel with the unit name, uses exact sharing copy, and shows Inherited from Operations for Section A REQUEST', () => {
     const snapshot = makeSnapshot()
     const sectionA = snapshot.units.find((row) => row.id === 'section-a')
     assert.ok(sectionA)
@@ -254,7 +254,9 @@ describe('UnitSidePanel component harness', () => {
       unit: sectionA,
       snapshot,
     }))
-    assert.match(html, /Manage Section A/)
+    // Owner-approved: the drawer title is the unit NAME (no "Manage " prefix).
+    assert.match(html, /<h2[^>]*>Section A<\/h2>/)
+    assert.doesNotMatch(html, /Manage Section A/)
     assert.match(html, /Share requests within this unit and all its descendants/)
     assert.equal(html.includes(SHARE_LABEL), true)
     assert.doesNotMatch(html, /exclud/i)
@@ -430,7 +432,7 @@ describe('C5 source contracts', () => {
     assert.match(panel, /Share requests within this unit and all its descendants/)
     assert.doesNotMatch(panel, /exclud/i)
     assert.match(panel, /Can work on solutions/)
-    assert.match(panel, /Manage \$\{/)
+    assert.doesNotMatch(panel, /Manage \$\{/, 'unit panel title must be the unit name alone')
     assert.doesNotMatch(panel, /ApprovalChainsPanel/)
 
     const actions = read('src/server-actions/organization.ts')
