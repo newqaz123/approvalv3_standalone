@@ -6,6 +6,7 @@ import { PersonAssignmentPanel } from '@/components/organization/PersonAssignmen
 import { TeamPanel } from '@/components/organization/TeamPanel'
 import { UnassignedPeopleList } from '@/components/organization/UnassignedPeopleList'
 import { UnitSidePanel } from '@/components/organization/UnitSidePanel'
+import { ZoomableFlowchart } from '@/components/organization/ZoomableFlowchart'
 import type { AssignmentNode, OrganizationUnitNode, TeamNode } from '@/lib/organization/model'
 import type { WorkspaceSnapshot } from '@/server-actions/organization'
 
@@ -85,12 +86,16 @@ export function OrganizationWorkspace({ snapshot }: { snapshot: WorkspaceSnapsho
   return (
     <div data-testid="organization-workspace" className="flex flex-col items-stretch gap-8 lg:flex-row lg:items-start">
       <div className="min-w-0 flex-1 space-y-8">
-        <OrganizationTree
-          snapshot={viewSnapshot}
-          onSelectUnit={selectUnit}
-          onSelectPerson={selectPerson}
-          onSelectTeam={selectTeam}
-        />
+        {/* Zoom owns the flowchart canvas only: the manage drawer and the
+            unassigned dock render outside the scaled surface. */}
+        <ZoomableFlowchart>
+          <OrganizationTree
+            snapshot={viewSnapshot}
+            onSelectUnit={selectUnit}
+            onSelectPerson={selectPerson}
+            onSelectTeam={selectTeam}
+          />
+        </ZoomableFlowchart>
         <UnassignedPeopleList
           users={viewSnapshot.unassignedUsers}
           onSelectUser={selectUnassigned}

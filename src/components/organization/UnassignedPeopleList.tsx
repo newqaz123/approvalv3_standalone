@@ -1,7 +1,7 @@
 'use client'
 
 import React from 'react'
-import { personInitials } from '@/components/organization/TreeNodeRow'
+import { personInitials, personShortName } from '@/components/organization/TreeNodeRow'
 
 export function UnassignedPeopleList({
   users,
@@ -44,7 +44,7 @@ export function UnassignedPeopleList({
                   {personInitials(user.name)}
                 </span>
                 <span className="min-w-0 max-w-full truncate whitespace-nowrap">
-                  {user.name}
+                  {personShortName(user.name)}
                 </span>
               </button>
             </li>

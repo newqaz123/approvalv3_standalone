@@ -1,10 +1,9 @@
-import Link from 'next/link'
 import { Network } from 'lucide-react'
 import { requireAdmin } from '@/lib/auth'
 import { BackButton } from '@/components/admin/back-button'
-import { Button } from '@/components/ui/button'
 import { ApprovalChainsPanel } from '@/components/organization/ApprovalChainsPanel'
 import { CreateUnitDialog } from '@/components/organization/CreateUnitDialog'
+import { OrganizationTabs } from '@/components/organization/OrganizationTabs'
 import { OrganizationWorkspace } from '@/components/organization/OrganizationWorkspace'
 import { PositionAdminPanel } from '@/components/organization/PositionAdminPanel'
 import { getApprovalChainsData } from '@/server-actions/approval-routes'
@@ -21,14 +20,15 @@ export default async function OrganizationPage({
   await requireAdmin()
   const params = await searchParams
   const snapshot = await getOrganizationWorkspaceData()
-  const showPositions = params.panel === 'positions'
-  const showChains = params.panel === 'chains'
+  // One canvas at a time: no panel renders the flowchart workspace; the
+  // positions/chains panels replace it instead of stacking above it.
+  const panel = params.panel === 'positions' ? 'positions' : params.panel === 'chains' ? 'chains' : null
   const chainsScope = typeof params.scope === 'string' ? params.scope : null
   const chainsPhase = ['REQUEST', 'SOLUTION', 'FINAL'].includes(String(params.phase))
     ? (params.phase as ApprovalPhase)
     : null
   const chainsReadOnly = params.mode === 'view'
-  const chainsEditor = showChains && chainsScope && chainsPhase
+  const chainsEditor = panel === 'chains' && chainsScope && chainsPhase
     ? { scopeUnitId: chainsScope, phase: chainsPhase, readOnly: chainsReadOnly }
     : null
 
@@ -45,28 +45,21 @@ export default async function OrganizationPage({
         </p>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="outline" asChild>
-          <Link href="/admin/organization?panel=chains" data-testid="header-approval-chains">
-            Approval chains
-          </Link>
-        </Button>
-        <Button type="button" variant="outline" asChild>
-          <Link href="/admin/organization?panel=positions" data-testid="header-positions">Positions</Link>
-        </Button>
-        <CreateUnitDialog units={snapshot.units} />
-      </div>
+      <OrganizationTabs active={panel ?? 'organization'} />
 
-      {showPositions ? <PositionAdminPanel snapshot={snapshot} /> : null}
-
-      {showChains ? (
+      {panel === 'positions' ? <PositionAdminPanel snapshot={snapshot} /> : null}
+      {panel === 'chains' ? (
         <ApprovalChainsPanel
           data={await getApprovalChainsData()}
           initialEditor={chainsEditor}
         />
       ) : null}
-
-      <OrganizationWorkspace snapshot={snapshot} />
+      {panel === null ? (
+        <>
+          <CreateUnitDialog units={snapshot.units} />
+          <OrganizationWorkspace snapshot={snapshot} />
+        </>
+      ) : null}
     </div>
   )
 }

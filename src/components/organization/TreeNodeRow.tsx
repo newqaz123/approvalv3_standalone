@@ -18,6 +18,17 @@ function byName<T extends { name: string }>(left: T, right: T): number {
   return left.name.localeCompare(right.name)
 }
 
+/**
+ * Chip display label: the first segment of the stored name, dropping em-dash
+ * qualifier suffixes ("Mock Staff 1 — GA" displays "Mock Staff 1") so chips
+ * never show a truncated "… — Unit — Position" mush. The full stored name
+ * stays on the chip tooltip.
+ */
+export function personShortName(name: string): string {
+  const first = name.split(' — ')[0]?.trim() ?? ''
+  return first.length > 0 ? first : name.trim()
+}
+
 /** The compact avatar language is shared by managers and unassigned people. */
 export function personInitials(name: string): string {
   const words = name.trim().split(/\s+/).filter(Boolean)
@@ -216,14 +227,23 @@ function TeamGroup({
       <div className="flex flex-wrap gap-1">
         {members.map((assignment) => {
           const label = personLabel(assignment, usersById, positionsById)
-          if (!label) return null
+          const user = usersById.get(assignment.userId)
+          const position = positionsById.get(assignment.positionId)
+          if (!label || !user || !position) return null
           return (
             <span
               key={assignment.id}
               data-testid={`team-member-${assignment.userId}`}
-              className="inline-flex max-w-full items-center rounded-md border bg-background px-2 py-0.5 text-xs"
+              title={label}
+              className="inline-flex max-w-full flex-wrap items-center gap-1 rounded-md border bg-background px-2 py-0.5 text-xs"
             >
-              {label}
+              <span className="min-w-0 break-words">{personShortName(user.name)}</span>
+              <span
+                data-testid={`team-member-position-${assignment.userId}`}
+                className="shrink-0 rounded-full bg-secondary px-1.5 py-0.5 text-[10px] font-medium leading-3 text-muted-foreground"
+              >
+                {position.name}
+              </span>
             </span>
           )
         })}
@@ -252,8 +272,9 @@ function PersonChip({
   onSelectTeam?: (teamId: string) => void
 }) {
   const user = usersById.get(assignment.userId)
+  const position = positionsById.get(assignment.positionId)
   const label = personLabel(assignment, usersById, positionsById)
-  if (!user || !label) return null
+  if (!user || !position || !label) return null
   return (
     <div
       data-testid={`person-chip-${assignment.userId}`}
@@ -261,7 +282,8 @@ function PersonChip({
     >
       <button
         type="button"
-        className={`inline-flex max-w-full items-center gap-2 rounded-lg border border-slate-200 bg-secondary text-left text-sm shadow-sm transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${manager ? 'min-h-10 px-2.5 py-1.5' : 'min-h-8 px-2 py-1'}`}
+        title={label}
+        className={`inline-flex max-w-full flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-secondary text-left text-sm shadow-sm transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${manager ? 'min-h-10 px-2.5 py-1.5' : 'min-h-8 px-2 py-1'}`}
         onClick={(event) => {
           event.stopPropagation()
           onSelectPerson?.(assignment.id)
@@ -271,7 +293,13 @@ function PersonChip({
           name={user.name}
           testId={`${manager ? 'manager-avatar' : 'person-avatar'}-${user.id}`}
         />
-        <span className="min-w-0 truncate">{label}</span>
+        <span className="min-w-0 break-words">{personShortName(user.name)}</span>
+        <span
+          data-testid={`person-position-${user.id}`}
+          className="organization-person-position-badge shrink-0 rounded-full bg-background px-2 py-0.5 text-[11px] font-medium leading-4 text-muted-foreground ring-1 ring-slate-200"
+        >
+          {position.name}
+        </span>
       </button>
       {nestedTeams.map((team) => (
         <TeamGroup
@@ -365,7 +393,8 @@ export function TreeNodeRow({
           <span
             ref={nameRef}
             data-testid={`unit-name-${unit.id}`}
-            className="organization-unit-name min-w-0 flex-1 overflow-hidden font-medium [&_[data-testid=inline-name-edit]]:min-w-0 [&_[data-testid=inline-name-edit]]:max-w-full [&_[data-testid=inline-name-edit-pencil]]:hidden [&_[data-testid=inline-name-edit-input]]:w-full [&_[data-testid=inline-name-edit-input]]:max-w-full"
+            title={unit.name}
+            className="organization-unit-name min-w-0 flex-1 overflow-hidden text-lg font-medium [&_[data-testid=inline-name-edit]]:min-w-0 [&_[data-testid=inline-name-edit]]:max-w-full [&_[data-testid=inline-name-edit-pencil]]:hidden [&_[data-testid=inline-name-edit-input]]:w-full [&_[data-testid=inline-name-edit-input]]:max-w-full"
           >
             <InlineNameEdit
               value={unit.name}
@@ -462,20 +491,25 @@ export function TreeNodeRow({
             </div>
           ) : null}
           {staffList.length > 0 ? (
-            <div className="organization-staff-list flex flex-col items-stretch gap-1">
-              {staffList.map((assignment) => (
-                <PersonChip
-                  key={assignment.userId}
-                  assignment={assignment}
-                  manager={false}
-                  nestedTeams={teamsByReportsTo.get(assignment.id) ?? []}
-                  assignments={snapshot.assignments}
-                  usersById={usersById}
-                  positionsById={positionsById}
-                  onSelectPerson={onSelectPerson}
-                  onSelectTeam={onSelectTeam}
-                />
-              ))}
+            <div className="organization-staff-list space-y-1.5">
+              {/* Non-manager assignees get their own heading: the MANAGER row
+                  is only the persisted unit manager, never the whole unit. */}
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">People</p>
+              <div className="flex flex-col items-stretch gap-1">
+                {staffList.map((assignment) => (
+                  <PersonChip
+                    key={assignment.userId}
+                    assignment={assignment}
+                    manager={false}
+                    nestedTeams={teamsByReportsTo.get(assignment.id) ?? []}
+                    assignments={snapshot.assignments}
+                    usersById={usersById}
+                    positionsById={positionsById}
+                    onSelectPerson={onSelectPerson}
+                    onSelectTeam={onSelectTeam}
+                  />
+                ))}
+              </div>
             </div>
           ) : null}
           {peopleList.length > 0 ? (

@@ -1348,9 +1348,13 @@ describe('approval-routes server action source contracts', () => {
 
   it('wires the workspace page header to the chains panel', () => {
     const page = read('src/app/admin/organization/page.tsx')
-    assert.match(page, /panel=chains/)
+    assert.match(page, /<OrganizationTabs active=\{panel \?\? 'organization'\} \/>/)
     assert.match(page, /ApprovalChainsPanel/)
     assert.match(page, /getApprovalChainsData/)
+    // The chains tab owns the panel=chains href; deep links from the unit
+    // panel keep their scope/phase params on the same panel route.
+    const tabs = read('src/components/organization/OrganizationTabs.tsx')
+    assert.match(tabs, /panel=chains/)
   })
 
   it('unit panel View/Customize route to the chains panel', () => {

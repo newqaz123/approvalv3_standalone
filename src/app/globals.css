@@ -780,7 +780,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
  * Wrap only on genuinely narrow viewports.
  */
 .organization-flowchart {
-  --organization-flowchart-line: #94a3b8;
+  --organization-flowchart-line: #64748b;
   background-image: radial-gradient(#cbd5e1 1px, transparent 1px);
   background-size: 16px 16px;
   padding: 1.25rem 0.5rem 1.5rem;
@@ -796,8 +796,8 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
   min-width: 0;
 }
 .organization-unit-card {
-  width: 22rem;
-  max-width: 22rem;
+  width: 26rem;
+  max-width: 26rem;
   min-width: 0;
   overflow: visible;
   container-type: inline-size;
@@ -816,18 +816,18 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 }
 .organization-unit-name [data-testid="inline-name-edit"] {
   display: flex;
+  flex-wrap: wrap;
   max-width: 100%;
   min-width: 0;
-  overflow: hidden;
-  flex-wrap: nowrap;
 }
-.organization-unit-name [data-testid="inline-name-edit"] > span,
-.organization-unit-name [data-testid="inline-name-edit-input"] {
+/* The unit title owns the remaining header space and wraps (break-words)
+   instead of ellipsizing at three letters. The full name also stays on the
+   header tooltip. */
+.organization-unit-name [data-testid="inline-name-edit"] > span {
   min-width: 0;
   max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: break-word;
+  white-space: normal;
 }
 .organization-unit-name [data-testid="inline-name-edit-input"] {
   width: 100%;
@@ -844,7 +844,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
   flex-shrink: 0;
   align-items: center;
 }
-@container organization-unit-card (max-width: 24rem) {
+@container organization-unit-card (max-width: 26rem) {
   .organization-unit-hover-actions {
     display: none !important;
   }
@@ -921,7 +921,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
   position: relative;
   flex: 0 0 auto;
   width: max-content;
-  min-width: 22rem;
+  min-width: 26rem;
   padding-top: 1.5rem;
 }
 .organization-unit-child > .organization-flowchart-connector {

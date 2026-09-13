@@ -352,11 +352,14 @@ describe('flowchart organization UI', () => {
     )
   })
 
-  it('renders a manager row with initials, name, and position, plus an unassigned initials dock', () => {
+  it('renders a manager row with initials, short name, position badge, plus an unassigned initials dock', () => {
     const html = renderWorkspace()
     assert.match(html, /data-testid="unit-manager-flow-child-a"/)
     assert.match(html, /data-testid="manager-avatar-flow-manager"[^>]*>DM<\//)
-    assert.match(html, /Dana Manager — Department manager/)
+    // Full label stays on the chip tooltip; the visible chip shows the short
+    // name plus a small position badge.
+    assert.match(html, /title="Dana Manager — Department manager"/)
+    assert.match(html, /data-testid="person-position-flow-manager"[^>]*>\s*Department manager\s*</)
     assert.match(html, /data-testid="unassigned-people-list"[^>]*organization-unassigned-dock/)
     assert.match(html, /data-testid="unassigned-avatar-flow-unassigned"[^>]*>AU<\//)
   })
@@ -388,7 +391,7 @@ describe('flowchart organization UI', () => {
     assert.match(nameRule, /min-width:\s*0/)
     assert.match(css, /\[data-testid="inline-name-edit"\][\s\S]*max-width:\s*100%/)
     assert.match(css, /\[data-testid="inline-name-edit-input"\][\s\S]*max-width:\s*100%/)
-    assert.match(css, /@container organization-unit-card \(max-width: 24rem\)[\s\S]*organization-unit-header-overflow[\s\S]*display:\s*flex/)
+    assert.match(css, /@container organization-unit-card \(max-width: 26rem\)[\s\S]*organization-unit-header-overflow[\s\S]*display:\s*flex/)
     assert.match(css, /@media \(max-width: 767px\)[\s\S]*organization-unit-header-overflow[\s\S]*display:\s*flex/)
 
     const actionsClass = classOfTestId(html, 'unit-hover-actions-flow-child-a')

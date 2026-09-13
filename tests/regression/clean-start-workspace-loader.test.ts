@@ -131,8 +131,11 @@ describe('clean-start organization workspace loader', () => {
       page.indexOf('requireAdmin') < page.indexOf('getOrganizationWorkspaceData'),
       'page must call requireAdmin before getOrganizationWorkspaceData',
     )
-    assert.match(page, /Approval chains/)
-    assert.match(page, /Positions/)
+    // Tab labels live in OrganizationTabs; the page just renders the tab bar.
+    const tabs = read('src/components/organization/OrganizationTabs.tsx')
+    assert.match(tabs, /Approval chains/)
+    assert.match(tabs, /Positions/)
+    assert.match(page, /OrganizationTabs/)
     assert.match(page, /CreateUnitDialog/)
     assert.doesNotMatch(page, /OrganizationEditor/)
     assert.doesNotMatch(page, /getOrganizationAdminData/)

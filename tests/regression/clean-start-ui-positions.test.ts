@@ -1043,12 +1043,15 @@ describe('C8 source contracts', () => {
     const page = read('src/app/admin/organization/page.tsx')
     assert.match(page, /requireAdmin/)
     assert.match(page, /getOrganizationWorkspaceData/)
-    assert.match(page, /Approval chains/)
-    assert.match(page, /Positions/)
     assert.match(page, /CreateUnitDialog/)
     assert.match(page, /PositionAdminPanel/)
-    assert.match(page, /panel=positions/)
-    assert.match(page, /header-positions/)
+    assert.match(page, /panel === 'positions' \? <PositionAdminPanel/)
+    assert.match(page, /<OrganizationTabs/)
+    // Positions tab label/testid/href live in OrganizationTabs.
+    const tabs = read('src/components/organization/OrganizationTabs.tsx')
+    assert.match(tabs, /Positions/)
+    assert.match(tabs, /panel=positions/)
+    assert.match(tabs, /header-positions/)
     assert.ok(
       page.indexOf('requireAdmin') < page.indexOf('getOrganizationWorkspaceData'),
       'page must call requireAdmin before getOrganizationWorkspaceData',
