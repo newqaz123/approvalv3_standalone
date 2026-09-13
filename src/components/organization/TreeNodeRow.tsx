@@ -85,29 +85,16 @@ function indexById<T extends { id: string }>(rows: readonly T[]): Map<string, T>
 }
 
 /**
- * Resolve the single manager row used by the card. The persisted unit manager
- * is authoritative; the position-name fallback keeps older snapshots readable
- * while they are being normalized by the live-data cleanup stream.
+ * Resolve the single manager row used by the card. Persisted managerUserId is
+ * authoritative, including null ("None"): never infer a manager from a
+ * position name that happens to contain "manager".
  */
 function managerAssignmentForUnit(
   unit: OrganizationUnitNode,
   people: Map<string, AssignmentNode>,
-  positionsById: Map<string, PositionNode>,
-  usersById: Map<string, WorkspaceSnapshot['users'][number]>,
 ): AssignmentNode | null {
-  if (unit.managerUserId !== null) {
-    const explicit = people.get(unit.managerUserId)
-    if (explicit !== undefined) return explicit
-  }
-  const candidates = [...people.values()]
-    .filter((assignment) => positionsById.get(assignment.positionId)?.name.toLowerCase().includes('manager'))
-    .sort((left, right) => {
-      const leftRank = positionsById.get(left.positionId)?.rank ?? 0
-      const rightRank = positionsById.get(right.positionId)?.rank ?? 0
-      return rightRank - leftRank
-        || (usersById.get(left.userId)?.name ?? '').localeCompare(usersById.get(right.userId)?.name ?? '')
-    })
-  return candidates[0] ?? null
+  if (unit.managerUserId === null) return null
+  return people.get(unit.managerUserId) ?? null
 }
 
 /**
@@ -328,7 +315,7 @@ export function TreeNodeRow({
     const rightName = usersById.get(right.userId)?.name ?? ''
     return leftName.localeCompare(rightName)
   })
-  const managerAssignment = managerAssignmentForUnit(unit, people, positionsById, usersById)
+  const managerAssignment = managerAssignmentForUnit(unit, people)
   const staffList = peopleList.filter((assignment) => assignment.id !== managerAssignment?.id)
   const childUnits = (childrenByParentId.get(unit.id) ?? [])
     .filter((child) => child.isActive)
@@ -351,7 +338,7 @@ export function TreeNodeRow({
       >
         <div
           data-testid={`unit-header-${unit.id}`}
-          className="group flex cursor-pointer flex-wrap items-center gap-2 rounded-t-xl bg-muted/60 px-3 py-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+          className="organization-unit-header group flex cursor-pointer items-center gap-2 rounded-t-xl bg-muted/60 px-3 py-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
           tabIndex={0}
           onClick={() => onSelectUnit?.(unit.id)}
           onKeyDown={(event) => {
@@ -378,7 +365,7 @@ export function TreeNodeRow({
           <span
             ref={nameRef}
             data-testid={`unit-name-${unit.id}`}
-            className="min-w-0 flex-1 font-medium break-words [&_[data-testid=inline-name-edit]]:min-w-0 [&_[data-testid=inline-name-edit-pencil]]:hidden"
+            className="organization-unit-name min-w-0 flex-1 overflow-hidden font-medium [&_[data-testid=inline-name-edit]]:min-w-0 [&_[data-testid=inline-name-edit]]:max-w-full [&_[data-testid=inline-name-edit-pencil]]:hidden [&_[data-testid=inline-name-edit-input]]:w-full [&_[data-testid=inline-name-edit-input]]:max-w-full"
           >
             <InlineNameEdit
               value={unit.name}
@@ -388,25 +375,27 @@ export function TreeNodeRow({
             />
           </span>
           {unit.shareRequests || unit.canWorkOnSolutions ? (
-            <TooltipProvider delayDuration={200}>
-              {unit.shareRequests ? (
-                <UnitFlagIcon testId={`sharing-badge-${unit.id}`} label="Request sharing">
-                  <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
-                </UnitFlagIcon>
-              ) : null}
-              {unit.canWorkOnSolutions ? (
-                <UnitFlagIcon testId={`solutions-badge-${unit.id}`} label="Can work on solutions">
-                  <Wrench className="h-3.5 w-3.5" aria-hidden="true" />
-                </UnitFlagIcon>
-              ) : null}
-            </TooltipProvider>
+            <span className="organization-unit-flags inline-flex shrink-0 items-center gap-1">
+              <TooltipProvider delayDuration={200}>
+                {unit.shareRequests ? (
+                  <UnitFlagIcon testId={`sharing-badge-${unit.id}`} label="Request sharing">
+                    <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  </UnitFlagIcon>
+                ) : null}
+                {unit.canWorkOnSolutions ? (
+                  <UnitFlagIcon testId={`solutions-badge-${unit.id}`} label="Can work on solutions">
+                    <Wrench className="h-3.5 w-3.5" aria-hidden="true" />
+                  </UnitFlagIcon>
+                ) : null}
+              </TooltipProvider>
+            </span>
           ) : null}
           {/* Permanently reserved in-flow action area (md+ fine pointer): the
               strip always owns this space, so revealing it via
               visibility/opacity can never shift geometry. */}
           <div
             data-testid={`unit-hover-actions-${unit.id}`}
-            className="invisible flex shrink-0 items-center gap-1 rounded-md bg-muted px-1 opacity-0 transition-opacity duration-150 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100 max-md:!hidden pointer-coarse:!hidden"
+            className="organization-unit-hover-actions invisible flex shrink-0 items-center gap-1 rounded-md bg-muted px-1 opacity-0 transition-opacity duration-150 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100 max-md:!hidden pointer-coarse:!hidden"
           >
             <Button
               type="button"
@@ -427,7 +416,7 @@ export function TreeNodeRow({
               Manage
             </Button>
           </div>
-          <div className="flex shrink-0 md:hidden pointer-coarse:!flex">
+          <div className="organization-unit-header-overflow shrink-0">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -499,9 +488,8 @@ export function TreeNodeRow({
 
       {/* Collapsed branch content stays MOUNTED behind the hidden attribute:
           unmounting would tear down editors and cancel a queued follow-up
-          rename. The children are a responsive flowchart group: siblings use
-          a row when there is room and wrap into additional rows on narrow
-          surfaces. */}
+          rename. Desktop siblings stay in one horizontal row; the canvas
+          scrolls instead of wrapping into a fake parent/child stack. */}
       <div
         data-testid={`unit-children-${unit.id}`}
         hidden={!expanded}

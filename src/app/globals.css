@@ -774,8 +774,10 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
  * Organization flowchart surface. Child groups keep the historical Tailwind
  * class names (border-l-2 / pl-6 / space-y-5) so existing render contracts
  * still match, but the visual language is a centered card flowchart: compact
- * white cards, wrapping sibling rows, and slate T-connectors. Semantic
- * hierarchy stays in the nested DOM and existing test IDs.
+ * white cards, desktop sibling rows, and slate T-connectors. Nested nodes
+ * grow with their subtree (max-content) so siblings stay in one row; the
+ * canvas scrolls horizontally instead of wrapping into a fake stack.
+ * Wrap only on genuinely narrow viewports.
  */
 .organization-flowchart {
   --organization-flowchart-line: #94a3b8;
@@ -783,27 +785,90 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
   background-size: 16px 16px;
   padding: 1.25rem 0.5rem 1.5rem;
   border-radius: 1rem;
+  overflow-x: auto;
+  max-width: 100%;
 }
 .organization-unit-node {
   display: flex;
   flex-direction: column;
   align-items: center;
-  width: 100%;
+  width: max-content;
   min-width: 0;
 }
 .organization-unit-card {
-  width: min(100%, 22rem);
+  width: 22rem;
+  max-width: 22rem;
   min-width: 0;
   overflow: visible;
+  container-type: inline-size;
+  container-name: organization-unit-card;
+}
+.organization-unit-header {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  min-width: 0;
+}
+.organization-unit-name {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+.organization-unit-name [data-testid="inline-name-edit"] {
+  display: flex;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  flex-wrap: nowrap;
+}
+.organization-unit-name [data-testid="inline-name-edit"] > span,
+.organization-unit-name [data-testid="inline-name-edit-input"] {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.organization-unit-name [data-testid="inline-name-edit-input"] {
+  width: 100%;
+  max-width: 100%;
+}
+.organization-unit-flags {
+  flex-shrink: 0;
+}
+.organization-unit-hover-actions {
+  flex-shrink: 0;
+}
+.organization-unit-header-overflow {
+  display: none;
+  flex-shrink: 0;
+  align-items: center;
+}
+@container organization-unit-card (max-width: 24rem) {
+  .organization-unit-hover-actions {
+    display: none !important;
+  }
+  .organization-unit-header-overflow {
+    display: flex;
+  }
+}
+@media (pointer: coarse) {
+  .organization-unit-hover-actions {
+    display: none !important;
+  }
+  .organization-unit-header-overflow {
+    display: flex;
+  }
 }
 .organization-unit-children {
   position: relative;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: flex-start;
   justify-content: center;
   gap: 1.25rem 1rem;
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   margin-top: 1.5rem;
   padding: 1.5rem 0.5rem 0;
   border-left-color: transparent;
@@ -836,12 +901,13 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
   display: none;
 }
 .organization-unit-children > .organization-unit-child {
-  margin-top: 0;
+  margin-top: 0 !important;
 }
 .organization-unit-child {
   position: relative;
-  min-width: min(100%, 18rem);
-  flex: 1 1 18rem;
+  flex: 0 0 auto;
+  width: max-content;
+  min-width: 22rem;
   padding-top: 1.5rem;
 }
 .organization-unit-child > .organization-flowchart-connector {
@@ -871,12 +937,24 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
   scrollbar-width: thin;
 }
 @media (max-width: 640px) {
+  .organization-flowchart {
+    overflow-x: hidden;
+  }
+  .organization-unit-node {
+    width: 100%;
+  }
   .organization-unit-card {
+    width: 100%;
+    max-width: none;
+  }
+  .organization-unit-children {
+    flex-wrap: wrap;
     width: 100%;
   }
   .organization-unit-child {
     min-width: 100%;
     max-width: 100%;
-    flex-basis: 100%;
+    width: 100%;
+    flex: 1 1 100%;
   }
 }
