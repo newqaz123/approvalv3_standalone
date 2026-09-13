@@ -878,6 +878,15 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
   padding: 1.5rem 0.5rem 0;
   border-left-color: transparent;
 }
+/* Historical pl-6 / md:pl-8 / border-l-2 class names stay on the node for render
+   contracts. Compiled Tailwind emits md:pl-8 after these unlayered rules, which
+   would indent the only child and leave the 50% stem as a parallel disconnected
+   segment. Cancel that box effect so stem and stub share an x. */
+.organization-flowchart .organization-unit-children {
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+  border-left-width: 0;
+}
 .organization-unit-children:empty,
 .organization-unit-children[hidden],
 .organization-unit-people[hidden] {

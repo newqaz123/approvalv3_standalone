@@ -7,6 +7,9 @@ import { readFileSync } from 'node:fs'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { chromium } from '@playwright/test'
+import postcss from 'postcss'
+import tailwindcss from 'tailwindcss'
+import autoprefixer from 'autoprefixer'
 import type { AssignmentNode, OrganizationUnitNode, PositionNode, TeamNode } from '@/lib/organization/model'
 import type { WorkspaceSnapshot } from '@/server-actions/organization'
 import { OrganizationWorkspace } from '@/components/organization/OrganizationWorkspace'
@@ -80,23 +83,30 @@ type Box = { top: number; left: number; right: number; bottom: number; width: nu
 
 type Geometry = Record<string, Box | string | number | null>
 
+let compiledCssPromise: Promise<string> | null = null
+
+async function compiledApplicationCss(): Promise<string> {
+  if (!compiledCssPromise) {
+    compiledCssPromise = postcss([tailwindcss(), autoprefixer])
+      .process(readFileSync('src/app/globals.css', 'utf8'), { from: 'src/app/globals.css' })
+      .then((result) => result.css)
+  }
+  return compiledCssPromise
+}
+
 async function measureFlowchartGeometry(options: {
   viewport: { width: number; height: number }
   frameWidth: string
 }): Promise<Geometry> {
-  const css = readFileSync('src/app/globals.css', 'utf8')
-  const start = css.indexOf('.organization-flowchart')
-  assert.ok(start >= 0, 'organization flowchart CSS is missing')
-  const orgCss = css.slice(start)
+  const css = await compiledApplicationCss()
+  assert.match(css, /\.pl-6/, 'compiled application styles must include Tailwind pl-6')
+  assert.match(css, /\.border-l-2/, 'compiled application styles must include Tailwind border-l-2')
+  assert.match(css, /\.md\\:pl-8/, 'compiled application styles must include Tailwind md:pl-8')
   const html = renderWorkspace()
   const browser = await chromium.launch({ headless: true })
   try {
     const page = await browser.newPage({ viewport: options.viewport })
-    await page.setContent(`<!DOCTYPE html><html><head><style>
-      * { box-sizing: border-box; }
-      body { margin: 0; }
-      ${orgCss}
-    </style></head><body>
+    await page.setContent(`<!DOCTYPE html><html><head><style>${css}</style></head><body>
       <div data-testid="geometry-frame" style="width:${options.frameWidth};max-width:${options.frameWidth};">${html}</div>
     </body></html>`)
     return await page.evaluate(`(() => {
@@ -106,17 +116,38 @@ async function measureFlowchartGeometry(options: {
         const r = el.getBoundingClientRect()
         return { top: r.top, left: r.left, right: r.right, bottom: r.bottom, width: r.width, height: r.height }
       }
+      const usedPx = (value, reference) => {
+        if (!value || value === 'auto') return 0
+        const trimmed = String(value).trim()
+        if (trimmed.endsWith('%')) return (parseFloat(trimmed) / 100) * reference
+        const parsed = parseFloat(trimmed)
+        return Number.isFinite(parsed) ? parsed : 0
+      }
       const pseudo = (id, name) => {
         const el = document.querySelector('[data-testid="' + id + '"]')
         if (!el) return null
         const r = el.getBoundingClientRect()
         const cs = getComputedStyle(el, name)
         if (cs.display === 'none' || cs.content === 'none') return null
+        const host = getComputedStyle(el)
+        const borderLeft = parseFloat(host.borderLeftWidth) || 0
+        const borderTop = parseFloat(host.borderTopWidth) || 0
+        const paddingBoxWidth = el.clientWidth
+        const paddingBoxHeight = el.clientHeight
+        let tx = 0, ty = 0
+        if (cs.transform && cs.transform !== 'none') {
+          const matrix = new DOMMatrixReadOnly(cs.transform)
+          tx = matrix.m41
+          ty = matrix.m42
+        }
+        const top = r.top + borderTop + usedPx(cs.top, paddingBoxHeight) + ty
+        const left = r.left + borderLeft + usedPx(cs.left, paddingBoxWidth) + tx
+        let width = parseFloat(cs.width)
+        if (!Number.isFinite(width) || width === 0) {
+          width = Math.max(0, paddingBoxWidth - usedPx(cs.left, paddingBoxWidth) - usedPx(cs.right, paddingBoxWidth))
+        }
         const height = parseFloat(cs.height)
         if (!height) return null
-        const top = r.top + (parseFloat(cs.top) || 0)
-        const left = r.left + (parseFloat(cs.left) || 0)
-        const width = parseFloat(cs.width) || 0
         return { top: top, left: left, right: left + width, bottom: top + height, width: width, height: height }
       }
       const overflowWrap = document.querySelector('[data-testid="unit-overflow-flow-child-a"]')
@@ -169,6 +200,28 @@ function verticalGap(upperBottom: number, lowerTop: number): number {
   return lowerTop - upperBottom
 }
 
+function horizontalOverlap(a: Box, b: Box): number {
+  return Math.min(a.right, b.right) - Math.max(a.left, b.left)
+}
+
+function assertHorizontalIntersection(a: Box, b: Box, label: string) {
+  const overlap = horizontalOverlap(a, b)
+  assert.ok(
+    overlap >= 0,
+    `${label} must intersect horizontally (a ${a.left.toFixed(1)}-${a.right.toFixed(1)}, b ${b.left.toFixed(1)}-${b.right.toFixed(1)}, overlap=${overlap.toFixed(1)})`,
+  )
+}
+
+function assertVerticalSegmentsColinear(a: Box, b: Box, label: string) {
+  assertHorizontalIntersection(a, b, label)
+  const aMid = (a.left + a.right) / 2
+  const bMid = (b.left + b.right) / 2
+  assert.ok(
+    Math.abs(aMid - bMid) <= 2,
+    `${label} stem and stub must share an x, not sit as parallel segments (centers ${aMid.toFixed(1)} vs ${bMid.toFixed(1)})`,
+  )
+}
+
 function assertConnectorJoinsRailToCard(connector: Box, rail: Box, card: Box, label: string) {
   const railGap = verticalGap(rail.bottom, connector.top)
   const overlapOrTouch = connector.top <= rail.bottom + 2 && rail.top <= connector.bottom + 2
@@ -176,6 +229,7 @@ function assertConnectorJoinsRailToCard(connector: Box, rail: Box, card: Box, la
     overlapOrTouch && railGap <= 2,
     `${label} connector must meet the rail (rail ${rail.top}-${rail.bottom}, stub ${connector.top}-${connector.bottom}, gap=${railGap})`,
   )
+  assertHorizontalIntersection(connector, rail, `${label} stub/rail`)
   assert.ok(
     Math.abs(connector.bottom - card.top) <= 2,
     `${label} connector must meet the card (stub bottom ${connector.bottom} vs card top ${card.top})`,
@@ -187,6 +241,7 @@ function assertConnectorJoinsStemToCard(connector: Box, stem: Box, card: Box, la
     Math.abs(connector.top - stem.bottom) <= 2,
     `${label} single-child connector must meet the parent stem (stem bottom ${stem.bottom} vs stub top ${connector.top})`,
   )
+  assertVerticalSegmentsColinear(stem, connector, `${label} stem/stub`)
   assert.ok(
     Math.abs(connector.bottom - card.top) <= 2,
     `${label} single-child connector must meet the card (stub bottom ${connector.bottom} vs card top ${card.top})`,
