@@ -21,6 +21,7 @@ import {
   existingApprovalDecision,
 } from '@/lib/action-permissions'
 import { requireAdmin } from '@/lib/auth'
+import { canUserViewRequest } from '@/lib/request-visibility/scope'
 import { APPROVAL_ENGINE_TRANSACTION_ISOLATION } from '@/lib/approval-engine/plan'
 import {
   createCleanStartPhaseAttemptTx,
@@ -368,9 +369,19 @@ async function notifyNextApprover(requestId: string) {
 }
 
 /**
- * Get approval status for a request with eligible approvers
+ * Get approval status for a request with eligible approvers.
+ * Authentication plus the request's shared visibility policy gate every
+ * return path; approval metadata never leaks to invisible callers.
  */
 export async function getRequestApprovals(requestId: string) {
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
+  if (!userId) {
+    throw new Error('Unauthorized')
+  }
+  if (!(await canUserViewRequest(userId, requestId))) {
+    return []
+  }
+
   const request = await prisma.requests.findUnique({
     where: { id: requestId },
     select: { id: true },
