@@ -698,6 +698,21 @@ export const MATRIX_HEADED = {
   checkpointMs: 6000,
 } as const
 
+/** Unattended runs: no visible browser, no slow-motion, short checkpoint pauses. */
+export const MATRIX_HEADLESS = {
+  headless: true as const,
+  slowMo: 0,
+  viewport: { width: 1440, height: 1000 },
+  checkpointMs: 500,
+} as const
+
+export type MatrixBrowserProfile = typeof MATRIX_HEADED | typeof MATRIX_HEADLESS
+
+/** RRM_HEADLESS=1 selects the headless profile; headed stays the default. */
+export function matrixBrowserProfile(env: Record<string, string | undefined> = process.env): MatrixBrowserProfile {
+  return env.RRM_HEADLESS === '1' ? MATRIX_HEADLESS : MATRIX_HEADED
+}
+
 export type CustomToggleSurface = 'solution' | 'resubmit' | 'final'
 export type CustomToggleControl = 'radix-switch' | 'unnamed-final-button'
 

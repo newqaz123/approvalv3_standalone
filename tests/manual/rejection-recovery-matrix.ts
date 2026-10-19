@@ -48,7 +48,7 @@ import {
   LIVE_CO_CANDIDATE_VERIFICATION,
   matrixActorEmail,
   matrixActorId,
-  MATRIX_HEADED,
+  matrixBrowserProfile,
   MatrixLedger,
   type ObservedApprovalRow,
   instanceRouteSql,
@@ -99,6 +99,8 @@ import {
   writeFailureArtifacts,
   type MatrixRuntimeHandle,
 } from '../support/native/rejection-recovery-runtime'
+
+const BROWSER = matrixBrowserProfile()
 
 interface Options {
   routesConfig: RouteProfile
@@ -189,7 +191,7 @@ async function checkpoint(page: Page, dir: string, label: string): Promise<void>
   const file = path.join(dir, 'screenshots', `${String(++shotSeq).padStart(4, '0')}-${label.replace(/[^a-z0-9-]/gi, '-')}.png`)
   await page.screenshot({ path: file }) // viewport-only: real in-viewport proof
   log(`screenshot ${path.basename(file)}`)
-  await page.waitForTimeout(MATRIX_HEADED.checkpointMs)
+  await page.waitForTimeout(BROWSER.checkpointMs)
 }
 
 function escapeRegExp(value: string): string {
@@ -202,7 +204,7 @@ export function playwrightMatrixUi(browser: Browser, evidenceRoot: string): Matr
     const videoDir = path.join(currentCaseDir ?? evidenceRoot, 'videos', `${label.replace(/[^a-z0-9-]/gi, '-')}-${++videoSeq}`)
     await fs.mkdir(videoDir, { recursive: true })
     const context = await browser.newContext({
-      viewport: MATRIX_HEADED.viewport,
+      viewport: BROWSER.viewport,
       recordVideo: { dir: videoDir },
     })
     const traceBase = row
@@ -603,13 +605,13 @@ export function playwrightMatrixUi(browser: Browser, evidenceRoot: string): Matr
           // SOLUTION approvals are ONE direct "Approve Solution" mutation.
           await expect(dialog.getByRole('button', { name: 'Approve Solution' })).toHaveCount(1)
           await dialog.getByRole('button', { name: 'Approve Solution' }).scrollIntoViewIfNeeded()
-          await page.waitForTimeout(MATRIX_HEADED.checkpointMs)
+          await page.waitForTimeout(BROWSER.checkpointMs)
           guardClick()
           await dialog.getByRole('button', { name: 'Approve Solution' }).click()
         } else {
           await expect(dialog.getByRole('button', { name: 'Approve', exact: true })).toHaveCount(1)
           await dialog.getByRole('button', { name: 'Approve', exact: true }).scrollIntoViewIfNeeded()
-          await page.waitForTimeout(MATRIX_HEADED.checkpointMs)
+          await page.waitForTimeout(BROWSER.checkpointMs)
           guardClick()
           await dialog.getByRole('button', { name: 'Approve', exact: true }).click()
           await expect(page.getByRole('button', { name: 'Confirm Approval' })).toBeVisible()
@@ -943,7 +945,7 @@ export function playwrightMatrixUi(browser: Browser, evidenceRoot: string): Matr
         const viewport = page.viewportSize()
         const stage3InViewport = Boolean(stageBox && viewport && stageBox.y >= 0 && stageBox.y < viewport.height)
         if (!stage3InViewport) throw new Error('stage 3 is not in the viewport')
-        await page.waitForTimeout(MATRIX_HEADED.checkpointMs)
+        await page.waitForTimeout(BROWSER.checkpointMs)
         await page.screenshot({ path: path.join(currentCaseDir ?? evidenceRoot, 'screenshots', `completed-stage3-inviewport-${Date.now()}.png`) })
         await closeContext()
         const request = await requestByTitle(title)
@@ -1187,7 +1189,7 @@ async function main(): Promise<void> {
   await runOwnedMatrixSession({
     handle,
     log,
-    launchBrowser: () => chromium.launch({ headless: MATRIX_HEADED.headless, slowMo: MATRIX_HEADED.slowMo }),
+    launchBrowser: () => chromium.launch({ headless: BROWSER.headless, slowMo: BROWSER.slowMo }),
     run: async (browser) => {
       const ui = playwrightMatrixUi(browser as Browser, options.evidenceRoot)
       traces = ui.traces

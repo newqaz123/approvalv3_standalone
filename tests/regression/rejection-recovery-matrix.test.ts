@@ -2427,3 +2427,13 @@ describe('RRM-023 readiness — actual resubmit caller with controlled offline d
     await assert.rejects(() => playwrightExpect({} as unknown as import('@playwright/test').Locator).toBeVisible({ timeout: RESUBMIT_OPENER_READINESS_TIMEOUT_MS }), /can be only used with Locator/)
   })
 })
+
+describe('matrix browser profile', () => {
+  it('stays headed by default and goes headless only with RRM_HEADLESS=1', async () => {
+    const { matrixBrowserProfile, MATRIX_HEADED, MATRIX_HEADLESS } = await import('../support/rejection-recovery-matrix')
+    assert.equal(matrixBrowserProfile({}), MATRIX_HEADED)
+    assert.equal(matrixBrowserProfile({ RRM_HEADLESS: '0' }), MATRIX_HEADED)
+    assert.equal(matrixBrowserProfile({ RRM_HEADLESS: '1' }), MATRIX_HEADLESS)
+    assert.deepEqual(MATRIX_HEADLESS, { headless: true, slowMo: 0, viewport: { width: 1440, height: 1000 }, checkpointMs: 500 })
+  })
+})
