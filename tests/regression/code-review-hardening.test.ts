@@ -30,3 +30,21 @@ describe('H4: getRequestApprovals is gated by session and request visibility', (
     assert.ok(body.indexOf(gate[0]) < body.indexOf('request_approvals.findMany'))
   })
 })
+
+describe('H7: initiateFinalApproval uses the real user.isActive', () => {
+  const body = exportedFunctionBody(read('src/server-actions/solutions.ts'), 'initiateFinalApproval')
+
+  it('loads isActive and denies inactive users before evaluating the action', () => {
+    assert.match(body, /select: \{[^}]*isActive: true[^}]*\}/)
+    const deny = body.indexOf('if (!user.isActive)')
+    assert.ok(deny > -1, 'must deny inactive users explicitly')
+    assert.ok(deny < body.indexOf("evaluateRequestAction('INITIATE_FINAL_APPROVAL'"))
+  })
+
+  it('never hard-codes isActive: true into the actor or the decision input', () => {
+    const evaluation = body.slice(body.indexOf("evaluateRequestAction('INITIATE_FINAL_APPROVAL'"))
+    const actorBlock = evaluation.slice(0, evaluation.indexOf('if (!initiateAction.allowed)'))
+    assert.doesNotMatch(actorBlock, /isActive: true/)
+    assert.equal((actorBlock.match(/isActive: user\.isActive/g) ?? []).length, 2)
+  })
+})

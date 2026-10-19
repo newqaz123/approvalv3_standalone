@@ -1214,11 +1214,15 @@ export async function initiateFinalApproval(
   // Get current user
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, role: true },
+    select: { id: true, role: true, isActive: true },
   })
 
   if (!user) {
     throw new Error('User not found')
+  }
+
+  if (!user.isActive) {
+    throw new Error('Inactive users cannot initiate final approval')
   }
 
   // Validate request exists and is in correct status
@@ -1250,7 +1254,7 @@ export async function initiateFinalApproval(
     actor: {
       id: user.id,
       role: user.role,
-      isActive: true,
+      isActive: user.isActive,
       assignmentUnitId: actorAssignment?.unitId ?? null,
     },
     request: {
@@ -1263,7 +1267,7 @@ export async function initiateFinalApproval(
     assignedEngineer: false,
     existingActionDecisions: {
       INITIATE_FINAL_APPROVAL: existingInitiateFinalApprovalDecision({
-        isActive: true,
+        isActive: user.isActive,
         assignmentUnitId: actorAssignment?.unitId ?? null,
         requestOriginUnitId,
         units,
@@ -1275,7 +1279,7 @@ export async function initiateFinalApproval(
     if (initiateAction.reason === 'WRONG_STATUS') {
       throw new Error(`Request must be in SendBackToRequester status to initiate final approval. Current status: ${request.status}`)
     }
-    throw new Error('Only members of the originating unit or its management hierarchy can initiate final approval')
+    throw new Error('Only members of the originating unit can initiate final approval')
   }
 
   await runSolutionTransactionWithNotifications(
