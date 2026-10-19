@@ -86,7 +86,7 @@ describe('canSubmitSolutionWork — A5 unit flag inherited; not role, not admin'
   })
 })
 
-describe('canInitiateFinalApproval — origin unit or ancestor hierarchy', () => {
+describe('canInitiateFinalApproval — origin unit only (owner decision H6)', () => {
   it('allows an active assignment in the request origin unit', () => {
     assert.equal(canInitiateFinalApproval({
       isActive: true,
@@ -96,13 +96,13 @@ describe('canInitiateFinalApproval — origin unit or ancestor hierarchy', () =>
     }), true)
   })
 
-  it('allows an ancestor-unit assignment (department/company managers)', () => {
+  it('denies an ancestor-unit assignment (department/company managers)', () => {
     assert.equal(canInitiateFinalApproval({
       isActive: true,
       assignmentUnitId: 'company',
       requestOriginUnitId: 'sales',
       units,
-    }), true)
+    }), false)
   })
 
   it('denies unrelated branches, inactive, unassigned, and empty origin', () => {
@@ -200,7 +200,8 @@ describe('extracted action guards use assignment inputs, not departmentType/role
       units,
       status: 'SendBackToRequester',
     })
-    assert.equal(ancestorOnly.allowed, true)
+    assert.equal(ancestorOnly.allowed, false)
+    assert.equal(ancestorOnly.reason, 'WRONG_ROLE')
 
     const missingOrigin = existingInitiateFinalApprovalDecision({
       isActive: true,
@@ -325,6 +326,8 @@ describe('B10 source contract — department-typed helpers gone; engineering ROL
     assert.doesNotMatch(solutionWork, /userRole === ['"]engineering['"]/)
     const initiate = source.slice(source.indexOf('export function canInitiateFinalApproval'), source.indexOf('export function canUserAssignEngineers'))
     assert.doesNotMatch(initiate, /userRole === ['"]engineering['"]/)
+    assert.doesNotMatch(initiate, /ancestorUnitIds/)
+    assert.match(initiate, /input\.assignmentUnitId === input\.requestOriginUnitId/)
   })
 
   it('action-permissions inputs are assignmentUnitId + units + requestOriginUnitId', () => {

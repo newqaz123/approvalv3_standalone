@@ -134,7 +134,7 @@ describe('extracted existing action guards feed existingActionDecisions', () => 
     assert.equal(evaluateRequestAction('APPROVE_REQUEST', context).allowed, false)
   })
 
-  it('allows a parent-unit manager to initiate final approval for a descendant origin', () => {
+  it('denies a parent-unit manager initiating final approval for a descendant origin (origin unit only)', () => {
     const initiation = existingInitiateFinalApprovalDecision({
       isActive: true,
       assignmentUnitId: 'company',
@@ -142,7 +142,8 @@ describe('extracted existing action guards feed existingActionDecisions', () => 
       units,
       status: 'SendBackToRequester',
     })
-    assert.equal(initiation.allowed, true)
+    assert.equal(initiation.allowed, false)
+    assert.equal(initiation.reason, 'WRONG_ROLE')
 
     const context: ActionPermissionContext = {
       actor: {
@@ -163,7 +164,7 @@ describe('extracted existing action guards feed existingActionDecisions', () => 
         INITIATE_FINAL_APPROVAL: initiation,
       },
     }
-    assert.equal(evaluateRequestAction('INITIATE_FINAL_APPROVAL', context).allowed, true)
+    assert.equal(evaluateRequestAction('INITIATE_FINAL_APPROVAL', context).allowed, false)
   })
 
   it('keeps solution resubmit on assignment eligibility and rejection evidence', () => {
@@ -192,7 +193,7 @@ describe('extracted existing action guards feed existingActionDecisions', () => 
     assert.equal(evaluateRequestAction('RESUBMIT_SOLUTION', context).allowed, true)
   })
 
-  it('keeps final resubmit on origin or ancestor membership, not unrelated branches', () => {
+  it('keeps final resubmit on origin-unit membership, not unrelated branches', () => {
     const denied = existingResubmitFinalApprovalDecision({
       isActive: true,
       assignmentUnitId: 'web',
@@ -471,7 +472,7 @@ describe('INITIATE_FINAL_APPROVAL capability for origin-unit assignment (I1 re-b
     assert.equal(decision.reason, 'WRONG_ROLE')
   })
 
-  it('allows ancestor-unit assignment on the origin chain', () => {
+  it('denies ancestor-unit assignment on the origin chain', () => {
     const decision = existingInitiateFinalApprovalDecision({
       isActive: true,
       assignmentUnitId: 'company',
@@ -479,6 +480,7 @@ describe('INITIATE_FINAL_APPROVAL capability for origin-unit assignment (I1 re-b
       units,
       status: 'SendBackToRequester',
     })
-    assert.equal(decision.allowed, true)
+    assert.equal(decision.allowed, false)
+    assert.equal(decision.reason, 'WRONG_ROLE')
   })
 })

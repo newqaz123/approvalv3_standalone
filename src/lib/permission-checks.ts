@@ -2,13 +2,12 @@
  * Assignment-based action policy helpers (Plan B Task 10).
  * Solution work is A5 canWorkOnSolutions (unit flag inherited by descendants).
  * Final initiation is an active assignment in the request origin unit
- * or an ancestor unit (management hierarchy).
+ * only (ancestor units are not eligible).
  * Request submission is every active assignment. Admin is separate.
  * Approval is chain-only — there is no level helper.
  * The engineering ROLE remains only for engineer-assignment / sub-task
  * administration, never for solution-work eligibility or visibility.
  */
-import { ancestorUnitIds } from '@/lib/organization/hierarchy'
 import type { OrganizationUnitNode } from '@/lib/organization/model'
 import { canWorkOnSolutions } from '@/lib/solution-eligibility'
 
@@ -30,11 +29,9 @@ export function canInitiateFinalApproval(input: {
   if (!input.isActive) return false
   if (input.assignmentUnitId === null) return false
   if (input.requestOriginUnitId === '') return false
-  try {
-    return ancestorUnitIds(input.units, input.requestOriginUnitId).includes(input.assignmentUnitId)
-  } catch {
-    return false
-  }
+  // Owner decision (H6): only an active assignment in the request ORIGIN
+  // unit may initiate Final approval; ancestor units are not eligible.
+  return input.assignmentUnitId === input.requestOriginUnitId
 }
 
 /**
