@@ -7,7 +7,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { sharingScopeUnitIds } from '@/lib/organization/sharing'
+import { sharingScopeUnitIds, visibleRequestOriginUnitIds } from '@/lib/organization/sharing'
 import { descendantUnitIds } from '@/lib/organization/hierarchy'
 import type { OrganizationUnitNode } from '@/lib/organization/model'
 import {
@@ -223,12 +223,12 @@ describe('production findActor — users + active assignment + A5 sharing + mana
     const manager = await db.findActor('ops-manager')
     assert.ok(pat && alice && bob && manager)
     assert.equal(pat.assignmentUnitId, 'operations')
-    assert.deepEqual([...pat.sharingScopeUnitIds].sort(), [...sharingScopeUnitIds(specUnits, 'operations')].sort())
-    assert.deepEqual([...alice.sharingScopeUnitIds].sort(), [...sharingScopeUnitIds(specUnits, 'section-a')].sort())
-    assert.equal(alice.sharingScopeUnitIds.includes('section-b'), false)
-    assert.deepEqual(bob.sharingScopeUnitIds, ['section-b'])
+    assert.deepEqual([...pat.sharingScopeUnitIds].sort(), [...visibleRequestOriginUnitIds(specUnits, 'operations')].sort())
+    assert.deepEqual([...alice.sharingScopeUnitIds].sort(), [...visibleRequestOriginUnitIds(specUnits, 'section-a')].sort())
+    assert.equal(alice.sharingScopeUnitIds.includes('section-b'), true)
+    assert.equal(bob.sharingScopeUnitIds.includes('section-a'), true)
     assert.equal(manager.assignmentUnitId, 'section-a')
-    assert.equal(manager.sharingScopeUnitIds.includes('section-b'), false)
+    assert.equal(manager.sharingScopeUnitIds.includes('section-b'), true)
     assert.deepEqual([...manager.managedUnitIds].sort(), [...descendantUnitIds(specUnits, 'operations')].sort())
     assert.equal(manager.managedUnitIds.includes('section-b'), true)
   })
@@ -281,7 +281,7 @@ describe('production findActor — users + active assignment + A5 sharing + mana
     }))
     const pat = await db.findActor('pat') as RequestVisibilityActor
     assert.equal(pat.assignmentUnitId, 'operations')
-    assert.deepEqual([...pat.sharingScopeUnitIds].sort(), [...sharingScopeUnitIds(specUnits, 'operations')].sort())
+    assert.deepEqual([...pat.sharingScopeUnitIds].sort(), [...visibleRequestOriginUnitIds(specUnits, 'operations')].sort())
   })
 })
 

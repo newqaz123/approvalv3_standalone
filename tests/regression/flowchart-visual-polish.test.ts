@@ -671,30 +671,39 @@ describe('exactly one management drawer', () => {
       await page.getByTestId('unit-header-udh-ga').click()
       assert.deepEqual(await drawers(), { count: 1, unassigned: false, unit: true, person: false, team: false })
 
+      // Modal UX: Escape closes the dialog; the page behind is clean again.
+      await page.keyboard.press('Escape')
+      assert.deepEqual(await drawers(), { count: 0, unassigned: false, unit: false, person: false, team: false })
+
       // THE FIX: the Unassigned chip takes over — exactly one drawer remains.
       await page.getByTestId('unassigned-dock-toggle').click()
       assert.deepEqual(await drawers(), { count: 1, unassigned: true, unit: false, person: false, team: false })
       assert.equal(await chipExpanded(), 'true')
 
-      // A person selection closes Unassigned again.
+      // A person selection closes Unassigned again (tree chip: Escape first).
+      await page.keyboard.press('Escape')
       await page.getByTestId('person-chip-udh-ga-staff').locator('button').first().click()
       assert.deepEqual(await drawers(), { count: 1, unassigned: false, unit: false, person: true, team: false })
       assert.equal(await chipExpanded(), 'false')
 
-      // Back to Unassigned from the person drawer.
+      // Back to Unassigned from the person drawer (Escape closes the modal).
+      await page.keyboard.press('Escape')
       await page.getByTestId('unassigned-dock-toggle').click()
       assert.deepEqual(await drawers(), { count: 1, unassigned: true, unit: false, person: false, team: false })
 
-      // A team selection closes Unassigned.
+      // A team selection closes Unassigned (tree sits behind the modal: Escape first).
+      await page.keyboard.press('Escape')
       await page.getByTestId('team-select-udh-team-line').click()
       assert.deepEqual(await drawers(), { count: 1, unassigned: false, unit: false, person: false, team: true })
       assert.equal(await chipExpanded(), 'false')
 
       // Back to Unassigned from the team drawer.
+      await page.keyboard.press('Escape')
       await page.getByTestId('unassigned-dock-toggle').click()
       assert.deepEqual(await drawers(), { count: 1, unassigned: true, unit: false, person: false, team: false })
 
-      // A unit selection closes Unassigned (reverse direction).
+      // A unit selection closes Unassigned (reverse direction; Escape first).
+      await page.keyboard.press('Escape')
       await page.getByTestId('unit-header-udh-ga').click()
       assert.deepEqual(await drawers(), { count: 1, unassigned: false, unit: true, person: false, team: false })
       assert.equal(await chipExpanded(), 'false')

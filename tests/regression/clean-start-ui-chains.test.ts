@@ -12,9 +12,12 @@
 //   for all-vacant routes;
 // - root-default publication copy is NOT a global activation switch.
 // C9-fix1 pins (review 9814796e):
-// - View seeds the effective PUBLISHED route (inherited ancestor, never a draft);
-// - Restart requires a successfully loaded preview for the current instance;
-// - Continue editing retains the selected draft version id.
+// - View seeds the effective PUBLISHED route (inherited ancestor, never an
+//   empty editor);
+// - Restart requires a successfully loaded preview for the current instance.
+// Owner revision: the persisted-draft feature is removed — routes publish
+// directly; the read-only submitter test still previews the in-memory editor
+// state via testWithSubmitter's draft input.
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -29,9 +32,9 @@ import type {
 import { ApprovalRouteConfigurationError } from '@/lib/approval-routes/definition'
 import type { ApprovalPhase } from '@/lib/approval-routes/definition'
 import {
+  deleteRouteException,
   getApprovalChainsData,
   publishRoute,
-  saveRouteDraft,
   testWithSubmitter,
   type ApprovalChainsReadDb,
   type ApprovalChainsWriteDb,
@@ -41,6 +44,7 @@ import {
 } from '@/server-actions/approval-routes'
 import {
   ApprovalChainsPanel,
+  RouteExceptionDeletionSection,
 } from '@/components/organization/ApprovalChainsPanel'
 import * as ChainsPanel from '@/components/organization/ApprovalChainsPanel'
 import {
@@ -362,94 +366,8 @@ function makeWriteDb(over: {
 }
 
 // ---------------------------------------------------------------------------
-// saveRouteDraft / publishRoute
+// publishRoute
 // ---------------------------------------------------------------------------
-
-describe('saveRouteDraft (fake db)', () => {
-  it('inserts an immutable DRAFT version with steps and never retires the published route', async () => {
-    const db = makeWriteDb()
-    const result = await saveRouteDraft({
-      scopeUnitId: 'company',
-      phase: 'SOLUTION',
-      approvalLimitPositionId: 'p-director',
-      steps: rootSteps(),
-    }, db)
-    assert.equal(typeof result.versionId, 'string')
-    assert.ok(result.versionId.length > 0)
-    assert.equal(db.transactions(), 1)
-    assert.equal(db.txLog.includes('retirePublishedVersions:company:SOLUTION'), false)
-    assert.equal(db.inserts.length, 1)
-    assert.equal(db.inserts[0].status, 'DRAFT')
-    assert.equal(db.inserts[0].publishedAt, null)
-    assert.equal(db.inserts[0].adminUserId, 'admin-1')
-    assert.equal(db.inserts[0].approvalLimitPositionId, 'p-director')
-    assert.deepEqual(
-      db.inserts[0].steps.map((step) => step.order),
-      [1, 2, 3],
-    )
-    // Prior published REQUEST route survives untouched.
-    const root = db.routeVersions.find(
-      (row) => row.id === 'route-root-request' && row.status === 'PUBLISHED',
-    )
-    assert.ok(root)
-    assert.equal(db.revalidations.length, 1)
-  })
-
-  it('rejects an invalid definition before any write', async () => {
-    const db = makeWriteDb()
-    await assert.rejects(
-      saveRouteDraft({
-        scopeUnitId: 'company',
-        phase: 'REQUEST',
-        approvalLimitPositionId: 'p-missing',
-        steps: rootSteps(),
-      }, db),
-      (error: unknown) => error instanceof ApprovalRouteConfigurationError,
-    )
-    assert.equal(db.transactions(), 0)
-    assert.equal(db.inserts.length, 0)
-  })
-
-  it('rejects an unknown or inactive scope unit before any write', async () => {
-    const db = makeWriteDb()
-    await assert.rejects(
-      saveRouteDraft({
-        scopeUnitId: 'nope',
-        phase: 'REQUEST',
-        approvalLimitPositionId: 'p-director',
-        steps: rootSteps(),
-      }, db),
-      (error: unknown) => error instanceof ApprovalRouteConfigurationError,
-    )
-    const inactiveUnits = fixtureUnits()
-    inactiveUnits[1] = unit('ops', 'Operations', 'company', { isActive: false })
-    const db2 = makeWriteDb({ units: inactiveUnits })
-    await assert.rejects(
-      saveRouteDraft({
-        scopeUnitId: 'ops',
-        phase: 'REQUEST',
-        approvalLimitPositionId: 'p-director',
-        steps: rootSteps(),
-      }, db2),
-      (error: unknown) => error instanceof ApprovalRouteConfigurationError,
-    )
-    assert.equal(db.inserts.length + db2.inserts.length, 0)
-  })
-
-  it('rejects an invalid phase before any write', async () => {
-    const db = makeWriteDb()
-    await assert.rejects(
-      saveRouteDraft({
-        scopeUnitId: 'company',
-        phase: 'NOPE' as ApprovalPhase,
-        approvalLimitPositionId: 'p-director',
-        steps: rootSteps(),
-      }, db),
-      (error: unknown) => error instanceof ApprovalRouteConfigurationError,
-    )
-    assert.equal(db.transactions(), 0)
-  })
-})
 
 describe('publishRoute (fake db)', () => {
   it('refuses a step above a lowered limit: returns the flagged steps and writes nothing', async () => {
@@ -771,21 +689,43 @@ describe('testWithSubmitter (fake db)', () => {
   })
 })
 
+describe('deleteRouteException (fake db)', () => {
+  it('retires only the published unit exception so future selection inherits the ancestor', async () => {
+    const db = makeWriteDb()
+    const result = await deleteRouteException({ scopeUnitId: 'ops', phase: 'REQUEST' }, db)
+    assert.deepEqual(result, { success: true })
+    assert.equal(db.transactions(), 1)
+    assert.equal(db.inserts.length, 0)
+    assert.equal(db.routeVersions.find((row) => row.id === 'route-ops-request')?.status, 'RETIRED')
+    assert.equal(db.routeVersions.find((row) => row.id === 'route-root-request')?.status, 'PUBLISHED')
+    assert.deepEqual(db.revalidations, ['/admin/organization'])
+    // The route definition remains as history; only its future-selection status changes.
+    assert.equal(db.routeVersions.some((row) => row.id === 'route-ops-request'), true)
+  })
+
+  it('refuses deleting the company default or a missing exception without changing route rows', async () => {
+    const rootDb = makeWriteDb()
+    await assert.rejects(
+      () => deleteRouteException({ scopeUnitId: 'company', phase: 'REQUEST' }, rootDb),
+      (error: unknown) => error instanceof ApprovalRouteConfigurationError && /root|default/i.test(error.message),
+    )
+    assert.equal(rootDb.transactions(), 0)
+    assert.equal(rootDb.routeVersions.find((row) => row.id === 'route-root-request')?.status, 'PUBLISHED')
+
+    const missingDb = makeWriteDb()
+    await assert.rejects(
+      () => deleteRouteException({ scopeUnitId: 'section-b', phase: 'REQUEST' }, missingDb),
+      /no published.*exception/i,
+    )
+    assert.equal(missingDb.routeVersions.every((row) => row.status === 'PUBLISHED'), true)
+    assert.equal(missingDb.inserts.length, 0)
+  })
+})
+
 describe('getApprovalChainsData (fake db)', () => {
   it('returns units, positions, users, versions with steps, and stranded attempts', async () => {
     const db = makeReadDb({
-      routeVersions: [
-        ...fixtureRouteVersions(),
-        {
-          id: 'draft-1',
-          scopeUnitId: 'company',
-          phase: 'REQUEST',
-          version: 2,
-          approvalLimitPositionId: 'p-manager',
-          status: 'DRAFT',
-          steps: rootSteps(),
-        },
-      ],
+      routeVersions: fixtureRouteVersions(),
       stranded: [
         {
           instanceId: 'inst-1',
@@ -813,10 +753,7 @@ describe('getApprovalChainsData (fake db)', () => {
     const data = await getApprovalChainsData(db)
     assert.equal(data.rootUnitId, 'company')
     assert.equal(data.units.length, 4)
-    assert.equal(data.versions.length, 3)
-    const draft = data.versions.find((row) => row.versionId === 'draft-1')
-    assert.equal(draft?.status, 'DRAFT')
-    assert.deepEqual(draft?.steps, rootSteps())
+    assert.equal(data.versions.length, 2)
     // All-inactive candidate sets are stranded; a set with any active member is not.
     assert.deepEqual(
       data.strandedAttempts.map((row) => row.instanceId),
@@ -847,15 +784,6 @@ const chainsData = (): ApprovalChainsData => ({
       status: row.status,
       steps: row.steps,
     })),
-    {
-      versionId: 'draft-1',
-      scopeUnitId: 'company',
-      phase: 'REQUEST',
-      version: 2,
-      approvalLimitPositionId: 'p-manager',
-      status: 'DRAFT',
-      steps: rootSteps(),
-    },
   ],
   strandedAttempts: [
     {
@@ -870,7 +798,7 @@ const chainsData = (): ApprovalChainsData => ({
 })
 
 describe('ApprovalChainsPanel markup', () => {
-  it('renders root defaults per phase and visibly distinct draft/published lists', () => {
+  it('renders root defaults per phase with published lists', () => {
     const html = renderToStaticMarkup(createElement(ApprovalChainsPanel, { data: chainsData() }))
     assert.match(html, /Approval chains/)
     assert.match(html, /data-testid="chains-root-REQUEST"/)
@@ -878,18 +806,15 @@ describe('ApprovalChainsPanel markup', () => {
     assert.match(html, /data-testid="chains-root-FINAL"/)
     // Published root default for REQUEST.
     assert.match(html, /data-testid="chains-published-route-root-request"/)
-    // Draft renders in its own distinct list with a Draft label.
-    assert.match(html, /data-testid="chains-draft-list-REQUEST"/)
-    assert.match(html, /data-testid="chains-draft-draft-1"/)
-    assert.match(html, /Draft/)
-    // Draft rows never render inside the published list.
-    const publishedList = html.match(/data-testid="chains-published-list-REQUEST"[^]*?data-testid="chains-section-/)?.[0] ?? ''
-    assert.equal(publishedList.includes('draft-1'), false)
+    // Owner revision: the draft feature is removed — no draft lists render.
+    assert.doesNotMatch(html, /chains-draft-list-/)
+    assert.doesNotMatch(html, /Continue editing/)
     // Unit exceptions show the effective source with View/Customize.
     assert.match(html, /data-testid="chains-exception-ops-REQUEST"/)
     assert.match(html, /Custom at this unit/)
     assert.match(html, /data-testid="chains-exception-view-ops-REQUEST"/)
     assert.match(html, /data-testid="chains-exception-customize-ops-REQUEST"/)
+    assert.match(html, /data-testid="chains-exception-delete-ops-REQUEST"/)
   })
 
   it('root-default publication copy is NOT a global activation switch', () => {
@@ -906,6 +831,25 @@ describe('ApprovalChainsPanel markup', () => {
     const html = renderToStaticMarkup(createElement(ApprovalChainsPanel, { data: chainsData() }))
     assert.match(html, /data-testid="chains-stranded-list"/)
     assert.match(html, /data-testid="chains-stranded-restart-inst-1"/)
+  })
+
+  it('stamps the existing requestId on the stranded row and does not accept a different request', () => {
+    const data = chainsData()
+    data.strandedAttempts = [
+      ...data.strandedAttempts,
+      {
+        instanceId: 'inst-other',
+        phase: 'REQUEST',
+        attempt: 1,
+        requestId: 'req-other',
+        solutionId: null,
+        originUserId: 'bob',
+      },
+    ]
+    const html = renderToStaticMarkup(createElement(ApprovalChainsPanel, { data }))
+    assert.match(html, /data-testid="chains-stranded-inst-1"[^>]*data-request-id="req-1"/)
+    assert.match(html, /data-testid="chains-stranded-inst-other"[^>]*data-request-id="req-other"/)
+    assert.doesNotMatch(html, /data-testid="chains-stranded-inst-1"[^>]*data-request-id="req-other"/)
   })
 })
 
@@ -953,10 +897,10 @@ describe('RouteEditorPanel markup and conflict gating', () => {
     assert.match(html, /EXCEEDS_LIMIT/)
   })
 
-  it('a valid draft keeps Publish enabled and offers Test with a submitter', () => {
+  it('a valid route keeps Publish enabled and offers Test with a submitter', () => {
     const html = renderToStaticMarkup(createElement(RouteEditorPanel, editorProps()))
     assert.equal(html.includes('data-testid="route-editor-publish" disabled'), false)
-    assert.match(html, /data-testid="route-editor-save-draft"/)
+    assert.doesNotMatch(html, /data-testid="route-editor-save-draft"/)
     assert.match(html, /Test with a submitter/)
     assert.match(html, /Publish affects future attempts only/i)
   })
@@ -1079,6 +1023,27 @@ const replacementPreview = (): ReplacementChainPreview => ({
   ],
 })
 
+describe('unit exception deletion confirmation UI', () => {
+  it('renders a cancelable, named confirmation with inherited-route and history copy', () => {
+    const html = renderToStaticMarkup(createElement(RouteExceptionDeletionSection, {
+      unitName: 'Operations',
+      phase: 'REQUEST',
+      confirming: true,
+      deleting: false,
+      error: null,
+      onConfirm: () => {},
+      onCancel: () => {},
+    }))
+    assert.match(html, /data-testid="chains-exception-delete-confirmation"/)
+    assert.match(html, /Operations/)
+    assert.match(html, /Request/)
+    assert.match(html, /inherited/i)
+    assert.match(html, /histor/i)
+    assert.match(html, /data-testid="chains-exception-delete-confirm"/)
+    assert.match(html, /data-testid="chains-exception-delete-cancel"/)
+  })
+})
+
 describe('C9-fix1 View seeds the effective published route', () => {
   it('inherited-route View opens the ancestor published route, not an empty editor', () => {
     assert.equal(typeof ChainsPanel.resolveEditorVersion, 'function')
@@ -1104,7 +1069,7 @@ describe('C9-fix1 View seeds the effective published route', () => {
     assert.doesNotMatch(html, /EXCEEDS_LIMIT/)
   })
 
-  it('published-plus-draft View opens the published route, not the draft', () => {
+  it('View opens the published route', () => {
     assert.equal(typeof ChainsPanel.resolveEditorVersion, 'function')
     const data = chainsData()
     const seed = ChainsPanel.resolveEditorVersion(data.versions, data.units, {
@@ -1116,14 +1081,25 @@ describe('C9-fix1 View seeds the effective published route', () => {
     assert.equal(seed?.status, 'PUBLISHED')
     assert.equal(seed?.approvalLimitPositionId, 'p-director')
 
+    const wrongScope = ChainsPanel.resolveEditorVersion(data.versions, data.units, {
+      scopeUnitId: 'section-b',
+      phase: 'REQUEST',
+      versionId: 'root-request',
+    })
+    assert.equal(wrongScope, null)
+    const wrongPhase = ChainsPanel.resolveEditorVersion(data.versions, data.units, {
+      scopeUnitId: 'company',
+      phase: 'SOLUTION',
+      versionId: 'root-request',
+    })
+    assert.equal(wrongPhase, null)
+
     const html = renderToStaticMarkup(createElement(ApprovalChainsPanel, {
       data,
       initialEditor: { scopeUnitId: 'company', phase: 'REQUEST', readOnly: true },
     }))
     assert.match(html, /data-testid="route-editor-company-REQUEST"/)
     assert.match(html, /data-editor-version="root-request"/)
-    assert.doesNotMatch(html, /data-editor-version="draft-1"/)
-    // The company draft lowers the limit to Manager, which would flag Director.
     assert.doesNotMatch(html, /EXCEEDS_LIMIT/)
     assert.doesNotMatch(html, /data-testid="route-editor-conflicts"/)
     assert.match(html, /data-testid="route-editor-step-3"/)
@@ -1133,68 +1109,16 @@ describe('C9-fix1 View seeds the effective published route', () => {
     assert.equal(typeof ChainsPanel.editorRemountKey, 'function')
     const data = chainsData()
     const published = data.versions.find((row) => row.versionId === 'root-request') ?? null
-    const draft = data.versions.find((row) => row.versionId === 'draft-1') ?? null
     const viewKey = ChainsPanel.editorRemountKey(
       { scopeUnitId: 'company', phase: 'REQUEST', readOnly: true },
       published,
-    )
-    const draftKey = ChainsPanel.editorRemountKey(
-      { scopeUnitId: 'company', phase: 'REQUEST', versionId: 'draft-1' },
-      draft,
     )
     const inheritedKey = ChainsPanel.editorRemountKey(
       { scopeUnitId: 'section-b', phase: 'REQUEST', readOnly: true },
       data.versions.find((row) => row.versionId === 'ops-request') ?? null,
     )
-    assert.notEqual(viewKey, draftKey)
     assert.notEqual(viewKey, inheritedKey)
     assert.match(viewKey, /root-request/)
-    assert.match(draftKey, /draft-1/)
-  })
-})
-
-describe('C9-fix1 Continue editing retains the selected draft', () => {
-  it('opens the selected older draft, not the newest/first draft', () => {
-    const data: ApprovalChainsData = {
-      ...chainsData(),
-      versions: [
-        ...chainsData().versions,
-        {
-          versionId: 'draft-older',
-          scopeUnitId: 'company',
-          phase: 'REQUEST',
-          version: 3,
-          approvalLimitPositionId: 'p-staff',
-          status: 'DRAFT',
-          steps: [{ order: 1, positionId: 'p-staff' }],
-        },
-      ],
-    }
-    assert.equal(typeof ChainsPanel.resolveEditorVersion, 'function')
-    const seed = ChainsPanel.resolveEditorVersion(data.versions, data.units, {
-      scopeUnitId: 'company',
-      phase: 'REQUEST',
-      versionId: 'draft-older',
-    })
-    assert.equal(seed?.versionId, 'draft-older')
-    assert.equal(seed?.approvalLimitPositionId, 'p-staff')
-    assert.deepEqual(seed?.steps, [{ order: 1, positionId: 'p-staff' }])
-
-    const html = renderToStaticMarkup(createElement(ApprovalChainsPanel, {
-      data,
-      initialEditor: { scopeUnitId: 'company', phase: 'REQUEST', versionId: 'draft-older' },
-    }))
-    assert.match(html, /data-editor-version="draft-older"/)
-    assert.match(html, /data-testid="route-editor-step-1"/)
-    assert.doesNotMatch(html, /data-testid="route-editor-step-2"/)
-    assert.doesNotMatch(html, /data-editor-version="draft-1"/)
-  })
-
-  it('Continue editing buttons pass the selected draft version id and remount key uses it', () => {
-    const source = read('src/components/organization/ApprovalChainsPanel.tsx')
-    assert.match(source, /versionId: version\.versionId/)
-    assert.match(source, /editorRemountKey\(/)
-    assert.match(source, /resolveEditorVersion\(/)
   })
 })
 
@@ -1333,6 +1257,9 @@ describe('approval-routes server action source contracts', () => {
   it('imports the clean-start route libs, never the legacy validation/resolver/candidate-groups', () => {
     assert.match(source, /@\/lib\/approval-routes\/definition/)
     assert.match(source, /@\/lib\/approval-routes\/selection/)
+    assert.match(source, /export async function deleteRouteException/)
+    assert.match(source, /requireChainsAdmin/)
+    assert.match(source, /retirePublishedVersions/)
     assert.doesNotMatch(source, /@\/lib\/approval-routes\/validation/)
     assert.doesNotMatch(source, /@\/lib\/approval-routes\/resolver/)
     assert.doesNotMatch(source, /@\/lib\/approval-engine\/candidate-groups/)

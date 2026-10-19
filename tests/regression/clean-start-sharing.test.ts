@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { sharingScopeUnitIds } from '@/lib/organization/sharing'
+import { sharingScopeUnitIds, visibleRequestOriginUnitIds } from '@/lib/organization/sharing'
 import { descendantUnitIds, nearestSharingScopeUnitId, NoSharingScopeError } from '@/lib/organization/hierarchy'
 import type { OrganizationUnitNode } from '@/lib/organization/model'
 
@@ -129,5 +129,34 @@ describe('downward-inclusive sharing scope — fail-closed corrupt/missing input
     sharingScopeUnitIds(specUnits, 'operations')
     sharingScopeUnitIds(specUnits, 'section-a-child')
     assert.deepEqual(JSON.parse(JSON.stringify(specUnits)), before)
+  })
+})
+
+describe('request-origin sharing — department ON vs section OFF', () => {
+  it('sharing ON: Alice in Section A sees Section B requests (same department)', () => {
+    const origins = visibleRequestOriginUnitIds(specUnits, 'section-a')
+    assert.equal(origins.includes('section-b'), true)
+    assert.equal(origins.includes('section-a'), true)
+    assert.equal(origins.includes('operations'), true)
+  })
+
+  it('sharing ON: Bob in Section B sees Section A requests', () => {
+    const origins = visibleRequestOriginUnitIds(specUnits, 'section-b')
+    assert.equal(origins.includes('section-a'), true)
+  })
+
+  it('sharing OFF: sister sections cannot see the origin; bosses on the ancestor chain can', () => {
+    const tree = [
+      u('company', null, { shareRequests: true }),
+      u('operations', 'company', { shareRequests: true }),
+      u('section-a', 'operations', { shareRequests: false }),
+      u('section-b', 'operations', { shareRequests: true }),
+    ]
+    const alice = visibleRequestOriginUnitIds(tree, 'section-a')
+    const bob = visibleRequestOriginUnitIds(tree, 'section-b')
+    const pat = visibleRequestOriginUnitIds(tree, 'operations')
+    assert.equal(alice.includes('section-a'), true)
+    assert.equal(bob.includes('section-a'), false)
+    assert.equal(pat.includes('section-a'), true)
   })
 })

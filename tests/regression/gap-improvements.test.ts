@@ -128,11 +128,10 @@ describe("Gapforimprove regressions", () => {
 	it("notification refresh does not replace an open notification list with loading state", () => {
 		const bell = read("src/components/notifications/notification-bell.tsx");
 
-		assert.match(bell, /hasLoadedNotifications/);
-		assert.match(
-			bell,
-			/if \(!hasLoadedNotifications\) \{\s*setIsLoading\(true\)\s*\}/,
-		);
+		assert.match(bell, /let loaded = false/);
+		assert.match(bell, /if \(!loaded\) setIsLoading\(true\)/);
+		assert.doesNotMatch(bell, /\[userId, hasLoadedNotifications\]/);
+		assert.match(bell, /\}, \[userId\]\)/);
 		assert.match(bell, /<RequestModalRouter/);
 	});
 

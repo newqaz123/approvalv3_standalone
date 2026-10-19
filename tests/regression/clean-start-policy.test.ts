@@ -86,40 +86,49 @@ describe('canSubmitSolutionWork — A5 unit flag inherited; not role, not admin'
   })
 })
 
-describe('canInitiateFinalApproval — active assignment in the request origin unit', () => {
-  it('allows only an active assignment in the request origin unit', () => {
+describe('canInitiateFinalApproval — origin unit or ancestor hierarchy', () => {
+  it('allows an active assignment in the request origin unit', () => {
     assert.equal(canInitiateFinalApproval({
       isActive: true,
       assignmentUnitId: 'sales',
       requestOriginUnitId: 'sales',
+      units,
     }), true)
   })
 
-  it('denies ancestor/descendant visibility, inactive, unassigned, and empty origin', () => {
+  it('allows an ancestor-unit assignment (department/company managers)', () => {
     assert.equal(canInitiateFinalApproval({
       isActive: true,
       assignmentUnitId: 'company',
       requestOriginUnitId: 'sales',
-    }), false)
+      units,
+    }), true)
+  })
+
+  it('denies unrelated branches, inactive, unassigned, and empty origin', () => {
     assert.equal(canInitiateFinalApproval({
       isActive: true,
       assignmentUnitId: 'web',
-      requestOriginUnitId: 'engineering',
+      requestOriginUnitId: 'sales',
+      units,
     }), false)
     assert.equal(canInitiateFinalApproval({
       isActive: false,
       assignmentUnitId: 'sales',
       requestOriginUnitId: 'sales',
+      units,
     }), false)
     assert.equal(canInitiateFinalApproval({
       isActive: true,
       assignmentUnitId: null,
       requestOriginUnitId: 'sales',
+      units,
     }), false)
     assert.equal(canInitiateFinalApproval({
       isActive: true,
       assignmentUnitId: 'sales',
       requestOriginUnitId: '',
+      units,
     }), false)
   })
 })
@@ -179,6 +188,7 @@ describe('extracted action guards use assignment inputs, not departmentType/role
       isActive: true,
       assignmentUnitId: 'sales',
       requestOriginUnitId: 'sales',
+      units,
       status: 'SendBackToRequester',
     })
     assert.equal(allowed.allowed, true)
@@ -187,15 +197,16 @@ describe('extracted action guards use assignment inputs, not departmentType/role
       isActive: true,
       assignmentUnitId: 'company',
       requestOriginUnitId: 'sales',
+      units,
       status: 'SendBackToRequester',
     })
-    assert.equal(ancestorOnly.allowed, false)
-    assert.equal(ancestorOnly.reason, 'WRONG_ROLE')
+    assert.equal(ancestorOnly.allowed, true)
 
     const missingOrigin = existingInitiateFinalApprovalDecision({
       isActive: true,
       assignmentUnitId: 'sales',
       requestOriginUnitId: '',
+      units,
       status: 'SendBackToRequester',
     })
     assert.equal(missingOrigin.allowed, false)
@@ -204,8 +215,9 @@ describe('extracted action guards use assignment inputs, not departmentType/role
   it('RESUBMIT_FINAL_APPROVAL keeps origin membership and rejection evidence', () => {
     const denied = existingResubmitFinalApprovalDecision({
       isActive: true,
-      assignmentUnitId: 'company',
+      assignmentUnitId: 'web',
       requestOriginUnitId: 'sales',
+      units,
       status: 'SendBackToRequester',
       hasFinalApprovalRejection: true,
     })
@@ -215,6 +227,7 @@ describe('extracted action guards use assignment inputs, not departmentType/role
       isActive: true,
       assignmentUnitId: 'sales',
       requestOriginUnitId: 'sales',
+      units,
       status: 'SendBackToRequester',
       hasFinalApprovalRejection: true,
     })

@@ -134,14 +134,15 @@ describe('extracted existing action guards feed existingActionDecisions', () => 
     assert.equal(evaluateRequestAction('APPROVE_REQUEST', context).allowed, false)
   })
 
-  it('blocks a manager who can see descendant requests from initiating final approval without origin-unit assignment', () => {
+  it('allows a parent-unit manager to initiate final approval for a descendant origin', () => {
     const initiation = existingInitiateFinalApprovalDecision({
       isActive: true,
       assignmentUnitId: 'company',
       requestOriginUnitId: 'sales',
+      units,
       status: 'SendBackToRequester',
     })
-    assert.equal(initiation.allowed, false)
+    assert.equal(initiation.allowed, true)
 
     const context: ActionPermissionContext = {
       actor: {
@@ -162,7 +163,7 @@ describe('extracted existing action guards feed existingActionDecisions', () => 
         INITIATE_FINAL_APPROVAL: initiation,
       },
     }
-    assert.equal(evaluateRequestAction('INITIATE_FINAL_APPROVAL', context).allowed, false)
+    assert.equal(evaluateRequestAction('INITIATE_FINAL_APPROVAL', context).allowed, true)
   })
 
   it('keeps solution resubmit on assignment eligibility and rejection evidence', () => {
@@ -191,11 +192,12 @@ describe('extracted existing action guards feed existingActionDecisions', () => 
     assert.equal(evaluateRequestAction('RESUBMIT_SOLUTION', context).allowed, true)
   })
 
-  it('keeps final resubmit on origin membership rather than descendant visibility', () => {
+  it('keeps final resubmit on origin or ancestor membership, not unrelated branches', () => {
     const denied = existingResubmitFinalApprovalDecision({
       isActive: true,
-      assignmentUnitId: 'company',
+      assignmentUnitId: 'web',
       requestOriginUnitId: 'sales',
+      units,
       status: 'SendBackToRequester',
       hasFinalApprovalRejection: true,
     })
@@ -205,6 +207,7 @@ describe('extracted existing action guards feed existingActionDecisions', () => 
       isActive: true,
       assignmentUnitId: 'sales',
       requestOriginUnitId: 'sales',
+      units,
       status: 'SendBackToRequester',
       hasFinalApprovalRejection: true,
     })
@@ -450,6 +453,7 @@ describe('INITIATE_FINAL_APPROVAL capability for origin-unit assignment (I1 re-b
       isActive: true,
       assignmentUnitId: 'sales',
       requestOriginUnitId: 'sales',
+      units,
       status: 'SendBackToRequester',
     })
     assert.deepEqual(decision, { allowed: true, reason: 'ALLOWED' })
@@ -460,20 +464,21 @@ describe('INITIATE_FINAL_APPROVAL capability for origin-unit assignment (I1 re-b
       isActive: true,
       assignmentUnitId: 'sales',
       requestOriginUnitId: '',
+      units,
       status: 'SendBackToRequester',
     })
     assert.equal(decision.allowed, false)
     assert.equal(decision.reason, 'WRONG_ROLE')
   })
 
-  it('still requires origin-unit assignment', () => {
+  it('allows ancestor-unit assignment on the origin chain', () => {
     const decision = existingInitiateFinalApprovalDecision({
       isActive: true,
       assignmentUnitId: 'company',
       requestOriginUnitId: 'sales',
+      units,
       status: 'SendBackToRequester',
     })
-    assert.equal(decision.allowed, false)
-    assert.equal(decision.reason, 'WRONG_ROLE')
+    assert.equal(decision.allowed, true)
   })
 })

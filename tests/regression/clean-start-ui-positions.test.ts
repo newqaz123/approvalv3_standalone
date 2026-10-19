@@ -20,6 +20,8 @@ import {
   changePositionRank,
   createPosition,
   deactivatePosition,
+  deletePosition,
+  reactivatePosition,
   renamePosition,
   type OrganizationPositionMutationDb,
   type WorkspaceSnapshot,
@@ -277,6 +279,8 @@ function makePositionMutationDb(over: {
   const revalidated: string[] = []
   const instanceWrites: string[] = []
   const userRoleWrites: Array<{ userId: string; role: string }> = []
+  const deletedPositionIds: string[] = []
+  const reactivatedPositionIds: string[] = []
   let created = 0
   let exclusive = Promise.resolve()
   const db: OrganizationPositionMutationDb & {
@@ -289,6 +293,8 @@ function makePositionMutationDb(over: {
     revalidated: string[]
     instanceWrites: string[]
     userRoleWrites: Array<{ userId: string; role: string }>
+    deletedPositionIds: string[]
+    reactivatedPositionIds: string[]
     approvalInstances: CapturedApprovalInstance[]
     requestApprovals: CapturedApprovalRow[]
     solutionApprovals: CapturedApprovalRow[]
@@ -315,6 +321,8 @@ function makePositionMutationDb(over: {
     revalidated,
     instanceWrites,
     userRoleWrites,
+    deletedPositionIds,
+    reactivatedPositionIds,
     approvalInstances,
     requestApprovals,
     solutionApprovals,
@@ -394,6 +402,30 @@ function makePositionMutationDb(over: {
       const row = positions.find((candidate) => candidate.id === id)
       if (!row) throw new Error(`missing position ${id}`)
       row.isActive = false
+    },
+    async reactivatePosition(id) {
+      const row = positions.find((candidate) => candidate.id === id)
+      if (!row) throw new Error(`missing position ${id}`)
+      row.isActive = true
+      reactivatedPositionIds.push(id)
+    },
+    async deletePosition(id) {
+      const row = positions.find((candidate) => candidate.id === id)
+      if (!row) throw new Error(`missing position ${id}`)
+      const referenced = assignments.some((candidate) => candidate.positionId === id)
+        || publishedRoutes.some((route) => (
+          route.approvalLimitPositionId === id
+          || route.steps.some((step) => step.positionId === id)
+        ))
+        || approvalInstances.some((candidate) => candidate.originPositionId === id)
+        || requestApprovals.some((candidate) => candidate.requiredPositionId === id)
+        || solutionApprovals.some((candidate) => candidate.requiredPositionId === id)
+        || candidateGroups.some((candidate) => candidate.requiredPositionId === id)
+      if (referenced) {
+        throw new Error('Position is referenced by assignments, routes, or approval history and cannot be deleted')
+      }
+      deletedPositionIds.push(id)
+      positions.splice(positions.indexOf(row), 1)
     },
     // Forbidden persistence recorders (C8-fix1 P2): position administration
     // must never write historical approval rows or user roles. These surface
@@ -530,17 +562,23 @@ describe('PositionAdminPanel component harness', () => {
       assert.match(html, new RegExp(`data-testid="position-deactivate-${id}"`))
     }
     assert.doesNotMatch(html, /data-testid="position-row-p-old"/)
-    assert.doesNotMatch(html, /Old Position/)
+    // Owner-revised: deactivated positions stay visible in an inactive
+    // section with a Reactivate action (never hidden, never deleted).
+    assert.match(html, /data-testid="position-inactive-row-p-old"/)
+    assert.match(html, /Old Position/)
+    assert.match(html, /data-testid="position-reactivate-p-old"/)
     const lead = html.slice(html.indexOf('data-testid="position-row-p-lead"'))
     assert.match(lead, /Lead/)
     assert.match(html, /data-testid="position-rank-p-lead"[^>]*>Rank 2</)
-    assert.match(html, /data-testid="position-assignment-count-p-staff"[^>]*>2 active assignment\(s\)</)
-    assert.match(html, /data-testid="position-assignment-count-p-manager"[^>]*>1 active assignment\(s\)</)
-    assert.match(html, /data-testid="position-assignment-count-p-director"[^>]*>0 active assignment\(s\)</)
-    assert.match(html, /data-testid="position-create-name"/)
-    assert.match(html, /data-testid="position-create-rank"/)
-    assert.match(html, /data-testid="position-create-save"/)
-    assert.match(html, /data-testid="position-panel-close"/)
+    assert.match(html, /data-testid="position-assignment-count-p-staff"[^>]*>2 people hold this title</)
+    assert.match(html, /data-testid="position-assignment-count-p-manager"[^>]*>1 person holds this title</)
+    assert.match(html, /data-testid="position-assignment-count-p-director"[^>]*>0 people hold this title</)
+    // Owner revision: create moved into a dialog opened by the header button;
+    // the name/rank fields live inside it (covered by the e2e journey).
+    assert.match(html, /data-testid="position-create-open"/)
+    assert.doesNotMatch(html, /data-testid="position-panel-close"/)
+    assert.match(html, /data-testid="position-delete-p-old"/)
+    assert.match(html, /data-testid="position-reactivate-p-old"/)
   })
 
   it('blocked rank edit renders team names and route problems adjacent to the rank input; save disabled', () => {
@@ -805,6 +843,112 @@ describe('deactivatePosition fake db', () => {
       () => deactivatePosition({ positionId: 'p-missing' }, db),
       /not found/i,
     )
+  })
+})
+
+describe('reactivatePosition fake db', () => {
+  it('rejects an active rank collision without changing the target or writing an audit', async () => {
+    const db = makePositionMutationDb({
+      positions: [
+        ...fixturePositions(),
+        position('p-active-rank-nine', 'Active Rank Nine', 9),
+      ],
+    })
+    const before = cloneFixture(db)
+    await assert.rejects(
+      () => reactivatePosition({ positionId: 'p-old' }, db),
+      (error: unknown) => {
+        assert.equal(error instanceof OrganizationValidationError, true)
+        assert.match(String(error), /unique/i)
+        return true
+      },
+    )
+    assert.deepEqual(db.positions, before.positions)
+    assert.equal(db.reactivatedPositionIds.length, 0)
+    assert.equal(db.audits.length, 0)
+    assert.deepEqual(db.revalidated, [])
+  })
+
+  it('reactivates an inactive position with an unused rank, audits, and revalidates', async () => {
+    const db = makePositionMutationDb()
+    const result = await reactivatePosition({ positionId: 'p-old' }, db)
+    assert.deepEqual(result, { success: true })
+    assert.equal(db.positions.find((row) => row.id === 'p-old')?.isActive, true)
+    assert.deepEqual(db.reactivatedPositionIds, ['p-old'])
+    assert.equal(db.audits.length, 1)
+    assert.equal(db.audits[0].action, 'position_reactivated')
+    assert.match(db.audits[0].comments, /Old Position/)
+    assert.deepEqual(db.revalidated, ['/admin/organization'])
+  })
+
+  it('rejects a missing position without writing or revalidating', async () => {
+    const db = makePositionMutationDb()
+    const before = cloneFixture(db)
+    await assert.rejects(
+      () => reactivatePosition({ positionId: 'p-missing' }, db),
+      /not found/i,
+    )
+    assert.deepEqual(db.positions, before.positions)
+    assert.deepEqual(db.reactivatedPositionIds, [])
+    assert.equal(db.audits.length, 0)
+    assert.deepEqual(db.revalidated, [])
+  })
+
+  it('keeps already-active reactivation idempotent without calling the writer or auditing', async () => {
+    const db = makePositionMutationDb({
+      positions: [
+        ...fixturePositions(),
+        position('p-other-rank-six', 'Other Rank Six', 6),
+      ],
+    })
+    const before = cloneFixture(db)
+    const result = await reactivatePosition({ positionId: 'p-coordinator' }, db)
+    assert.deepEqual(result, { success: true })
+    assert.deepEqual(db.positions, before.positions)
+    assert.deepEqual(db.reactivatedPositionIds, [])
+    assert.equal(db.audits.length, 0)
+    assert.deepEqual(db.revalidated, ['/admin/organization'])
+  })
+})
+
+describe('deletePosition fake db', () => {
+  it('requires the target to be inactive and leaves active rows untouched', async () => {
+    const db = makePositionMutationDb()
+    await assert.rejects(
+      () => deletePosition({ positionId: 'p-coordinator' }, db),
+      /active.*deactivate.*before deleting/i,
+    )
+    assert.equal(db.positions.some((row) => row.id === 'p-coordinator'), true)
+    assert.deepEqual(db.deletedPositionIds, [])
+    assert.equal(db.audits.length, 0)
+  })
+
+  it('permanently deletes an unreferenced inactive row, audits, and preserves snapshots', async () => {
+    const db = makePositionMutationDb()
+    const before = cloneFixture(db)
+    const result = await deletePosition({ positionId: 'p-old' }, db)
+    assert.deepEqual(result, { success: true })
+    assert.equal(db.positions.some((row) => row.id === 'p-old'), false)
+    assert.deepEqual(db.deletedPositionIds, ['p-old'])
+    assert.equal(db.audits.length, 1)
+    assert.equal(db.audits[0].action, 'position_deleted')
+    assert.match(db.audits[0].comments, /Old Position/)
+    assertCapturedSnapshotsUnchanged(db, before)
+    assert.deepEqual(db.instanceWrites, [])
+  })
+
+  it('refuses an inactive row referenced by captured approval history without mutating it', async () => {
+    const db = makePositionMutationDb()
+    db.candidateGroups[0].requiredPositionId = 'p-old'
+    const before = cloneFixture(db)
+    await assert.rejects(
+      () => deletePosition({ positionId: 'p-old' }, db),
+      /referenced.*approval history/i,
+    )
+    assert.equal(db.positions.some((row) => row.id === 'p-old'), true)
+    assert.deepEqual(db.deletedPositionIds, [])
+    assert.deepEqual(db.candidateGroups, before.candidateGroups)
+    assert.equal(db.audits.length, 0)
   })
 })
 

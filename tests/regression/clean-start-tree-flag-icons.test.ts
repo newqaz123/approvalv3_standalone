@@ -154,13 +154,16 @@ describe('tree flag icons', () => {
 })
 
 describe('settings labels preserved', () => {
-  it('UnitSidePanel keeps the full sharing and solutions settings labels', () => {
+  it('UnitSidePanel keeps concise settings labels and adjacent info controls', () => {
     const html = renderToStaticMarkup(createElement(UnitSidePanel, {
       unit: units[1],
       snapshot: makeSnapshot(),
     }))
-    assert.match(html, /Share requests within this unit and all its descendants/)
+    assert.match(html, />Request visibility<\/label>/)
     assert.match(html, /Can work on solutions/)
+    assert.doesNotMatch(html, /Share requests within this unit and all its descendants/)
+    assert.match(html, /data-testid="unit-share-requests-info"/)
+    assert.match(html, /data-testid="unit-can-work-on-solutions-info"/)
     assert.match(html, /data-testid="unit-share-requests"/)
     assert.match(html, /data-testid="unit-can-work-on-solutions"/)
   })
@@ -168,7 +171,7 @@ describe('settings labels preserved', () => {
   it('the exported sharing label stays the full sentence', () => {
     assert.equal(
       SHARE_REQUESTS_LABEL,
-      'Share requests within this unit and all its descendants',
+      'Share this unit’s requests with the rest of the department',
     )
   })
 })

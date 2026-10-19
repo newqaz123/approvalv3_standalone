@@ -25,7 +25,6 @@ import {
 } from '@/components/organization/UnitSidePanel'
 
 const read = (path: string) => readFileSync(path, 'utf8')
-const SHARE_LABEL = 'Share requests within this unit and all its descendants'
 
 function unit(
   id: string,
@@ -246,7 +245,7 @@ function makeSnapshot(over: Partial<WorkspaceSnapshot> = {}): WorkspaceSnapshot 
 }
 
 describe('UnitSidePanel component harness', () => {
-  it('titles the panel with the unit name, uses exact sharing copy, and shows Inherited from Operations for Section A REQUEST', () => {
+  it('titles the panel with the unit name, uses concise setting labels, and shows Inherited from Operations for Section A REQUEST', () => {
     const snapshot = makeSnapshot()
     const sectionA = snapshot.units.find((row) => row.id === 'section-a')
     assert.ok(sectionA)
@@ -257,16 +256,39 @@ describe('UnitSidePanel component harness', () => {
     // Owner-approved: the drawer title is the unit NAME (no "Manage " prefix).
     assert.match(html, /<h2[^>]*>Section A<\/h2>/)
     assert.doesNotMatch(html, /Manage Section A/)
-    assert.match(html, /Share requests within this unit and all its descendants/)
-    assert.equal(html.includes(SHARE_LABEL), true)
-    assert.doesNotMatch(html, /exclud/i)
-    assert.doesNotMatch(html, /except child/i)
-    assert.doesNotMatch(html, /not include child/i)
+    assert.match(html, />Request visibility<\/label>/)
     assert.match(html, /Can work on solutions/)
+    assert.doesNotMatch(html, /Share this unit’s requests with the rest of the department/)
+    assert.doesNotMatch(html, /People here may submit and work on solutions\./)
     assert.match(html, /Inherited from Operations/)
-    assert.match(html, />View</)
-    assert.match(html, />Customize</)
+    assert.match(html, /Approval chain exceptions/)
+    assert.match(html, /Read-only here — edit chains in Approval chains\./)
+    assert.doesNotMatch(html, /data-testid="route-view-/)
+    assert.doesNotMatch(html, /data-testid="route-customize-/)
     assert.doesNotMatch(html, /ApprovalChainsPanel/)
+  })
+
+  it('keeps setting explanations in focusable, tappable tooltip triggers', () => {
+    const snapshot = makeSnapshot()
+    const sectionA = snapshot.units.find((row) => row.id === 'section-a')
+    assert.ok(sectionA)
+    const html = renderToStaticMarkup(createElement(UnitSidePanel, {
+      unit: sectionA,
+      snapshot,
+    }))
+    assert.match(html, /data-testid="unit-share-requests-info"/)
+    assert.match(html, /data-testid="unit-can-work-on-solutions-info"/)
+    assert.match(html, /aria-label="Request visibility information"/)
+    assert.match(html, /aria-label="Solution capability information"/)
+
+    const panel = read('src/components/organization/UnitSidePanel.tsx')
+    assert.match(panel, /On: people in this unit and sister units in the same department can see these requests\./)
+    assert.match(panel, /Off: only this unit and managers above it/)
+    assert.match(panel, /Does not grant approval rights\./)
+    assert.match(panel, /Grants people in this unit permission to submit and work on solutions/)
+    assert.match(panel, /does not grant approval rights\./)
+    assert.match(panel, /<TooltipTrigger asChild>/)
+    assert.match(panel, /type="button"/)
   })
 
   it('lists only active direct assignees as manager candidates', () => {
@@ -429,9 +451,10 @@ describe('createOrganizationUnit / updateUnitSettings / setUnitManager fake db',
 describe('C5 source contracts', () => {
   it('keeps exact toggle copy, leftover SECTION, Serializable uniqueness, and validateOrganization before manager write', () => {
     const panel = read('src/components/organization/UnitSidePanel.tsx')
-    assert.match(panel, /Share requests within this unit and all its descendants/)
-    assert.doesNotMatch(panel, /exclud/i)
+    assert.match(panel, /Request visibility/)
     assert.match(panel, /Can work on solutions/)
+    assert.match(panel, /export const SHARE_REQUESTS_LABEL/)
+    assert.doesNotMatch(panel, /<span>\{SHARE_REQUESTS_LABEL\}<\/span>/)
     assert.doesNotMatch(panel, /Manage \$\{/, 'unit panel title must be the unit name alone')
     assert.doesNotMatch(panel, /ApprovalChainsPanel/)
 

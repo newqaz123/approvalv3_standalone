@@ -498,7 +498,7 @@ describe('flowchart organization UI', () => {
     assert.equal(g.overflowDisplay, 'flex', `overflow must be exposed below md when the card is wider than 24rem (got ${g.overflowDisplay})`)
   })
 
-  it('keeps the manage surface sticky with viewport-bounded internal scrolling', () => {
+  it('keeps the manage surface viewport-bounded with internal scrolling', () => {
     const panel = renderToStaticMarkup(createElement(UnitSidePanel, {
       unit: units[1],
       snapshot,
@@ -508,9 +508,15 @@ describe('flowchart organization UI', () => {
     assert.match(panel, /data-testid="unit-side-panel"[^>]*max-h-\[calc\(100vh-2rem\)\]/)
 
     const workspace = readFileSync('src/components/organization/OrganizationWorkspace.tsx', 'utf8')
-    assert.match(workspace, /data-testid="organization-manage-drawer"/)
-    assert.match(workspace, /lg:sticky/)
-    assert.match(workspace, /overflow-y-auto/)
+    assert.match(workspace, /organization-manage-drawer/)
+    assert.match(workspace, /InTreeModal/)
+    // Scrolling is owned by the InTreeModal overlay (the drawer card must NOT
+    // create its own overflow ancestor, which would defeat the sticky close lane).
+    assert.doesNotMatch(workspace, /organization-manage-drawer[^\n]*overflow/)
+    const modal = readFileSync('src/components/organization/InTreeModal.tsx', 'utf8')
+    assert.match(modal, /max-h-\[calc\(100dvh-2rem\)\]/)
+    assert.match(modal, /overflow-y-auto/)
+    assert.doesNotMatch(modal, /sticky top-0/)
   })
 
   it('preserves collapse mounted descendants, queued rename, and person-once teams', () => {

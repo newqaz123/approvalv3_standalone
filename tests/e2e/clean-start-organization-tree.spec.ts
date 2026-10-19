@@ -385,13 +385,16 @@ test.describe("clean-start unit side panel", () => {
 			await expect(panel.getByRole("heading", { name: "Operations", exact: true })).toBeVisible();
 
 			const sectionAHeader = page.getByTestId(`unit-header-${SECTION_A_ID}`);
+			await page.keyboard.press("Escape");
 			await sectionAHeader.hover();
 			await page.getByTestId(`unit-manage-${SECTION_A_ID}`).click();
 			await expect(panel.getByRole("heading", { name: "Section A", exact: true })).toBeVisible();
-			await expect(page.getByTestId("route-source-REQUEST")).toHaveText("Inherited from Operations");
-			await expect(panel.getByText("Share requests within this unit and all its descendants")).toBeVisible();
+			await expect(panel.getByTestId("unit-exception-chain-REQUEST")).toContainText("Inherited from Operations");
+			await expect(panel.getByText("Request visibility", { exact: true })).toBeVisible();
+			await expect(panel.getByTestId("unit-share-requests-info")).toBeVisible();
 
 			const childHeader = page.getByTestId(`unit-header-${SECTION_A_CHILD_ID}`);
+			await page.keyboard.press("Escape");
 			await childHeader.hover();
 			await page.getByTestId(`unit-manage-${SECTION_A_CHILD_ID}`).click();
 			await expect(panel.getByRole("heading", { name: "Section A Child", exact: true })).toBeVisible();
@@ -532,8 +535,14 @@ test.describe("clean-start position administration", () => {
 			await page.getByTestId("header-positions").click();
 			const panel = page.getByTestId("position-admin-panel");
 			await expect(panel).toBeVisible({ timeout: 20_000 });
+			await page.getByTestId("position-create-open").click();
 			await page.getByTestId("position-create-name").fill(NIGHT_SHIFT_NAME);
-			await page.getByTestId("position-create-rank").fill("7");
+			// Rank stepper: six + clicks walk 1 → 7.
+			const rankUp = page.getByTestId("position-create-rank-increase");
+			for (let step = 0; step < 6; step += 1) {
+				await rankUp.click();
+			}
+			await expect(page.getByTestId("position-create-rank")).toHaveText("7");
 			await page.getByTestId("position-create-save").click();
 			await expect(panel.getByTestId("position-list")).toContainText(NIGHT_SHIFT_NAME, {
 				timeout: 15_000,
@@ -596,7 +605,6 @@ test.describe("clean-start approval chains panel", () => {
 			await expect(page.getByTestId("chains-root-FINAL")).toBeVisible();
 			await expect(panel).toContainText(/not a global on\/off switch/i);
 			await expect(panel).toContainText(/affects future attempts only/i);
-			await expect(page.getByTestId("chains-draft-list-REQUEST")).toBeVisible();
 			await expect(page.getByTestId("chains-published-list-REQUEST")).toBeVisible();
 
 			await page.getByTestId("chains-root-customize-REQUEST").click();
@@ -611,6 +619,20 @@ test.describe("clean-start approval chains panel", () => {
 			await expect(conflicts).toBeVisible();
 			await expect(conflicts).toContainText("Director");
 			await expect(conflicts).toContainText("EXCEEDS_LIMIT");
+
+			// A nested Radix Select must consume its Escape without dismissing the
+			// enclosing editor, so this unsaved limit change remains in the draft.
+			const editor = page.getByTestId("route-editor-cs-unit-company-REQUEST");
+			await page.getByTestId("route-editor-limit-select").click();
+			await expect(page.getByRole("listbox")).toBeVisible();
+			await page.keyboard.press("Escape");
+			await expect(page.getByRole("listbox")).toHaveCount(0);
+			await expect(editor).toBeVisible();
+			await expect(page.getByTestId("route-editor-limit-select")).toContainText("Manager (rank 3)");
+
+			// A later Escape, with no nested popup handling it, dismisses the editor.
+			await page.keyboard.press("Escape");
+			await expect(editor).toHaveCount(0);
 		} finally {
 			await session.context.close();
 		}
@@ -927,7 +949,8 @@ test.describe("clean-start C10 full journey", () => {
 			await page.getByTestId("assignment-team-select").click();
 			await page.getByRole("option", { name: "Line A" }).click();
 			await page.getByTestId("assignment-save").click();
-			await expect(assignPanel.getByRole("heading", { name: "System Admin" })).toBeVisible({
+			// Owner-approved modal UX: a completed assign closes the dialog.
+			await expect(page.getByTestId("person-assignment-panel")).toHaveCount(0, {
 				timeout: 15_000,
 			});
 
@@ -964,7 +987,10 @@ test.describe("clean-start C10 full journey", () => {
 			await expect(confirmation.getByTestId("assignment-change-after")).toContainText("Section B");
 			await expect(confirmation.getByTestId("assignment-change-after")).toContainText("None");
 			await page.getByTestId("assignment-move-confirm").click();
-			await expect(confirmation).toHaveCount(0, { timeout: 15_000 });
+			// Owner-approved modal UX: a confirmed move closes the dialog.
+			await expect(page.getByTestId("person-assignment-panel")).toHaveCount(0, {
+				timeout: 15_000,
+			});
 			await expect(
 				page.getByTestId(`unit-people-${SECTION_B_ID}`).getByTestId(`person-chip-${adminId}`),
 			).toBeVisible({ timeout: 15_000 });
@@ -1056,7 +1082,7 @@ test.describe("clean-start C10 full journey", () => {
 		}
 	});
 
-	test("Approval chains: root default draft, limit conflict blocks publish, submitter tests, publish, drafts distinct", async ({
+	test("Approval chains: publish-direct root default edit, limit conflict blocks publish, submitter tests, publish", async ({
 		browser,
 	}) => {
 		test.setTimeout(240_000);
@@ -1071,19 +1097,13 @@ test.describe("clean-start C10 full journey", () => {
 			const panel = page.getByTestId("chains-panel");
 			await expect(panel).toBeVisible({ timeout: 20_000 });
 
-			// Edit the root REQUEST default: save a draft first.
+			// Owner-revised publish-direct flow: no drafts — the editor writes a
+			// new published version directly.
 			await page.getByTestId("chains-root-customize-REQUEST").click();
 			const editor = page.getByTestId("route-editor-cs-unit-company-REQUEST");
 			await expect(editor).toBeVisible({ timeout: 15_000 });
 			await expect(editor).toContainText("Lead");
 			await expect(editor).toContainText("Director");
-
-			await page.getByTestId("route-editor-save-draft").click();
-			await expect(editor.getByText(/Draft saved \(version/)).toBeVisible({ timeout: 15_000 });
-			const draftList = page.getByTestId("chains-draft-list-REQUEST");
-			await expect(draftList.locator('[data-testid^="chains-draft-"]')).not.toHaveCount(0, {
-				timeout: 15_000,
-			});
 
 			// Lower the approval limit below a step: Publish disabled with the
 			// conflict list.
@@ -1097,8 +1117,7 @@ test.describe("clean-start C10 full journey", () => {
 			await expect(conflicts.getByTestId("route-editor-conflict-3")).toContainText("Director");
 
 			// Restore the limit before the side-effect-free submitter test: the
-		// server refuses to resolve a draft whose steps exceed its limit, so the
-		// test runs on the corrected draft.
+			// editor state must be publishable before running the tests.
 			await page.getByTestId("route-editor-limit-select").click();
 			await page.getByRole("option", { name: /Director \(rank 4\)/ }).click();
 			await expect(page.getByTestId("route-editor-conflicts")).toHaveCount(0);
@@ -1112,8 +1131,9 @@ test.describe("clean-start C10 full journey", () => {
 			await page.getByTestId("submitter-test-run").click();
 			const bobResult = page.getByTestId("submitter-test-result");
 			await expect(bobResult).toBeVisible({ timeout: 15_000 });
-			// The dialog tests the CURRENT editor draft: it substitutes at the
-			// nearest published scope on the submitter's branch (Operations).
+			// The dialog tests the CURRENT editor state (in-memory preview; no
+			// persisted draft anymore): it substitutes at the nearest published
+			// scope on the submitter's branch (Operations).
 			await expect(page.getByTestId("submitter-test-source")).toContainText(
 				"Draft (would substitute at Operations)",
 			);
@@ -1149,7 +1169,6 @@ test.describe("clean-start C10 full journey", () => {
 				1,
 				{ timeout: 15_000 },
 			);
-			await expect(draftList.locator('[data-testid^="chains-draft-"]')).not.toHaveCount(0);
 
 			const prisma = prismaClient();
 			try {

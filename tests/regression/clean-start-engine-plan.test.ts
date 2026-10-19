@@ -94,6 +94,7 @@ function originFor(path: ReportingPath): PhaseOrigin {
 
 function createFakeDb(input: {
   path?: ReportingPath
+  origin?: PhaseOrigin
   route?: ResolvedApprovalRoute
   positions?: PositionNode[]
   ownTeam?: readonly AssignmentNode[]
@@ -106,7 +107,7 @@ function createFakeDb(input: {
     ownTeamCalls,
     get findStepCalls() { return findStepCalls },
     async resolvePhaseOrigin() {
-      return originFor(path)
+      return input.origin ?? originFor(path)
     },
     async resolvePublishedRoute() {
       return input.route ?? publishedRoute
@@ -270,6 +271,44 @@ describe('clean-start engine plan — builder + persist', () => {
     assert.deepEqual([...plan.steps[0].candidateUserIds], ['u-webmgr', 'u-engmgr'])
   })
 
+  it('2b. FINAL initiator rank does not skip the requester chain or auto-approve', async () => {
+    const finalRoute: ResolvedApprovalRoute = {
+      ...publishedRoute,
+      phase: 'FINAL',
+      steps: [
+        { order: 1, positionId: 'p-mgr' },
+        { order: 2, positionId: 'p-dir' },
+      ],
+    }
+    const path: ReportingPath = {
+      ...teamPath,
+      steps: [
+        ...teamPath.steps,
+        { kind: 'UNIT_MANAGER', unitId: 'company', assignmentId: 'a-dir', userId: 'u-dir', positionId: 'p-dir' },
+      ],
+    }
+    const db = createFakeDb({
+      path,
+      route: finalRoute,
+      accounts: [...allActiveAccounts, { id: 'u-dir', isActive: true }],
+      origin: {
+        phase: 'FINAL',
+        originUserId: path.originUserId,
+        originUnitId: path.unitId,
+        path,
+        requestId: 'req-1',
+        source: 'FINAL_INITIATOR',
+      },
+    })
+    const plan = await buildNormalApprovalInstance(db, {
+      requestId: 'req-1',
+      phase: 'FINAL',
+      originUserId: 'u-dir',
+    })
+    assert.equal(plan.state, 'PENDING')
+    assert.deepEqual(plan.steps.map((step) => step.requiredPositionId), ['p-mgr', 'p-dir'])
+  })
+
   it('3. vacant required step is recorded VACANT_POSITION (not-required vs vacant distinction)', async () => {
     const db = createFakeDb({
       accounts: [
@@ -423,7 +462,7 @@ describe('clean-start engine plan — builder + persist', () => {
     assert.equal('integrityVersion' in tx.requestApprovals[0], false)
     assert.equal('requiredLevel' in tx.requestApprovals[0], false)
     assert.equal('isCustomChain' in tx.requestApprovals[0], false)
-    assert.equal('isFinalApproval' in tx.requestApprovals[0], false)
+    assert.equal(tx.requestApprovals[0].isFinalApproval, false) // REQUEST phase: explicitly false (FINAL-only flag)
     assert.equal('requiredPosition' in tx.requestApprovals[0], false)
 
     const second = await persistApprovalInstance(tx, plan)
@@ -465,6 +504,55 @@ describe('clean-start engine plan — builder + persist', () => {
     assert.equal('requiredPosition' in selfRow, false)
     assert.equal(tx.instances[0].originPositionId, 'p-dir')
     assert.equal('originContext' in tx.instances[0], false)
+  })
+
+  it('7c. FINAL request rows persist isFinalApproval=true (pending and AUTO_APPROVED); REQUEST stays false; SOLUTION rows carry no flag', async () => {
+    // FINAL, normal pending steps: every request_approvals row must be flagged.
+    const finalPending = await buildNormalApprovalInstance(createFakeDb({}), { ...buildInput, phase: 'FINAL' })
+    assert.equal(finalPending.phase, 'FINAL')
+    assert.equal(finalPending.state, 'PENDING')
+    const pendingTx = createFakeTx({})
+    await persistApprovalInstance(pendingTx, finalPending)
+    assert.equal(pendingTx.requestApprovals.length, 2)
+    for (const row of pendingTx.requestApprovals) {
+      assert.equal(row.status, 'pending')
+      assert.equal(row.isFinalApproval, true)
+    }
+
+    // FINAL, origin at limit rank (AUTO_APPROVED): the group-less approved self row must be flagged too.
+    const finalAuto = await buildNormalApprovalInstance(
+      createFakeDb({ path: { ...teamPath, positionId: 'p-dir' } }),
+      { ...buildInput, phase: 'FINAL' },
+    )
+    assert.equal(finalAuto.state, 'AUTO_APPROVED')
+    const autoTx = createFakeTx({})
+    await persistApprovalInstance(autoTx, finalAuto)
+    assert.equal(autoTx.requestApprovals.length, 1)
+    assert.equal(autoTx.requestApprovals[0].status, 'approved')
+    assert.equal(autoTx.requestApprovals[0].approverId, 'u-origin')
+    assert.equal(autoTx.requestApprovals[0].isFinalApproval, true)
+
+    // REQUEST rows are never flagged.
+    const requestPlan = await buildNormalApprovalInstance(createFakeDb({}), buildInput)
+    const requestTx = createFakeTx({})
+    await persistApprovalInstance(requestTx, requestPlan)
+    assert.equal(requestTx.requestApprovals.length, 2)
+    for (const row of requestTx.requestApprovals) {
+      assert.equal(row.isFinalApproval, false)
+    }
+
+    // SOLUTION rows go to solution_approvals and must not carry the request-only flag.
+    const solutionPlan = await buildNormalApprovalInstance(
+      createFakeDb({}),
+      { requestId: 'req-1', solutionId: 'sol-1', phase: 'SOLUTION', originUserId: 'u-origin' },
+    )
+    const solutionTx = createFakeTx({})
+    await persistApprovalInstance(solutionTx, solutionPlan)
+    assert.equal(solutionTx.requestApprovals.length, 0)
+    assert.equal(solutionTx.solutionApprovals.length, 2)
+    for (const row of solutionTx.solutionApprovals) {
+      assert.equal('isFinalApproval' in row, false)
+    }
   })
 
   it('missing origin position rank fails closed with ApprovalEnginePlanError', async () => {
@@ -519,6 +607,8 @@ describe('clean-start engine plan — builder + persist', () => {
     assert.doesNotMatch(src, /from ['"]\.\/(legacy|transactions|instances|candidate-groups|phase-adapters|phase-origin|types)['"]/)
     assert.doesNotMatch(src, /integrityVersion/)
     assert.doesNotMatch(src, /isCustomChain/)
-    assert.doesNotMatch(src, /isFinalApproval/)
+    // isFinalApproval ban lifted: the request branch now intentionally writes the
+    // FINAL-phase flag (request_approvals.isFinalApproval); see 7c. The legacy
+    // columns above still must not appear.
   })
 })

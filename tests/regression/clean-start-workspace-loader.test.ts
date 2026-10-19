@@ -44,14 +44,67 @@ type RouteRow = {
   scopeUnitId: string
   phase: ApprovalPhase
   status: 'DRAFT' | 'PUBLISHED' | 'RETIRED'
+  version?: number
+  approvalLimitPositionId?: string | null
+  steps?: ReadonlyArray<{ order: number; positionId: string }>
 }
 
 const routes: RouteRow[] = [
-  { id: 'rv-root-request', scopeUnitId: 'company', phase: 'REQUEST', status: 'PUBLISHED' },
-  { id: 'rv-root-solution', scopeUnitId: 'company', phase: 'SOLUTION', status: 'PUBLISHED' },
-  { id: 'rv-root-final', scopeUnitId: 'company', phase: 'FINAL', status: 'PUBLISHED' },
-  { id: 'rv-ops-request', scopeUnitId: 'ops', phase: 'REQUEST', status: 'PUBLISHED' },
-  { id: 'rv-ops-request-draft', scopeUnitId: 'ops', phase: 'REQUEST', status: 'DRAFT' },
+  {
+    id: 'rv-root-request',
+    scopeUnitId: 'company',
+    phase: 'REQUEST',
+    status: 'PUBLISHED',
+    approvalLimitPositionId: 'p-lead',
+    steps: [
+      { order: 1, positionId: 'p-staff' },
+      { order: 2, positionId: 'p-lead' },
+    ],
+  },
+  {
+    id: 'rv-root-solution',
+    scopeUnitId: 'company',
+    phase: 'SOLUTION',
+    status: 'PUBLISHED',
+    approvalLimitPositionId: 'p-lead',
+    steps: [{ order: 1, positionId: 'p-staff' }],
+  },
+  {
+    id: 'rv-root-final',
+    scopeUnitId: 'company',
+    phase: 'FINAL',
+    status: 'PUBLISHED',
+    approvalLimitPositionId: 'p-lead',
+    steps: [{ order: 1, positionId: 'p-lead' }],
+  },
+  {
+    id: 'rv-ops-request',
+    scopeUnitId: 'ops',
+    phase: 'REQUEST',
+    status: 'PUBLISHED',
+    approvalLimitPositionId: 'p-lead',
+    // Deliberately supplied out of order to pin the snapshot's ordered view.
+    steps: [
+      { order: 2, positionId: 'p-lead' },
+      { order: 1, positionId: 'p-staff' },
+    ],
+  },
+  {
+    id: 'rv-ops-request-draft',
+    scopeUnitId: 'ops',
+    phase: 'REQUEST',
+    status: 'DRAFT',
+    approvalLimitPositionId: 'p-lead',
+    steps: [{ order: 1, positionId: 'p-staff' }],
+  },
+  {
+    id: 'rv-section-final-draft',
+    scopeUnitId: 'section-a',
+    phase: 'FINAL',
+    status: 'DRAFT',
+    approvalLimitPositionId: 'p-lead',
+    steps: [{ order: 1, positionId: 'p-lead' }],
+  },
 ]
 
 function makeDb(over: Partial<OrganizationWorkspaceDb> = {}): OrganizationWorkspaceDb {
@@ -80,21 +133,52 @@ function routeSource(
 describe('clean-start organization workspace loader', () => {
   it('classifies routeSources with the B2 nearest-published walk', async () => {
     const snapshot = await getOrganizationWorkspaceData(makeDb())
+    const rootRequest = routeSource(snapshot, 'company', 'REQUEST')
+    assert.equal(rootRequest.source, 'ROOT_DEFAULT')
+    assert.equal(rootRequest.sourceUnitId, 'company')
+
     const sectionRequest = routeSource(snapshot, 'section-a', 'REQUEST')
     assert.equal(sectionRequest.source, 'INHERITED')
     assert.equal(sectionRequest.sourceUnitId, 'ops')
     assert.equal(sectionRequest.publishedVersionId, 'rv-ops-request')
+    assert.deepEqual(
+      sectionRequest.steps?.map((step) => ({ order: step.order, name: step.positionName })),
+      [
+        { order: 1, name: 'Staff' },
+        { order: 2, name: 'Lead' },
+      ],
+    )
+    assert.equal(sectionRequest.approvalLimitPositionId, 'p-lead')
+    assert.equal(sectionRequest.approvalLimitName, 'Lead')
 
     const opsRequest = routeSource(snapshot, 'ops', 'REQUEST')
     assert.equal(opsRequest.source, 'CUSTOM')
     assert.equal(opsRequest.hasDraft, true)
     assert.equal(opsRequest.publishedVersionId, 'rv-ops-request')
+    assert.deepEqual(opsRequest.steps?.map((step) => step.positionName), ['Staff', 'Lead'])
+    assert.equal(opsRequest.approvalLimitName, 'Lead')
 
     const sectionSolution = routeSource(snapshot, 'section-a', 'SOLUTION')
     assert.equal(sectionSolution.source, 'ROOT_DEFAULT')
     assert.equal(sectionSolution.sourceUnitId, 'company')
     assert.equal(sectionSolution.publishedVersionId, 'rv-root-solution')
     assert.equal(sectionSolution.hasDraft, false)
+    assert.deepEqual(sectionSolution.steps?.map((step) => step.positionName), ['Staff'])
+    assert.equal(sectionSolution.approvalLimitName, 'Lead')
+
+    const sectionFinal = routeSource(snapshot, 'section-a', 'FINAL')
+    assert.equal(sectionFinal.source, 'ROOT_DEFAULT')
+    assert.equal(sectionFinal.hasDraft, true, 'a draft-only local scope must not override the published ancestor')
+    assert.equal(sectionFinal.publishedVersionId, 'rv-root-final')
+
+    const withoutFinal = await getOrganizationWorkspaceData(makeDb({
+      loadRouteVersions: async () => routes.filter((route) => route.phase !== 'FINAL'),
+    }))
+    assert.equal(
+      withoutFinal.routeSources.some((row) => row.unitId === 'section-a' && row.phase === 'FINAL'),
+      false,
+      'missing published routes should omit that phase instead of throwing or inventing a fallback',
+    )
   })
 
   it('lists active users without active assignments as unassignedUsers', async () => {

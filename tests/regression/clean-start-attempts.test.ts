@@ -2,7 +2,7 @@
 // In-memory fakes only: NO Prisma, NO database, NO env, NO schema/server ops.
 // REQUEST origin = stored requesterId. SOLUTION origin = stored submittedById
 // (never an authorized reviser; mismatched trusted input rejected). FINAL
-// origin = authenticated trusted initiator. Custom chains: CUSTOM_PERSON,
+// origin document = stored requester; skip rank = initiator. Custom chains: CUSTOM_PERSON,
 // ordered requiredApproverId, never AUTO_APPROVED, skip route resolution.
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
@@ -276,21 +276,22 @@ describe('resolvePhaseOrigin', () => {
     assert.equal(matched.originUserId, 'u-submitter')
   })
 
-  it('FINAL origin is the authenticated trusted initiator', async () => {
+  it('FINAL origin uses the requester chain and the initiator skip rank', async () => {
     const origin = await resolvePhaseOrigin(originRepo({}), {
       phase: 'FINAL',
       requestId: 'r1',
       originUserId: 'u-initiator',
     })
     assert.equal(origin.source, 'FINAL_INITIATOR')
-    assert.equal(origin.originUserId, 'u-initiator')
+    assert.equal(origin.originUserId, 'u-requester')
     assert.equal(origin.originUnitId, 'ops')
+    assert.equal(origin.path.originUserId, 'u-requester')
   })
 
-  it('FINAL origin rejects missing trusted initiator input', async () => {
+  it('FINAL origin rejects missing initiator input', async () => {
     await assert.rejects(
       () => resolvePhaseOrigin(originRepo({}), { phase: 'FINAL', requestId: 'r1' }),
-      /final initiator|trusted initiator/i,
+      /initiator/i,
     )
   })
 })
@@ -331,6 +332,84 @@ describe('createCustomPersonAttempt', () => {
     )
     assert.equal(tx.instances[0]?.routingMode, 'CUSTOM_PERSON')
     assert.equal(tx.instances[0]?.state, 'PENDING')
+  })
+
+  it('custom FINAL: request rows explicitly carry isFinalApproval true, ordered ids, pending, CUSTOM_PERSON, instance phase FINAL', async () => {
+    const origin: PhaseOrigin = {
+      phase: 'FINAL',
+      originUserId: 'u-requester',
+      originUnitId: 'ops',
+      path: requesterPath,
+      requestId: 'r1',
+      source: 'FINAL_INITIATOR',
+    }
+    const tx = createAttemptTx({ origin })
+    await createCustomPersonAttempt(tx, {
+      requestId: 'r1',
+      phase: 'FINAL',
+      orderedApproverIds: ['u-approver-b', 'u-approver-a'],
+      actorId: 'u-initiator',
+    })
+    assert.equal(tx.requestApprovals.length, 2)
+    assert.deepEqual(
+      tx.requestApprovals.map((row) => ({
+        requiredApproverId: row.requiredApproverId,
+        order: row.order,
+        status: row.status,
+        routingMode: row.routingMode,
+        isFinalApproval: row.isFinalApproval,
+      })),
+      [
+        { requiredApproverId: 'u-approver-b', order: 1, status: 'pending', routingMode: 'CUSTOM_PERSON', isFinalApproval: true },
+        { requiredApproverId: 'u-approver-a', order: 2, status: 'pending', routingMode: 'CUSTOM_PERSON', isFinalApproval: true },
+      ],
+    )
+    assert.equal(tx.instances[0]?.phase, 'FINAL')
+    assert.equal(tx.instances[0]?.routingMode, 'CUSTOM_PERSON')
+    assert.equal(tx.instances[0]?.state, 'PENDING')
+  })
+
+  it('custom REQUEST: request rows carry isFinalApproval false (explicit request-phase classification)', async () => {
+    const origin: PhaseOrigin = {
+      phase: 'REQUEST',
+      originUserId: 'u-requester',
+      originUnitId: 'ops',
+      path: requesterPath,
+      requestId: 'r1',
+      source: 'REQUESTER',
+    }
+    const tx = createAttemptTx({ origin })
+    await createCustomPersonAttempt(tx, {
+      requestId: 'r1',
+      phase: 'REQUEST',
+      orderedApproverIds: ['u-approver-a'],
+      actorId: 'u-requester',
+    })
+    assert.equal(tx.requestApprovals.length, 1)
+    assert.equal(tx.requestApprovals[0].isFinalApproval, false)
+    assert.equal(tx.instances[0]?.phase, 'REQUEST')
+  })
+
+  it('custom SOLUTION: solution rows never receive the request-only isFinalApproval flag', async () => {
+    const origin: PhaseOrigin = {
+      phase: 'SOLUTION',
+      originUserId: 'u-submitter',
+      originUnitId: 'eng',
+      path: submitterPath,
+      requestId: 'r1',
+      source: 'SOLUTION_SUBMITTER',
+    }
+    const tx = createAttemptTx({ origin })
+    await createCustomPersonAttempt(tx, {
+      requestId: 'r1',
+      solutionId: 's1',
+      phase: 'SOLUTION',
+      orderedApproverIds: ['u-approver-a'],
+      actorId: 'u-submitter',
+    })
+    assert.equal(tx.solutionApprovals.length, 1)
+    assert.equal(Object.prototype.hasOwnProperty.call(tx.solutionApprovals[0], 'isFinalApproval'), false)
+    assert.equal(tx.requestApprovals.length, 0)
   })
 })
 
@@ -388,12 +467,12 @@ describe('normal attempt creators use B4 builder+persist', () => {
     assert.ok(tx.instances.some((row) => row.originAssignmentId === 'a-requester'))
   })
 
-  it('createFinalApprovalAttempt uses the trusted initiator origin', async () => {
+  it('createFinalApprovalAttempt persists the requester origin and queries the initiator', async () => {
     const origin: PhaseOrigin = {
       phase: 'FINAL',
-      originUserId: 'u-initiator',
+      originUserId: 'u-requester',
       originUnitId: 'ops',
-      path: initiatorPath,
+      path: requesterPath,
       requestId: 'r1',
       source: 'FINAL_INITIATOR',
     }
@@ -405,7 +484,7 @@ describe('normal attempt creators use B4 builder+persist', () => {
     })
     assert.equal(result.instance.phase, 'FINAL')
     assert.equal(tx.originCalls[0]?.originUserId, 'u-initiator')
-    assert.equal(tx.instances[0]?.originUserId, 'u-initiator')
+    assert.equal(tx.instances[0]?.originUserId, 'u-requester')
   })
 })
 

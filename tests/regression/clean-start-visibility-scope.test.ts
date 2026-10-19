@@ -8,7 +8,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import type { Prisma } from '@prisma/client'
-import { sharingScopeUnitIds } from '@/lib/organization/sharing'
+import { sharingScopeUnitIds, visibleRequestOriginUnitIds } from '@/lib/organization/sharing'
 import { descendantUnitIds } from '@/lib/organization/hierarchy'
 import type { OrganizationUnitNode } from '@/lib/organization/model'
 import {
@@ -98,6 +98,7 @@ function actor(over: Partial<RequestVisibilityActor> & Pick<RequestVisibilityAct
     assignmentUnitId: null,
     sharingScopeUnitIds: [],
     managedUnitIds: [],
+    canWorkOnSolutions: false,
     ...over,
   }
 }
@@ -130,22 +131,22 @@ function fakeScopeDb(): RequestVisibilityDb {
     pat: actor({
       id: 'pat',
       assignmentUnitId: 'operations',
-      sharingScopeUnitIds: sharingScopeUnitIds(specUnits, 'operations'),
+      sharingScopeUnitIds: visibleRequestOriginUnitIds(specUnits, 'operations'),
     }),
     alice: actor({
       id: 'alice',
       assignmentUnitId: 'section-a',
-      sharingScopeUnitIds: sharingScopeUnitIds(specUnits, 'section-a'),
+      sharingScopeUnitIds: visibleRequestOriginUnitIds(specUnits, 'section-a'),
     }),
     bob: actor({
       id: 'bob',
       assignmentUnitId: 'section-b',
-      sharingScopeUnitIds: sharingScopeUnitIds(specUnits, 'section-b'),
+      sharingScopeUnitIds: visibleRequestOriginUnitIds(specUnits, 'section-b'),
     }),
     'ops-manager': actor({
       id: 'ops-manager',
       assignmentUnitId: 'section-a',
-      sharingScopeUnitIds: sharingScopeUnitIds(specUnits, 'section-a'),
+      sharingScopeUnitIds: visibleRequestOriginUnitIds(specUnits, 'section-a'),
       managedUnitIds: descendantUnitIds(specUnits, 'operations'),
     }),
     'eng-outsider': actor({
@@ -159,7 +160,7 @@ function fakeScopeDb(): RequestVisibilityDb {
       id: 'inactive-pat',
       isActive: false,
       assignmentUnitId: 'operations',
-      sharingScopeUnitIds: sharingScopeUnitIds(specUnits, 'operations'),
+      sharingScopeUnitIds: visibleRequestOriginUnitIds(specUnits, 'operations'),
     }),
   }
 
@@ -230,20 +231,19 @@ describe('sharing-scope visibility — spec matrix (Pat/Alice/Bob)', () => {
     assert.equal(await canViewRequestByPredicate(db, 'pat', 'req-a-child'), true)
   })
 
-  it('Alice in Section A sees A (and descendants), never sibling Section B', async () => {
+  it('Alice in Section A sees A and sibling Section B when sharing is ON', async () => {
     const db = fakeScopeDb()
-    assert.equal(sharingScopeUnitIds(specUnits, 'section-a').includes('section-b'), false)
+    assert.equal(visibleRequestOriginUnitIds(specUnits, 'section-a').includes('section-b'), true)
     assert.equal(await canViewRequestByPredicate(db, 'alice', 'req-a'), true)
     assert.equal(await canViewRequestByPredicate(db, 'alice', 'req-a-child'), true)
-    assert.equal(await canViewRequestByPredicate(db, 'alice', 'req-b'), false)
+    assert.equal(await canViewRequestByPredicate(db, 'alice', 'req-b'), true)
   })
 
-  it('Bob in Section B sees only B', async () => {
+  it('Bob in Section B sees B and sibling Section A when sharing is ON', async () => {
     const db = fakeScopeDb()
-    assert.deepEqual(sharingScopeUnitIds(specUnits, 'section-b'), ['section-b'])
+    assert.equal(visibleRequestOriginUnitIds(specUnits, 'section-b').includes('section-a'), true)
     assert.equal(await canViewRequestByPredicate(db, 'bob', 'req-b'), true)
-    assert.equal(await canViewRequestByPredicate(db, 'bob', 'req-a'), false)
-    assert.equal(await canViewRequestByPredicate(db, 'bob', 'req-a-child'), false)
+    assert.equal(await canViewRequestByPredicate(db, 'bob', 'req-a'), true)
   })
 })
 
@@ -252,8 +252,9 @@ describe('unit manager descendant visibility outside sharing scope', () => {
     const db = fakeScopeDb()
     const aliceScope = sharingScopeUnitIds(specUnits, 'section-a')
     assert.equal(aliceScope.includes('section-b'), false)
+    assert.equal(visibleRequestOriginUnitIds(specUnits, 'section-a').includes('section-b'), true)
     assert.equal(descendantUnitIds(specUnits, 'operations').includes('section-b'), true)
-    assert.equal(await canViewRequestByPredicate(db, 'alice', 'req-b'), false)
+    assert.equal(await canViewRequestByPredicate(db, 'alice', 'req-b'), true)
     assert.equal(await canViewRequestByPredicate(db, 'ops-manager', 'req-b'), true)
     assert.equal(await canViewRequestByPredicate(db, 'ops-manager', 'req-a'), true)
   })
@@ -305,7 +306,7 @@ describe('fail closed, archive list filter, soft-delete', () => {
     assert.equal(await canViewRequestByPredicate(db, 'pat', 'req-a-archived'), true)
     assert.equal(await listed(db, 'alice', 'req-a-archived'), false)
     assert.equal(await canViewRequestByPredicate(db, 'alice', 'req-a-archived'), true)
-    assert.equal(await canViewRequestByPredicate(db, 'bob', 'req-a-archived'), false)
+    assert.equal(await canViewRequestByPredicate(db, 'bob', 'req-a-archived'), true)
   })
 
   it('soft-deleted is never visible, including to admin with includeArchived true', async () => {
