@@ -223,17 +223,15 @@ export function createBusinessWorkflowFixture(): BusinessWorkflowFixture {
     // via canWorkOnSolutions flags, which are unchanged.
     //
     // TEST-only sharing configuration (src/lib/organization/sharing.ts):
-    // a viewer's scope is the subtree of their nearest sharing-enabled
-    // self-or-ancestor unit. The Engineering units deliberately OPT OUT of
-    // own sharing (shareRequests: false) so Engineering members inherit the
-    // Production 1 sharing scope and can VIEW Production 1 Section requests
-    // — required for the confirmed T03/T04 positive solution flows (an
-    // Engineering user must see the request to open the routed Submit
-    // Solution modal). Request-CREATION rights are assignment-based
-    // (canSubmitRequests) and are unaffected: every section keeps them.
-    // "Sharing off inherits the nearest active sharing-enabled ancestor; it
-    // does not mean private" — the nearest sharing-enabled ancestor here is
-    // Production 1 (shareRequests: true).
+    // per origin unit, ON = the parent unit's whole subtree (including sister
+    // units) may view; OFF = the origin unit's own subtree plus its ancestor
+    // units. Units here set shareRequests explicitly, so the schema default
+    // (OFF for new units) does not change this fixture. The Engineering
+    // units keep their own sharing OFF; Engineering members see Production 1
+    // Section requests sent to Engineering through canWorkOnSolutions work
+    // access (request-visibility/scope.ts) — required for the confirmed
+    // T03/T04 positive solution flows. Request-CREATION rights are
+    // assignment-based (canSubmitRequests) and are unaffected.
     unit(BUSINESS_UNITS.engineering, 'Engineering', BUSINESS_UNITS.production, true, false),
     unit(BUSINESS_UNITS.engineeringSection, 'Engineering Section', BUSINESS_UNITS.engineering, true, false),
     unit(BUSINESS_UNITS.siblingSection, 'Sibling Section', BUSINESS_UNITS.production, false),

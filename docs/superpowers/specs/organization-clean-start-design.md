@@ -27,7 +27,7 @@ Alternatives considered: relabeling four fixed levels would not satisfy arbitrar
 - Only application admins may explicitly restart a stranded attempt whose saved approvers are all inactive. Require a reason and replacement-chain preview; preserve the old attempt and decisions, and create a new attempt from current organization settings. Restart itself does not grant approval; normal new-attempt resolution rules still apply.
 - Approval attempts preserve origin, route version, positions and candidate identities as immutable snapshots. Inactive candidates cannot act; replacements require an explicit restart. Moving a person does not rewrite existing attempts.
 - Request and Final origin follow the requester; Solution origin follows the stored solution submitter, not an authorized reviser.
-- Sharing is downward-inclusive. A person uses the nearest sharing-enabled unit at or above their assignment as their viewing scope and can view requests originating in that unit and all descendants. Child sharing settings do not remove descendants from an ancestor member's scope. Example: Operations sharing contains separately sharing-enabled Sections A and B; Pat assigned to Operations sees both sections, Alice assigned to A sees A, and Bob assigned to B sees B. Team members within the same sharing scope share visibility. Explicit parent managers retain descendant visibility independently. Visibility does not grant mutation or approval authority.
+- Request sharing is a per-origin-unit switch (implemented in `src/lib/organization/sharing.ts`). Sharing ON on a unit: everyone assigned anywhere in the parent unit's whole subtree sees that unit's requests, including sister units under the same parent (for the root unit, its own subtree). Sharing OFF: only people assigned in the unit's own subtree plus people assigned to its ancestor units see its requests; sister units cannot. New units default to sharing OFF. Example: Operations contains Sections A and B; with Section A sharing OFF, Alice (A) and Pat (Operations) see A's requests but Bob (B) does not; with Section A sharing ON, Bob also sees them. Visibility does not grant mutation or approval authority.
 
 ## Tree-first administration
 
@@ -37,7 +37,7 @@ One Organization & Approvals workspace replaces the separate organization and ro
 - A person appears once in their assigned unit; overseeing multiple teams does not duplicate their assignment.
 - Selecting a unit opens a contextual side panel. Selecting a person opens assignment management; selecting a team opens membership/reporting management.
 - Unit-row Rename and Manage controls appear on hover or keyboard focus; touch devices retain a visible overflow control. Remove the persistent Manage unit / inherited chain link from tree rows; show effective route source inside Manage instead. Keep compact custom-chain exception badges.
-- Manage unit contains the explicit Share requests within this unit and all its descendants toggle. The tree shows a Request sharing badge reflecting the saved setting; avoid boundary wording that implies child exclusions.
+- Manage unit contains the explicit Share requests toggle (share this unit's requests with the rest of the parent unit, including sister units); it defaults to OFF for new units. The tree shows a Request sharing badge reflecting the saved setting.
 - Unit/team names support explicit pencil-to-edit, Enter/save, Escape/cancel, adjacent validation errors and retained input on failure.
 - Create unit asks for name and parent. There is no inferred unit type in this flexible model. The company root is created during setup; later creation must select a parent. Sections can have child units too.
 - Assign person selects an existing account, position, unit and optional valid team. Account creation is separate.
@@ -83,7 +83,7 @@ Use a separate fresh database for the new implementation. Do not reset app_db or
 - Shared candidate first-decision approval/rejection races.
 - Position ceiling, vacant skipping and all-vacant completion.
 - Immutable attempts across rename, moves, rank changes and deactivation; explicit restart.
-- Downward-inclusive sharing scopes, including parent staff access across child sharing scopes, sibling isolation for child-scoped people, and parent-manager visibility without action widening.
+- Request sharing: OFF keeps a unit's requests within its own subtree plus ancestor units (sister units denied); ON opens them to the parent unit's whole subtree including sister units; new units default to OFF; visibility never widens actions.
 - Inline rename, assignment moves/removal, duplicate team errors, stale forms and save feedback.
 - Actual Next compilation plus browser interaction, not only source-contract tests.
 
@@ -93,6 +93,6 @@ Use a separate fresh database for the new implementation. Do not reset app_db or
 2. Resolved: ungrouped people follow the selected Unit manager then selected parent-unit managers, matching exact configured positions; no automatic ungrouped coworker candidates. For team members, follow eligible exact-position members of their own team, the explicit reports-to person, then the selected own-unit manager and selected ancestor-unit managers. The owner approved including the own-unit manager even when different from the reports-to person. Include only positions called for by the chain, and deduplicate people so no person appears twice. Reporting-path traversal does not insert extra approval steps.
 3. Restart authorization resolved: application admins only, with required reason and replacement-chain preview. Solution work is derived from an explicit Can work on solutions flag on an organization unit, inherited by all descendant units; it is not a per-person permission checkbox or inferred from a unit name. Application administration remains separate. Request submission is allowed for every active user with an active organization assignment, subject to workflow/readiness validation; no per-user submission permission checkbox.
 4. Resolved: block position-rank changes that invalidate reporting relationships or published chains; list affected records. No automatic repair and no changes to existing attempt snapshots.
-5. Resolved: child sharing settings never exclude their branch from an ancestor member's viewing scope. Pat in sharing-enabled Operations sees both descendant sections even if each section has its own sharing scope.
+5. Resolved: sharing is decided per origin unit. Ancestor-unit members always see a descendant unit's requests regardless of its sharing switch; the switch only controls whether sister units (the rest of the parent unit's subtree) see them. New units default to sharing OFF.
 
 These are intentionally open design decisions, not permission to guess at authorization behavior. Review the proposed model and mockup first; resolve these points before schema implementation.

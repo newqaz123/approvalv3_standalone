@@ -497,7 +497,7 @@ model organization_units {
   name                  String
   parentId              String?
   isActive              Boolean                              @default(true)
-  shareRequests         Boolean                              @default(true)
+  shareRequests         Boolean                              @default(false)
   canWorkOnSolutions    Boolean                              @default(false)
   managerUserId         String?
   createdAt             DateTime                             @default(now())

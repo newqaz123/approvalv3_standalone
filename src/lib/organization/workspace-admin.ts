@@ -725,7 +725,8 @@ function createMutationStore(
         data: {
           name: input.name,
           parentId: input.parentId,
-          shareRequests: true,
+          // New units default to request sharing OFF (owner decision H5).
+          shareRequests: false,
           canWorkOnSolutions: false,
           isActive: true,
         },

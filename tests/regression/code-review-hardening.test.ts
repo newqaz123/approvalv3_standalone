@@ -81,3 +81,28 @@ describe('H8: client-callable admin actions cannot skip requireAdmin via an inje
     })
   }
 })
+
+describe('H5: new units default to request sharing OFF', () => {
+  it('Prisma schema defaults organization_units.shareRequests to false', () => {
+    const schema = read('prisma/schema.prisma')
+    const model = schema.slice(schema.indexOf('model organization_units'))
+    const block = model.slice(0, model.indexOf('\n}'))
+    assert.match(block, /shareRequests\s+Boolean\s+@default\(false\)/)
+  })
+
+  it('the production createUnit store writes shareRequests: false', () => {
+    const source = read('src/lib/organization/workspace-admin.ts')
+    const start = source.indexOf('async createUnit(input)')
+    assert.ok(start > -1)
+    const body = source.slice(start, source.indexOf('async updateUnitSettings', start))
+    assert.match(body, /shareRequests: false/)
+    assert.doesNotMatch(body, /shareRequests: true/)
+  })
+
+  it('the clean-start design spec documents the implemented sharing rule and default OFF', () => {
+    const spec = read('docs/superpowers/specs/organization-clean-start-design.md')
+    assert.match(spec, /default(s to)? OFF/i)
+    assert.match(spec, /sister units/i)
+    assert.doesNotMatch(spec, /Sharing is downward-inclusive/)
+  })
+})

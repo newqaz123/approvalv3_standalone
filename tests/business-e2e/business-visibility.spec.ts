@@ -329,7 +329,7 @@ test('T11A sharing ON at awaiting-Engineering: scoped viewers see the request, s
   await proveInactiveSignInDenied(browser, SCENARIO_IDS.T11A, 'denial-inactive-sign-in')
 })
 
-test('T11B sharing OFF (real org UI toggle): Production 1 + Engineering still see the SAME request (nearest sharing-enabled ancestor), Staff C still does not; sharing restored ON', async ({ browser }) => {
+test('T11B sharing OFF (real org UI toggle): Production 1 subtree + ancestor managers + Engineering (work access) still see the SAME request, sister-section Staff C does not; sharing restored ON', async ({ browser }) => {
   test.setTimeout(480_000)
   const title = uniqueBusinessTitle('T11B')
 
@@ -407,7 +407,7 @@ test('T11B sharing OFF (real org UI toggle): Production 1 + Engineering still se
   await setProductionSectionSharing(browser, SCENARIO_IDS.T11B, 'restore-sharing-on', true)
 })
 
-test('T11C completed request: previous viewers still see it read-only with no unauthorized pending actions; Staff C still sees nothing', async ({ browser }) => {
+test('T11C completed request: previous viewers (including sister-section Staff C, sharing ON) still see it read-only with no unauthorized pending actions', async ({ browser }) => {
   test.setTimeout(600_000)
   const title = uniqueBusinessTitle('T11C')
 

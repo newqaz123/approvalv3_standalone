@@ -141,7 +141,7 @@ function makeMutationDb(over: {
       created += 1
       const id = `unit-new-${created}`
       units.push(unit(id, input.name, input.parentId, {
-        shareRequests: true,
+        shareRequests: false,
         canWorkOnSolutions: false,
         managerUserId: null,
       }))

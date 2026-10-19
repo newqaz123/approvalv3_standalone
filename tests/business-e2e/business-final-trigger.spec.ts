@@ -297,9 +297,12 @@ async function runFinalTriggerWorkflow(
 }
 
 /**
- * T09 denial segment for a NON-VIEWING actor (sibling-section Staff C /
- * unassigned user): no action item and the request is not even listed in
- * their sharing scope, so no Final control is reachable at all.
+ * T09 denial segment for a NON-VIEWING actor (the unassigned user): no action
+ * item and the request is not even listed in their scope, so no Final control
+ * is reachable at all. Sibling-section Staff C is NOT a non-viewer here: the
+ * fixture seeds Production 1 Section sharing ON, so the sister section CAN
+ * view the request (src/lib/organization/sharing.ts) and is denied only the
+ * Final trigger (origin-unit-only initiation).
  */
 async function proveFinalUnreachableForNonViewer(
   browser: Browser,
@@ -442,7 +445,8 @@ test.describe('route configuration: all-defaults', () => {
       },
     )
 
-    // Denials 2/3 — sibling-section Staff C and the unassigned user cannot
+    // Denials 2/3 — sibling-section Staff C can VIEW (sharing ON on the
+    // origin section) but has no Final trigger; the unassigned user cannot
     // even reach the request.
     await signedInSegment(
       browser,
@@ -493,8 +497,9 @@ test.describe('route configuration: all-defaults', () => {
       },
     )
 
-    // Denials 2/3 — sibling-section Staff C and the unassigned user cannot
-    // reach the completed request.
+    // Denials 2/3 — sibling-section Staff C can VIEW the completed request
+    // (sharing ON) but has no Final trigger; the unassigned user cannot reach
+    // it.
     await signedInSegment(
       browser,
       { scenario: SCENARIO_IDS.T09B, phase: 'denial-completed-sibling-section', actor: 'staffC' },
