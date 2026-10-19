@@ -24,7 +24,12 @@ export default async function AdminLayout({
   })
 
   if (!user || user.role !== 'admin') {
-    redirect('/requests')
+    // Role-aware denial landing: an authenticated Engineering-ROLE user
+    // (UserRole.engineering — organization membership alone does NOT
+    // qualify) lands on their engineering dashboard; every other
+    // non-admin keeps the prior /requests destination. Bare relative
+    // path so the browser resolves it against the origin it is on.
+    redirect(user?.role === 'engineering' ? '/engineering' : '/requests')
   }
 
   return (
