@@ -159,9 +159,9 @@ const USER = {
 
 /**
  * Confirmed expectations for the T08 Final-TRIGGER scenarios (all-defaults
- * profile): one FRESH Requester-A-origin request per trigger actor (Requester
- * A, Staff B, Supervisor P, Section manager P, Department manager), Final
- * triggered after Solution approval.
+ * profile): one FRESH Requester-A-origin request per ORIGIN-UNIT trigger actor
+ * (Requester A, Staff B, Supervisor P, Section manager P), Final triggered
+ * after Solution approval.
  *
  * CONFIRMED RULE asserted for EVERY trigger actor (plan §1/§6):
  *  - the trigger SUCCEEDS (triggering is NOT approving);
@@ -175,10 +175,13 @@ const USER = {
  *  - attempt origin may persist as the TRIGGER actor (solutions.ts
  *    createFinalApprovalAttempt originUserId: userId) → final-origin fails
  *    for every non-requester trigger;
- *  - exact-origin-unit eligibility may DENY the parent Department manager
- *    trigger entirely (permission-checks.ts canInitiateFinalApproval) → the
- *    browser trigger segment and the final-instance/terminal-status checks
- *    fail.
+ *
+ * INTENDED RULE (owner decision H6, permission-checks.ts
+ * canInitiateFinalApproval): only an active assignment in the request ORIGIN
+ * unit may initiate Final. The parent Department manager sits in the parent
+ * unit and is therefore DENIED — T08E uses
+ * allDefaultsParentManagerDeniedExpectation below (no FINAL attempt, status
+ * stays SendBackToRequester), not this builder.
  * Step arrays are the same positions as the shared STEPS_* consts below (the
  * consts themselves are declared after this map, so positions are inlined).
  */
@@ -203,6 +206,26 @@ function allDefaultsFinalTriggerExpectation(): ScenarioExpectation {
       candidates: [['user-section-manager-p'], ['user-department-manager']],
     },
     finalStatus: 'Completed',
+  }
+}
+
+/**
+ * T08E (all-defaults): the parent-department Department manager attempts
+ * Final after Solution approval and is DENIED (origin-unit-only rule). The
+ * Request and Solution phases are the same as the other T08 scenarios; NO
+ * FINAL approval instance may exist and the request stays in
+ * SendBackToRequester.
+ */
+function allDefaultsParentManagerDeniedExpectation(): ScenarioExpectation {
+  const base = allDefaultsFinalTriggerExpectation()
+  return {
+    requestOrigin: base.requestOrigin,
+    requestSteps: base.requestSteps,
+    requestApprovers: base.requestApprovers,
+    requestCandidates: base.requestCandidates,
+    solution: base.solution,
+    finalForbidden: true,
+    finalStatus: 'SendBackToRequester',
   }
 }
 
@@ -312,7 +335,7 @@ export const DEFAULT_WORKFLOW_EXPECTATIONS: Record<string, ScenarioExpectation> 
   'Business T08B': allDefaultsFinalTriggerExpectation(), // trigger: Staff B (other Production 1 Staff)
   'Business T08C': allDefaultsFinalTriggerExpectation(), // trigger: Supervisor P (requester-unit hierarchy)
   'Business T08D': allDefaultsFinalTriggerExpectation(), // trigger: Section manager P (requester-unit hierarchy)
-  'Business T08E': allDefaultsFinalTriggerExpectation(), // trigger: Department manager (parent-department hierarchy)
+  'Business T08E': allDefaultsParentManagerDeniedExpectation(), // parent-department Department manager: DENIED (origin-unit-only rule)
   // T09A — PREMATURE Final denials: the four unauthorized actors attempt
   // Final BEFORE Solution approval on this fresh request. The request must
   // stay in the Solution-approval stage with NO FINAL approval instance at
@@ -399,8 +422,11 @@ export const SOLUTION_EXCEPTION_EXPECTATIONS: Record<string, ScenarioExpectation
 /**
  * Confirmed expectations for the T10 Final-ORIGIN scenarios (final-exception
  * profile): three EQUIVALENT Production 1 requests, all originating from
- * Requester A, each triggered by a DIFFERENT authorized actor (Requester A,
- * Staff B, parent Department manager). Per plan §3/§6 the FINAL phase must
+ * Requester A, each with a DIFFERENT Final-trigger actor (Requester A,
+ * Staff B, parent Department manager). The parent Department manager is NOT
+ * eligible (origin-unit-only rule, canInitiateFinalApproval): T10C proves the
+ * denial, then the original requester initiates, so T10C additionally
+ * asserts exactly one FINAL attempt. Per plan §3/§6 the FINAL phase must
  * follow the ORIGINAL REQUESTER for every trigger actor: route id
  * `final-exception-final-exception`, persisted scope unit-production-1-section
  * (the Production 1 requester-origin branch), originUserId = user-requester-a
@@ -478,7 +504,10 @@ export const FINAL_EXCEPTION_EXPECTATIONS: Record<string, ScenarioExpectation> =
   // persisted route/scope/steps to the parent-branch company default.
   'Business T10A': finalExceptionFinalOriginExpectation(), // trigger: Requester A
   'Business T10B': finalExceptionFinalOriginExpectation(), // trigger: Staff B
-  'Business T10C': finalExceptionFinalOriginExpectation(), // trigger: Department manager
+  // T10C: the parent Department manager is DENIED (origin-unit-only rule);
+  // the original requester then initiates, so exactly one FINAL attempt
+  // exists and it follows the requester branch.
+  'Business T10C': { ...finalExceptionFinalOriginExpectation(), singleFinalAttempt: true },
 }
 
 export const SOLUTION_AND_FINAL_EXCEPTIONS_EXPECTATIONS: Record<string, ScenarioExpectation> = {

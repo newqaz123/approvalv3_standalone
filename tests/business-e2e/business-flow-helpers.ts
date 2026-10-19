@@ -737,17 +737,15 @@ export async function openRequestByTitlePrefix(page: Page, titlePrefix: string, 
  * Approval" heading) "Start Final Approval" → "Final approval initiated
  * successfully" toast. Unlike initiateFinalApprovalViaUi below (whose callers
  * only ever run the ORIGINAL REQUESTER), this variant serves the T08/T10
- * trigger-authority scenarios for ANY authorized trigger actor.
+ * trigger-authority scenarios for ANY authorized ORIGIN-UNIT trigger actor.
  *
- * The CONFIRMED plan result is that the trigger SUCCEEDS (plan §1/§4 T08:
- * original requester, other Production 1 Staff, and the requester-unit
- * management hierarchy may trigger Final). If the product does not even
- * render the control — e.g. the exact-origin-unit eligibility gap that
- * excludes the parent Department manager (src/lib/permission-checks.ts
- * canInitiateFinalApproval; plan appendix expected mismatch #1) — this fails
- * the segment with a named policy reason instead of a bare selector timeout,
- * so the honest Fail carries a diagnosable manifest note. Production is NOT
- * patched and the defect is NOT encoded as an expected pass.
+ * Final initiation is intentionally limited to active assignments in the
+ * request ORIGIN unit (owner decision H6, src/lib/permission-checks.ts
+ * canInitiateFinalApproval) — ancestor units such as the parent Department
+ * manager are NOT eligible; their DENIAL is asserted separately with
+ * expectNoSubmitFinalApprovalControl (T08E/T10C). If an origin-unit actor is
+ * not offered the control, this fails with a named reason instead of a bare
+ * selector timeout.
  */
 export async function attemptFinalApprovalViaUi(page: Page, title: string, actorLabel: string): Promise<void> {
   const dialog = await openRequestByTitle(page, title, '/requests')
@@ -755,8 +753,8 @@ export async function attemptFinalApprovalViaUi(page: Page, title: string, actor
   if ((await control.count()) === 0) {
     throw new Error(
       `Confirmed-plan violation: ${actorLabel} was NOT offered the Final trigger control on "${title}" at SendBackToRequester. ` +
-        'Plan §1/§4 T08: original requester, other Production 1 Staff and the authorized requester-unit hierarchy MAY trigger Final; ' +
-        'the product currently gates eligibility on exact assignment-unit equality (canInitiateFinalApproval) — failing honestly, production unchanged.',
+        'Origin-unit actors (original requester, other origin-unit Staff, origin-unit Supervisor/Section manager) MAY trigger Final ' +
+        '(canInitiateFinalApproval: active assignment in the request origin unit).',
     )
   }
   await control.click()

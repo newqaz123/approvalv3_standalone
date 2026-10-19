@@ -17,9 +17,12 @@ import {
  *    (user-requester-a), NEVER the trigger actor — a persisted trigger-actor
  *    origin (solutions.ts createFinalApprovalAttempt originUserId: userId)
  *    must fail `final-origin`;
- *  - a MISSING Final trigger (e.g. the exact-origin-unit eligibility gap that
- *    denies the parent Department manager, canInitiateFinalApproval) must
- *    fail `final-instance`/`terminal-status`;
+ *  - a MISSING Final trigger by an origin-unit actor must fail
+ *    `final-instance`/`terminal-status`;
+ *  - the parent Department manager is NOT eligible to start Final (intended
+ *    origin-unit-only rule, canInitiateFinalApproval): T08E must persist NO
+ *    FINAL instance, and T10C (denied, then the original requester initiates)
+ *    must keep exactly one FINAL attempt;
  *  - a Final routed over the TRIGGER actor's parent/company branch instead of
  *    the original requester's branch must fail route id + persisted scope +
  *    ordered steps + captured candidates (distinguishable final-exception
@@ -320,11 +323,29 @@ describe('db-evidence evaluator: T08 final-trigger authority (all-defaults)', ()
     assert.equal(byName.get('db-evidence/Business T08B/final-ordered-steps')?.status, 'pass')
   })
 
-  it('FAILS when the Final trigger is MISSING entirely (e.g. exact-origin-unit eligibility denied the Department manager)', () => {
-    const data = t08Workflow({ title: 'Business T08E 1789800000000-0012', requestId: 't08e-request', solutionId: 't08e-solution', finalOrigin: 'user-requester-a', finalRouteVersionId: 'all-defaults-final-default', omitFinal: true, requestStatus: 'SendBackToRequester' })
+  it('FAILS when the Final trigger is MISSING entirely for an origin-unit trigger actor (T08A)', () => {
+    const data = t08Workflow({ title: 'Business T08A 1789800000000-0012', requestId: 't08a-request', solutionId: 't08a-solution', finalOrigin: 'user-requester-a', finalRouteVersionId: 'all-defaults-final-default', omitFinal: true, requestStatus: 'SendBackToRequester' })
     const byName = checksByName(evaluateDefaultWorkflowEvidence(data, 'all-defaults'))
-    assert.equal(byName.get('db-evidence/Business T08E/final-instance')?.status, 'fail')
-    assert.match(byName.get('db-evidence/Business T08E/final-instance')?.detail ?? '', /no current FINAL approval instance/)
+    assert.equal(byName.get('db-evidence/Business T08A/final-instance')?.status, 'fail')
+    assert.match(byName.get('db-evidence/Business T08A/final-instance')?.detail ?? '', /no current FINAL approval instance/)
+    assert.equal(byName.get('db-evidence/Business T08A/terminal-status')?.status, 'fail')
+  })
+
+  it('T08E: the parent Department manager is DENIED Final (origin-unit-only rule): no FINAL instance, request stays SendBackToRequester', () => {
+    const data = t08Workflow({ title: 'Business T08E 1789800000000-0012', requestId: 't08e-request', solutionId: 't08e-solution', finalOrigin: 'user-requester-a', finalRouteVersionId: 'all-defaults-final-default', omitFinal: true, requestStatus: 'SendBackToRequester' })
+    const checks = evaluateDefaultWorkflowEvidence(data, 'all-defaults')
+    const byName = checksByName(checks)
+    assert.deepEqual(failures(checks), [])
+    assert.equal(byName.get('db-evidence/Business T08E/no-final-instance')?.status, 'pass')
+    assert.equal(byName.get('db-evidence/Business T08E/terminal-status')?.status, 'pass')
+    assert.match(byName.get('db-evidence/Business T08E/terminal-status')?.detail ?? '', /SendBackToRequester/)
+    assert.equal(byName.get('db-evidence/Business T08E/final-instance'), undefined)
+  })
+
+  it('T08E FAILS when the parent Department manager trigger nevertheless created a FINAL attempt', () => {
+    const data = t08Workflow({ title: 'Business T08E 1789800000000-0015', requestId: 't08e-request', solutionId: 't08e-solution', finalOrigin: 'user-department-manager', finalRouteVersionId: 'all-defaults-final-default' })
+    const byName = checksByName(evaluateDefaultWorkflowEvidence(data, 'all-defaults'))
+    assert.equal(byName.get('db-evidence/Business T08E/no-final-instance')?.status, 'fail')
     assert.equal(byName.get('db-evidence/Business T08E/terminal-status')?.status, 'fail')
   })
 
@@ -420,6 +441,23 @@ describe('db-evidence evaluator: T10 final-origin routing (final-exception)', ()
     assert.equal(byName.get('db-evidence/Business T10B/final-origin')?.status, 'fail')
     assert.equal(byName.get('db-evidence/Business T10B/final-route')?.status, 'pass')
     assert.equal(byName.get('db-evidence/Business T10B/final-ordered-steps')?.status, 'pass')
+  })
+
+  it('T10C: the parent Department manager is denied, then the original requester initiates — exactly one FINAL attempt on the requester branch', () => {
+    const data = t10Workflow({ title: 'Business T10C 1789800000000-0025', requestId: 't10c-request', finalOrigin: 'user-requester-a', branch: 'exception' })
+    const checks = evaluateDefaultWorkflowEvidence(data, 'final-exception')
+    const byName = checksByName(checks)
+    assert.deepEqual(failures(checks), [])
+    assert.equal(byName.get('db-evidence/Business T10C/single-final-attempt')?.status, 'pass')
+    assert.equal(byName.get('db-evidence/Business T10C/final-origin')?.status, 'pass')
+    assert.equal(byName.get('db-evidence/Business T10C/final-route')?.status, 'pass')
+  })
+
+  it('T10C FAILS single-final-attempt when the denied Department-manager trigger created an extra attempt', () => {
+    const data = t10Workflow({ title: 'Business T10C 1789800000000-0026', requestId: 't10c-request', finalOrigin: 'user-requester-a', branch: 'exception' })
+    data.approvalInstances.push({ id: 't10c-instance-final-rogue', phase: 'FINAL', requestId: 't10c-request', solutionId: null, routeVersionId: 'final-exception-final-default', originUserId: 'user-department-manager', state: 'SUPERSEDED', attempt: 1, supersededAt: '2026-09-18T00:00:30Z', createdAt: '2026-09-18T00:00:00Z' })
+    const byName = checksByName(evaluateDefaultWorkflowEvidence(data, 'final-exception'))
+    assert.equal(byName.get('db-evidence/Business T10C/single-final-attempt')?.status, 'fail')
   })
 
   it('FAILS route id, persisted scope, ordered steps, approvers and candidates when the Department-manager trigger routes over the parent/company branch', () => {

@@ -32,10 +32,12 @@ import {
  *
  * CONFIRMED POLICY (plan §1/§4/§6 — asserted here, never weakened, never
  * patched in production):
- *  - the ORIGINAL REQUESTER, other Production 1 Staff (Staff B), and the
- *    authorized Production 1 management hierarchy (Supervisor P, Section
- *    manager P, parent Department manager) MAY trigger Final after Solution
- *    approval — a separate fresh request per trigger actor;
+ *  - ORIGIN-UNIT actors — the ORIGINAL REQUESTER, other Production 1 Staff
+ *    (Staff B), Supervisor P and Section manager P — MAY trigger Final after
+ *    Solution approval (a separate fresh request per trigger actor);
+ *  - the parent-department Department manager may NOT trigger Final: only an
+ *    active assignment in the request ORIGIN unit may initiate Final (owner
+ *    decision H6, canInitiateFinalApproval). T08E/T10C prove that DENIAL;
  *  - triggering is NOT approving: the trigger actor gains NO Final decision
  *    right (no action item / no Approve control) unless they are INDEPENDENTLY
  *    the current saved candidate of the pending Final step;
@@ -47,10 +49,8 @@ import {
  * KNOWN PRODUCT DEVIATIONS (plan technical appendix) — these tests DEMONSTRATE
  * them by failing honestly; production is NOT changed and the defects are NOT
  * encoded as expected results:
- *  - expected mismatch #1: exact-origin-unit eligibility may DENY the parent
- *    Department manager trigger (canInitiateFinalApproval requires
- *    assignmentUnitId === requestOriginUnitId) → the T08E/T10C trigger
- *    segments fail with a named confirmed-plan violation;
+ *  - (former mismatch #1, origin-unit-only Final initiation, is now the
+ *    INTENDED rule and is asserted as a denial by T08E/T10C);
  *  - expected mismatch #2: the attempt origin may persist as the TRIGGER
  *    actor instead of the original requester (initiateFinalApproval passes
  *    originUserId: userId) → the runner DB-evidence `final-origin` check
@@ -201,13 +201,11 @@ async function proveTriggerIsNotApproval(
 }
 
 /**
- * T08 shared workflow (all-defaults): fresh Requester-A-origin request through
- * the default Request and Solution chains, then Final triggered by the given
- * actor, then the default Final chain decides (Section manager P → Department
- * manager) and the request completes. When `trigger.postTriggerNegative` is
- * set, the trigger actor is proven to hold NO Final decision right afterwards.
+ * T08 shared preparation (all-defaults): fresh Requester-A-origin request
+ * through the default Request and Solution chains, ending in
+ * SendBackToRequester (ready for a Final trigger).
  */
-async function runFinalTriggerWorkflow(
+async function prepareRequestForFinalTrigger(
   browser: Browser,
   scenarioId: string,
   title: string,
@@ -218,7 +216,7 @@ async function runFinalTriggerWorkflow(
     { scenario: scenarioId, phase: 'create-request', actor: 'requesterA' },
     BUSINESS_ACTOR_EMAILS.requesterA,
     async ({ page, checkpoint }) => {
-      await createRequestViaUi(page, checkpoint, title, `T08 (${trigger.actor}): separate fresh request triggered by ${trigger.authority} after Solution approval; trigger ≠ approve.`)
+      await createRequestViaUi(page, checkpoint, title, `T08 (${trigger.actor}): separate fresh request; Final trigger attempted by ${trigger.authority} after Solution approval; trigger ≠ approve.`)
       return { notes: `created ${title}` }
     },
   )
@@ -231,7 +229,7 @@ async function runFinalTriggerWorkflow(
     async ({ page, checkpoint }) => {
       await submitSolutionViaUi(page, checkpoint, title, {
         title: `Engineering solution for ${title}`,
-        description: `T08: engineering solution approved on the default chain before ${trigger.actor} triggers Final.`,
+        description: `T08: engineering solution approved on the default chain before ${trigger.actor} attempts Final.`,
         cost: '1800',
         timeline: '2 weeks',
       })
@@ -240,6 +238,46 @@ async function runFinalTriggerWorkflow(
     },
   )
   await approveDefaultSolutionChain(browser, scenarioId, title)
+}
+
+/**
+ * Denial segment for the parent-department Department manager: the request is
+ * VISIBLE (ancestor-chain boss) at SendBackToRequester but the Final trigger
+ * control is NOT offered — only an active assignment in the request ORIGIN
+ * unit may initiate Final (canInitiateFinalApproval). The persisted proof (no
+ * FINAL attempt from this actor) is the runner DB-evidence layer.
+ */
+async function proveParentManagerFinalDenied(
+  browser: Browser,
+  scenarioId: string,
+  title: string,
+): Promise<void> {
+  await signedInSegment(
+    browser,
+    { scenario: scenarioId, phase: 'final-trigger-denied', actor: 'departmentManager' },
+    BUSINESS_ACTOR_EMAILS.departmentManager,
+    async ({ page, checkpoint }) => {
+      await expectNoSubmitFinalApprovalControl(page, title, '/requests')
+      await checkpoint(`${slug(scenarioId)}-parent-department-manager-final-denied`)
+      return { notes: 'Parent Department manager sees the request but is NOT offered the Final trigger (origin-unit-only Final initiation)' }
+    },
+  )
+}
+
+/**
+ * T08 shared workflow (all-defaults): prepared request, then Final triggered
+ * by the given ORIGIN-UNIT actor, then the default Final chain decides
+ * (Section manager P → Department manager) and the request completes. When
+ * `trigger.postTriggerNegative` is set, the trigger actor is proven to hold
+ * NO Final decision right afterwards.
+ */
+async function runFinalTriggerWorkflow(
+  browser: Browser,
+  scenarioId: string,
+  title: string,
+  trigger: TriggerActor,
+): Promise<void> {
+  await prepareRequestForFinalTrigger(browser, scenarioId, title, trigger)
 
   await signedInSegment(
     browser,
@@ -384,10 +422,6 @@ test.describe('route configuration: all-defaults', () => {
       id: 'T08D',
       trigger: { actor: 'sectionManagerP', email: BUSINESS_ACTOR_EMAILS.sectionManagerP, authority: 'requester-unit Section manager (Section manager P)', postTriggerNegative: false },
     },
-    {
-      id: 'T08E',
-      trigger: { actor: 'departmentManager', email: BUSINESS_ACTOR_EMAILS.departmentManager, authority: 'parent-department Department manager', postTriggerNegative: true },
-    },
   ]
 
   for (const { id, trigger } of TRIGGERS) {
@@ -397,6 +431,29 @@ test.describe('route configuration: all-defaults', () => {
       await runFinalTriggerWorkflow(browser, SCENARIO_IDS[id], title, trigger)
     })
   }
+
+  test('T08E the parent-department Department manager is DENIED the Final trigger (origin-unit-only rule); the request stays Sent Back to Requester with no Final attempt', async ({ browser }) => {
+    test.setTimeout(600_000)
+    const title = uniqueBusinessTitle('T08E')
+    await prepareRequestForFinalTrigger(browser, SCENARIO_IDS.T08E, title, {
+      actor: 'departmentManager',
+      email: BUSINESS_ACTOR_EMAILS.departmentManager,
+      authority: 'parent-department Department manager (not origin unit)',
+      postTriggerNegative: false,
+    })
+    await proveParentManagerFinalDenied(browser, SCENARIO_IDS.T08E, title)
+
+    await signedInSegment(
+      browser,
+      { scenario: SCENARIO_IDS.T08E, phase: 'verify-status-unchanged', actor: 'requesterA' },
+      BUSINESS_ACTOR_EMAILS.requesterA,
+      async ({ page, checkpoint }) => {
+        await expectRequestRowStatus(page, title, 'Sent Back to Requester')
+        await checkpoint(`${slug(SCENARIO_IDS.T08E)}-status-unchanged`)
+        return { notes: 'Request still Sent Back to Requester — the denied parent-manager trigger created no Final attempt (persisted proof: DB evidence no-final-instance)' }
+      },
+    )
+  })
 
   test('T09A premature Final attempts (solution author, sibling section, inactive, unassigned) before Solution approval are denied with no attempt and no status change', async ({ browser }) => {
     test.setTimeout(600_000)
@@ -529,7 +586,12 @@ test.describe('route configuration: final-exception', () => {
     `T10 belongs to the "final-exception" route-configuration profile (active: "${env.routesConfig}")`,
   )
 
-  const TRIGGERS: ReadonlyArray<{ id: keyof typeof SCENARIO_IDS; trigger: TriggerActor }> = [
+  const TRIGGERS: ReadonlyArray<{
+    id: keyof typeof SCENARIO_IDS
+    trigger: TriggerActor
+    /** Actor proven DENIED the Final trigger before `trigger` initiates (T10C). */
+    deniedParentManagerFirst?: boolean
+  }> = [
     {
       id: 'T10A',
       trigger: { actor: 'requesterA', email: BUSINESS_ACTOR_EMAILS.requesterA, authority: 'original requester (Requester A)', postTriggerNegative: true },
@@ -539,13 +601,17 @@ test.describe('route configuration: final-exception', () => {
       trigger: { actor: 'staffB', email: BUSINESS_ACTOR_EMAILS.staffB, authority: 'other Production 1 Staff (Staff B)', postTriggerNegative: true },
     },
     {
+      // The parent Department manager is DENIED (origin-unit-only rule); the
+      // original requester then initiates so the scenario still reaches
+      // Completed on the requester branch with exactly one FINAL attempt.
       id: 'T10C',
-      trigger: { actor: 'departmentManager', email: BUSINESS_ACTOR_EMAILS.departmentManager, authority: 'parent-department Department manager', postTriggerNegative: false },
+      trigger: { actor: 'requesterA', email: BUSINESS_ACTOR_EMAILS.requesterA, authority: 'original requester (Requester A) after the parent Department manager was denied', postTriggerNegative: true },
+      deniedParentManagerFirst: true,
     },
   ]
 
-  for (const { id, trigger } of TRIGGERS) {
-    test(`T10 Final routing follows the ORIGINAL requester when ${trigger.actor} triggers; Final exception chain (Department manager only) decides → Completed`, async ({ browser }) => {
+  for (const { id, trigger, deniedParentManagerFirst } of TRIGGERS) {
+    test(`T10 Final routing follows the ORIGINAL requester when ${deniedParentManagerFirst ? 'the parent Department manager is denied and ' : ''}${trigger.actor} triggers; Final exception chain (Department manager only) decides → Completed`, async ({ browser }) => {
       test.setTimeout(600_000)
       const title = uniqueBusinessTitle(id)
 
@@ -577,6 +643,10 @@ test.describe('route configuration: final-exception', () => {
       )
       await approveDefaultSolutionChain(browser, SCENARIO_IDS[id], title)
 
+      if (deniedParentManagerFirst) {
+        await proveParentManagerFinalDenied(browser, SCENARIO_IDS[id], title)
+      }
+
       await signedInSegment(
         browser,
         { scenario: SCENARIO_IDS[id], phase: 'final-trigger', actor: trigger.actor },
@@ -591,9 +661,6 @@ test.describe('route configuration: final-exception', () => {
       if (trigger.postTriggerNegative) {
         await proveTriggerIsNotApproval(browser, SCENARIO_IDS[id], trigger, title)
       }
-      // T10C (Department manager) IS the single saved candidate of the
-      // replaced Final chain — an Approve control would prove candidacy, not
-      // trigger authority, so no negative is claimed for that actor.
 
       // Replaced FINAL chain: Department manager only.
       await signedInSegment(
