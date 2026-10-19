@@ -17,7 +17,7 @@ import {
   type OrganizationMutationDb,
   type OrganizationUnitMutationDb,
   type WorkspaceSnapshot,
-} from '@/server-actions/organization'
+} from '@/lib/organization/workspace-admin'
 import {
   UnitSidePanel,
   directManagerCandidates,
@@ -458,7 +458,7 @@ describe('C5 source contracts', () => {
     assert.doesNotMatch(panel, /Manage \$\{/, 'unit panel title must be the unit name alone')
     assert.doesNotMatch(panel, /ApprovalChainsPanel/)
 
-    const actions = read('src/server-actions/organization.ts')
+    const actions = read('src/lib/organization/workspace-admin.ts')
     assert.match(actions, /export async function createOrganizationUnit/)
     assert.match(actions, /export async function updateUnitSettings/)
     assert.match(actions, /export async function setUnitManager/)

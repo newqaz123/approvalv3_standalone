@@ -15,7 +15,7 @@ import {
   deactivateOrganizationUnit,
   type OrganizationUnitDeactivationDb,
   type WorkspaceSnapshot,
-} from '@/server-actions/organization'
+} from '@/lib/organization/workspace-admin'
 import { UnitSidePanel, UnitDeactivationSection } from '@/components/organization/UnitSidePanel'
 import { OrganizationWorkspace } from '@/components/organization/OrganizationWorkspace'
 
@@ -523,7 +523,7 @@ describe('UnitSidePanel deactivation UI', () => {
 
 describe('unit deactivation source contracts', () => {
   it('exports the action with Serializable isolation, typed refusals, and validateOrganization before the write', () => {
-    const actions = read('src/server-actions/organization.ts')
+    const actions = read('src/lib/organization/workspace-admin.ts')
     assert.match(actions, /export async function deactivateOrganizationUnit/)
     assert.match(actions, /organization_unit_deactivated/)
     assert.match(actions, /isolationLevel: 'Serializable'/)

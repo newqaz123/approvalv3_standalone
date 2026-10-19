@@ -18,7 +18,7 @@ import {
   type OrganizationAssignmentMutationDb,
   type OrganizationWorkspaceDb,
   type WorkspaceSnapshot,
-} from '@/server-actions/organization'
+} from '@/lib/organization/workspace-admin'
 import {
   AssignmentChangeSummary,
   PersonAssignmentPanel,
@@ -742,7 +742,7 @@ describe('C6 source contracts', () => {
     assert.match(panel, /Remove assignment/)
     assert.doesNotMatch(panel, /users\.role/)
 
-    const actions = read('src/server-actions/organization.ts')
+    const actions = read('src/lib/organization/workspace-admin.ts')
     assert.match(actions, /export async function assignPerson/)
     assert.match(actions, /export async function moveAssignment/)
     assert.match(actions, /export async function removeAssignment/)

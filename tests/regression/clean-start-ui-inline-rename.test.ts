@@ -14,7 +14,7 @@ import {
   renameOrganizationUnit,
   renameTeam,
   type OrganizationMutationDb,
-} from '@/server-actions/organization'
+} from '@/lib/organization/workspace-admin'
 import {
   InlineNameEdit,
   InlineNameEditView,
@@ -455,7 +455,7 @@ describe('TreeNodeRow wires InlineNameEdit', () => {
     assert.match(editor, /handleInlineNameEditKeyDown/)
     assert.match(editor, /applyInlineNameEditResult/)
     assert.doesNotMatch(editor, /toLowerCase\(|normalize\(|replace\(\s*\/\\s\+/)
-    const actions = read('src/server-actions/organization.ts')
+    const actions = read('src/lib/organization/workspace-admin.ts')
     assert.match(actions, /runSerializable/)
     assert.match(actions, /isolationLevel:\s*['"]Serializable['"]/)
     assert.match(actions, /P2002/)

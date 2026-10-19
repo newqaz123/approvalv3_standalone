@@ -41,7 +41,7 @@ import {
   type ApprovalChainsWriteTx,
   type ApprovalChainsData,
   type SubmitterTestResult,
-} from '@/server-actions/approval-routes'
+} from '@/lib/approval-routes/chains-admin'
 import {
   ApprovalChainsPanel,
   RouteExceptionDeletionSection,
@@ -1252,7 +1252,7 @@ describe('C9-fix1 Restart requires a current-instance preview', () => {
 // ---------------------------------------------------------------------------
 
 describe('approval-routes server action source contracts', () => {
-  const source = read('src/server-actions/approval-routes.ts')
+  const source = read('src/lib/approval-routes/chains-admin.ts')
 
   it('imports the clean-start route libs, never the legacy validation/resolver/candidate-groups', () => {
     assert.match(source, /@\/lib\/approval-routes\/definition/)

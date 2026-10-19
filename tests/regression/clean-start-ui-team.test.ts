@@ -15,7 +15,7 @@ import {
   updateTeam,
   type OrganizationTeamMutationDb,
   type WorkspaceSnapshot,
-} from '@/server-actions/organization'
+} from '@/lib/organization/workspace-admin'
 import { OrganizationWorkspace } from '@/components/organization/OrganizationWorkspace'
 import { TeamPanel } from '@/components/organization/TeamPanel'
 
@@ -575,7 +575,7 @@ describe('C7 source contracts', () => {
     assert.match(panel, /updateTeam/)
     assert.doesNotMatch(panel, /users\.role/)
 
-    const actions = read('src/server-actions/organization.ts')
+    const actions = read('src/lib/organization/workspace-admin.ts')
     assert.match(actions, /export async function createTeam/)
     assert.match(actions, /export async function updateTeam/)
     assert.match(actions, /isolationLevel: 'Serializable'/)

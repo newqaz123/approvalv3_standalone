@@ -13,7 +13,7 @@ import { readFileSync } from 'node:fs'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { AssignmentNode, OrganizationUnitNode, PositionNode, TeamNode } from '@/lib/organization/model'
-import type { WorkspaceSnapshot } from '@/server-actions/organization'
+import type { WorkspaceSnapshot } from '@/lib/organization/workspace-admin'
 import { OrganizationWorkspace } from '@/components/organization/OrganizationWorkspace'
 import { SHARE_REQUESTS_LABEL, UnitSidePanel } from '@/components/organization/UnitSidePanel'
 

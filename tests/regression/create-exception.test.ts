@@ -5,7 +5,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { ApprovalPhase } from '@/lib/approval-routes/definition'
 import type { OrganizationUnitNode, PositionNode } from '@/lib/organization/model'
-import type { ApprovalChainsData } from '@/server-actions/approval-routes'
+import type { ApprovalChainsData } from '@/lib/approval-routes/chains-admin'
 import {
   ApprovalChainsPanel,
   CreateExceptionDialog,
@@ -17,7 +17,7 @@ import {
   REQUEST_VISIBILITY_LABEL,
   UnitSidePanel,
 } from '@/components/organization/UnitSidePanel'
-import type { WorkspaceSnapshot } from '@/server-actions/organization'
+import type { WorkspaceSnapshot } from '@/lib/organization/workspace-admin'
 
 const positions: PositionNode[] = [
   { id: 'staff', name: 'Staff', rank: 1, isActive: true },

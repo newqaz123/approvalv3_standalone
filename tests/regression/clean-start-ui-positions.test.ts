@@ -25,7 +25,7 @@ import {
   renamePosition,
   type OrganizationPositionMutationDb,
   type WorkspaceSnapshot,
-} from '@/server-actions/organization'
+} from '@/lib/organization/workspace-admin'
 import {
   PositionAdminPanel,
   PositionRankEditor,
@@ -1115,7 +1115,7 @@ describe('rank edit session — delayed responses (C3-fix1 epoch pattern)', () =
 
 describe('C8 source contracts', () => {
   it('exports the four actions with Serializable uniqueness, guard-first blocking, and no instance/auto-repair writes', () => {
-    const actions = read('src/server-actions/organization.ts')
+    const actions = read('src/lib/organization/workspace-admin.ts')
     assert.match(actions, /export async function createPosition/)
     assert.match(actions, /export async function renamePosition/)
     assert.match(actions, /export async function changePositionRank/)

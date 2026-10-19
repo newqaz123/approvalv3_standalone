@@ -48,3 +48,36 @@ describe('H7: initiateFinalApproval uses the real user.isActive', () => {
     assert.equal((actorBlock.match(/isActive: user\.isActive/g) ?? []).length, 2)
   })
 })
+
+describe('H8: client-callable admin actions cannot skip requireAdmin via an injected db', () => {
+  const pairs = [
+    { wrapper: 'src/server-actions/organization.ts', core: 'src/lib/organization/workspace-admin.ts' },
+    { wrapper: 'src/server-actions/approval-routes.ts', core: 'src/lib/approval-routes/chains-admin.ts' },
+  ] as const
+
+  for (const { wrapper, core } of pairs) {
+    it(`${wrapper} exports thin wrappers that never accept or forward a db`, () => {
+      const source = read(wrapper)
+      assert.match(source, /^'use server'/)
+      assert.doesNotMatch(source, /db \?\?/)
+      assert.doesNotMatch(source, /createProduction\w*Db/)
+      const exported = [...source.matchAll(/export async function (\w+)\(([^)]*)\)/g)]
+      assert.ok(exported.length >= 4, 'wrappers must exist')
+      for (const [, name, params] of exported) {
+        assert.doesNotMatch(params, /\bdb\b/, `${name} must not accept a db argument`)
+        const body = exportedFunctionBody(source, name)
+        assert.match(body, new RegExp(`return core\\.${name}\\((input)?\\)`), `${name} must forward only its input`)
+      }
+    })
+
+    it(`${core} is not a server-action module and its production stores require admin`, () => {
+      const source = read(core)
+      assert.doesNotMatch(source, /^'use server'/m)
+      const factories = [...source.matchAll(/async function (createProduction\w*Db)\(\)[^{]*\{([\s\S]*?)\n\}/g)]
+      assert.ok(factories.length > 0)
+      for (const [, name, body] of factories) {
+        assert.match(body, /await (requireAdmin|requireChainsAdmin)\(\)/, `${name} must require admin`)
+      }
+    })
+  }
+})

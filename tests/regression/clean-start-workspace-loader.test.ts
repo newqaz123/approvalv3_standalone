@@ -10,7 +10,7 @@ import type { AssignmentNode, OrganizationUnitNode, PositionNode, TeamNode } fro
 import {
   getOrganizationWorkspaceData,
   type OrganizationWorkspaceDb,
-} from '@/server-actions/organization'
+} from '@/lib/organization/workspace-admin'
 import type { ApprovalPhase } from '@/lib/approval-routes/definition'
 
 const read = (path: string) => readFileSync(path, 'utf8')

@@ -16,7 +16,7 @@ import {
   deactivateTeam,
   type OrganizationTeamDeactivationDb,
   type WorkspaceSnapshot,
-} from '@/server-actions/organization'
+} from '@/lib/organization/workspace-admin'
 import { TeamPanel, TeamDeactivationSection } from '@/components/organization/TeamPanel'
 import { OrganizationWorkspace } from '@/components/organization/OrganizationWorkspace'
 
@@ -436,7 +436,7 @@ describe('TeamPanel deactivation UI', () => {
 
 describe('team deactivation source contracts', () => {
   it('exports the action with Serializable isolation, typed refusals, and validateOrganization before the write', () => {
-    const actions = read('src/server-actions/organization.ts')
+    const actions = read('src/lib/organization/workspace-admin.ts')
     assert.match(actions, /export async function deactivateTeam/)
     assert.match(actions, /team_deactivated/)
     assert.match(actions, /isolationLevel: 'Serializable'/)
