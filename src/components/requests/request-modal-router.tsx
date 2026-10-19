@@ -747,7 +747,7 @@ function RequestModalRouterContent({
 								hasFinalRejection ||
 								hasFinalRejectionInEngineering) &&
 							!canApprove
-								? "solution_rejected"
+								? hasSolutionRejection ? "solution_rejected" : "final_rejected"
 								: "solution",
 						solution: {
 							...modalData.solution,

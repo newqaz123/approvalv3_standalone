@@ -102,7 +102,7 @@ interface SolutionModalProps {
 		id: string;
 		referenceId: string;
 		title: string;
-		status: "solution" | "solution_rejected";
+		status: "solution" | "solution_rejected" | "final_rejected";
 		submitter: {
 			name: string;
 			role: string;
@@ -156,6 +156,11 @@ const statusConfig = {
 	},
 	solution_rejected: {
 		label: "Solution Rejected",
+		className: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
+		dotClass: "bg-red-500",
+	},
+	final_rejected: {
+		label: "Final Approval Rejected",
 		className: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
 		dotClass: "bg-red-500",
 	},
@@ -699,7 +704,9 @@ export function SolutionModal({
 								</div>
 								<div className="flex-1">
 									<h4 className="text-sm font-bold text-red-900 dark:text-red-400">
-										Solution Rejected
+										{data.status === "final_rejected"
+											? "Final Approval Rejected — solution needs revision"
+											: "Solution Rejected"}
 									</h4>
 									<p className="text-xs text-red-600 dark:text-red-300 mt-1">
 										Rejected by {data.rejection.rejectedBy} on{" "}
