@@ -472,7 +472,7 @@ describe('C5 source contracts', () => {
     const tree = read('src/components/organization/TreeNodeRow.tsx')
     assert.match(tree, /event\.target === event\.currentTarget/)
 
-    const seed = read('prisma/seed.ts')
+    const seed = read('prisma/seed-dev.ts')
     assert.match(seed, /cs-route-ops-request/)
     assert.match(seed, /CS\.unit\.operations/)
 

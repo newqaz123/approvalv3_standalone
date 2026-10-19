@@ -192,7 +192,8 @@ Request Created → Approval Chain (Level 1 → 2 → 3)
 ```
 ├── prisma/
 │   ├── schema.prisma          # Database schema
-│   ├── seed.ts                # Default admin + departments
+│   ├── seed.ts                # Production bootstrap: company root, positions, admin (idempotent)
+│   ├── seed-dev.ts            # Dev/test fixture (app_cleanstart_dev only): test org, accounts, routes
 │   └── migrations/            # Database migrations
 ├── src/
 │   ├── app/                   # Next.js App Router pages
@@ -219,7 +220,8 @@ npm run start            # Start production server
 npm run lint             # Run ESLint
 npx prisma studio        # Visual database browser
 npx prisma migrate dev   # Create new migration
-npx prisma db seed       # Seed database
+npx prisma db seed       # Production bootstrap seed (prisma/seed.ts, idempotent)
+npm run seed:dev         # Dev fixture (prisma/seed-dev.ts, app_cleanstart_dev only)
 ```
 
 ## Docker Deployment
