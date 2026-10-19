@@ -32,8 +32,12 @@ export function visibleRequestOriginUnitIds(
   viewerUnitId: string,
 ): string[] {
   const visible: string[] = []
+  // Inactive origin units are NOT skipped: deactivating a unit must not hide
+  // its existing requests, so they keep the same sharing rule as when the
+  // unit was active. This is read-only visibility; creating new work
+  // (submission, Final initiation, solution work) still requires an active
+  // unit/assignment and is enforced elsewhere.
   for (const origin of units) {
-    if (!origin.isActive) continue
     if (viewerCanSeeOrigin(units, viewerUnitId, origin)) visible.push(origin.id)
   }
   return visible

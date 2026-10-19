@@ -160,3 +160,35 @@ describe('request-origin sharing — department ON vs section OFF', () => {
     assert.equal(pat.includes('section-a'), true)
   })
 })
+
+describe('L11: deactivating an origin unit does not hide its existing requests', () => {
+  it('inactive origin with sharing ON stays visible to its department (same rule as when active)', () => {
+    const tree = [
+      u('company', null, { shareRequests: true }),
+      u('operations', 'company', { shareRequests: true }),
+      u('section-a', 'operations', { shareRequests: true, isActive: false }),
+      u('section-b', 'operations', { shareRequests: true }),
+    ]
+    const active = tree.map((unit) => ({ ...unit, isActive: true }))
+    for (const viewer of ['section-b', 'operations', 'company']) {
+      assert.equal(
+        visibleRequestOriginUnitIds(tree, viewer).includes('section-a'),
+        visibleRequestOriginUnitIds(active, viewer).includes('section-a'),
+        viewer,
+      )
+    }
+    assert.equal(visibleRequestOriginUnitIds(tree, 'section-b').includes('section-a'), true)
+  })
+
+  it('inactive origin with sharing OFF: bosses still see it, sisters still do not', () => {
+    const tree = [
+      u('company', null, { shareRequests: true }),
+      u('operations', 'company', { shareRequests: true }),
+      u('section-a', 'operations', { shareRequests: false, isActive: false }),
+      u('section-b', 'operations', { shareRequests: true }),
+    ]
+    assert.equal(visibleRequestOriginUnitIds(tree, 'operations').includes('section-a'), true)
+    assert.equal(visibleRequestOriginUnitIds(tree, 'company').includes('section-a'), true)
+    assert.equal(visibleRequestOriginUnitIds(tree, 'section-b').includes('section-a'), false)
+  })
+})
