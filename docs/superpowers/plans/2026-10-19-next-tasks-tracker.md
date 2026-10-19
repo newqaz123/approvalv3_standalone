@@ -53,8 +53,8 @@ Low
 - ⏸ Merge to `main` / open PR (needs owner OK)
 
 - ✅ Final check after all fixes: 3335 tests, 0 fail, 1 skipped; verify-upgrade ALL CHECKS PASSED
-- 🔄 Real UI smoke after fixes: RRM-001/004/007/011 (one per phase + custom)
-- ⬜ `npm run check` leaks 2 `approval-envcheck-*` dirs in $TMPDIR per run
+- ✅ Real UI smoke after fixes: RRM-001/004/007/011 all passed (RRM-004 first failed on a test timing race, fixed in `b412c0a`)
+- ✅ (`e65ec17`) `npm run check` leaked 2 `approval-envcheck-*` dirs in $TMPDIR per run
 
 ## Log
 - 2026-10-19: Rejection UI test 44/44 passed — `test-results/rejection-ui-report-20261019/report.md`
