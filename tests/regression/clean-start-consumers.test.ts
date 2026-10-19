@@ -226,9 +226,6 @@ describe('re-based approver unit labels', () => {
     assert.match(unitUsers, /listActiveUnitSubtreeUsers/)
     assert.match(unitUsers, /authorizeUnitUsersQuery/)
     assert.match(unitUsers, /unitPathNames/)
-    const detail = read('src/components/requests/request-detail-modal.tsx')
-    assert.match(detail, /\/api\/organization\/unit-users\?unitId=/)
-    assert.doesNotMatch(detail, /\/api\/departments\//)
   })
 })
 

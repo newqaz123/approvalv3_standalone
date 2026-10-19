@@ -37,8 +37,6 @@ export async function signUp(input: SignUpInput) {
     },
   })
 
-  console.log(`User signed up: ${input.email} (pending organization assignment)`)
-
   revalidatePath('/admin/users')
   return { success: true, userId: user.id }
 }

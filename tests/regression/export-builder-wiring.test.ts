@@ -41,11 +41,6 @@ describe("completed approval export builder wiring", () => {
 			"src/components/requests/completed-final-modal.tsx",
 			"utf8",
 		);
-		const detailModal = readFileSync(
-			"src/components/requests/request-detail-modal.tsx",
-			"utf8",
-		);
-
 		assert.match(
 			completedFinalModal,
 			/showExportBuilder, setShowExportBuilder[\s\S]*useState\(false\)/,
@@ -60,18 +55,6 @@ describe("completed approval export builder wiring", () => {
 			/showExportBuilder &&[\s\S]*CompletedApprovalExportBuilder/,
 		);
 		assert.match(completedFinalModal, /Export Report/);
-
-		assert.match(
-			detailModal,
-			/showExportBuilder, setShowExportBuilder[\s\S]*useState\(false\)/,
-		);
-		assert.match(detailModal, /setShowExportBuilder\(true\)/);
-		assert.match(
-			detailModal,
-			/scrollIntoView\(\{[\s\S]*behavior:\s*['"]smooth['"][\s\S]*block:\s*['"]start['"]/,
-		);
-		assert.match(detailModal, /if \(!showExportBuilder\)/);
-		assert.match(detailModal, /CompletedApprovalExportBuilder/);
 	});
 
 	it("routes ordered selected package items to the package server action", () => {
@@ -95,19 +78,6 @@ describe("completed approval export builder wiring", () => {
 		assert.match(reportsAction, /buildExportableAttachment/);
 		assert.match(reportsAction, /convertAttachmentToPdf/);
 		assert.match(reportsAction, /mergePdfBuffers/);
-	});
-
-	it("replaces legacy request detail export buttons with the package builder", () => {
-		const detailModal = readFileSync(
-			"src/components/requests/request-detail-modal.tsx",
-			"utf8",
-		);
-
-		assert.match(detailModal, /CompletedApprovalExportBuilder/);
-		assert.match(detailModal, /exportRequestPackageAsPDF/);
-		assert.match(detailModal, /renderExportBuilder/);
-		assert.match(detailModal, /request\.status !== 'Completed'/);
-		assert.doesNotMatch(detailModal, /ExportPDFButton/);
 	});
 
 	it("keeps completed-only export eligibility across legacy and server paths", () => {

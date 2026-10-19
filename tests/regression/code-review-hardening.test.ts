@@ -1,7 +1,7 @@
 // Code-review hardening: verified findings H4-H8 and L12.
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
@@ -104,5 +104,16 @@ describe('H5: new units default to request sharing OFF', () => {
     assert.match(spec, /default(s to)? OFF/i)
     assert.match(spec, /sister units/i)
     assert.doesNotMatch(spec, /Sharing is downward-inclusive/)
+  })
+})
+
+describe('L12: dead code and PII log cleanup', () => {
+  it('deletes the unreferenced legacy request-detail-modal', () => {
+    assert.equal(existsSync('src/components/requests/request-detail-modal.tsx'), false)
+  })
+
+  it('does not log the signup email address', () => {
+    const source = read('src/server-actions/auth.ts')
+    assert.doesNotMatch(source, /console\.\w+\([^)]*input\.email/)
   })
 })
