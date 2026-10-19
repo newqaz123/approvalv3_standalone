@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs'
 const schema = readFileSync('prisma/schema.prisma', 'utf8')
 const migration = () =>
   readFileSync(
-    'prisma/migrations/00000000000001_clean_start_init/migration.sql',
+    'prisma/migrations/20260828000000_add_inline_description_images/migration.sql',
     'utf8',
   )
 

@@ -16,7 +16,7 @@ describe("engineering sub-task schema", () => {
 	const schema = () => readFileSync("prisma/schema.prisma", "utf8");
 	const migration = () =>
 		readFileSync(
-			"prisma/migrations/00000000000001_clean_start_init/migration.sql",
+			"prisma/migrations/20260606000000_add_engineering_sub_tasks/migration.sql",
 			"utf8",
 		);
 

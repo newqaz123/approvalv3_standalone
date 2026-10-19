@@ -392,7 +392,7 @@ describe('T15E coordinator session (Task93)', { timeout: 15_000 }, () => {
 describe('T15E coordinator integrity counterexamples (Task94)', { timeout: 15_000, concurrency: 1 }, () => {
   it('requests.id is TEXT and lock/ARM predicates use a validated text literal, not ::uuid', async () => {
     const migration = await fs.readFile(
-      path.join(process.cwd(), 'prisma/migrations/00000000000001_clean_start_init/migration.sql'),
+      path.join(process.cwd(), 'prisma/migrations/20260131032658_add_request_workflow_models/migration.sql'),
       'utf8',
     )
     const schema = await fs.readFile(path.join(process.cwd(), 'prisma/schema.prisma'), 'utf8')

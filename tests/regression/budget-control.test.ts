@@ -383,7 +383,7 @@ describe('budget code name field', () => {
     const schema = readFileSync('prisma/schema.prisma', 'utf8')
     const types = readFileSync('src/types/budget.ts', 'utf8')
     const migration = readFileSync(
-      'prisma/migrations/00000000000001_clean_start_init/migration.sql',
+      'prisma/migrations/20260518000000_add_budget_control/migration.sql',
       'utf8'
     )
 

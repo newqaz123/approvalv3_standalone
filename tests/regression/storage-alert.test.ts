@@ -238,7 +238,7 @@ describe('storage alert wiring', () => {
     assert.match(schema, /storageAlertThresholdPct/)
     assert.match(schema, /lastStorageAlertOn/)
     assert.ok(
-      existsSync('prisma/migrations/00000000000001_clean_start_init/migration.sql'),
+      existsSync('prisma/migrations/20260827000000_add_storage_alert/migration.sql'),
       'migration exists'
     )
   })

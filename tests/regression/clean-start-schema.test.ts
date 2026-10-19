@@ -43,7 +43,7 @@ describe('clean-start additive schema', () => {
     assert.ok(fields('budget_codes').includes('unitId'))
   })
   it('carries the partial unique contracts in migration SQL', () => {
-    const sql = readFileSync('prisma/migrations/00000000000001_clean_start_init/migration.sql', 'utf8').replace(/\s+/g, ' ')
+    const sql = readFileSync('prisma/migrations/20261019000000_organization_upgrade/migration.sql', 'utf8').replace(/\s+/g, ' ')
     // Quoted identifiers are required: Prisma stores camelCase columns quoted.
     // Unquoted userId folds to userid and would fail a real SQL apply.
     // These regexes must not match unquoted SQL (no /i; quotes are mandatory).
@@ -125,8 +125,8 @@ describe('clean-start schema finalization removals', () => {
     required('approval_candidate_groups', 'requiredPositionId')
   })
 
-  it('carries row-mode CHECKs in the squashed init migration', () => {
-    const sql = readFileSync('prisma/migrations/00000000000001_clean_start_init/migration.sql', 'utf8').replace(/\s+/g, ' ')
+  it('carries row-mode CHECKs in the organization upgrade migration', () => {
+    const sql = readFileSync('prisma/migrations/20261019000000_organization_upgrade/migration.sql', 'utf8').replace(/\s+/g, ' ')
     assert.match(sql, /ADD CONSTRAINT "request_approvals_row_mode_integrity" CHECK/)
     assert.match(sql, /ADD CONSTRAINT "solution_approvals_row_mode_integrity" CHECK/)
     assert.match(sql, /"routingMode" = 'SNAPSHOT_GROUP' AND "instanceId" IS NOT NULL AND "requiredPositionId" IS NOT NULL/)
