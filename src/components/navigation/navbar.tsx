@@ -40,7 +40,10 @@ export function Navbar() {
 
 	const userRole = user?.role || null;
 	const isAdmin = userRole === "admin";
-	const isEngineering = userRole === "engineering";
+	// Engineering menu follows the unit "Can work on solutions" flag (from
+	// /api/user/department), never the user role.
+	const [canWorkOnSolutions, setCanWorkOnSolutions] = useState(false);
+	const isEngineering = canWorkOnSolutions;
 	const isRequestsActive = pathname === "/requests";
 	const isMyActionsActive = pathname === "/requests/my-actions";
 	const isAnalyticsActive = pathname === "/analytics";
@@ -89,6 +92,7 @@ export function Navbar() {
 	useEffect(() => {
 		if (!user?.id) {
 			setDepartmentName(null);
+			setCanWorkOnSolutions(false);
 			return;
 		}
 
@@ -98,6 +102,7 @@ export function Navbar() {
 				if (response.ok) {
 					const data = await response.json();
 					setDepartmentName(data?.name ?? null);
+					setCanWorkOnSolutions(data?.canWorkOnSolutions === true);
 				}
 			} catch (error) {
 				console.error("Failed to fetch user department:", error);

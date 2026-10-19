@@ -42,13 +42,13 @@ High / Medium
 - ✅ H6 (`4ea3de6`) Final initiation widened to any ancestor unit (permission-checks.ts:24-38) — **Owner: revert to origin unit only**
 - ✅ H7 (`f13e386`) `initiateFinalApproval` ignores `user.isActive`
 - ✅ H8 (`013eb67`, cores moved to `src/lib/organization/workspace-admin.ts`, `src/lib/approval-routes/chains-admin.ts`) Admin check skipped when 2nd arg passed (organization.ts, approval-routes.ts) — make `requireAdmin` unconditional
-- ⬜ H9 Engineering dashboard / mark-complete still role-based, not unit flag (+ `getRequestsNeedingEngineeringAction` takes client userId)
+- 🔄 H9 Engineering dashboard / mark-complete still role-based, not unit flag (+ `getRequestsNeedingEngineeringAction` takes client userId)
 Low
-- ⬜ L10 Reject paths bypass engine (status write w/o expected-status check)
-- ⬜ L11 Deactivated units' requests vanish from sharing views
+- 🔄 L10 Reject paths bypass engine (status write w/o expected-status check)
+- 🔄 L11 Deactivated units' requests vanish from sharing views
 - ✅ L12 (`0a7eae6`; `handoff.md` on main still to remove at merge) Cleanup: dead `request-detail-modal.tsx`, signup email log in auth.ts, obsolete `handoff.md` on main
-- ⬜ business-e2e T08E/T10C (+ DB evidence checker) still expect parent Dept manager to start Final — convert to denial after H6
-- ⬜ Clean-start constraints integration suite fails 6/6 (also on plain db push → pre-existing test issue: constraint names not in Prisma raw errors; scoped cleanup)
+- 🔄 business-e2e T08E/T10C (+ DB evidence checker) still expect parent Dept manager to start Final — convert to denial after H6
+- 🔄 Clean-start constraints integration suite fails 6/6 (also on plain db push → pre-existing test issue: constraint names not in Prisma raw errors; scoped cleanup)
 - ✅ Decision: no eligible higher-level approver → step skipped / phase auto-completes (owner, 2026-10-19); runbook says set managers/teams promptly
 - ⏸ Merge to `main` / open PR (needs owner OK)
 

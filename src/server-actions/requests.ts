@@ -6,7 +6,8 @@ import { revalidatePath } from 'next/cache'
 import { revalidateRequestViews } from './request-view-invalidation'
 import { z } from 'zod'
 import { requireAdmin } from '@/lib/auth'
-import { getCurrentUser, getUserById } from '@/lib/cache/user-cache'
+import { createSolutionWorkActorDb, isActorSolutionWorker } from '@/lib/solution-work-actor'
+import { getCurrentUser } from '@/lib/cache/user-cache'
 import {
   attachmentFileExists,
   deleteAttachmentFile,
@@ -1761,10 +1762,12 @@ export interface NeedsActionResult {
  * 1. Requests needing solution submission (SentToEngineer status)
  * 2. Solutions needing user's approval (DesignCostEstimationApproval status)
  */
-export async function getRequestsNeedingEngineeringAction(userId: string): Promise<NeedsActionResult> {
-  const user = await getUserById(userId)
-
-  if (!user || user.role !== 'engineering') {
+export async function getRequestsNeedingEngineeringAction(): Promise<NeedsActionResult> {
+  // Identity comes from the session, never from a client-supplied id (IDOR).
+  // Eligibility is the unit "Can work on solutions" flag, not the user role.
+  const { user: authUser } = (await auth()) ?? {}
+  const userId = authUser?.id
+  if (!userId || !(await isActorSolutionWorker(createSolutionWorkActorDb(prisma), userId))) {
     return { needsSolution: [], needsApproval: [] }
   }
 

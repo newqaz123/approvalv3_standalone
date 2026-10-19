@@ -44,8 +44,32 @@ export function MobileNav() {
   const isVisible = useScrollDirection()
   const [menuOpen, setMenuOpen] = useState(false)
   const [pendingCount, setPendingCount] = useState(0)
-  const isEngineering = user?.role === 'engineering'
+  // Engineering tab follows the unit "Can work on solutions" flag (from
+  // /api/user/department), never the user role.
+  const [canWorkOnSolutions, setCanWorkOnSolutions] = useState(false)
+  const isEngineering = canWorkOnSolutions
   const visibleTabs = isEngineering ? engineeringTabs : tabs
+
+  useEffect(() => {
+    if (!user?.id) {
+      setCanWorkOnSolutions(false)
+      return
+    }
+
+    async function fetchSolutionWorkEligibility() {
+      try {
+        const response = await fetch('/api/user/department')
+        if (response.ok) {
+          const data = await response.json()
+          setCanWorkOnSolutions(data?.canWorkOnSolutions === true)
+        }
+      } catch (error) {
+        console.error('Failed to fetch user unit:', error)
+      }
+    }
+
+    fetchSolutionWorkEligibility()
+  }, [user?.id])
 
   // Fetch pending actions count for badge
   useEffect(() => {

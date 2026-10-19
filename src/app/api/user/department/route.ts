@@ -3,6 +3,7 @@ import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
 import { unitPathNames } from '@/lib/unit-labels'
 import type { OrganizationUnitNode } from '@/lib/organization/model'
+import { createSolutionWorkActorDb, isActorSolutionWorker } from '@/lib/solution-work-actor'
 
 export async function GET() {
   try {
@@ -22,6 +23,7 @@ export async function GET() {
         id: null,
         name: null,
         unitPathNames: [],
+        canWorkOnSolutions: false,
       })
     }
 
@@ -42,6 +44,8 @@ export async function GET() {
       id: assignment.unitId,
       name: names[0] ?? null,
       unitPathNames: names,
+      // Drives the Engineering navigation entry: unit flag, not user role.
+      canWorkOnSolutions: await isActorSolutionWorker(createSolutionWorkActorDb(prisma), session.user.id),
     })
   } catch (error) {
     console.error('Failed to fetch user unit:', error)

@@ -1,6 +1,7 @@
 import { auth } from "@/lib/auth-config";
 import { redirect } from "next/navigation";
 import prisma from "@/lib/prisma";
+import { createSolutionWorkActorDb, isActorSolutionWorker } from "@/lib/solution-work-actor";
 import { buildRequestVisibilityWhere, createRequestVisibilityDb } from "@/lib/request-visibility/scope";
 import {
 	getRequestsNeedingEngineeringAction,
@@ -24,22 +25,15 @@ export default async function EngineeringDashboardPage() {
 		redirect("/sign-in");
 	}
 
-	// Get current user with role
-	const user = await prisma.user.findUnique({
-		where: { id: userId },
-		select: {
-			id: true,
-			role: true,
-		},
-	});
-
-	// Validate user has engineering role
-	if (!user || user.role !== "engineering") {
-		redirect("/dashboard");
+	// Solution-work eligibility is the unit "Can work on solutions" flag
+	// (inherited by descendants), never the user role. Ineligible users land
+	// on /requests: /dashboard may bounce engineering-role users back here.
+	if (!(await isActorSolutionWorker(createSolutionWorkActorDb(prisma), userId))) {
+		redirect("/requests");
 	}
 
-	// Fetch needs action data
-	const needsActionData = await getRequestsNeedingEngineeringAction(userId);
+	// Fetch needs action data (actor derived from the session)
+	const needsActionData = await getRequestsNeedingEngineeringAction();
 
 	// Fetch engineering users for Person in Charge selector
 	const engineeringUsers = await getEngineeringUsers();

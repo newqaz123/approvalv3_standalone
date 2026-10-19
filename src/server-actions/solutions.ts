@@ -2,7 +2,7 @@
 
 import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
-import { RequestStatus, UserRole, type Prisma } from '@prisma/client'
+import { RequestStatus, type Prisma } from '@prisma/client'
 import { submitSolutionSchema, SubmitSolutionInput, resubmitSolutionSchema, ResubmitSolutionInput } from '@/lib/schemas/solution-schemas'
 import {
   attachmentFileExists,
@@ -44,6 +44,7 @@ import {
   type CleanStartAttemptStore,
 } from '@/lib/approval-engine/attempts'
 import { canWorkOnSolutions } from '@/lib/solution-eligibility'
+import { createSolutionWorkActorDb, isActorSolutionWorker } from '@/lib/solution-work-actor'
 import type { OrganizationUnitNode } from '@/lib/organization/model'
 import { canUserViewRequest } from '@/lib/request-visibility/scope'
 import { CURRENT_INSTANCE_ROW_FILTER } from '@/lib/approval-engine/current-instance'
@@ -1047,8 +1048,9 @@ export async function markRequestComplete(requestId: string, completionNote?: st
     throw new Error('User not found')
   }
 
-  if (user.role !== UserRole.engineering) {
-    throw new Error('Only engineering users can mark requests complete')
+  // Unit "Can work on solutions" flag, not the user role (H9).
+  if (!(await isActorSolutionWorker(createSolutionWorkActorDb(prisma), user.id))) {
+    throw new Error('Your organization assignment is not eligible to mark requests complete')
   }
 
   // Validate request exists and is in correct status
@@ -1132,8 +1134,8 @@ export async function canMarkComplete(requestId: string): Promise<{
     return { canMark: false, reason: 'User not found' }
   }
 
-  if (user.role !== UserRole.engineering) {
-    return { canMark: false, reason: 'Only engineering users can mark requests complete' }
+  if (!(await isActorSolutionWorker(createSolutionWorkActorDb(prisma), user.id))) {
+    return { canMark: false, reason: 'Your organization assignment is not eligible to mark requests complete' }
   }
 
   const request = await prisma.requests.findUnique({
