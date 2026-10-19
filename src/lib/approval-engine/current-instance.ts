@@ -15,6 +15,15 @@ export const CURRENT_INSTANCE_ROW_FILTER = [
   { instance: { supersededAt: null } },
 ] as const
 
+/** In-memory equivalent of CURRENT_INSTANCE_ROW_FILTER for already-loaded rows. */
+export function isCurrentInstanceApproval(row: {
+  instanceId?: string | null
+  instance?: { supersededAt: Date | string | null } | null
+}): boolean {
+  if (row.instanceId == null) return true
+  return row.instance != null && row.instance.supersededAt == null
+}
+
 /** Prisma predicate for a snapshot-group actionable row: persisted membership. */
 export function snapshotGroupActionWhere(userId: string) {
   return {

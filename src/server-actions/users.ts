@@ -46,10 +46,23 @@ export type CurrentUserProfile = {
 }
 
 /**
+ * Every exported action here is an invocable Server Action and must abort
+ * when authorization fails. requireAdmin stays nullable for callers that
+ * inspect its result; this wrapper enforces denial before any read/write.
+ */
+async function requireAdminUser(): Promise<string> {
+  const adminUserId = await requireAdmin()
+  if (!adminUserId) {
+    throw new Error('Admin authorization is required for user actions')
+  }
+  return adminUserId
+}
+
+/**
  * Get all users with their department information
  */
 export async function getUsers() {
-  await requireAdmin()
+  await requireAdminUser()
 
   const users = await prisma.user.findMany({
     include: {
@@ -92,7 +105,7 @@ export async function getUsers() {
  * Get a single user by ID
  */
 export async function getUser(id: string) {
-  await requireAdmin()
+  await requireAdminUser()
 
   const user = await prisma.user.findUnique({
     where: { id },
@@ -232,7 +245,7 @@ export async function updateUser(input: UpdateUserInput) {
  * Deactivate a user (soft delete — Prisma only)
  */
 export async function deactivateUser(userId: string) {
-  await requireAdmin()
+  await requireAdminUser()
 
   await prisma.user.update({
     where: { id: userId },
@@ -247,7 +260,7 @@ export async function deactivateUser(userId: string) {
  * Reactivate a user
  */
 export async function activateUser(userId: string) {
-  await requireAdmin()
+  await requireAdminUser()
 
   await prisma.user.update({
     where: { id: userId },
@@ -262,7 +275,7 @@ export async function activateUser(userId: string) {
  * Reset a user's password (admin action)
  */
 export async function resetUserPassword(userId: string, newPassword: string) {
-  await requireAdmin()
+  await requireAdminUser()
 
   const passwordHash = await hash(newPassword, 12)
   await prisma.user.update({

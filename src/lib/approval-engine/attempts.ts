@@ -7,7 +7,7 @@
 //
 // Origins (spec): REQUEST = stored requests.requesterId; SOLUTION = stored
 // solutions.submittedById never an authorized reviser (mismatched trusted
-// input rejected); FINAL = authenticated trusted initiator.
+// input rejected); FINAL = original requester (never the trigger actor).
 // Custom chains skip route resolution, write CUSTOM_PERSON ordered
 // requiredApproverId rows, and never auto-approve.
 // Ledger R5: ApprovalPhase from definition.ts. R-A6-2: reporting path is
@@ -142,13 +142,14 @@ export async function resolvePhaseOrigin(db: PhaseOriginRepository, query: Phase
   if (!request) originError(`Request ${query.requestId} no longer exists`)
 
   if (query.phase === 'FINAL') {
-    if (!query.originUserId) originError('Final phase origin requires the authenticated trusted initiator')
-    const path = await requirePath(db, query.originUserId)
+    if (!query.originUserId) originError('Final phase origin requires the authenticated initiator')
+    await requirePath(db, query.originUserId)
+    const requesterPath = await requirePath(db, request.requesterId)
     return {
       phase: 'FINAL',
-      originUserId: query.originUserId,
-      originUnitId: path.unitId,
-      path,
+      originUserId: request.requesterId,
+      originUnitId: requesterPath.unitId,
+      path: requesterPath,
       requestId: query.requestId,
       source: 'FINAL_INITIATOR',
     }
@@ -331,7 +332,10 @@ export async function createCustomPersonAttempt(
       })
     } else {
       await tx.request_approvals.create({
-        data: { ...row, requestId: input.requestId } as never,
+        // Legacy consumers (capability lookup, transaction eligibility and modal
+        // classification) key on isFinalApproval; FINAL rows must carry it
+        // explicitly (creation-only fix, plan 2026-10-11-custom-final-phase-flag-fix).
+        data: { ...row, requestId: input.requestId, isFinalApproval: input.phase === 'FINAL' } as never,
       })
     }
   }

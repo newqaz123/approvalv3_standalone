@@ -1,17 +1,13 @@
-// Clean-start downward-inclusive sharing-scope visibility predicate (Plan B Task 8)
-// with production findActor (Plan B Task 9).
-// Visibility only: this module grants no mutation, approval, or notification
-// rights. The engineering ROLE grants no blanket visibility. Child sharing
-// settings never subtract from an ancestor member's complete subtree (A5
-// sharingScopeUnitIds). Explicit parent managers retain descendant visibility
-// via managedUnitIds independently of sharing scope. Production findActor reads
-// users + the active organization_assignments row + A5 sharingScopeUnitIds +
-// descendants of units this actor manages (organization_units.managerUserId).
+// Request-list visibility: origin-unit sharing (ON = department including
+// sisters; OFF = origin + ancestor bosses) plus approval participation,
+// explicit managedUnitIds, and Engineering work access for SentToEngineer /
+// DesignCostEstimationApproval. Visibility grants no mutation rights. The
+// engineering ROLE still grants no blanket visibility.
 import type { Prisma } from '@prisma/client'
 import { CURRENT_INSTANCE_ROW_FILTER } from '@/lib/approval-engine/current-instance'
-import { descendantUnitIds, NoSharingScopeError } from '@/lib/organization/hierarchy'
+import { ancestorUnitIds, descendantUnitIds, NoSharingScopeError } from '@/lib/organization/hierarchy'
 import type { OrganizationUnitNode } from '@/lib/organization/model'
-import { sharingScopeUnitIds } from '@/lib/organization/sharing'
+import { visibleRequestOriginUnitIds } from '@/lib/organization/sharing'
 
 export interface RequestVisibilityActor {
   id: string
@@ -20,6 +16,8 @@ export interface RequestVisibilityActor {
   assignmentUnitId: string | null
   sharingScopeUnitIds: readonly string[]
   managedUnitIds: readonly string[]
+  /** True when the assignment unit or an ancestor can work on solutions. */
+  canWorkOnSolutions?: boolean
 }
 
 export interface RequestVisibilityDb {
@@ -50,6 +48,11 @@ export async function buildRequestVisibilityWhere(
     { solutions: { some: { approvals: { some: { requiredApproverId: actor.id, ...current } } } } },
     { solutions: { some: { approvals: { some: { candidateGroup: { members: { some: { userId: actor.id } } }, ...current } } } } },
   ]
+  if (actor.canWorkOnSolutions) {
+    relationships.push({
+      status: { in: ['SentToEngineer', 'DesignCostEstimationApproval'] },
+    })
+  }
   return { AND: [base, { OR: relationships }] }
 }
 
@@ -152,11 +155,20 @@ export function createRequestVisibilityDb(client: RequestVisibilityPrisma): Requ
       const nodes = units.map(toUnitNode)
 
       let sharing: readonly string[] = []
+      let canWorkOnSolutions = false
       if (assignment) {
         try {
-          sharing = sharingScopeUnitIds(nodes, assignment.unitId)
+          sharing = visibleRequestOriginUnitIds(nodes, assignment.unitId)
         } catch (error) {
           if (!(error instanceof NoSharingScopeError)) throw error
+        }
+        try {
+          canWorkOnSolutions = ancestorUnitIds(nodes, assignment.unitId).some((id) => {
+            const unit = nodes.find((row) => row.id === id)
+            return unit?.canWorkOnSolutions === true
+          })
+        } catch {
+          canWorkOnSolutions = false
         }
       }
 
@@ -173,6 +185,7 @@ export function createRequestVisibilityDb(client: RequestVisibilityPrisma): Requ
         assignmentUnitId: assignment?.unitId ?? null,
         sharingScopeUnitIds: sharing,
         managedUnitIds: [...managed],
+        canWorkOnSolutions,
       }
     },
     async findRequest(where) {

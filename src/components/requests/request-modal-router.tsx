@@ -34,6 +34,7 @@ import {
 import {
 	getModalTypeForStatus,
 } from "@/lib/permission-checks";
+import { isCurrentInstanceApproval } from "@/lib/approval-engine/current-instance";
 import {
 	shouldShowActionButton,
 	type ActionDecision,
@@ -256,28 +257,37 @@ function RequestModalRouterContent({
 		(requestData.status === "ImprovementRequest" ||
 			requestData.status === "RequestRejected") &&
 		requestData.approvals?.some(
-			(a: any) => a.status === "rejected" && !a.isFinalApproval,
+			(a: any) =>
+				a.status === "rejected" &&
+				!a.isFinalApproval &&
+				isCurrentInstanceApproval(a),
 		);
 
 	const hasSolutionRejection =
 		(requestData.status === "SentToEngineer" ||
 			requestData.status === "DesignCostEstimationApproval") &&
 		requestData.solutions?.[0]?.approvals?.some(
-			(a: any) => a.status === "rejected",
+			(a: any) => a.status === "rejected" && isCurrentInstanceApproval(a),
 		);
 
 	const hasFinalRejection =
 		(requestData.status === "FinalApproval" ||
 			requestData.status === "FinalRejected") &&
 		requestData.approvals?.some(
-			(a: any) => a.status === "rejected" && a.isFinalApproval,
+			(a: any) =>
+				a.status === "rejected" &&
+				a.isFinalApproval &&
+				isCurrentInstanceApproval(a),
 		);
 
 	// Special case: Final approval rejection that sent request back to engineering
 	const hasFinalRejectionInEngineering =
 		requestData.status === "SentToEngineer" &&
 		requestData.approvals?.some(
-			(a: any) => a.status === "rejected" && a.isFinalApproval,
+			(a: any) =>
+				a.status === "rejected" &&
+				a.isFinalApproval &&
+				isCurrentInstanceApproval(a),
 		);
 
 	const hasRejection =

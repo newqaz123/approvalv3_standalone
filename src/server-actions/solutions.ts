@@ -1244,6 +1244,7 @@ export async function initiateFinalApproval(
   // O3: initiator holds an active assignment in the request's originating unit.
   const actorAssignment = await loadActiveAssignment(user.id)
   const requestOriginUnitId = request.organizationUnitId ?? ''
+  const units = await loadOrganizationUnitNodes()
 
   const initiateAction = evaluateRequestAction('INITIATE_FINAL_APPROVAL', {
     actor: {
@@ -1265,6 +1266,7 @@ export async function initiateFinalApproval(
         isActive: true,
         assignmentUnitId: actorAssignment?.unitId ?? null,
         requestOriginUnitId,
+        units,
         status: request.status,
       }),
     },
@@ -1273,7 +1275,7 @@ export async function initiateFinalApproval(
     if (initiateAction.reason === 'WRONG_STATUS') {
       throw new Error(`Request must be in SendBackToRequester status to initiate final approval. Current status: ${request.status}`)
     }
-    throw new Error('Only members of the request\'s originating unit can initiate final approval')
+    throw new Error('Only members of the originating unit or its management hierarchy can initiate final approval')
   }
 
   await runSolutionTransactionWithNotifications(
@@ -1629,18 +1631,13 @@ export async function rejectFinalApproval(requestId: string, comments: string, e
       },
     })
 
-    // Return request to SentToEngineer status for engineering revision
+    // Existing product path: Final reject reopens engineering revision.
+    // Do not hardcode a different destination here.
     await tx.requests.update({
       where: { id: requestId },
       data: { status: RequestStatus.SentToEngineer },
     })
 
-    // Atomic status-change audit for the reopened engineering cycle. The
-    // engineering resolution trend aggregates status_changed activities, so
-    // this row (written in the same transaction as the status update) makes
-    // the rejection visible as a new rework cycle for that request.
-    // canUserApproveFinalApproval guarantees the request is in FinalApproval,
-    // recorded here as the authoritative fromStatus.
     await tx.request_activities.create({
       data: {
         requestId,

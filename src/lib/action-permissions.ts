@@ -176,6 +176,7 @@ export function existingInitiateFinalApprovalDecision(input: {
   isActive: boolean
   assignmentUnitId: string | null
   requestOriginUnitId: string
+  units: readonly OrganizationUnitNode[]
   status: string
 }): ActionDecision {
   if (input.status !== 'SendBackToRequester') {
@@ -191,6 +192,7 @@ export function existingResubmitFinalApprovalDecision(input: {
   isActive: boolean
   assignmentUnitId: string | null
   requestOriginUnitId: string
+  units: readonly OrganizationUnitNode[]
   status: string
   hasFinalApprovalRejection: boolean
 }): ActionDecision {

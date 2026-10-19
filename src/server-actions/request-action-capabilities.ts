@@ -186,6 +186,7 @@ export async function getRequestActionCapabilities(requestId: string): Promise<R
     isActive: user.isActive,
     assignmentUnitId,
     requestOriginUnitId,
+    units,
     status: request.status,
   }
 

@@ -20,6 +20,7 @@ import {
 } from '@/lib/inline-images/references'
 import { cancellationReasonSchema } from '@/lib/schemas/cancellation-schemas'
 import { buildRequestExportRows } from '@/lib/request-export'
+import { APPROVAL_DISPLAY_SELECT, withApprovalDisplay } from '@/lib/approval-display'
 import {
   evaluateRequesterCancellation,
   getCancellationBlockedMessage,
@@ -681,6 +682,9 @@ export async function getRequest(id: string) {
           status: true,
           comments: true,
           isFinalApproval: true,
+          ...APPROVAL_DISPLAY_SELECT,
+          instanceId: true,
+          instance: { select: { supersededAt: true } },
                     order: true,
           createdAt: true,
           approvedAt: true,
@@ -726,6 +730,9 @@ export async function getRequest(id: string) {
               id: true,
               status: true,
               comments: true,
+              ...APPROVAL_DISPLAY_SELECT,
+              instanceId: true,
+              instance: { select: { supersededAt: true } },
                             order: true,
               createdAt: true,
               approvedAt: true,
@@ -800,33 +807,10 @@ export async function getRequest(id: string) {
   }
 
   if (request) {
-    const addPotentialApprovers = async <T extends {
-      status: string
-      requiredApprover?: { id: string; name: string | null; email: string } | null
-      candidateGroupId?: string | null
-    }>(approvals: T[]) => {
-      return Promise.all(approvals.map(async (approval) => {
-        if (approval.status !== 'pending' || approval.requiredApprover || !approval.candidateGroupId) {
-          return approval
-        }
-        const members = await prisma.approval_candidate_group_members.findMany({
-          where: { candidateGroupId: approval.candidateGroupId },
-          select: { capturedDisplayName: true },
-          take: 10,
-        })
-        return {
-          ...approval,
-          potentialApprovers: members.map((member) => ({ name: member.capturedDisplayName })),
-        }
-      }))
-    }
-
-    request.approvals = await addPotentialApprovers(request.approvals) as any
-
+    // Candidate display comes only from the stored snapshot selected above.
+    request.approvals = request.approvals.map(withApprovalDisplay)
     if (request.solutions?.[0]) {
-      request.solutions[0].approvals = await addPotentialApprovers(
-        request.solutions[0].approvals,
-      ) as any
+      request.solutions[0].approvals = request.solutions[0].approvals.map(withApprovalDisplay)
     }
   }
 

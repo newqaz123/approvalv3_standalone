@@ -169,6 +169,9 @@ interface ApprovalRowCreate {
   requiredPositionId?: string
   candidateGroupId?: string
   approverId?: string
+  // request_approvals-only flag (solution_approvals has no such column);
+  // written exclusively by writeApprovalRow's request branch.
+  isFinalApproval?: boolean
 }
 
 export interface ApprovalInstanceTx {
@@ -424,7 +427,9 @@ async function writeApprovalRow(
     await tx.solution_approvals.create({ data: { ...row, solutionId: requireSolutionId(plan) } })
     return
   }
-  await tx.request_approvals.create({ data: { ...row, requestId: requireDocumentId(plan) } })
+  await tx.request_approvals.create({
+    data: { ...row, requestId: requireDocumentId(plan), isFinalApproval: plan.phase === 'FINAL' },
+  })
 }
 
 export async function persistApprovalInstance(

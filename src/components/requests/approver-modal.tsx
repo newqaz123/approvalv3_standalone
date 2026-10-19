@@ -45,6 +45,7 @@ import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { CancelRequestDialog } from "./cancel-request-dialog";
+import { resolveApproverHeaderStatus } from "@/lib/approval-header-status";
 
 // Types
 interface ApprovalStep {
@@ -542,7 +543,7 @@ export function ApproverModal({
 	onCancelled,
 	subTasksElement,
 }: ApproverModalProps) {
-	const status = statusConfig[data.status] || statusConfig.request;
+	const status = statusConfig[resolveApproverHeaderStatus(data.status)];
 
 	// Debug: Log stage data to verify submitter information
 	if (open && data.stages) {
