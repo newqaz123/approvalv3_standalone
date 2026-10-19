@@ -37,3 +37,9 @@ image*.png
 # Pi session artifacts
 .pi/
 .pi-subagents/
+
+# Local debug/run output (not source)
+/scratch/
+/failures/
+/docs/superpowers/e2e-runs/
+/sql-probe.cjs
