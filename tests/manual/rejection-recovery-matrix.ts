@@ -932,7 +932,10 @@ export function playwrightMatrixUi(browser: Browser, evidenceRoot: string): Matr
         await expect(rowEl.getByText('Completed', { exact: true })).toBeVisible()
         await rowEl.click()
         const dialog = page.getByRole('dialog')
-        const bannerSeen = await dialog.getByText('Final Approval Completed').isVisible()
+        // The dialog opens on a loading skeleton first; wait for the loaded banner.
+        const bannerSeen = await expect(dialog.getByText('Final Approval Completed'))
+          .toBeVisible({ timeout: 30_000 })
+          .then(() => true, () => false)
         if (!bannerSeen) throw new Error('Final Approval Completed banner was not visible')
         const stage3 = await findStageBlock(dialog, 3)
         await stage3.scrollIntoViewIfNeeded()
