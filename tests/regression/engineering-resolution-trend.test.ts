@@ -378,8 +378,9 @@ describe('final approval rejection rework producer contract', () => {
       'the reopened cycle must record fromStatus FinalApproval',
     )
 
+    // L10: the status write is the expected-status guard on the tx client.
     const statusUpdate = body.match(
-      /tx\.requests\.update\(\{[\s\S]*?status: RequestStatus\.SentToEngineer[\s\S]*?\}\)/,
+      /updateRequestStatusExpecting\(tx, \{[\s\S]*?expectedStatuses: \[RequestStatus\.FinalApproval\][\s\S]*?status: RequestStatus\.SentToEngineer[\s\S]*?\}\)/,
     )
     assert.ok(statusUpdate, 'status update must remain on the transaction client')
   })

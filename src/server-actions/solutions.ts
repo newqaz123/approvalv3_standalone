@@ -941,7 +941,23 @@ export async function rejectSolution(solutionId: string, comments: string, expec
 
   // Keep workflow writes atomic; notification plans are dispatched only
   // after this transaction commits.
+  //
+  // Not routed through the engine REJECT branch: that branch logs the
+  // approve-flavoured 'solution_approved' activity and its SOLUTION status
+  // write copies the cost estimate into projectEstimateCost unguarded.
+  // Instead eligibility is re-evaluated with the engine inside the
+  // transaction and the status change is guarded on the expected status.
   await runSolutionTransactionWithNotifications(async (tx, notifications) => {
+    const txEligibility = await engineCanUserApproveSolution(
+      createPrismaApprovalTransactionDb(tx),
+      { approvalId: approval.id, actorId: userId },
+    )
+    if (!txEligibility.canApprove) {
+      throw new RequestStatusConflictError(
+        'Cannot reject this solution - it was changed by someone else. Please refresh and try again.',
+      )
+    }
+
     const rejected = await tx.solution_approvals.updateMany({
       where: {
         id: approval.id,
@@ -988,10 +1004,13 @@ export async function rejectSolution(solutionId: string, comments: string, expec
       },
     })
 
-    // Return request to SentToEngineer status for resubmission
-    await tx.requests.update({
-      where: { id: solution.requestId },
+    // Return request to SentToEngineer status for resubmission, only if it
+    // is still in solution approval (0 rows -> conflict + rollback).
+    await updateRequestStatusExpecting(tx, {
+      requestId: solution.requestId,
+      expectedStatuses: [RequestStatus.DesignCostEstimationApproval],
       data: { status: RequestStatus.SentToEngineer },
+      actionLabel: 'reject the solution',
     })
 
     const [solutionData, requestRow] = await Promise.all([
@@ -1578,7 +1597,23 @@ export async function rejectFinalApproval(requestId: string, comments: string, e
 
   // Keep workflow writes atomic; notification plans are dispatched only
   // after this transaction commits.
+  //
+  // Not routed through the engine REJECT branch: that branch logs the
+  // approve-flavoured 'final_approval_approved' activity instead of
+  // 'final_approval_rejected' with the reason. Instead eligibility is
+  // re-evaluated with the engine inside the transaction and the status
+  // change is guarded on the expected status.
   await runSolutionTransactionWithNotifications(async (tx, notifications) => {
+    const txEligibility = await engineCanUserApproveFinal(
+      createPrismaApprovalTransactionDb(tx),
+      { approvalId: approval.id, actorId: userId },
+    )
+    if (!txEligibility.canApprove) {
+      throw new RequestStatusConflictError(
+        'Cannot reject this request - it was changed by someone else. Please refresh and try again.',
+      )
+    }
+
     const rejected = await tx.request_approvals.updateMany({
       where: {
         id: approval.id,
@@ -1639,9 +1674,11 @@ export async function rejectFinalApproval(requestId: string, comments: string, e
 
     // Existing product path: Final reject reopens engineering revision.
     // Do not hardcode a different destination here.
-    await tx.requests.update({
-      where: { id: requestId },
+    await updateRequestStatusExpecting(tx, {
+      requestId,
+      expectedStatuses: [RequestStatus.FinalApproval],
       data: { status: RequestStatus.SentToEngineer },
+      actionLabel: 'reject the final approval',
     })
 
     await tx.request_activities.create({

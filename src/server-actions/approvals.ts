@@ -4,7 +4,11 @@ import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
 import type { Prisma } from '@prisma/client'
 import { revalidateRequestViews } from './request-view-invalidation'
-import { RequestStatusConflictError, type RequestStatusChangeResult } from '@/lib/request-status-transition'
+import {
+  RequestStatusConflictError,
+  updateRequestStatusExpecting,
+  type RequestStatusChangeResult,
+} from '@/lib/request-status-transition'
 import { CURRENT_INSTANCE_ROW_FILTER } from '@/lib/approval-engine/current-instance'
 import {
   advanceApprovalAtomically,
@@ -220,7 +224,35 @@ export async function rejectRequest(
   // Reject atomically: the matched row, the audit activity, the remaining
   // current pending rows, and the current instance's REJECTED outcome commit
   // together; a failure rolls all of it back.
+  //
+  // Not routed through the engine REJECT branch (advanceApprovalTransaction
+  // with decision 'REJECT'): that branch records the approve-flavoured
+  // activity ('approved' + "approved at step" comment) and does not store the
+  // rejection reason on the activity, which the timeline, notifications and
+  // evidence checks read from the 'rejected' activity. Instead eligibility is
+  // re-evaluated with the engine inside the transaction and the request row
+  // is guarded on its expected status.
   await prisma.$transaction(async (tx) => {
+    const txEligibility = await canUserApproveRequest(
+      createPrismaApprovalTransactionDb(tx),
+      { approvalId: approval.id, actorId: userId },
+    )
+    if (!txEligibility.canApprove) {
+      throw new RequestStatusConflictError(
+        'Cannot reject this request - it was changed by someone else. Please refresh and try again.',
+      )
+    }
+
+    // Request rejection keeps the document in ImprovementRequest for
+    // revision; the guarded touch makes a concurrent cancel/approval that
+    // already moved the request turn this reject into a conflict + rollback.
+    await updateRequestStatusExpecting(tx, {
+      requestId,
+      expectedStatuses: ['ImprovementRequest'],
+      data: { updatedAt: new Date() },
+      actionLabel: 'reject the request',
+    })
+
     const rejected = await tx.request_approvals.updateMany({
       where: {
         id: approval.id,
