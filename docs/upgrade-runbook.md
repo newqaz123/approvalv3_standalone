@@ -144,7 +144,9 @@ that case, add a position.
    at the exact position each route step names. The upgrade sets a manager
    only where one person clearly holds the top level. A step with nobody
    eligible is **skipped as vacant**, and if all steps are vacant the phase
-   completes without an approver. For each unit, use postcheck
+   completes without an approver. This is the intended behaviour (owner
+   decision 2026-10-19: no higher-level approver → skip / auto-complete), so
+   set managers and teams promptly. For each unit, use postcheck
    `units_without_manager` and the unit list to:
    - pick the Unit manager, and
    - create teams with a reports-to person where several levels must

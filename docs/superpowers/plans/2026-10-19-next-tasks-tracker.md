@@ -33,9 +33,9 @@ Legend: ⬜ todo · 🔄 in progress · ✅ done · ⏸ needs owner decision
 
 ### Review fixes
 Blockers
-- ⬜ B1 Migrations squashed into one `clean_start_init` (main's 18 dropped) → `migrate deploy` fails on existing prod DB; no data path from departments → org units. **Owner: write upgrade migration** → design `docs/superpowers/specs/2026-10-19-upgrade-migration-design.md` (Q1 Level N higher=senior; Q2 block while requests open)
-- ⬜ B2 Restore audit-trail append-only trigger (`prevent_audit_modification`) lost in squash + test
-- ⬜ B3 Split seed: production bootstrap (admin w/ forcePasswordChange, `update: {}`, company root, settings, stages) vs dev fixture behind URL guard
+- ✅ B1 (`69051f8`, `dfde1b5`; verify A/B/C passed, re-run by parent) Migrations squashed into one `clean_start_init` (main's 18 dropped) → `migrate deploy` fails on existing prod DB; no data path from departments → org units. **Owner: write upgrade migration** → design `docs/superpowers/specs/2026-10-19-upgrade-migration-design.md` (Q1 Level N higher=senior; Q2 block while requests open)
+- ✅ B2 (kept from main's migrations; verified trigger blocks UPDATE) Restore audit-trail append-only trigger (`prevent_audit_modification`) lost in squash + test
+- ✅ B3 (`4b0ea18`; dev fixture → `prisma/seed-dev.ts`, `npm run seed:dev`) Split seed: production bootstrap (admin w/ forcePasswordChange, `update: {}`, company root, settings, stages) vs dev fixture behind URL guard
 High / Medium
 - ✅ H4 (`ff31640`) `getRequestApprovals` (approvals.ts:373) — add login + `canUserViewRequest`
 - ✅ H5 (`3dcf617`; spec updated; schema default false — migration pending in B1) Sharing semantics differ from spec (ON = parent subtree incl. siblings; default ON) — **Owner: keep code, default new units to sharing OFF**; update spec + T09
@@ -48,7 +48,8 @@ Low
 - ⬜ L11 Deactivated units' requests vanish from sharing views
 - ✅ L12 (`0a7eae6`; `handoff.md` on main still to remove at merge) Cleanup: dead `request-detail-modal.tsx`, signup email log in auth.ts, obsolete `handoff.md` on main
 - ⬜ business-e2e T08E/T10C (+ DB evidence checker) still expect parent Dept manager to start Final — convert to denial after H6
-- ⬜ Re-run clean-start constraints integration suite on squashed migration
+- ⬜ Clean-start constraints integration suite fails 6/6 (also on plain db push → pre-existing test issue: constraint names not in Prisma raw errors; scoped cleanup)
+- ✅ Decision: no eligible higher-level approver → step skipped / phase auto-completes (owner, 2026-10-19); runbook says set managers/teams promptly
 - ⏸ Merge to `main` / open PR (needs owner OK)
 
 ## Log
