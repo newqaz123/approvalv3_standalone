@@ -3,11 +3,14 @@
  * constraints and first-decision-wins races (Plan B Task 13).
  *
  * These tests are NOT part of `npm run check` (which only runs
- * tests/regression) and are NEVER executed locally — the source task has no
- * database authority and no migration may be applied here. They require a
- * database with the additive clean-start schema (including the hand-appended
- * partial unique indexes) already applied, provided ONLY through
+ * tests/regression). They require a disposable database with the full
+ * migration history applied (`prisma migrate deploy`, including the
+ * hand-written partial unique indexes), provided ONLY through
  * CLEAN_START_CI_DATABASE_URL; without that variable every test self-skips.
+ * scripts/upgrade/verify-upgrade.sh runs them against a throwaway cluster and
+ * counts the result. Unique-index violations are asserted via SQLSTATE 23505,
+ * the conflicting key, and the index definition in pg_indexes (Prisma raw
+ * errors do not carry the index name).
  * An explicit guard rejects a CI URL equal to the application's DATABASE_URL,
  * and PrismaClient is always constructed with the explicit CI datasource URL,
  * so the target can never silently default to a local env. Protected local
@@ -24,9 +27,11 @@
  * transaction promises immediately so expected failures are never unhandled.
  *
  * Fixture discipline: cleanup is registered BEFORE the first seed write,
- * tracks exactly the IDs each scenario created in creation order, and runs
- * them in FK-safe reverse order as idempotent deleteMany calls. Failures are
- * collected and reported via AggregateError instead of being swallowed.
+ * tracks exactly the IDs each scenario created, and deletes them in a fixed
+ * FK-safe table order inside one transaction (audit-trigger bypass set
+ * locally). Scenario units hang under the single active company root (an
+ * existing one, or a suite-owned root removed afterwards). Failures are
+ * reported via AggregateError instead of being swallowed.
  */
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert/strict'
@@ -40,6 +45,9 @@ const PROTECTED_DATABASE_NAMES = new Set(['app_db', 'app_org_manual_7abcdf3', 'a
 const ci = hasCI ? describe : describe.skip
 
 let prisma: PrismaClient | null = null
+const SUITE_ROOT_ID = '00000000-0013-4000-8000-000000000900'
+let suiteRootId: string | null = null
+let createdSuiteRoot = false
 
 function databaseNameFromUrl(url: string): string {
   const parsed = new URL(url)
@@ -63,11 +71,46 @@ before(async () => {
     datasources: { db: { url: CI_DATABASE_URL } },
   })
   await prisma.$connect()
+
+  // Scenario units hang under the database's single active company root
+  // (one_active_company_root): reuse an existing root, otherwise create a
+  // suite-owned root that is removed in `after`.
+  const existingRoot = await prisma.organization_units.findFirst({
+    where: { parentId: null, isActive: true },
+    select: { id: true },
+  })
+  if (existingRoot) {
+    suiteRootId = existingRoot.id
+  } else {
+    suiteRootId = SUITE_ROOT_ID
+    await prisma.organization_units.create({ data: { id: SUITE_ROOT_ID, name: `B13 suite root ${SUITE_ROOT_ID}` } })
+    createdSuiteRoot = true
+  }
 })
 
 after(async () => {
-  if (prisma) await prisma.$disconnect()
+  if (!prisma) return
+  try {
+    if (createdSuiteRoot) await prisma.organization_units.deleteMany({ where: { id: SUITE_ROOT_ID } })
+  } finally {
+    await prisma.$disconnect()
+  }
 })
+
+function suiteRoot(): string {
+  assert.ok(suiteRootId, 'suite root unit must be initialised')
+  return suiteRootId
+}
+
+/** Runs `fn` and returns its rejection reason; fails if it resolves. */
+async function captureRejection(fn: () => Promise<unknown>): Promise<unknown> {
+  try {
+    await fn()
+  } catch (error) {
+    return error
+  }
+  assert.fail('expected the statement to be rejected')
+}
 
 function client(): PrismaClient {
   assert.ok(prisma, 'CI database client must be initialised')
@@ -92,8 +135,36 @@ function errorDump(error: unknown): string {
   return String(error)
 }
 
-function assertIndexViolation(error: unknown, indexName: string): void {
-  assert.match(errorDump(error), new RegExp(indexName, 'i'))
+/**
+ * Prisma raw-query errors (P2010) carry the PostgreSQL SQLSTATE and detail
+ * ("Key (...)=(...) already exists.") but NOT the violated index name, so the
+ * name cannot be asserted from the error. Instead: (1) assert SQLSTATE 23505
+ * (unique_violation) from the error/meta, (2) assert the conflicting key
+ * matches the index's key expression, and (3) prove from pg_indexes that the
+ * named partial unique index exists with exactly that key and predicate — the
+ * only unique index on the table that can produce this key.
+ */
+function postgresCode(error: unknown): string | undefined {
+  if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    const metaCode = (error.meta as { code?: unknown } | undefined)?.code
+    if (typeof metaCode === 'string') return metaCode
+  }
+  const match = /Code: `(\w{5})`/.exec(errorDump(error))
+  return match?.[1]
+}
+
+async function assertPartialUniqueIndexViolation(
+  db: PrismaClient,
+  error: unknown,
+  index: { name: string; table: string; keyDetail: RegExp; definition: RegExp },
+): Promise<void> {
+  assert.equal(postgresCode(error), '23505', `expected unique_violation (23505): ${errorDump(error)}`)
+  assert.match(errorDump(error), index.keyDetail, `conflicting key does not match ${index.name}`)
+  const rows = await db.$queryRaw<Array<{ indexdef: string }>>`
+    SELECT indexdef FROM pg_indexes WHERE schemaname = current_schema() AND tablename = ${index.table} AND indexname = ${index.name}`
+  assert.equal(rows.length, 1, `partial unique index ${index.name} missing on ${index.table}`)
+  assert.match(rows[0].indexdef, /^CREATE UNIQUE INDEX /)
+  assert.match(rows[0].indexdef, index.definition)
 }
 
 function assertRestrictViolation(error: unknown): void {
@@ -118,14 +189,28 @@ async function waitFor(
 
 /**
  * Failure-safe scoped cleanup: tracks exactly the IDs this scenario created
- * (in creation order) and deletes them in reverse registration order, which
- * is FK-safe because children are always created after their parents.
- * Deletions are idempotent deleteMany calls; failures are collected and
- * reported as an AggregateError after best-effort completion instead of
- * being swallowed.
+ * and deletes them in a FIXED FK-safe table order (children before parents,
+ * restart attempts before the attempts they restart, child units before
+ * parent units) regardless of registration order. Deletions run in ONE
+ * transaction with `SET LOCAL app.bypass_audit = 'true'` (the same bypass the
+ * retention hard-delete uses) so the append-only request_activities trigger
+ * does not block cascades from deleted requests. Failures are reported via
+ * AggregateError instead of being swallowed.
  */
+type TrackedTable =
+  | 'request_approvals'
+  | 'approval_candidate_groups'
+  | 'approval_instances'
+  | 'requests'
+  | 'approval_route_steps'
+  | 'approval_route_versions'
+  | 'organization_assignments'
+  | 'positions'
+  | 'organization_units'
+  | 'users'
+
 class ScenarioCleanup {
-  private readonly steps: Array<{ description: string; run: () => Promise<unknown> }> = []
+  private readonly tracked = new Map<TrackedTable, Set<string>>()
   private readonly beforeCleanup: Array<{ description: string; run: () => Promise<unknown> }> = []
 
   constructor(private readonly db: PrismaClient) {}
@@ -134,49 +219,26 @@ class ScenarioCleanup {
     this.beforeCleanup.push({ description, run })
   }
 
-  private track(description: string, run: () => Promise<unknown>): void {
-    this.steps.push({ description, run })
+  private track(table: TrackedTable, id: string): void {
+    const ids = this.tracked.get(table) ?? new Set<string>()
+    ids.add(id)
+    this.tracked.set(table, ids)
   }
 
-  trackApprovalRow(id: string): void {
-    this.track(`request_approvals ${id}`, () => this.db.request_approvals.deleteMany({ where: { id } }))
+  private ids(table: TrackedTable): string[] {
+    return [...(this.tracked.get(table) ?? [])]
   }
 
-  trackCandidateGroup(id: string): void {
-    this.track(`approval_candidate_groups ${id}`, () => this.db.approval_candidate_groups.deleteMany({ where: { id } }))
-  }
-
-  trackInstance(id: string): void {
-    this.track(`approval_instances ${id}`, () => this.db.approval_instances.deleteMany({ where: { id } }))
-  }
-
-  trackRequest(id: string): void {
-    this.track(`requests ${id}`, () => this.db.requests.deleteMany({ where: { id } }))
-  }
-
-  trackRouteStep(id: string): void {
-    this.track(`approval_route_steps ${id}`, () => this.db.approval_route_steps.deleteMany({ where: { id } }))
-  }
-
-  trackRouteVersion(id: string): void {
-    this.track(`approval_route_versions ${id}`, () => this.db.approval_route_versions.deleteMany({ where: { id } }))
-  }
-
-  trackAssignment(id: string): void {
-    this.track(`organization_assignments ${id}`, () => this.db.organization_assignments.deleteMany({ where: { id } }))
-  }
-
-  trackPosition(id: string): void {
-    this.track(`positions ${id}`, () => this.db.positions.deleteMany({ where: { id } }))
-  }
-
-  trackUnit(id: string): void {
-    this.track(`organization_units ${id}`, () => this.db.organization_units.deleteMany({ where: { id } }))
-  }
-
-  trackUser(id: string): void {
-    this.track(`users ${id}`, () => this.db.user.deleteMany({ where: { id } }))
-  }
+  trackApprovalRow(id: string): void { this.track('request_approvals', id) }
+  trackCandidateGroup(id: string): void { this.track('approval_candidate_groups', id) }
+  trackInstance(id: string): void { this.track('approval_instances', id) }
+  trackRequest(id: string): void { this.track('requests', id) }
+  trackRouteStep(id: string): void { this.track('approval_route_steps', id) }
+  trackRouteVersion(id: string): void { this.track('approval_route_versions', id) }
+  trackAssignment(id: string): void { this.track('organization_assignments', id) }
+  trackPosition(id: string): void { this.track('positions', id) }
+  trackUnit(id: string): void { this.track('organization_units', id) }
+  trackUser(id: string): void { this.track('users', id) }
 
   async run(): Promise<void> {
     const preconditionFailures: Array<{ description: string; error: unknown }> = []
@@ -196,21 +258,49 @@ class ScenarioCleanup {
       )
     }
 
-    const failures: Array<{ description: string; error: unknown }> = []
-    for (const step of [...this.steps].reverse()) {
-      try {
-        await step.run()
-      } catch (error) {
-        failures.push({ description: step.description, error })
-      }
-    }
-    if (failures.length > 0) {
-      throw new AggregateError(
-        failures.map((failure) =>
-          failure.error instanceof Error ? failure.error : new Error(String(failure.error)),
-        ),
-        `scoped cleanup failures: ${failures.map((failure) => failure.description).join(', ')}`,
-      )
+    const requests = this.ids('requests')
+    const instances = this.ids('approval_instances')
+    const groups = this.ids('approval_candidate_groups')
+    const routeVersions = this.ids('approval_route_versions')
+    const units = this.ids('organization_units')
+    try {
+      await this.db.$transaction(async (tx) => {
+        await tx.$executeRaw`SET LOCAL app.bypass_audit = 'true'`
+        await tx.request_activities.deleteMany({ where: { requestId: { in: requests } } })
+        await tx.request_approvals.deleteMany({
+          where: { OR: [{ id: { in: this.ids('request_approvals') } }, { requestId: { in: requests } }, { instanceId: { in: instances } }] },
+        })
+        await tx.approval_candidate_group_members.deleteMany({ where: { candidateGroupId: { in: groups } } })
+        await tx.approval_candidate_groups.deleteMany({
+          where: { OR: [{ id: { in: groups } }, { approvalInstanceId: { in: instances } }] },
+        })
+        // Restart attempts reference the attempt they restart (Restrict).
+        await tx.approval_instances.deleteMany({ where: { id: { in: instances }, restartOfInstanceId: { not: null } } })
+        await tx.approval_instances.deleteMany({ where: { id: { in: instances } } })
+        await tx.requests.deleteMany({ where: { id: { in: requests } } })
+        await tx.approval_route_steps.deleteMany({
+          where: { OR: [{ id: { in: this.ids('approval_route_steps') } }, { routeVersionId: { in: routeVersions } }] },
+        })
+        await tx.approval_route_versions.deleteMany({ where: { id: { in: routeVersions } } })
+        await tx.organization_assignments.deleteMany({ where: { id: { in: this.ids('organization_assignments') } } })
+        await tx.positions.deleteMany({ where: { id: { in: this.ids('positions') } } })
+        // Child units first: repeat until every tracked unit is gone.
+        for (;;) {
+          const remaining = (
+            await tx.organization_units.findMany({ where: { id: { in: units } }, select: { id: true } })
+          ).map((row) => row.id)
+          if (remaining.length === 0) break
+          const leaves = await tx.organization_units.findMany({
+            where: { id: { in: remaining }, children: { none: {} } },
+            select: { id: true },
+          })
+          if (leaves.length === 0) throw new Error(`organization_units cleanup stuck on ${remaining.join(', ')}`)
+          await tx.organization_units.deleteMany({ where: { id: { in: leaves.map((row) => row.id) } } })
+        }
+        await tx.user.deleteMany({ where: { id: { in: this.ids('users') } } })
+      })
+    } catch (error) {
+      throw new AggregateError([error instanceof Error ? error : new Error(String(error))], `scoped cleanup failed: ${errorDump(error)}`)
     }
   }
 }
@@ -398,7 +488,7 @@ ci('clean-start SQL constraints and races (CI database)', () => {
       data: { id: userId, name: 'B13 assignment user', email: `b13-assign-${userId}@example.test`, isActive: true },
     })
     await db.organization_units.create({
-      data: { id: unitA, name: `B13 unit A ${unitA}`,  },
+      data: { id: unitA, name: `B13 unit A ${unitA}`, parentId: suiteRoot() },
     })
     await db.organization_units.create({
       data: {
@@ -412,16 +502,18 @@ ci('clean-start SQL constraints and races (CI database)', () => {
       data: { id: firstAssignmentId, userId, unitId: unitA, positionId, isActive: true },
     })
 
-    await assert.rejects(
-      () =>
-        db.$executeRawUnsafe(
-          `INSERT INTO "organization_assignments" ("id", "userId", "unitId", "positionId", "isActive", "updatedAt") VALUES ('${secondAssignmentId}', '${userId}', '${unitB}', '${positionId}', true, NOW())`,
-        ),
-      (error: unknown) => {
-        assertIndexViolation(error, 'one_active_assignment_per_user')
-        return true
-      },
+    const error = await captureRejection(() =>
+      db.$executeRawUnsafe(
+        `INSERT INTO "organization_assignments" ("id", "userId", "unitId", "positionId", "isActive", "updatedAt") VALUES ('${secondAssignmentId}', '${userId}', '${unitB}', '${positionId}', true, NOW())`,
+      ),
     )
+    await assertPartialUniqueIndexViolation(db, error, {
+      name: 'one_active_assignment_per_user',
+      table: 'organization_assignments',
+      keyDetail: new RegExp(`Key \\("userId"\\)=\\(${userId}\\) already exists`),
+      definition: /\("userId"\) WHERE "isActive"$/,
+    })
+    assert.equal(await db.organization_assignments.count({ where: { id: secondAssignmentId } }), 0)
   })
 
   it('one_active_company_root rejects a second active root', async (t) => {
@@ -429,30 +521,29 @@ ci('clean-start SQL constraints and races (CI database)', () => {
     const cleanup = new ScenarioCleanup(db)
     t.after(() => cleanup.run())
 
-    const firstRootId = scenarioId(11)
+    // The suite root (existing or suite-owned) is the single active root.
     const secondRootId = scenarioId(12)
-    cleanup.trackUnit(firstRootId)
+    const inactiveRootId = scenarioId(13)
     cleanup.trackUnit(secondRootId)
+    cleanup.trackUnit(inactiveRootId)
+    assert.equal(await db.organization_units.count({ where: { parentId: null, isActive: true } }), 1)
 
-    await db.organization_units.create({
-      data: {
-        id: firstRootId,
-        name: `B13 root ${firstRootId}`,
-
-        parentId: null,
-        isActive: true,
-      },
+    const error = await captureRejection(() =>
+      db.$executeRawUnsafe(
+        `INSERT INTO "organization_units" ("id", "name", "parentId", "isActive", "updatedAt") VALUES ('${secondRootId}', 'B13 root ${secondRootId}', NULL, true, NOW())`,
+      ),
+    )
+    await assertPartialUniqueIndexViolation(db, error, {
+      name: 'one_active_company_root',
+      table: 'organization_units',
+      keyDetail: /Key \(\(1\)\)=\(1\) already exists/,
+      definition: /\(\(1\)\) WHERE \(\("parentId" IS NULL\) AND "isActive"\)$/,
     })
+    assert.equal(await db.organization_units.count({ where: { id: secondRootId } }), 0)
 
-    await assert.rejects(
-      () =>
-        db.$executeRawUnsafe(
-          `INSERT INTO "organization_units" ("id", "name", "parentId", "isActive", "updatedAt") VALUES ('${secondRootId}', 'B13 root ${secondRootId}', NULL, true, NOW())`,
-        ),
-      (error: unknown) => {
-        assertIndexViolation(error, 'one_active_company_root')
-        return true
-      },
+    // The index is partial: an INACTIVE second root is allowed.
+    await db.$executeRawUnsafe(
+      `INSERT INTO "organization_units" ("id", "name", "parentId", "isActive", "updatedAt") VALUES ('${inactiveRootId}', 'B13 inactive root ${inactiveRootId}', NULL, false, NOW())`,
     )
   })
 
@@ -465,7 +556,9 @@ ci('clean-start SQL constraints and races (CI database)', () => {
     const unitId = scenarioId(22)
     const firstVersionId = scenarioId(23)
     const secondVersionId = scenarioId(24)
+    const limitPositionId = scenarioId(25)
     cleanup.trackUser(createdById)
+    cleanup.trackPosition(limitPositionId)
     cleanup.trackUnit(unitId)
     cleanup.trackRouteVersion(firstVersionId)
     cleanup.trackRouteVersion(secondVersionId)
@@ -474,8 +567,9 @@ ci('clean-start SQL constraints and races (CI database)', () => {
       data: { id: createdById, name: 'B13 publisher', email: `b13-pub-${createdById}@example.test`, isActive: true },
     })
     await db.organization_units.create({
-      data: { id: unitId, name: `B13 route unit ${unitId}`,  },
+      data: { id: unitId, name: `B13 route unit ${unitId}`, parentId: suiteRoot() },
     })
+    await db.positions.create({ data: { id: limitPositionId, name: `B13 route limit ${limitPositionId}`, rank: 10, isActive: true } })
 
     const c1 = newClient()
     const c2 = newClient()
@@ -493,7 +587,7 @@ ci('clean-start SQL constraints and races (CI database)', () => {
           async (txA) => {
             await setLocalLockTimeout(txA)
             await txA.$executeRawUnsafe(
-              `INSERT INTO "approval_route_versions" ("id", "scopeUnitId", "phase", "version", "maximumPositionLevel", "status", "createdById") VALUES ('${firstVersionId}', '${unitId}', 'REQUEST', 1, 5, 'PUBLISHED', '${createdById}')`,
+              `INSERT INTO "approval_route_versions" ("id", "scopeUnitId", "phase", "version", "status", "createdById", "approvalLimitPositionId") VALUES ('${firstVersionId}', '${unitId}', 'REQUEST', 1, 'PUBLISHED', '${createdById}', '${limitPositionId}')`,
             )
             observed.pidA = await backendPid(txA)
             await new Promise<void>((resolve) => {
@@ -511,7 +605,7 @@ ci('clean-start SQL constraints and races (CI database)', () => {
             await setLocalLockTimeout(txB, '30s')
             observed.pidB = await backendPid(txB)
             await txB.$executeRawUnsafe(
-              `INSERT INTO "approval_route_versions" ("id", "scopeUnitId", "phase", "version", "maximumPositionLevel", "status", "createdById") VALUES ('${secondVersionId}', '${unitId}', 'REQUEST', 2, 5, 'PUBLISHED', '${createdById}')`,
+              `INSERT INTO "approval_route_versions" ("id", "scopeUnitId", "phase", "version", "status", "createdById", "approvalLimitPositionId") VALUES ('${secondVersionId}', '${unitId}', 'REQUEST', 2, 'PUBLISHED', '${createdById}', '${limitPositionId}')`,
             )
           },
           { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, ...PINNED_TX_OPTIONS },
@@ -531,13 +625,13 @@ ci('clean-start SQL constraints and races (CI database)', () => {
 
       releaseFirstPublisher()
       await txAPromise
-      await assert.rejects(
-        () => txBPromise,
-        (error: unknown) => {
-          assertIndexViolation(error, 'one_published_route_per_scope_phase')
-          return true
-        },
-      )
+      const error = await captureRejection(() => txBPromise)
+      await assertPartialUniqueIndexViolation(db, error, {
+        name: 'one_published_route_per_scope_phase',
+        table: 'approval_route_versions',
+        keyDetail: new RegExp(`Key \\("scopeUnitId", phase\\)=\\(${unitId}, REQUEST\\) already exists`),
+        definition: /\("scopeUnitId", phase\) WHERE \(status = 'PUBLISHED'::"ApprovalRouteStatus"\)$/,
+      })
     })
 
     const published = await db.approval_route_versions.findMany({
@@ -582,7 +676,7 @@ ci('clean-start SQL constraints and races (CI database)', () => {
       ],
     })
     await db.organization_units.create({
-      data: { id: unitId, name: `B13 decision unit ${unitId}` },
+      data: { id: unitId, name: `B13 decision unit ${unitId}`, parentId: suiteRoot() },
     })
     await db.positions.create({ data: { id: positionId, name: `B13 decision pos ${positionId}`, rank: 10, isActive: true } })
     await db.organization_assignments.create({
@@ -745,7 +839,7 @@ ci('clean-start SQL constraints and races (CI database)', () => {
       ],
     })
     await db.organization_units.create({
-      data: { id: unitId, name: `B13 restrict unit ${unitId}`,  },
+      data: { id: unitId, name: `B13 restrict unit ${unitId}`, parentId: suiteRoot() },
     })
     await db.positions.create({ data: { id: positionId, name: `B13 restrict pos ${positionId}`, rank: 20, isActive: true } })
     await db.organization_assignments.create({
@@ -867,7 +961,7 @@ ci('clean-start SQL constraints and races (CI database)', () => {
       ],
     })
     await db.organization_units.create({
-      data: { id: unitId, name: `B13 restart unit ${unitId}` },
+      data: { id: unitId, name: `B13 restart unit ${unitId}`, parentId: suiteRoot() },
     })
     await db.positions.create({ data: { id: positionId, name: `B13 restart pos ${positionId}`, rank: 8, isActive: true } })
     await db.organization_assignments.create({

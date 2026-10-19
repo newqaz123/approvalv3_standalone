@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Verify the in-place organization upgrade on THROWAWAY PostgreSQL clusters.
 #
-#   bash scripts/upgrade/verify-upgrade.sh            # scenarios A, B, C (+ CI suite)
+#   bash scripts/upgrade/verify-upgrade.sh            # scenarios A, B, C + CI suite (counted)
 #   SKIP_CI_SUITE=1 bash scripts/upgrade/verify-upgrade.sh
 #
 # Safety: never reads .env and never touches an existing database. It creates
@@ -228,13 +228,9 @@ if [ "${SKIP_CI_SUITE:-0}" != 1 ] && [ -f tests/integration/clean-start-constrai
   prisma "$(url cisuite)" migrate deploy >"$WORK/ci-deploy.log" 2>&1 || { cat "$WORK/ci-deploy.log"; exit 1; }
   if DATABASE_URL="postgresql://unused:unused@127.0.0.1:1/unused" CLEAN_START_CI_DATABASE_URL="$(url cisuite)" \
      npx --no-install tsx --test tests/integration/clean-start-constraints.integration.test.ts >"$WORK/ci-suite.log" 2>&1; then
-    echo "  CI constraints suite: PASS"
+    check "CI constraints suite" PASS PASS
   else
-    # Informational only: on 2026-10-19 this suite failed identically (6/6)
-    # against a CI-style `prisma db push` + partial-index database, i.e. the
-    # failures are in the suite/harness (constraint names absent from Prisma
-    # raw-query errors, cleanup ordering), not in the migrations.
-    echo "  CI constraints suite: FAIL (informational, not counted; compare with a db-push database)"
+    check "CI constraints suite" PASS FAIL
   fi
   grep -E "^# (tests|pass|fail|skipped|cancelled)" "$WORK/ci-suite.log" | sed 's/^/  /'
   grep -E "^not ok" "$WORK/ci-suite.log" | sed 's/^/  /' || true

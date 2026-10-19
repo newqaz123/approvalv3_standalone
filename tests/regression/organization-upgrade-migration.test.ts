@@ -133,3 +133,19 @@ describe('production bootstrap seed', () => {
     assert.match(readFileSync('docker-compose.prod.yml', 'utf8'), /npx tsx prisma\/seed\.ts/)
   })
 })
+
+describe('upgrade verification script', () => {
+  it('counts the clean-start constraints integration suite instead of treating it as informational', () => {
+    const script = readFileSync('scripts/upgrade/verify-upgrade.sh', 'utf8')
+    assert.match(script, /check "CI constraints suite" PASS FAIL/)
+    assert.doesNotMatch(script, /informational, not counted/)
+  })
+
+  it('integration suite asserts SQLSTATE + pg_indexes and cleans up with the audit bypass', () => {
+    const suite = readFileSync('tests/integration/clean-start-constraints.integration.test.ts', 'utf8')
+    assert.match(suite, /postgresCode\(error\), '23505'/)
+    assert.match(suite, /FROM pg_indexes WHERE/)
+    assert.match(suite, /SET LOCAL app\.bypass_audit = 'true'/)
+    assert.doesNotMatch(suite, /maximumPositionLevel/)
+  })
+})
