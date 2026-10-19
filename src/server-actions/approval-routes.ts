@@ -209,42 +209,8 @@ function definitionFromInput(
 }
 
 // ---------------------------------------------------------------------------
-// saveRouteDraft / publishRoute
+// publishRoute
 // ---------------------------------------------------------------------------
-
-/**
- * Saves a new immutable DRAFT version for the scope/phase. Drafts never
- * retire a published version and never affect route resolution. Validation
- * (B2 validateRouteDefinition against the active position catalog) runs
- * before any write.
- */
-export async function saveRouteDraft(
-  input: SaveRouteInput,
-  db?: ApprovalChainsWriteDb,
-): Promise<{ versionId: string }> {
-  const store = db ?? (await createProductionWriteDb())
-  validatedPhase(input.phase)
-  const [units, positions] = await Promise.all([store.loadUnits(), store.loadPositions()])
-  validatedScopeUnit(units, input.scopeUnitId)
-  const definition = definitionFromInput(input, 'DRAFT')
-  validateRouteDefinition(definition, new Map(positions.map((row) => [row.id, row])))
-
-  const created = await store.runRouteTransaction(async (tx) => {
-    const version = await tx.nextVersionNumber(input.scopeUnitId, definition.phase)
-    return tx.insertRouteVersion({
-      scopeUnitId: input.scopeUnitId,
-      phase: definition.phase,
-      version,
-      approvalLimitPositionId: input.approvalLimitPositionId,
-      status: 'DRAFT',
-      adminUserId: store.adminUserId,
-      publishedAt: null,
-      steps: definition.steps,
-    })
-  })
-  await store.revalidateWorkspace()
-  return { versionId: created.id }
-}
 
 /**
  * Publishes a new immutable version for the scope/phase. REFUSES first when
@@ -291,6 +257,40 @@ export async function publishRoute(
   })
   await store.revalidateWorkspace()
   return { published: true, versionId: created.id, conflicts: [] }
+}
+
+/**
+ * Removes a unit-specific exception from future routing without deleting its
+ * immutable route version. The company root is the default and cannot be
+ * removed; a missing exception is rejected rather than silently succeeding.
+ * Retiring the published version makes selectNearestRoute continue walking to
+ * the nearest published ancestor while captured approval instances retain the
+ * route/version they already reference.
+ */
+export async function deleteRouteException(
+  input: { scopeUnitId: string; phase: ApprovalPhase },
+  db?: ApprovalChainsWriteDb,
+): Promise<{ success: true }> {
+  const store = db ?? (await createProductionWriteDb())
+  const phase = validatedPhase(input.phase)
+  const units = await store.loadUnits()
+  const scope = validatedScopeUnit(units, input.scopeUnitId)
+  if (scope.parentId === null) {
+    throw new ApprovalRouteConfigurationError(
+      'The company root route is the default and cannot be deleted as a unit exception',
+    )
+  }
+
+  const retired = await store.runRouteTransaction((tx) => (
+    tx.retirePublishedVersions(scope.id, phase)
+  ))
+  if (retired === 0) {
+    throw new ApprovalRouteConfigurationError(
+      `No published unit exception exists for ${scope.id} ${phase}`,
+    )
+  }
+  await store.revalidateWorkspace()
+  return { success: true as const }
 }
 
 // ---------------------------------------------------------------------------

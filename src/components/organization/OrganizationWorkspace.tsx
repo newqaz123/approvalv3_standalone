@@ -2,6 +2,8 @@
 
 import React, { useMemo, useState } from 'react'
 import { Users } from 'lucide-react'
+import { ExceptionBranchBadges } from '@/components/organization/ExceptionBranchBadges'
+import { InTreeModal } from '@/components/organization/InTreeModal'
 import { OrganizationTree } from '@/components/organization/OrganizationTree'
 import { PersonAssignmentPanel } from '@/components/organization/PersonAssignmentPanel'
 import { TeamPanel } from '@/components/organization/TeamPanel'
@@ -107,8 +109,47 @@ export function OrganizationWorkspace({ snapshot }: { snapshot: WorkspaceSnapsho
   const currentUnassigned = unassignedRows ?? snapshot.unassignedUsers
   const currentTeams = teamRows ?? snapshot.teams
 
+  function closeManageDrawer() {
+    setSelectedUnitId(null)
+    setSelectedAssignmentId(null)
+    setSelectedUnassignedUserId(null)
+    setSelectedTeamId(null)
+    setCreatingTeamUnitId(null)
+    setUnassignedPanelOpen(false)
+  }
+
+  const manageOpen = unassignedPanelOpen
+    || selectedUnit !== null
+    || creatingTeamUnitId !== null
+    || selectedTeamId !== null
+    || selectedAssignmentId !== null
+    || selectedUnassignedUserId !== null
+
+  const selectedTeam = selectedTeamId
+    ? viewSnapshot.teams.find((team) => team.id === selectedTeamId) ?? null
+    : null
+  const selectedPerson = selectedAssignmentId
+    ? viewSnapshot.assignments.find((assignment) => assignment.id === selectedAssignmentId)
+    : null
+  const selectedPersonName = selectedPerson
+    ? viewSnapshot.users.find((user) => user.id === selectedPerson.userId)?.name
+    : null
+  const manageTitle = selectedUnit ? (
+    <span className="flex min-w-0 items-center gap-2">
+      <span className="truncate">{selectedUnit.name}</span>
+      <ExceptionBranchBadges
+        snapshot={viewSnapshot}
+        unitId={selectedUnit.id}
+        unitName={selectedUnit.name}
+        compact
+      />
+    </span>
+  ) : creatingTeamUnitId ? 'Create team'
+    : selectedTeam ? selectedTeam.name
+      : selectedPersonName ?? (selectedUnassignedUserId ? 'Assign person' : 'Manage organization')
+
   return (
-    <div data-testid="organization-workspace" className="flex flex-col items-stretch gap-8 lg:flex-row lg:items-start">
+    <div data-testid="organization-workspace" className="flex flex-col items-stretch">
       {/* Zoom owns the flowchart canvas only: the sticky toolbar, the manage
           drawers, and the unassigned panel live outside the scaled surface.
           The bottom unassigned dock is gone: the toolbar's Unassigned chip
@@ -141,30 +182,34 @@ export function OrganizationWorkspace({ snapshot }: { snapshot: WorkspaceSnapsho
           />
         </ZoomableFlowchart>
       </div>
+      <InTreeModal
+        open={manageOpen}
+        onClose={closeManageDrawer}
+        testId="organization-manage-drawer"
+        title={manageTitle}
+        titleId="organization-manage-title"
+        overlayZ="z-40"
+        className="organization-manage-drawer max-w-[800px]"
+      >
       {unassignedPanelOpen ? (
-        <aside
-          data-testid="organization-manage-drawer"
-          className="organization-manage-drawer max-h-[calc(100vh-2rem)] w-full shrink-0 overflow-y-auto overscroll-contain lg:sticky lg:top-4 lg:w-96 lg:max-w-full"
-        >
           <UnassignedPeopleList
             users={viewSnapshot.unassignedUsers}
             onSelectUser={selectUnassigned}
           />
-        </aside>
       ) : null}
       {selectedUnit ? (
-        <aside
-          data-testid="organization-manage-drawer"
-          className="organization-manage-drawer max-h-[calc(100vh-2rem)] w-full shrink-0 overflow-y-auto overscroll-contain lg:sticky lg:top-4 lg:w-96 lg:max-w-full"
-        >
           <UnitSidePanel
           unit={selectedUnit}
           snapshot={viewSnapshot}
+          showTitle={false}
+          inModal
           onSettingsSaved={(patch) => {
             setOverrides((current) => ({
               ...current,
               [selectedUnit.id]: { ...current[selectedUnit.id], ...patch },
             }))
+            // Owner-approved modal UX: a saved unit dialog closes itself.
+            closeManageDrawer()
           }}
           onManagerSaved={(managerUserId) => {
             setOverrides((current) => ({
@@ -183,13 +228,8 @@ export function OrganizationWorkspace({ snapshot }: { snapshot: WorkspaceSnapsho
             setSelectedUnitId(null)
           }}
         />
-        </aside>
       ) : null}
       {creatingTeamUnitId || selectedTeamId ? (
-        <aside
-          data-testid="organization-manage-drawer"
-          className="organization-manage-drawer max-h-[calc(100vh-2rem)] w-full shrink-0 overflow-y-auto overscroll-contain lg:sticky lg:top-4 lg:w-96 lg:max-w-full"
-        >
           <TeamPanel
           snapshot={viewSnapshot}
           unitId={
@@ -227,13 +267,8 @@ export function OrganizationWorkspace({ snapshot }: { snapshot: WorkspaceSnapsho
             setSelectedTeamId(null)
           }}
         />
-        </aside>
       ) : null}
       {selectedAssignmentId || selectedUnassignedUserId ? (
-        <aside
-          data-testid="organization-manage-drawer"
-          className="organization-manage-drawer max-h-[calc(100vh-2rem)] w-full shrink-0 overflow-y-auto overscroll-contain lg:sticky lg:top-4 lg:w-96 lg:max-w-full"
-        >
           <PersonAssignmentPanel
           snapshot={viewSnapshot}
           assignmentId={selectedAssignmentId}
@@ -241,8 +276,9 @@ export function OrganizationWorkspace({ snapshot }: { snapshot: WorkspaceSnapsho
           onAssigned={(row) => {
             setAssignmentRows([...currentAssignments, row])
             setUnassignedRows(currentUnassigned.filter((user) => user.id !== row.userId))
-            setSelectedAssignmentId(row.id)
-            setSelectedUnassignedUserId(null)
+            // Owner-approved modal UX: a completed assign closes the dialog
+            // instead of flipping to the move view (no assign→save→move loop).
+            closeManageDrawer()
           }}
           onMoved={(patch) => {
             setAssignmentRows(currentAssignments.map((row) => (
@@ -259,9 +295,10 @@ export function OrganizationWorkspace({ snapshot }: { snapshot: WorkspaceSnapsho
                 return nextReportsTo ? { ...team, reportsToAssignmentId: nextReportsTo } : team
               }))
             }
+            // Owner-approved modal UX: a confirmed move closes the dialog.
+            closeManageDrawer()
           }}
           onRemoved={({ assignmentId, userId }) => {
-            const removed = currentAssignments.find((row) => row.id === assignmentId)
             setAssignmentRows(currentAssignments.map((row) => (
               row.id === assignmentId ? { ...row, isActive: false } : row
             )))
@@ -275,12 +312,13 @@ export function OrganizationWorkspace({ snapshot }: { snapshot: WorkspaceSnapsho
                 ])
               }
             }
-            setSelectedAssignmentId(null)
-            if (removed) setSelectedUnassignedUserId(userId)
+            // Owner-approved modal UX: remove closes the dialog; the account
+            // reappears under the Unassigned chip.
+            closeManageDrawer()
           }}
         />
-        </aside>
       ) : null}
+      </InTreeModal>
     </div>
   )
 }

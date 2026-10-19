@@ -287,7 +287,7 @@ export function PersonAssignmentPanel({
   return (
     <aside
       data-testid="person-assignment-panel"
-      className="max-h-[calc(100vh-2rem)] w-full shrink-0 space-y-6 overflow-y-auto overscroll-contain rounded-lg border bg-card p-4 lg:sticky lg:top-4 lg:w-96"
+      className="max-h-[calc(100vh-2rem)] w-full shrink-0 space-y-6 overflow-y-auto overscroll-contain rounded-lg border bg-card p-4 lg:sticky lg:top-4"
     >
       {/* Heading split (owner-approved): the TITLE is the person short name
           (never the stored "Name — Unit" qualifier string) and the unit vs

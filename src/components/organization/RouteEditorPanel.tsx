@@ -1,13 +1,14 @@
 'use client'
 
-// Clean-start route editor (Plan C Task 9). Edits a versioned route
-// definition for one (scope unit, phase): ordered position-id steps with
-// position-name Selects and a named "Approval limit" Select. Lowering the
-// limit below a step disables Publish and lists the conflicting steps until
-// corrected (B2 findLimitConflicts, mirrored client-side by the exported
-// draftLimitConflicts helper); the server refuses the same input with the
-// same list and writes nothing. "Test with a submitter" opens the
-// SubmitterTestDialog with the CURRENT editor draft (in-memory only).
+// Clean-start route editor (Plan C Task 9, owner-revised: publish-direct).
+// Edits a versioned route definition for one (scope unit, phase): ordered
+// position-id steps with position-name Selects and a named "Approval limit"
+// Select. Steps auto-sort by position rank (the route model requires strictly
+// ascending ranks) and a position already used in another step cannot be
+// picked again. Publish is the ONLY write: it refuses when B2
+// findLimitConflicts is non-empty and writes nothing otherwise (mirrored
+// client-side by draftLimitConflicts). "Test with a submitter" opens the
+// SubmitterTestDialog with the CURRENT editor state (in-memory only).
 // Publish affects future attempts only.
 
 import React, { useMemo, useState } from 'react'
@@ -23,12 +24,28 @@ import {
 import type { ApprovalPhase } from '@/lib/approval-routes/definition'
 import { findLimitConflicts } from '@/lib/approval-routes/definition'
 import type { PositionNode } from '@/lib/organization/model'
-import { publishRoute, saveRouteDraft } from '@/server-actions/approval-routes'
+import { publishRoute } from '@/server-actions/approval-routes'
 import { SubmitterTestDialog } from '@/components/organization/SubmitterTestDialog'
 
 export interface EditorStep {
   order: number
   positionId: string
+}
+
+/** Route steps are always persisted in ascending position-rank order. Empty
+ * placeholders remain at the end while an editor is choosing a position. */
+export function normalizeEditorSteps(
+  current: ReadonlyArray<EditorStep>,
+  positions: ReadonlyArray<PositionNode>,
+): EditorStep[] {
+  const rankOf = new Map(positions.map((row) => [row.id, row.rank] as const))
+  return [...current]
+    .sort((left, right) => {
+      const leftRank = left.positionId ? rankOf.get(left.positionId) ?? Number.MAX_SAFE_INTEGER : Number.MAX_SAFE_INTEGER
+      const rightRank = right.positionId ? rankOf.get(right.positionId) ?? Number.MAX_SAFE_INTEGER : Number.MAX_SAFE_INTEGER
+      return leftRank - rightRank || left.order - right.order
+    })
+    .map((step, index) => ({ ...step, order: index + 1 }))
 }
 
 /**
@@ -69,6 +86,14 @@ export function editorComplete(
   )
 }
 
+export type RouteEditorMode = 'create' | 'edit' | 'customize'
+
+export interface RouteEditorPublishedResult {
+  versionId: string
+  approvalLimitPositionId: string
+  steps: ReadonlyArray<EditorStep>
+}
+
 export function RouteEditorPanel({
   scopeUnitId,
   scopeName,
@@ -78,8 +103,9 @@ export function RouteEditorPanel({
   unitNames = new Map(),
   initial,
   seedVersionId = null,
+  seedScopeName = null,
+  editorMode = 'edit',
   readOnly = false,
-  onDraftSaved,
   onPublished,
 }: {
   scopeUnitId: string
@@ -90,9 +116,11 @@ export function RouteEditorPanel({
   unitNames?: ReadonlyMap<string, string>
   initial?: { approvalLimitPositionId: string; steps: ReadonlyArray<EditorStep> } | null
   seedVersionId?: string | null
+  /** Name of the inherited source used to seed a new destination-scoped draft. */
+  seedScopeName?: string | null
+  editorMode?: RouteEditorMode
   readOnly?: boolean
-  onDraftSaved?: (result: { versionId: string }) => void
-  onPublished?: (result: { versionId: string }) => void
+  onPublished?: (result: RouteEditorPublishedResult) => void
 }) {
   const [approvalLimitPositionId, setApprovalLimitPositionId] = useState<string | null>(
     initial?.approvalLimitPositionId ?? null,
@@ -120,41 +148,28 @@ export function RouteEditorPanel({
     [steps, approvalLimitPositionId, positions],
   )
   const complete = editorComplete(steps, approvalLimitPositionId)
+  const headingVerb = readOnly
+    ? 'View'
+    : editorMode === 'create'
+      ? 'Create exception for'
+      : editorMode === 'customize'
+        ? 'Customize'
+        : 'Edit'
 
   function addStep() {
-    setSteps((current) => [...current, { order: current.length + 1, positionId: '' }])
+    setSteps((current) => normalizeEditorSteps([...current, { order: current.length + 1, positionId: '' }], positions))
   }
 
   function removeStep(order: number) {
-    setSteps((current) => current
+    setSteps((current) => normalizeEditorSteps(current
       .filter((step) => step.order !== order)
-      .map((step, index) => ({ ...step, order: index + 1 })))
+      .map((step, index) => ({ ...step, order: index + 1 })), positions))
   }
 
   function changeStep(order: number, positionId: string) {
-    setSteps((current) => current.map((step) => (
+    setSteps((current) => normalizeEditorSteps(current.map((step) => (
       step.order === order ? { ...step, positionId } : step
-    )))
-  }
-
-  async function handleSaveDraft() {
-    setError(null)
-    setNotice(null)
-    setSaving(true)
-    try {
-      const result = await saveRouteDraft({
-        scopeUnitId,
-        phase,
-        approvalLimitPositionId: approvalLimitPositionId ?? '',
-        steps: steps.map((step) => ({ order: step.order, positionId: step.positionId })),
-      })
-      setNotice(`Draft saved (version ${result.versionId})`)
-      onDraftSaved?.(result)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setSaving(false)
-    }
+    )), positions))
   }
 
   async function handlePublish() {
@@ -176,7 +191,11 @@ export function RouteEditorPanel({
         return
       }
       setNotice(`Published (version ${result.versionId})`)
-      onPublished?.({ versionId: result.versionId })
+      onPublished?.({
+        versionId: result.versionId,
+        approvalLimitPositionId: approvalLimitPositionId ?? '',
+        steps: steps.map((step) => ({ ...step })),
+      })
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -190,7 +209,25 @@ export function RouteEditorPanel({
       data-editor-version={seedVersionId ?? ''}
       className="space-y-4 rounded-lg border bg-card p-4"
     >
-      <h3 className="text-base font-semibold">{`Customize ${scopeName} — ${phase}`}</h3>
+      <h3 className="text-base font-semibold">{`${headingVerb} ${scopeName} — ${phase}`}</h3>
+
+      {!readOnly && editorMode !== 'customize' ? (
+        <p data-testid="route-editor-replacement-copy" className="text-sm text-muted-foreground">
+          A custom chain replaces the inherited chain for this unit and all of its descendants unless
+          overridden by their own exception; it does not append to the inherited chain. Publish affects
+          future attempts only.
+        </p>
+      ) : null}
+      {editorMode === 'create' && seedScopeName ? (
+        <p data-testid="route-editor-seed-copy" className="text-sm text-muted-foreground">
+          {`Seeded from the published ${phase} chain at ${seedScopeName}. Publishing creates an exception for ${scopeName}; the inherited source remains unchanged.`}
+        </p>
+      ) : null}
+      {editorMode === 'create' && !seedScopeName ? (
+        <p data-testid="route-editor-blank-seed" className="text-sm text-muted-foreground">
+          {`No inherited published ${phase} chain is available for ${scopeName}. This editor starts blank; no placeholder route is fabricated. Nothing is saved until Publish.`}
+        </p>
+      ) : null}
 
       <div className="space-y-2">
         <Label htmlFor={`route-editor-limit-select-${scopeUnitId}-${phase}`}>Approval limit</Label>
@@ -220,7 +257,11 @@ export function RouteEditorPanel({
       </div>
 
       <ol className="space-y-2">
-        {steps.map((step) => (
+        {steps.map((step) => {
+          const usedElsewhere = new Set(
+            steps.filter((other) => other.order !== step.order).map((other) => other.positionId),
+          )
+          return (
           <li key={step.order} className="flex flex-wrap items-center gap-2">
             <span className="text-sm text-muted-foreground">{`Step ${step.order}`}</span>
             <Select
@@ -233,7 +274,11 @@ export function RouteEditorPanel({
               </SelectTrigger>
               <SelectContent>
                 {activePositions.map((position) => (
-                  <SelectItem key={position.id} value={position.id}>
+                  <SelectItem
+                    key={position.id}
+                    value={position.id}
+                    disabled={usedElsewhere.has(position.id)}
+                  >
                     {`${position.name} (rank ${position.rank})`}
                   </SelectItem>
                 ))}
@@ -251,7 +296,8 @@ export function RouteEditorPanel({
               </Button>
             ) : null}
           </li>
-        ))}
+          )
+          })}
       </ol>
 
       {!readOnly ? (
@@ -292,17 +338,6 @@ export function RouteEditorPanel({
 
       {!readOnly ? (
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            data-testid="route-editor-save-draft"
-            disabled={saving || !complete || conflicts.length > 0}
-            onClick={() => {
-              void handleSaveDraft()
-            }}
-          >
-            Save draft
-          </Button>
           <Button
             type="button"
             data-testid="route-editor-publish"

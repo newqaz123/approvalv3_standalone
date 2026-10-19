@@ -10,6 +10,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { ExceptionBranchBadges } from '@/components/organization/ExceptionBranchBadges'
 import { InlineNameEdit } from '@/components/organization/InlineNameEdit'
 import type { AssignmentNode, OrganizationUnitNode, PositionNode, TeamNode } from '@/lib/organization/model'
 import { personInitials, personShortName } from '@/lib/organization/person-name'
@@ -406,6 +407,11 @@ export function TreeNodeRow({
               }}
             />
           </span>
+          <ExceptionBranchBadges
+            snapshot={snapshot}
+            unitId={unit.id}
+            unitName={unit.name}
+          />
           {unit.shareRequests || unit.canWorkOnSolutions ? (
             <span className="organization-unit-flags inline-flex shrink-0 items-center gap-1">
               <TooltipProvider delayDuration={200}>

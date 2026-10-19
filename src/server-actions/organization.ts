@@ -22,11 +22,20 @@ const PHASES: readonly ApprovalPhase[] = ['REQUEST', 'SOLUTION', 'FINAL']
 
 export type RouteSourceKind = 'ROOT_DEFAULT' | 'INHERITED' | 'CUSTOM'
 
+export interface WorkspaceRouteStep {
+  order: number
+  positionId: string
+}
+
 export interface WorkspaceRouteVersion {
   id: string
   scopeUnitId: string
   phase: ApprovalPhase
   status: 'DRAFT' | 'PUBLISHED' | 'RETIRED'
+  /** Present for production snapshots; optional for legacy test/read ports. */
+  version?: number
+  approvalLimitPositionId?: string | null
+  steps?: ReadonlyArray<WorkspaceRouteStep>
 }
 
 export interface WorkspaceUser {
@@ -61,6 +70,10 @@ export interface WorkspaceSnapshot {
     sourceUnitId: string | null
     publishedVersionId: string | null
     hasDraft: boolean
+    /** Actual ordered steps from the selected published version. */
+    steps?: ReadonlyArray<WorkspaceRouteStep & { positionName: string | null }>
+    approvalLimitPositionId?: string | null
+    approvalLimitName?: string | null
   }>
   customChainExceptions: ReadonlyArray<{ requestId: string; title: string }>
   readiness: ReadinessReport
@@ -119,7 +132,16 @@ type WorkspacePrisma = {
       id: string
       scopeUnitId: string
       phase: string
+      version: number
       status: string
+      approvalLimitPositionId: string | null
+    }>>
+  }
+  approval_route_steps: {
+    findMany: (args?: object) => Promise<Array<{
+      routeVersionId: string
+      stepOrder: number
+      positionId: string
     }>>
   }
   requests: {
@@ -148,18 +170,25 @@ function asRouteDefinition(row: WorkspaceRouteVersion): ApprovalRouteVersionDefi
     id: row.id,
     scopeUnitId: row.scopeUnitId,
     phase: row.phase,
-    version: 1,
-    approvalLimitPositionId: '_workspace-read-only',
+    version: row.version ?? 1,
+    // Route selection only needs the identity while this snapshot is being
+    // classified. Production rows always carry the actual limit; the
+    // compatibility sentinel keeps older injected read ports selectable.
+    approvalLimitPositionId: row.approvalLimitPositionId ?? '_workspace-read-only',
     status: row.status,
-    steps: [],
+    steps: [...(row.steps ?? [])]
+      .map((step) => ({ order: step.order, positionId: step.positionId }))
+      .sort((left, right) => left.order - right.order),
   }
 }
 
 function classifyRouteSources(
   units: readonly OrganizationUnitNode[],
+  positions: readonly PositionNode[],
   routes: readonly WorkspaceRouteVersion[],
 ): WorkspaceSnapshot['routeSources'] {
   const root = units.find((unit) => unit.parentId === null) ?? null
+  const positionsById = new Map(positions.map((position) => [position.id, position]))
   const defs = routes.map(asRouteDefinition)
   const rows: Array<WorkspaceSnapshot['routeSources'][number]> = []
   for (const unit of units) {
@@ -172,7 +201,10 @@ function classifyRouteSources(
         const selected = selectNearestRoute(path, defs, phase)
         let source: RouteSourceKind
         let sourceUnitId: string | null
-        if (selected.scopeUnitId === unit.id) {
+        if (root && unit.id === root.id && selected.scopeUnitId === root.id) {
+          source = 'ROOT_DEFAULT'
+          sourceUnitId = root.id
+        } else if (selected.scopeUnitId === unit.id) {
           source = 'CUSTOM'
           sourceUnitId = unit.id
         } else if (root && selected.scopeUnitId === root.id) {
@@ -189,6 +221,17 @@ function classifyRouteSources(
           sourceUnitId,
           publishedVersionId: selected.id,
           hasDraft,
+          steps: selected.steps.map((step) => ({
+            order: step.order,
+            positionId: step.positionId,
+            positionName: positionsById.get(step.positionId)?.name ?? null,
+          })),
+          approvalLimitPositionId: selected.approvalLimitPositionId === '_workspace-read-only'
+            ? null
+            : selected.approvalLimitPositionId,
+          approvalLimitName: selected.approvalLimitPositionId === '_workspace-read-only'
+            ? null
+            : positionsById.get(selected.approvalLimitPositionId)?.name ?? null,
         })
       } catch (error) {
         if (error instanceof ApprovalRouteConfigurationError && /No published route/.test(error.message)) {
@@ -271,12 +314,30 @@ function createPrismaOrganizationWorkspaceDb(prisma: WorkspacePrisma): Organizat
       }))
     },
     async loadRouteVersions() {
+      // Load route definitions and all of their steps once for the workspace
+      // snapshot. The UI resolves each unit from this in-memory graph rather
+      // than issuing one route/step query per tree node.
       const rows = await prisma.approval_route_versions.findMany()
+      const steps = rows.length === 0
+        ? []
+        : await prisma.approval_route_steps.findMany({
+            where: { routeVersionId: { in: rows.map((row) => row.id) } },
+            orderBy: { stepOrder: 'asc' },
+          })
+      const stepsByRoute = new Map<string, WorkspaceRouteStep[]>()
+      for (const step of steps) {
+        const routeSteps = stepsByRoute.get(step.routeVersionId) ?? []
+        routeSteps.push({ order: step.stepOrder, positionId: step.positionId })
+        stepsByRoute.set(step.routeVersionId, routeSteps)
+      }
       return rows.map((row) => ({
         id: row.id,
         scopeUnitId: row.scopeUnitId,
         phase: row.phase as ApprovalPhase,
+        version: row.version,
         status: row.status as WorkspaceRouteVersion['status'],
+        approvalLimitPositionId: row.approvalLimitPositionId,
+        steps: stepsByRoute.get(row.id) ?? [],
       }))
     },
     async loadCustomChainExceptions() {
@@ -325,7 +386,7 @@ export async function getOrganizationWorkspaceData(
     .filter((user) => user.isActive && !assignedUserIds.has(user.id))
     .map((user) => ({ id: user.id, name: user.name, email: user.email }))
 
-  const routeSources = classifyRouteSources(units, routes)
+  const routeSources = classifyRouteSources(units, positions, routes)
   const publishedRootCounts = countPublishedRootRoutesByPhase(units, routes)
   const readiness = await verifyCleanStartReadiness({
     loadUnits: async () => units,
@@ -414,6 +475,10 @@ export interface OrganizationPositionMutationDb extends OrganizationTeamMutation
   updatePositionName(id: string, name: string): Promise<void>
   updatePositionRank(id: string, rank: number): Promise<void>
   deactivatePosition(id: string): Promise<void>
+  /** Inverse of deactivate; optional so harness fakes need not implement it. */
+  reactivatePosition?(id: string): Promise<void>
+  /** Hard delete. Optional; the production writer enforces reference guards. */
+  deletePosition?(id: string): Promise<void>
   /** PUBLISHED route versions only (guard caller contract: drafts never block). */
   loadPublishedRoutes(): Promise<ReadonlyArray<{
     id: string
@@ -491,6 +556,7 @@ type MutationPrisma = {
       teamId: string | null
       isActive: boolean
     }>>
+    count: (args?: object) => Promise<number>
     create: (args: {
       data: {
         userId: string
@@ -525,6 +591,7 @@ type MutationPrisma = {
       where: { id: string }
       data: { name?: string; rank?: number; isActive?: boolean }
     }) => Promise<unknown>
+    delete: (args: { where: { id: string } }) => Promise<unknown>
   }
   approval_route_versions: {
     findMany: (args?: object) => Promise<Array<{
@@ -534,6 +601,7 @@ type MutationPrisma = {
       status: string
       approvalLimitPositionId: string | null
     }>>
+    count: (args?: object) => Promise<number>
   }
   approval_route_steps: {
     findMany: (args?: object) => Promise<Array<{
@@ -541,6 +609,22 @@ type MutationPrisma = {
       stepOrder: number
       positionId: string | null
     }>>
+    count: (args?: object) => Promise<number>
+  }
+  approval_candidate_groups: {
+    count: (args?: object) => Promise<number>
+  }
+  approval_instance_skips: {
+    count: (args?: object) => Promise<number>
+  }
+  approval_instances: {
+    count: (args?: object) => Promise<number>
+  }
+  request_approvals: {
+    count: (args?: object) => Promise<number>
+  }
+  solution_approvals: {
+    count: (args?: object) => Promise<number>
   }
   user: {
     findMany: (args?: object) => Promise<Array<{
@@ -751,6 +835,34 @@ function createMutationStore(
     },
     async deactivatePosition(id) {
       await client.positions.update({ where: { id }, data: { isActive: false } })
+    },
+    async reactivatePosition(id) {
+      await client.positions.update({ where: { id }, data: { isActive: true } })
+    },
+    async deletePosition(id) {
+      // Hard delete is reserved for positions nothing references — approval
+      // history (snapshots, candidate groups, decisions) is never rewritten.
+      const [
+        assignments, steps, limits, candidateGroups, instanceSkips,
+        instances, requestApprovals, solutionApprovals,
+      ] = await Promise.all([
+        client.organization_assignments.count({ where: { positionId: id } }),
+        client.approval_route_steps.count({ where: { positionId: id } }),
+        client.approval_route_versions.count({ where: { approvalLimitPositionId: id } }),
+        client.approval_candidate_groups.count({ where: { requiredPositionId: id } }),
+        client.approval_instance_skips.count({ where: { requiredPositionId: id } }),
+        client.approval_instances.count({ where: { originPositionId: id } }),
+        client.request_approvals.count({ where: { requiredPositionId: id } }),
+        client.solution_approvals.count({ where: { requiredPositionId: id } }),
+      ])
+      const references = assignments + steps + limits + candidateGroups
+        + instanceSkips + instances + requestApprovals + solutionApprovals
+      if (references > 0) {
+        throw new Error(
+          'Position is referenced by assignments, routes, or approval history and cannot be deleted; deactivate it instead',
+        )
+      }
+      await client.positions.delete({ where: { id } })
     },
     async loadPublishedRoutes() {
       const versions = await client.approval_route_versions.findMany({ where: { status: 'PUBLISHED' } })
@@ -1942,7 +2054,7 @@ export async function deactivatePosition(
     ))
     if (activeAssignments.length > 0) {
       throw new OrganizationValidationError(
-        `Position "${current.name}" is in use by ${activeAssignments.length} active assignment(s); move or remove them first`,
+        `Position "${current.name}" is in use by ${activeAssignments.length} people; move or remove them first`,
       )
     }
     const referencingRoutes = publishedRoutes.filter((route) => (
@@ -1962,6 +2074,93 @@ export async function deactivatePosition(
     await writer.writeAudit({
       action: 'position_deactivated',
       comments: `Deactivated position ${current.id} "${current.name}"; history and snapshots keep their captured values`,
+    })
+    return { success: true as const }
+  })
+}
+
+/**
+ * Reactivate a previously deactivated position (isActive=true; the inverse of
+ * deactivatePosition — positions are never destructively deleted). No
+ * /in use/ guard: reactivating only widens the active position catalog, but an
+ * active rank collision is rejected to preserve the catalog invariant.
+ * Organization-wide validation still runs (rank ordering stays coherent).
+ * Audit + snapshots untouched.
+ */
+export async function reactivatePosition(
+  input: { positionId: string },
+  db?: OrganizationPositionMutationDb,
+): Promise<{ success: true }> {
+  const store = db ?? await createProductionMutationDb()
+  return runExclusiveWrite(store, null, async (tx) => {
+    const writer = asPositionWriter(tx)
+    const [units, positions, assignments, teams] = await Promise.all([
+      writer.loadUnits(),
+      writer.loadPositions(),
+      writer.loadAssignments(),
+      writer.loadTeams(),
+    ])
+    // NOTE: requirePosition rejects inactive rows, so the reactivation target
+    // is resolved manually — it must EXIST, but is expected to be inactive.
+    const current = positions.find((row) => row.id === input.positionId)
+    if (!current) {
+      throw new OrganizationValidationError(`position "${input.positionId}" was not found`)
+    }
+    if (current.isActive) return { success: true as const }
+    if (positions.some((row) => (
+      row.isActive
+      && row.id !== current.id
+      && row.rank === current.rank
+    ))) {
+      throw new OrganizationValidationError(POSITION_RANK_UNIQUE_MESSAGE)
+    }
+    const nextPositions = positions.map((row) => (
+      row.id === current.id ? { ...row, isActive: true } : row
+    ))
+    validateOrganization(units, nextPositions, assignments, teams)
+    if (!writer.reactivatePosition) {
+      throw new Error('Position reactivation is not supported by the current storage adapter')
+    }
+    await writer.reactivatePosition(current.id)
+    await writer.writeAudit({
+      action: 'position_reactivated',
+      comments: `Reactivated position ${current.id} "${current.name}"; history and snapshots keep their captured values`,
+    })
+    return { success: true as const }
+  })
+}
+
+/**
+ * Hard delete an INACTIVE position that nothing references. Owner addition to
+ * the deactivate-not-delete model: delete is opt-in cleanup for rows no
+ * assignment, route, or approval history points at — the production writer
+ * refuses (inside the transaction) when any reference exists. Active
+ * positions must be deactivated first. Audit records the deletion of the id.
+ */
+export async function deletePosition(
+  input: { positionId: string },
+  db?: OrganizationPositionMutationDb,
+): Promise<{ success: true }> {
+  const store = db ?? await createProductionMutationDb()
+  return runExclusiveWrite(store, null, async (tx) => {
+    const writer = asPositionWriter(tx)
+    const positions = await writer.loadPositions()
+    const current = positions.find((row) => row.id === input.positionId)
+    if (!current) {
+      throw new OrganizationValidationError(`position "${input.positionId}" was not found`)
+    }
+    if (current.isActive) {
+      throw new OrganizationValidationError(
+        `Position "${current.name}" is active; deactivate it before deleting`,
+      )
+    }
+    if (!writer.deletePosition) {
+      throw new Error('Position delete is not supported by the current storage adapter')
+    }
+    await writer.deletePosition(current.id)
+    await writer.writeAudit({
+      action: 'position_deleted',
+      comments: `Deleted unreferenced position ${current.id} "${current.name}" (rank ${current.rank})`,
     })
     return { success: true as const }
   })

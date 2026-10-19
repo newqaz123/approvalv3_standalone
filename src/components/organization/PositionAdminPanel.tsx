@@ -4,18 +4,22 @@
 // position names and ranks: inline rename (InlineNameEdit), rank editing with
 // the A4 guard's block-and-list impact rendered adjacent to the rank input
 // (no auto-repair — the admin corrects the listed records first), creation,
-// and /in use/-guarded deactivation. Attempt snapshots are never touched.
+// and /in use/-guarded deactivation plus confirmation-gated cleanup of inactive
+// rows. Attempt snapshots are never touched.
 
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { InlineNameEdit } from '@/components/organization/InlineNameEdit'
+import { InTreeModal } from '@/components/organization/InTreeModal'
 import type { PositionNode } from '@/lib/organization/model'
 import {
   changePositionRank,
   createPosition,
   deactivatePosition,
+  deletePosition,
+  reactivatePosition,
   renamePosition,
   type RankChangeImpact,
   type WorkspaceSnapshot,
@@ -159,6 +163,63 @@ export function applyRankSaveOutcome(
   return idleRankEditSession(session.epoch)
 }
 
+export function PositionDeleteConfirmation({
+  positionName,
+  confirming,
+  deleting,
+  error,
+  onConfirm,
+  onCancel,
+}: {
+  positionName: string
+  confirming: boolean
+  deleting: boolean
+  error: string | null
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  if (!confirming) return null
+  return (
+    <div
+      data-testid="position-delete-confirmation"
+      role="alertdialog"
+      aria-label={`Confirm permanent deletion of ${positionName}`}
+      className="basis-full space-y-3 rounded-md border border-destructive/40 bg-destructive/5 p-3"
+    >
+      <div className="space-y-1">
+        <p className="text-sm font-medium">{`Delete ${positionName} permanently?`}</p>
+        <p className="text-xs text-muted-foreground">
+          Only inactive positions with no assignments, route definitions, or approval-history references can
+          be deleted. Captured approval history remains protected and is never rewritten.
+        </p>
+      </div>
+      {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
+      <div className="flex flex-wrap gap-2">
+        <Button
+          type="button"
+          variant="destructive"
+          size="sm"
+          data-testid="position-delete-confirm"
+          disabled={deleting}
+          onClick={onConfirm}
+        >
+          {deleting ? 'Deleting…' : 'Delete permanently'}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          data-testid="position-delete-cancel"
+          disabled={deleting}
+          onClick={onCancel}
+        >
+          Cancel
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 /**
  * Rank editor for one position. Save stays disabled while the last assessment
  * for the current draft is blocked; editing the draft clears the assessment so
@@ -241,20 +302,37 @@ function activePositionsSorted(positions: readonly PositionNode[]): PositionNode
     ))
 }
 
+function inactivePositionsSorted(positions: readonly PositionNode[]): PositionNode[] {
+  return positions
+    .filter((row) => !row.isActive)
+    .slice()
+    .sort((left, right) => (
+      left.rank - right.rank || left.name.localeCompare(right.name)
+    ))
+}
+
 export function PositionAdminPanel({
   snapshot,
 }: {
   snapshot: WorkspaceSnapshot
 }) {
   const [rows, setRows] = useState<PositionNode[]>(() => activePositionsSorted(snapshot.positions))
+  const [inactiveRows, setInactiveRows] = useState<PositionNode[]>(
+    () => inactivePositionsSorted(snapshot.positions),
+  )
   const [rankSession, setRankSession] = useState<PositionRankEditSession>(() => idleRankEditSession())
   const sessionRef = useRef(rankSession)
   sessionRef.current = rankSession
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({})
   const [createName, setCreateName] = useState('')
-  const [createRank, setCreateRank] = useState('')
+  const [createRank, setCreateRank] = useState('1')
   const [createError, setCreateError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<PositionNode | null>(null)
+  /** Deactivate/reactivate/delete are single-flight per position: the button
+   *  of the in-flight row disables, and success transfers are idempotent. */
+  const [pendingPositionId, setPendingPositionId] = useState<string | null>(null)
 
   function commitRankSession(next: PositionRankEditSession) {
     sessionRef.current = next
@@ -263,11 +341,16 @@ export function PositionAdminPanel({
 
   useEffect(() => {
     setRows(activePositionsSorted(snapshot.positions))
+    setInactiveRows(inactivePositionsSorted(snapshot.positions))
   }, [snapshot.positions])
 
   const unitNames = useMemo(
     () => new Map(snapshot.units.map((row) => [row.id, row.name])),
     [snapshot.units],
+  )
+  const sliderMax = useMemo(
+    () => Math.max(8, ...rows.map((row) => row.rank), ...inactiveRows.map((row) => row.rank)) + 1,
+    [rows, inactiveRows],
   )
   const assignmentCounts = useMemo(() => {
     const counts = new Map<string, number>()
@@ -322,23 +405,84 @@ export function PositionAdminPanel({
   }
 
   async function handleDeactivate(row: PositionNode) {
+    if (pendingPositionId !== null) return
     setRowErrors((current) => {
       const next = { ...current }
       delete next[row.id]
       return next
     })
+    setPendingPositionId(row.id)
     try {
       await deactivatePosition({ positionId: row.id })
       setRows((current) => current.filter((candidate) => candidate.id !== row.id))
+      // Idempotent transfer (never duplicate), carrying the deactivated flag.
+      setInactiveRows((current) => current.some((candidate) => candidate.id === row.id)
+        ? current
+        : [...current, { ...row, isActive: false }].sort((left, right) => (
+            left.rank - right.rank || left.name.localeCompare(right.name)
+          )))
     } catch (err) {
       setRowErrors((current) => ({
         ...current,
         [row.id]: err instanceof Error ? err.message : String(err),
       }))
+    } finally {
+      setPendingPositionId(null)
     }
   }
 
-  async function handleCreate() {
+  async function handleReactivate(row: PositionNode) {
+    if (pendingPositionId !== null) return
+    setRowErrors((current) => {
+      const next = { ...current }
+      delete next[`inactive-${row.id}`]
+      delete next[`delete-${row.id}`]
+      return next
+    })
+    setPendingPositionId(row.id)
+    try {
+      await reactivatePosition({ positionId: row.id })
+      setInactiveRows((current) => current.filter((candidate) => candidate.id !== row.id))
+      // Idempotent transfer (never duplicate), carrying the activated flag.
+      setRows((current) => current.some((candidate) => candidate.id === row.id)
+        ? current
+        : [...current, { ...row, isActive: true }].sort((left, right) => (
+            left.rank - right.rank || left.name.localeCompare(right.name)
+          )))
+    } catch (err) {
+      setRowErrors((current) => ({
+        ...current,
+        [`inactive-${row.id}`]: err instanceof Error ? err.message : String(err),
+      }))
+    } finally {
+      setPendingPositionId(null)
+    }
+  }
+
+  async function handleDelete(row: PositionNode) {
+    if (pendingPositionId !== null) return
+    setRowErrors((current) => {
+      const next = { ...current }
+      delete next[`inactive-${row.id}`]
+      delete next[`delete-${row.id}`]
+      return next
+    })
+    setPendingPositionId(row.id)
+    try {
+      await deletePosition({ positionId: row.id })
+      setInactiveRows((current) => current.filter((candidate) => candidate.id !== row.id))
+      setDeleteTarget(null)
+    } catch (err) {
+      setRowErrors((current) => ({
+        ...current,
+        [`delete-${row.id}`]: err instanceof Error ? err.message : String(err),
+      }))
+    } finally {
+      setPendingPositionId(null)
+    }
+  }
+
+  async function handleCreate(onDone?: () => void) {
     setCreateError(null)
     setCreating(true)
     try {
@@ -351,7 +495,8 @@ export function PositionAdminPanel({
         isActive: true,
       }])
       setCreateName('')
-      setCreateRank('')
+      setCreateRank('1')
+      onDone?.()
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -367,20 +512,43 @@ export function PositionAdminPanel({
     >
       <div className="flex items-center justify-between gap-4">
         <h2 className="text-lg font-semibold">Positions</h2>
-        <a
-          href="/admin/organization"
-          data-testid="position-panel-close"
-          className="text-sm text-muted-foreground underline-offset-4 hover:underline"
-        >
-          Close
-        </a>
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            data-testid="position-create-open"
+            onClick={() => {
+              setCreateName('')
+              setCreateRank('1')
+              setCreateError(null)
+              setCreateOpen(true)
+            }}
+          >
+            Add position
+          </Button>
+        </div>
       </div>
       <p className="text-sm text-muted-foreground">
-        Company-wide approval ranks. A rank change that would invalidate a reporting relationship
-        or a published approval chain is blocked and lists the affected records; existing approval
-        snapshots keep their captured values.
+        Company-wide job titles and approval ranks (1 is lowest). A rank change that would
+        invalidate a reporting relationship or a published approval chain is blocked and lists the
+        affected records. Existing approval snapshots keep their captured values.
       </p>
 
+      <div className="grid gap-6 lg:grid-cols-[13rem_minmax(0,1fr)]">
+      <aside className="rounded-md border px-3 py-3" aria-label="Rank ladder">
+        <h3 className="text-sm font-medium">Rank ladder</h3>
+        <p className="mb-3 text-xs text-muted-foreground">Higher number sits higher on the approval ceiling.</p>
+        <ol className="space-y-1">
+          {rows.map((row) => (
+            <li key={`ladder-${row.id}`} className="flex items-center gap-2 text-sm">
+              <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-foreground text-xs font-semibold text-background">
+                {row.rank}
+              </span>
+              <span className="truncate font-medium">{row.name}</span>
+            </li>
+          ))}
+        </ol>
+      </aside>
       <ul data-testid="position-list" className="space-y-2">
         {rows.map((row) => {
           const count = assignmentCounts.get(row.id) ?? 0
@@ -402,7 +570,7 @@ export function PositionAdminPanel({
                   data-testid={`position-assignment-count-${row.id}`}
                   className="text-sm text-muted-foreground"
                 >
-                  {`${count} active assignment(s)`}
+                  {count === 1 ? '1 person holds this title' : `${count} people hold this title`}
                 </span>
                 <span className="flex-1" />
                 {rankSession.positionId !== row.id ? (
@@ -421,6 +589,7 @@ export function PositionAdminPanel({
                   variant="outline"
                   size="sm"
                   data-testid={`position-deactivate-${row.id}`}
+                  disabled={pendingPositionId !== null}
                   onClick={() => {
                     void handleDeactivate(row)
                   }}
@@ -428,23 +597,6 @@ export function PositionAdminPanel({
                   Deactivate
                 </Button>
               </div>
-              {rankSession.positionId === row.id ? (
-                <PositionRankEditor
-                  position={row}
-                  draftRank={rankSession.draftRank}
-                  blockedImpact={rankSession.blockedImpact}
-                  saving={rankSession.pendingEpoch !== null}
-                  error={rankSession.error}
-                  unitNames={unitNames}
-                  onDraftRankChange={(value) => {
-                    commitRankSession(typeRankDraft(sessionRef.current, value))
-                  }}
-                  onSave={() => {
-                    void handleSaveRank(row)
-                  }}
-                  onCancel={cancelRankEdit}
-                />
-              ) : null}
               {rowErrors[row.id] ? (
                 <p
                   role="alert"
@@ -458,48 +610,203 @@ export function PositionAdminPanel({
           )
         })}
       </ul>
+      </div>
 
-      <section data-testid="position-create-form" className="space-y-2 rounded-md border p-3">
-        <h3 className="text-sm font-medium">Create position</h3>
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="space-y-1">
-            <Label htmlFor="position-create-name">Name</Label>
-            <Input
-              id="position-create-name"
-              data-testid="position-create-name"
-              value={createName}
-              onChange={(event) => setCreateName(event.target.value)}
-              className="w-48"
-            />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="position-create-rank">Rank</Label>
-            <Input
-              id="position-create-rank"
-              data-testid="position-create-rank"
-              inputMode="numeric"
-              value={createRank}
-              onChange={(event) => setCreateRank(event.target.value)}
-              className="w-24"
-            />
-          </div>
-          <Button
-            type="button"
-            data-testid="position-create-save"
-            disabled={creating || createName.trim().length === 0 || createRank.trim().length === 0}
-            onClick={() => {
-              void handleCreate()
-            }}
-          >
-            Create position
-          </Button>
-        </div>
-        {createError ? (
-          <p role="alert" data-testid="position-create-error" className="text-sm text-destructive">
-            {createError}
+      {inactiveRows.length > 0 ? (
+        <section data-testid="position-inactive" className="space-y-2">
+          <h3 className="text-sm font-medium">Inactive positions</h3>
+          <p className="text-xs text-muted-foreground">
+            Hidden from new assignments and editors. Reactivate anytime — history and approval
+            snapshots keep their captured values.
           </p>
-        ) : null}
-      </section>
+          <ul className="space-y-2">
+            {inactiveRows.map((row) => (
+              <li
+                key={row.id}
+                data-testid={`position-inactive-row-${row.id}`}
+                className="flex flex-wrap items-center gap-3 rounded-md border border-dashed px-3 py-2"
+              >
+                <span className="text-sm font-medium">{row.name}</span>
+                <span className="text-sm text-muted-foreground">{`Rank ${row.rank}`}</span>
+                <span className="flex-1" />
+                {rowErrors[`inactive-${row.id}`] ? (
+                  <p role="alert" className="text-sm text-destructive">
+                    {rowErrors[`inactive-${row.id}`]}
+                  </p>
+                ) : null}
+                {deleteTarget?.id !== row.id ? (
+                  <div className="flex items-center gap-2">
+                    {rowErrors[`delete-${row.id}`] ? (
+                      <p role="alert" className="max-w-sm text-sm text-destructive">
+                        {rowErrors[`delete-${row.id}`]}
+                      </p>
+                    ) : null}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      data-testid={`position-reactivate-${row.id}`}
+                      disabled={pendingPositionId !== null}
+                      onClick={() => {
+                        void handleReactivate(row)
+                      }}
+                    >
+                      Reactivate
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      data-testid={`position-delete-${row.id}`}
+                      disabled={pendingPositionId !== null}
+                      className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                      onClick={() => {
+                        setRowErrors((current) => {
+                          const next = { ...current }
+                          delete next[`delete-${row.id}`]
+                          return next
+                        })
+                        setDeleteTarget(row)
+                      }}
+                    >
+                      Delete
+                    </Button>
+                  </div>
+                ) : (
+                  <PositionDeleteConfirmation
+                    positionName={row.name}
+                    confirming
+                    deleting={pendingPositionId === row.id}
+                    error={rowErrors[`delete-${row.id}`] ?? null}
+                    onConfirm={() => {
+                      void handleDelete(row)
+                    }}
+                    onCancel={() => setDeleteTarget(null)}
+                  />
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {rankSession.positionId ? (
+        <InTreeModal
+          open
+          onClose={cancelRankEdit}
+          className="max-w-lg"
+          title="Edit position rank"
+          ariaLabel="Edit position rank"
+        >
+          <div className="p-4">
+            {rows.filter((row) => row.id === rankSession.positionId).map((row) => (
+              <PositionRankEditor
+                key={row.id}
+                position={row}
+                draftRank={rankSession.draftRank}
+                blockedImpact={rankSession.blockedImpact}
+                saving={rankSession.pendingEpoch !== null}
+                error={rankSession.error}
+                unitNames={unitNames}
+                onDraftRankChange={(value) => {
+                  commitRankSession(typeRankDraft(sessionRef.current, value))
+                }}
+                onSave={() => {
+                  void handleSaveRank(row)
+                }}
+                onCancel={cancelRankEdit}
+              />
+            ))}
+          </div>
+        </InTreeModal>
+      ) : null}
+
+      {createOpen ? (
+        <InTreeModal
+          open
+          onClose={() => setCreateOpen(false)}
+          className="max-w-sm"
+          title="Add position"
+          ariaLabel="Add position"
+        >
+          <div className="space-y-4 p-4">
+            <div>
+              <h3 className="text-base font-semibold">Add position</h3>
+              <p className="text-sm text-muted-foreground">Company-wide title and approval rank.</p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="position-create-name">Name</Label>
+              <Input
+                id="position-create-name"
+                data-testid="position-create-name"
+                value={createName}
+                onChange={(event) => setCreateName(event.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="position-create-rank">Rank</Label>
+              <div className="flex items-center gap-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  data-testid="position-create-rank-decrease"
+                  aria-label="Decrease rank"
+                  disabled={Number(createRank) <= 1}
+                  onClick={() => setCreateRank(String(Math.max(1, Number(createRank) - 1)))}
+                >
+                  −
+                </Button>
+                <span
+                  id="position-create-rank"
+                  data-testid="position-create-rank"
+                  aria-live="polite"
+                  className="min-w-14 text-center text-xl font-bold tabular-nums"
+                >
+                  {createRank}
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  data-testid="position-create-rank-increase"
+                  aria-label="Increase rank"
+                  disabled={Number(createRank) >= sliderMax}
+                  onClick={() => setCreateRank(String(Math.min(sliderMax, Number(createRank) + 1)))}
+                >
+                  +
+                </Button>
+                <span className="text-xs text-muted-foreground">max {sliderMax}</span>
+              </div>
+              <p className="text-xs text-muted-foreground">1 is lowest; use + / − to set the rank.</p>
+            </div>
+            {createError ? (
+              <p role="alert" data-testid="position-create-error" className="text-sm text-destructive">
+                {createError}
+              </p>
+            ) : null}
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                data-testid="position-create-save"
+                disabled={creating || createName.trim().length === 0 || createRank.trim().length === 0}
+                onClick={() => {
+                  void handleCreate(() => setCreateOpen(false))
+                }}
+              >
+                Create position
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setCreateOpen(false)}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </InTreeModal>
+      ) : null}
     </section>
   )
 }
