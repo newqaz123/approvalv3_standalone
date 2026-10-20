@@ -1095,3 +1095,77 @@ describe('business runner scenario CLI: focused T16A and T11B selections (diagno
     })
   }
 })
+
+describe('business runner scenario CLI: focused T08E and T10C selections (Final-trigger denial)', () => {
+  const selections = [
+    {
+      name: 'T08E' as const,
+      grep: '\\bT08E\\b',
+      routesConfig: 'all-defaults',
+      otherConfig: 'solution-exception',
+      title: /test\('T08E the parent-department Department manager is DENIED the Final trigger/,
+      neighbours: ['T08', 'T08A', 'T08F', 't08e', '', 'T08E1'],
+    },
+    {
+      name: 'T10C' as const,
+      grep: '\\bT10 Final routing follows the ORIGINAL requester when the parent Department manager is denied\\b',
+      routesConfig: 'final-exception',
+      otherConfig: 'all-defaults',
+      title: /test\(`T10 Final routing follows the ORIGINAL requester when \$\{deniedParentManagerFirst \? 'the parent Department manager is denied and ' : ''\}/,
+      neighbours: ['T10', 'T10A', 'T10B', 'T10D', 't10c', '', 'T10C1'],
+    },
+  ]
+
+  for (const selection of selections) {
+    it(`accepts --scenario=${selection.name} only with the ${selection.routesConfig} profile in full mode`, () => {
+      const options = parseArgs([`--scenario=${selection.name}`, `--routes-config=${selection.routesConfig}`])
+      assert.equal(options.scenario, selection.name)
+      assert.equal(options.mode, 'full')
+      assert.equal(options.routesConfig, selection.routesConfig)
+      assert.equal(options.list, false)
+      assert.throws(
+        () => parseArgs([`--scenario=${selection.name}`, `--routes-config=${selection.otherConfig}`]),
+        new RegExp(`--scenario ${selection.name} belongs to the "${selection.routesConfig}" route configuration`),
+      )
+      assert.throws(
+        () => parseArgs([`--scenario=${selection.name}`, `--routes-config=${selection.routesConfig}`, '--mode=prepare']),
+        new RegExp(`--scenario ${selection.name} is only valid with --mode=full`),
+      )
+      for (const bad of selection.neighbours) {
+        assert.throws(() => parseArgs([`--scenario=${bad}`]), /unknown --scenario /, `--scenario=${bad}`)
+      }
+      assert.throws(() => parseArgs([`--scenario=${selection.name}`, '--grep=.*']), /unknown argument/)
+    })
+
+    it(`appends exactly one fixed grep for ${selection.name} that names a real browser test`, () => {
+      assert.equal(BUSINESS_SCENARIO_SELECTION[selection.name].grep, selection.grep)
+      assert.equal(BUSINESS_SCENARIO_SELECTION[selection.name].routesConfig, selection.routesConfig)
+      assert.deepEqual(playwrightBusinessArgs(selection.name), [
+        'test',
+        '--config=tests/playwright.business.config.ts',
+        `--grep=${selection.grep}`,
+      ])
+      assert.deepEqual(playwrightBusinessArgs(selection.name, { list: true }), [
+        'test',
+        '--list',
+        '--config=tests/playwright.business.config.ts',
+        `--grep=${selection.grep}`,
+      ])
+      for (const other of Object.keys(BUSINESS_SCENARIO_SELECTION)) {
+        if (other === selection.name) continue
+        assert.notEqual(
+          BUSINESS_SCENARIO_SELECTION[selection.name].grep,
+          BUSINESS_SCENARIO_SELECTION[other as keyof typeof BUSINESS_SCENARIO_SELECTION].grep,
+        )
+      }
+      assert.match(readFileSync('tests/business-e2e/business-final-trigger.spec.ts', 'utf8'), selection.title)
+    })
+
+    it(`does not require another scenario's evidence for a focused ${selection.name} run`, () => {
+      assert.equal(t18bEvidenceApplies('full', selection.routesConfig, selection.name), false)
+      assert.equal(t18c2EvidenceApplies('full', selection.routesConfig, selection.name), false)
+      assert.equal(t12aEvidenceApplies('full', selection.routesConfig, selection.name), false)
+      assert.equal(t15aEvidenceApplies('full', selection.routesConfig, selection.name), false)
+    })
+  }
+})

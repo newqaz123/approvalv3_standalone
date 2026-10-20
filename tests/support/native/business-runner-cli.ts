@@ -7,8 +7,10 @@
  *
  * Focused scenario selection contract (validated options, no free-form grep):
  *  - `--scenario=T18B`, `--scenario=T18C2`, `--scenario=T04B`,
- *    `--scenario=T12A`, `--scenario=T15A`, `--scenario=T16A` and
- *    `--scenario=T11B` are the ONLY selectable scenarios (T18C2 added as a
+ *    `--scenario=T12A`, `--scenario=T15A`, `--scenario=T16A`,
+ *    `--scenario=T11B`, `--scenario=T08E` and `--scenario=T10C` are the ONLY
+ *    selectable scenarios (T08E and T10C are the Final-trigger denial checks
+ *    added after the origin-unit-only rule; T18C2 added as a
  *    diagnosis-only selection; T04B added as a diagnosis-only selection by
  *    Task28 for the focused T04B retest; T12A added by Task41 to reproduce
  *    the known bell-click instability in isolation; T15A added by Task52 for
@@ -24,9 +26,10 @@
  *    arrays), and there is deliberately NO generic grep passthrough.
  *  - The default (no --scenario) is UNCHANGED: the full suite runs with no
  *    grep argument at all.
- *  - Both scenarios belong to the "all-defaults" route profile and only to
- *    the full browser mode; any other combination is rejected before any
- *    resource is created.
+ *  - Each scenario belongs to exactly one route profile ("all-defaults",
+ *    except T10C which belongs to "final-exception") and only to the full
+ *    browser mode; any other combination is rejected before any resource is
+ *    created.
  *  - Selection is re-verified at run time with a collection-only
  *    `playwright test --list` count over the exact same seam (cwd, config,
  *    env, grep): zero or multiple matched tests abort the run BEFORE any
@@ -83,6 +86,9 @@ export const PLAYWRIGHT_BUSINESS_CONFIG = 'tests/playwright.business.config.ts'
  * T16A and T11B are diagnosis-only selections under the same restrictions
  * (full mode, all-defaults only, fixed word-boundary grep, exactly-1 listing
  * gate, no arbitrary grep). They add no required evidence of their own.
+ * T08E and T10C follow the same rules for the Final-trigger denial checks
+ * (the parent Department manager may not start Final). T10C is the only
+ * selection outside "all-defaults": its profile is "final-exception".
  * Other scenarios' required correlations stay required for the default full
  * run and are explicit not-selected skips for these focused selections.
  */
@@ -94,6 +100,13 @@ export const BUSINESS_SCENARIO_SELECTION = {
   T15A: { grep: '\\bT15A\\b', routesConfig: 'all-defaults' },
   T16A: { grep: '\\bT16A\\b', routesConfig: 'all-defaults' },
   T11B: { grep: '\\bT11B\\b', routesConfig: 'all-defaults' },
+  T08E: { grep: '\\bT08E\\b', routesConfig: 'all-defaults' },
+  // The T10 tests are generated in a loop and no title carries the T10C token,
+  // so the grep anchors the exact title head of the denied-parent-manager variant.
+  T10C: {
+    grep: '\\bT10 Final routing follows the ORIGINAL requester when the parent Department manager is denied\\b',
+    routesConfig: 'final-exception',
+  },
 } as const
 
 export type BusinessScenarioName = keyof typeof BUSINESS_SCENARIO_SELECTION
