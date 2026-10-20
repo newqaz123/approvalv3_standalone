@@ -36,6 +36,7 @@ import {
   waitForHttpReady,
   type AppProcess,
 } from './runner-lifecycle'
+import { startAppHealthSampler, type AppHealthSampler } from './app-health'
 import { startMailCapture, type MailCaptureHandle } from './mail-capture'
 import { assertOwnedLoopbackDatabaseTarget, createSafeRunPlan } from '../business-workflow-safety'
 import { BUSINESS_ROUTE_CONFIGURATION_NAMES } from '../business-workflow-fixture'
@@ -154,6 +155,8 @@ export interface MatrixRuntimeHandle {
   baseUrl: string
   tracker: OwnedResourceTracker
   app?: AppProcess
+  /** Process-table samples of the app's group; read by the pre-stop capture. */
+  appHealth?: AppHealthSampler
   mail?: MailCaptureHandle
   captureArtifacts: () => Promise<void>
   setArtifactCapture(capture: () => Promise<void>): void
@@ -188,6 +191,8 @@ export interface MatrixLifecycleDeps {
   stopAppProcess: typeof stopAppProcess
   waitForHttpReady: typeof waitForHttpReady
   startMailCapture: typeof startMailCapture
+  /** Optional so injected fakes stay hermetic (no `ps`); defaultDeps supplies the real one. */
+  startAppHealthSampler?: typeof startAppHealthSampler
   copyAppSource: (runtime: OwnedRuntime) => Promise<string>
   assertOwnedLoopbackDatabaseTarget: typeof assertOwnedLoopbackDatabaseTarget
   createSafeRunPlan: typeof createSafeRunPlan
@@ -361,6 +366,7 @@ const defaultDeps: MatrixLifecycleDeps = {
   stopAppProcess,
   waitForHttpReady,
   startMailCapture,
+  startAppHealthSampler,
   copyAppSource: copyAppSourceIsolated,
   assertOwnedLoopbackDatabaseTarget,
   createSafeRunPlan,
@@ -621,6 +627,10 @@ export async function startMatrixRuntime(input: {
     const preloadPath = path.join(refs.appDir, 'tests', 'support', 'native', 'outbound-allowlist-preload.js')
     refs.app = deps.spawnApp(runtime, refs.appDir, preloadPath, path.join(runtime.paths.logsDir, 'next-dev.log'))
     handle.app = refs.app
+    handle.appHealth = deps.startAppHealthSampler?.({
+      pgid: refs.app.pid,
+      logFile: path.join(runtime.paths.logsDir, 'app-health.log'),
+    })
     tracker.register({ kind: 'app', stop: () => deps.stopAppProcess(refs.app as AppProcess, refs.appDir as string) })
     await deps.waitForHttpReady(`${handle.baseUrl}/sign-in`, runtime.ports.serverPort, refs.app.pid, 240_000)
     await handle.captureArtifacts()
@@ -681,6 +691,8 @@ export async function stopMatrixRuntime(
   const stopApp = deps?.stopApp ?? (handle.app ? () => stopAppProcess(handle.app as AppProcess, handle.appDir) : undefined)
   const closeMail = deps?.closeMail ?? (handle.mail ? () => handle.mail!.close() : undefined)
   const stopPg = deps?.stopPg ?? (() => stopPostgres(handle.runtime))
+  // The capture above has read the samples; stop sampling before the app goes away.
+  await handle.appHealth?.stop()
   await attempt('app', stopApp)
   await attempt('mail', closeMail)
   await attempt('postgres', stopPg)

@@ -1182,13 +1182,21 @@ export function buildAppEnvironment(input: {
   return explicit
 }
 
+/**
+ * `next dev` restarts itself once V8's heap passes 80% of its limit, which is
+ * about 4 GB by default. A long matrix profile gets there and the restart cuts
+ * the page the browser is loading (RRM-012). A ceiling of 8 GB moves the
+ * restart point past the end of a profile without reserving that memory.
+ */
+export const APP_MAX_OLD_SPACE_MB = 8192
+
 export function finalizeAppEnvironment(
   runtime: OwnedRuntime,
   appDir: string,
   preloadPath: string,
 ): Record<string, string> {
   const env = { ...runtime.appEnv }
-  env.NODE_OPTIONS = `--require ${preloadPath}`
+  env.NODE_OPTIONS = `--max-old-space-size=${APP_MAX_OLD_SPACE_MB} --require ${preloadPath}`
   env.BUSINESS_APP_DIR = appDir
   return env
 }

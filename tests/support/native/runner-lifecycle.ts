@@ -164,7 +164,10 @@ export function spawnApp(runtime: OwnedRuntime, appDir: string, preloadPath: str
   child.stdout?.on('data', (chunk) => { if (!stream.destroyed) stream.write(chunk) })
   child.stderr?.on('data', (chunk) => { if (!stream.destroyed) stream.write(chunk) })
   child.on('error', (error) => stream.end(`\n[next failed to start: ${error.message}]\n`))
-  child.on('close', (code) => stream.end(`\n[next exited ${code}]\n`))
+  // A server that dies mid-run leaves no other trace: record how and when.
+  child.on('close', (code, signal) => {
+    stream.end(`\n[next exited ${code}${signal ? ` signal=${signal}` : ''} at ${new Date().toISOString()}]\n`)
+  })
   return { pid: child.pid ?? 0, child, serverPort: runtime.ports.serverPort }
 }
 

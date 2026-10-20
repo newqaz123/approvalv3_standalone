@@ -101,6 +101,8 @@ import {
   writeFailureArtifacts,
   type MatrixRuntimeHandle,
 } from '../support/native/rejection-recovery-runtime'
+import { formatAppHealthSummary, summarizeAppHealth } from '../support/native/app-health'
+import { signInThroughUi } from '../support/ui-sign-in'
 
 const BROWSER = matrixBrowserProfile()
 const expect = baseExpect.configure({ timeout: MATRIX_ASSERT_TIMEOUT_MS })
@@ -256,11 +258,11 @@ export function playwrightMatrixUi(browser: Browser, evidenceRoot: string): Matr
         page.on('close', () => {
           if (!intentionalClose) activePageErrors.push(`${label}: page closed unexpectedly`)
         })
-        await page.goto(`${handle.baseUrl}/sign-in`)
-        await page.locator('#email').fill(actorEmail(label))
-        await page.locator('#password').fill(handle.runtime.e2ePassword)
-        await page.getByRole('button', { name: 'Sign in' }).click()
-        await page.waitForURL((url) => !url.pathname.includes('/sign-in'))
+        await signInThroughUi(page, {
+          baseUrl: handle.baseUrl,
+          email: actorEmail(label),
+          password: handle.runtime.e2ePassword,
+        })
         const closeContext = async (): Promise<void> => {
           intentionalClose = true
           const tracePath = `${traceBase}.zip`
@@ -1175,6 +1177,12 @@ async function main(): Promise<void> {
     // The run root (with next-dev.log) is deleted after a clean stop; keep the log tail for diagnosis.
     await copyLogTail(path.join(handle.runtime.paths.logsDir, 'next-dev.log'), path.join(evidenceDir, 'next-dev.log'))
       .catch((error: unknown) => log(`app log tail not kept: ${error instanceof Error ? error.message : String(error)}`))
+    if (handle.appHealth && handle.app) {
+      await handle.appHealth.sampleOnce() // the periodic sample may be seconds old
+      await copyLogTail(path.join(handle.runtime.paths.logsDir, 'app-health.log'), path.join(evidenceDir, 'app-health.log'))
+        .catch((error: unknown) => log(`app health log not kept: ${error instanceof Error ? error.message : String(error)}`))
+      log(formatAppHealthSummary(summarizeAppHealth(handle.app.pid, handle.appHealth.samples())))
+    }
     const aggregatePath = path.join(options.evidenceRoot, 'all-profiles.json')
     let existing: Record<string, unknown> = {}
     try {
