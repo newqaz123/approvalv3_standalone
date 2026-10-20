@@ -706,6 +706,12 @@ export const MATRIX_HEADLESS = {
   checkpointMs: 500,
 } as const
 
+/**
+ * Assertion wait. Page actions already use 30s; Playwright's 5s expect default
+ * is shorter than a busy next dev server needs once slowMo is 0 (headless).
+ */
+export const MATRIX_ASSERT_TIMEOUT_MS = 30_000
+
 export type MatrixBrowserProfile = typeof MATRIX_HEADED | typeof MATRIX_HEADLESS
 
 /** RRM_HEADLESS=1 selects the headless profile; headed stays the default. */

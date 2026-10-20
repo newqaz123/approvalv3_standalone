@@ -82,6 +82,35 @@ export function matrixRuntimeParentDir(explicit?: string): string {
   return explicit ?? path.join(os.tmpdir(), 'rejection-recovery-matrix')
 }
 
+/**
+ * Copies the last maxBytes of a log. The run root (and its logs) is deleted after
+ * a clean stop, so evidence capture keeps the app log tail first.
+ */
+export async function copyLogTail(
+  source: string,
+  dest: string,
+  maxBytes = 3 * 1024 * 1024,
+): Promise<'copied' | 'missing'> {
+  let file
+  try {
+    file = await fs.open(source, 'r')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'missing'
+    throw error
+  }
+  try {
+    const { size } = await file.stat()
+    const length = Math.min(size, maxBytes)
+    const buffer = Buffer.alloc(length)
+    if (length > 0) await file.read(buffer, 0, length, size - length)
+    await fs.mkdir(path.dirname(dest), { recursive: true })
+    await fs.writeFile(dest, buffer)
+    return 'copied'
+  } finally {
+    await file.close()
+  }
+}
+
 /** A run root is disposable only if it is a direct child of the matrix tmp parent. */
 export function isDisposableRuntimeRoot(rootDir: string): boolean {
   const resolved = path.resolve(rootDir)

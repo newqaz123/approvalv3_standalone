@@ -19,7 +19,7 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { chromium, expect, type Browser, type BrowserContext, type Page, type Locator } from '@playwright/test'
+import { chromium, expect as baseExpect, type Browser, type BrowserContext, type Page, type Locator } from '@playwright/test'
 import {
   assertApprovalEvidence,
   assertClickAllowed,
@@ -49,6 +49,7 @@ import {
   matrixActorEmail,
   matrixActorId,
   matrixBrowserProfile,
+  MATRIX_ASSERT_TIMEOUT_MS,
   MatrixLedger,
   type ObservedApprovalRow,
   instanceRouteSql,
@@ -94,6 +95,7 @@ import {
   type ToggleDriver,
 } from '../support/rejection-recovery-matrix'
 import {
+  copyLogTail,
   runOwnedMatrixSession,
   startMatrixRuntime,
   writeFailureArtifacts,
@@ -101,6 +103,7 @@ import {
 } from '../support/native/rejection-recovery-runtime'
 
 const BROWSER = matrixBrowserProfile()
+const expect = baseExpect.configure({ timeout: MATRIX_ASSERT_TIMEOUT_MS })
 
 interface Options {
   routesConfig: RouteProfile
@@ -1169,6 +1172,9 @@ async function main(): Promise<void> {
     const mailFile = path.join(evidenceDir, 'mail.json')
     const messages = handle.mail?.messages() ?? []
     await fs.writeFile(mailFile, JSON.stringify(messages, null, 2))
+    // The run root (with next-dev.log) is deleted after a clean stop; keep the log tail for diagnosis.
+    await copyLogTail(path.join(handle.runtime.paths.logsDir, 'next-dev.log'), path.join(evidenceDir, 'next-dev.log'))
+      .catch((error: unknown) => log(`app log tail not kept: ${error instanceof Error ? error.message : String(error)}`))
     const aggregatePath = path.join(options.evidenceRoot, 'all-profiles.json')
     let existing: Record<string, unknown> = {}
     try {

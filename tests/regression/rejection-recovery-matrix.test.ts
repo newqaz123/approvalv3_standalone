@@ -2437,3 +2437,31 @@ describe('matrix browser profile', () => {
     assert.deepEqual(MATRIX_HEADLESS, { headless: true, slowMo: 0, viewport: { width: 1440, height: 1000 }, checkpointMs: 500 })
   })
 })
+
+describe('matrix assertion timeout and app-log retention', () => {
+  it('waits for assertions as long as page actions (30s), not Playwright\'s 5s default', async () => {
+    const { MATRIX_ASSERT_TIMEOUT_MS } = await import('../support/rejection-recovery-matrix')
+    assert.equal(MATRIX_ASSERT_TIMEOUT_MS, 30_000)
+    const driver = await fsp.readFile(path.join(process.cwd(), 'tests/manual/rejection-recovery-matrix.ts'), 'utf8')
+    assert.match(driver, /expect as baseExpect/)
+    assert.match(driver, /const expect = baseExpect\.configure\(\{ timeout: MATRIX_ASSERT_TIMEOUT_MS \}\)/)
+    assert.match(driver, /page\.setDefaultTimeout\(30_000\)/)
+  })
+
+  it('keeps the tail of the app log before the runtime root is deleted', async () => {
+    const os = await import('node:os')
+    const { copyLogTail } = await import('../support/native/rejection-recovery-runtime')
+    const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'rrm-logtail-test-'))
+    try {
+      assert.equal(await copyLogTail(path.join(dir, 'missing.log'), path.join(dir, 'out', 'missing.log')), 'missing')
+      await fsp.writeFile(path.join(dir, 'small.log'), 'hello\n')
+      assert.equal(await copyLogTail(path.join(dir, 'small.log'), path.join(dir, 'out', 'small.log'), 100), 'copied')
+      assert.equal(await fsp.readFile(path.join(dir, 'out', 'small.log'), 'utf8'), 'hello\n')
+      await fsp.writeFile(path.join(dir, 'big.log'), `${'a'.repeat(50)}TAIL-END`)
+      assert.equal(await copyLogTail(path.join(dir, 'big.log'), path.join(dir, 'out', 'big.log'), 8), 'copied')
+      assert.equal(await fsp.readFile(path.join(dir, 'out', 'big.log'), 'utf8'), 'TAIL-END')
+    } finally {
+      await fsp.rm(dir, { recursive: true, force: true })
+    }
+  })
+})
