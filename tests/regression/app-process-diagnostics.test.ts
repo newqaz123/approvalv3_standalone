@@ -2,8 +2,10 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import os from 'node:os'
 import path from 'node:path'
+import { spawnSync } from 'node:child_process'
 import { promises as fsp } from 'node:fs'
-import { APP_MAX_OLD_SPACE_MB, finalizeAppEnvironment, type OwnedRuntime } from '../support/native/postgres-instance'
+import { fileURLToPath } from 'node:url'
+import { type OwnedRuntime } from '../support/native/postgres-instance'
 import { spawnApp } from '../support/native/runner-lifecycle'
 import {
   formatAppHealthSummary,
@@ -15,18 +17,53 @@ import {
 } from '../support/native/app-health'
 import { signInThroughUi, type SignInPage } from '../support/ui-sign-in'
 
-// `next dev` restarts itself once V8's heap passes 80% of its limit (~4 GB by
-// default), which cut in-flight pages mid-matrix (RRM-012). These tests pin the
-// fix and the diagnostics that tell a restart from a silent shutdown.
-describe('matrix app process stability', () => {
-  it('gives the app a V8 heap ceiling and keeps the net-guard preload', () => {
-    const runtime = { appEnv: { DATABASE_URL: 'postgres://owned' } } as unknown as OwnedRuntime
-    const env = finalizeAppEnvironment(runtime, '/tmp/app', '/tmp/app/preload.js')
-    assert.equal(APP_MAX_OLD_SPACE_MB, 8192)
-    assert.match(env.NODE_OPTIONS, /(^| )--max-old-space-size=8192( |$)/)
-    assert.match(env.NODE_OPTIONS, /--require \/tmp\/app\/preload\.js/)
-    assert.equal(env.BUSINESS_APP_DIR, '/tmp/app')
-    assert.equal(env.DATABASE_URL, 'postgres://owned')
+const PRELOAD = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '..',
+  'support',
+  'native',
+  'outbound-allowlist-preload.js',
+)
+
+// `next dev` restarts itself once its heap passes 80% of the limit and says so
+// only in its own log (RRM-012). These tests pin the diagnostics that tell that
+// restart from any other shutdown of the matrix app.
+describe('matrix app process diagnostics', () => {
+  const preloadEnv = (dir: string, extra: Record<string, string> = {}): Record<string, string> => ({
+    PATH: process.env.PATH ?? '/usr/bin:/bin',
+    BUSINESS_NET_ALLOWLIST: JSON.stringify({ mode: 'ENFORCE', tcp: {} }),
+    BUSINESS_NET_BLOCK_LOG: path.join(dir, 'blocked-connections.jsonl'),
+    ...extra,
+  })
+
+  it('records heap statistics for the dev server child, including the exit code', async () => {
+    const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'app-heap-'))
+    try {
+      const result = spawnSync(process.execPath, ['--require', PRELOAD, '-e', 'setTimeout(() => process.exit(75), 100)'], {
+        env: preloadEnv(dir, { NEXT_PRIVATE_WORKER: '1' }) as NodeJS.ProcessEnv,
+        encoding: 'utf8',
+      })
+      assert.equal(result.status, 75, result.stderr)
+      const lines = (await fsp.readFile(path.join(dir, 'app-heap.log'), 'utf8')).trim().split('\n')
+      assert.match(lines[0], /^\S+ start pid=\d+ heapUsedMb=\d+ heapLimitMb=\d+ externalMb=\d+ arrayBuffersMb=\d+ rssMb=\d+$/)
+      assert.match(lines[lines.length - 1], /^\S+ exit code=75 pid=\d+ heapUsedMb=\d+ heapLimitMb=\d+/)
+    } finally {
+      await fsp.rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('leaves processes other than the dev server child alone', async () => {
+    const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'app-heap-'))
+    try {
+      const result = spawnSync(process.execPath, ['--require', PRELOAD, '-e', 'process.exit(0)'], {
+        env: preloadEnv(dir) as NodeJS.ProcessEnv,
+        encoding: 'utf8',
+      })
+      assert.equal(result.status, 0, result.stderr)
+      await assert.rejects(fsp.stat(path.join(dir, 'app-heap.log')))
+    } finally {
+      await fsp.rm(dir, { recursive: true, force: true })
+    }
   })
 
   it('stamps how and when the app process ended in its log', async () => {

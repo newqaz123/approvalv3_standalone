@@ -1177,6 +1177,8 @@ async function main(): Promise<void> {
     // The run root (with next-dev.log) is deleted after a clean stop; keep the log tail for diagnosis.
     await copyLogTail(path.join(handle.runtime.paths.logsDir, 'next-dev.log'), path.join(evidenceDir, 'next-dev.log'))
       .catch((error: unknown) => log(`app log tail not kept: ${error instanceof Error ? error.message : String(error)}`))
+    await copyLogTail(path.join(handle.runtime.paths.logsDir, 'app-heap.log'), path.join(evidenceDir, 'app-heap.log'))
+      .catch((error: unknown) => log(`app heap log not kept: ${error instanceof Error ? error.message : String(error)}`))
     if (handle.appHealth && handle.app) {
       await handle.appHealth.sampleOnce() // the periodic sample may be seconds old
       await copyLogTail(path.join(handle.runtime.paths.logsDir, 'app-health.log'), path.join(evidenceDir, 'app-health.log'))

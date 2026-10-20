@@ -208,4 +208,32 @@ process.on('uncaughtException', (error) => {
   }
 })
 
+// Heap telemetry, for the `next dev` server child only (Next marks it with
+// NEXT_PRIVATE_WORKER). `next dev` restarts itself once the heap passes 80% of
+// its limit and says so only in its own log, so record the heap over time and
+// at exit to tell that restart from any other shutdown.
+if (process.env.NEXT_PRIVATE_WORKER === '1' && BLOCK_LOG) {
+  const v8 = require('node:v8')
+  const path = require('node:path')
+  const heapLog = path.join(path.dirname(BLOCK_LOG), 'app-heap.log')
+  const mb = (bytes) => Math.round(bytes / 1048576)
+  const writeHeap = (tag) => {
+    try {
+      const heap = v8.getHeapStatistics()
+      const usage = process.memoryUsage()
+      fs.appendFileSync(
+        heapLog,
+        `${new Date().toISOString()} ${tag} pid=${process.pid} heapUsedMb=${mb(heap.used_heap_size)} ` +
+          `heapLimitMb=${mb(heap.heap_size_limit)} externalMb=${mb(usage.external)} ` +
+          `arrayBuffersMb=${mb(usage.arrayBuffers)} rssMb=${mb(usage.rss)}\n`,
+      )
+    } catch {
+      // Evidence only; never let it break the app.
+    }
+  }
+  writeHeap('start')
+  setInterval(() => writeHeap('sample'), 5000).unref()
+  process.on('exit', (code) => writeHeap(`exit code=${code}`))
+}
+
 module.exports = { __businessNetGuard: { decision, spec } }
