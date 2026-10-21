@@ -5,6 +5,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { promises as fsp } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import {
   buildCasePlan,
   buildInventory,
@@ -343,7 +344,8 @@ describe('matrix runtime safety policy (no resources started)', () => {
   it('pins the app-copy source root and its required build inputs', async () => {
     const { MATRIX_REPO_ROOT } = await import('../support/native/rejection-recovery-runtime')
     const fsModule = await import('node:fs')
-    assert.equal(path.basename(MATRIX_REPO_ROOT), 'organization-approval-redesign')
+    // The app copy is made from the checkout that holds this test, whatever its folder is called.
+    assert.equal(path.resolve(MATRIX_REPO_ROOT), path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..'))
     await fsModule.promises.access(path.join(MATRIX_REPO_ROOT, 'package.json'))
     await fsModule.promises.access(path.join(MATRIX_REPO_ROOT, 'prisma', 'schema.prisma'))
     await fsModule.promises.access(path.join(MATRIX_REPO_ROOT, 'tests', 'support', 'native', 'seed-business-fixture.ts'))
