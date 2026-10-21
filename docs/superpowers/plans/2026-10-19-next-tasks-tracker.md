@@ -72,3 +72,4 @@ Low
 ## Log
 - 2026-10-19: Rejection UI test 44/44 passed — `test-results/rejection-ui-report-20261019/report.md`
 - 2026-10-21: Rejection UI test 44/44 passed headless on the final branch (`1574a99`) — `test-results/full-matrix-20261021/`
+- 2026-10-21: The raw `test-results/` evidence folders named in this file were deleted at the owner's request. The passing results, with screenshots, are summarized in `docs/business-flow-report/` (step-by-step walkthrough as Markdown, HTML and PDF).
