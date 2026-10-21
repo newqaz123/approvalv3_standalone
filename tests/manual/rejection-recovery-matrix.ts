@@ -96,12 +96,13 @@ import {
 } from '../support/rejection-recovery-matrix'
 import {
   copyLogTail,
+  readLogTail,
   runOwnedMatrixSession,
   startMatrixRuntime,
   writeFailureArtifacts,
   type MatrixRuntimeHandle,
 } from '../support/native/rejection-recovery-runtime'
-import { formatAppHealthSummary, summarizeAppHealth } from '../support/native/app-health'
+import { appRecycleReason, formatAppHealthSummary, latestServerHeap, summarizeAppHealth } from '../support/native/app-health'
 import { signInThroughUi } from '../support/ui-sign-in'
 
 const BROWSER = matrixBrowserProfile()
@@ -1241,7 +1242,19 @@ async function main(): Promise<void> {
           cleanup: () => journal(`evidence cleanup ${caseId}`),
         })
       }
+      let casesOnServer = 0
       for (const row of rows) {
+        // `next dev` leaks ~160 MB a minute and restarts itself at 80% of its heap, which
+        // cuts a page in flight. Replace the server between cases instead, where no page is open.
+        const recycleReason = appRecycleReason({
+          casesOnServer,
+          heap: latestServerHeap(await readLogTail(path.join(handle.runtime.paths.logsDir, 'app-heap.log'))),
+        })
+        if (recycleReason && handle.recycleApp) {
+          await handle.recycleApp(recycleReason)
+          casesOnServer = 0
+        }
+        casesOnServer += 1
         currentCaseId = row.id
         currentCaseDir = await caseDir(options.evidenceRoot, row)
         const title = `RRM ${row.id} ${row.profile} ${row.phase} pos${row.rejectOrder} ${Date.now()}`

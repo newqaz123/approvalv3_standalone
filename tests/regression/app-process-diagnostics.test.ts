@@ -6,9 +6,12 @@ import { spawnSync } from 'node:child_process'
 import { promises as fsp } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { type OwnedRuntime } from '../support/native/postgres-instance'
-import { spawnApp } from '../support/native/runner-lifecycle'
+import { spawnApp, type AppProcess } from '../support/native/runner-lifecycle'
+import { recycleMatrixApp, readLogTail, type MatrixRuntimeHandle } from '../support/native/rejection-recovery-runtime'
 import {
+  appRecycleReason,
   formatAppHealthSummary,
+  latestServerHeap,
   parseProcessGroupRows,
   startAppHealthSampler,
   summarizeAppHealth,
@@ -234,5 +237,139 @@ describe('matrix sign-in sequence', () => {
       'click button Sign in',
       'waitForURL leaves-sign-in=true stays=false',
     ])
+  })
+})
+
+// The dev server's heap grows about 160 MB a minute (React's dev-only async
+// stack tracking and Next's manifest cache; no application frames) and `next
+// dev` restarts it at 80% of its limit, cutting a page in flight (RRM-012).
+// The matrix replaces the server itself between cases, where nothing is open.
+describe('recycling the dev server between cases', () => {
+  const sampleLine = (at: string, pid: number, used: number, limit = 8240): string =>
+    `${at} sample pid=${pid} heapUsedMb=${used} heapLimitMb=${limit} externalMb=600 arrayBuffersMb=590 rssMb=3000`
+
+  it('reads the server heap from the newest samples and ignores tiny helper processes', () => {
+    const text = [
+      sampleLine('2026-10-21T00:00:00.000Z', 1111, 2000),
+      '2026-10-21T00:00:01.000Z start pid=2222 heapUsedMb=5 heapLimitMb=8240 externalMb=2 arrayBuffersMb=0 rssMb=44',
+      sampleLine('2026-10-21T00:00:05.000Z', 1111, 2100),
+      sampleLine('2026-10-21T00:00:05.500Z', 3333, 70),
+      '2026-10-21T00:00:06.000Z exit code=0 pid=3333 heapUsedMb=68 heapLimitMb=8240 externalMb=4 arrayBuffersMb=0 rssMb=178',
+    ].join('\n')
+    assert.deepEqual(latestServerHeap(text), { pid: 1111, usedMb: 2100, limitMb: 8240, at: '2026-10-21T00:00:05.000Z' })
+    assert.equal(latestServerHeap(''), null)
+    assert.equal(latestServerHeap('a cut first line\nnot a sample\n'), null)
+  })
+
+  it('does not look at samples from an earlier server that are more than 20 s old', () => {
+    const text = [
+      sampleLine('2026-10-21T00:00:00.000Z', 1111, 6500),
+      sampleLine('2026-10-21T00:10:00.000Z', 4444, 1800),
+    ].join('\n')
+    assert.equal(latestServerHeap(text)?.pid, 4444)
+  })
+
+  it('recycles after four cases on one server, or when its heap is half its limit', () => {
+    const heap = (usedMb: number) => ({ pid: 1, usedMb, limitMb: 8240, at: 't' })
+    assert.equal(appRecycleReason({ casesOnServer: 0, heap: null }), null)
+    assert.equal(appRecycleReason({ casesOnServer: 3, heap: heap(3000) }), null)
+    assert.match(appRecycleReason({ casesOnServer: 4, heap: heap(3000) }) ?? '', /4 cases/)
+    assert.match(appRecycleReason({ casesOnServer: 2, heap: heap(4200) }) ?? '', /4200 MB of 8240 MB/)
+    assert.equal(appRecycleReason({ casesOnServer: 3, heap: heap(4119) }), null)
+    assert.match(appRecycleReason({ casesOnServer: 4, heap: null }) ?? '', /4 cases/)
+  })
+
+  it('reads the tail of a log without the rest', async () => {
+    const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'log-tail-'))
+    try {
+      const file = path.join(dir, 'app-heap.log')
+      await fsp.writeFile(file, 'first line\nsecond line\nthird line\n')
+      assert.equal(await readLogTail(file, 1000), 'first line\nsecond line\nthird line\n')
+      assert.equal(await readLogTail(file, 11), 'third line\n')
+      assert.equal(await readLogTail(path.join(dir, 'missing.log'), 10), '')
+    } finally {
+      await fsp.rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  const fakeApp = (pid: number): AppProcess => ({ pid, serverPort: 4321, child: {} as AppProcess['child'] })
+  const paths = (events: string[]) => ({
+    preloadPath: '/tmp/app/preload.js',
+    logFile: '/tmp/logs/next-dev.log',
+    healthLogFile: '/tmp/logs/app-health.log',
+    log: (message: string) => { events.push(`log:${message}`) },
+  })
+  const fakeHandle = (events: string[]): MatrixRuntimeHandle => ({
+    app: fakeApp(100),
+    appDir: '/tmp/app',
+    baseUrl: 'http://127.0.0.1:4321',
+    runtime: { runId: 'business-test-x', ports: { serverPort: 4321 } },
+    appHealth: {
+      sampleOnce: async () => { events.push('final-sample') },
+      samples: () => [],
+      stop: async () => { events.push('stop-sampler') },
+    },
+  } as unknown as MatrixRuntimeHandle)
+
+  it('stops the old app, starts a new one on the same port, and waits until it is ready', async () => {
+    const events: string[] = []
+    const handle = fakeHandle(events)
+    const next = fakeApp(200)
+    await recycleMatrixApp(handle, paths(events), {
+      stopAppProcess: async (app, dir) => { events.push(`stop-app:${app.pid}:${dir}`) },
+      spawnApp: (_runtime, dir, preload, logFile) => { events.push(`spawn:${dir}:${preload}:${logFile}`); return next },
+      startAppHealthSampler: (options) => {
+        events.push(`sampler:${options.pgid}:${options.logFile}`)
+        return { sampleOnce: async () => undefined, samples: () => [], stop: async () => undefined }
+      },
+      waitForHttpReady: async (url, port, pid, timeoutMs) => { events.push(`ready:${url}:${port}:${pid}:${timeoutMs}`) },
+    }, 'server heap 4300 MB of 8240 MB')
+    assert.deepEqual(events.filter((e) => !e.startsWith('log:')), [
+      'final-sample',
+      'stop-sampler',
+      'stop-app:100:/tmp/app',
+      'spawn:/tmp/app:/tmp/app/preload.js:/tmp/logs/next-dev.log',
+      'sampler:200:/tmp/logs/app-health.log',
+      'ready:http://127.0.0.1:4321/sign-in:4321:200:240000',
+    ])
+    assert.equal(handle.app, next)
+    const logs = events.filter((e) => e.startsWith('log:')).join('\n')
+    assert.match(logs, /recycling the app \(server heap 4300 MB of 8240 MB\)/)
+    assert.match(logs, /app health: no samples taken/)
+    assert.match(logs, /app ready again at http:\/\/127\.0\.0\.1:4321/)
+  })
+
+  it('does not start a new app when the old one cannot be stopped', async () => {
+    const events: string[] = []
+    const handle = fakeHandle(events)
+    const old = handle.app
+    await assert.rejects(() => recycleMatrixApp(handle, paths(events), {
+      stopAppProcess: async () => { throw new Error('app process group 100 is still alive after SIGKILL') },
+      spawnApp: () => { events.push('spawn'); return fakeApp(200) },
+      waitForHttpReady: async () => { events.push('ready') },
+    }, 'test'), /still alive after SIGKILL/)
+    assert.equal(events.includes('spawn'), false)
+    assert.equal(handle.app, old)
+  })
+
+  it('keeps the new app on the handle when it never becomes ready, so the final stop still reaches it', async () => {
+    const events: string[] = []
+    const handle = fakeHandle(events)
+    const next = fakeApp(200)
+    await assert.rejects(() => recycleMatrixApp(handle, paths(events), {
+      stopAppProcess: async () => undefined,
+      spawnApp: () => next,
+      waitForHttpReady: async () => { throw new Error('app did not become ready') },
+    }, 'test'), /did not become ready/)
+    assert.equal(handle.app, next)
+  })
+
+  it('refuses to recycle an app that is not running', async () => {
+    const handle = { appDir: '/tmp/app', runtime: { runId: 'x' } } as unknown as MatrixRuntimeHandle
+    await assert.rejects(() => recycleMatrixApp(handle, paths([]), {
+      stopAppProcess: async () => undefined,
+      spawnApp: () => fakeApp(1),
+      waitForHttpReady: async () => undefined,
+    }, 'test'), /not running/)
   })
 })

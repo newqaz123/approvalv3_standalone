@@ -195,3 +195,46 @@ export function startAppHealthSampler(options: {
     },
   }
 }
+
+export interface ServerHeapReading {
+  pid: number
+  usedMb: number
+  limitMb: number
+  at: string
+}
+
+const HEAP_SAMPLE = /^(\S+) sample pid=(\d+) heapUsedMb=(\d+) heapLimitMb=(\d+)/
+const HEAP_WINDOW_MS = 20_000
+
+/**
+ * The dev server's current heap, read from app-heap.log. Helper processes that
+ * inherit the preload write tiny samples too, so take the largest heap among the
+ * newest samples (the server's heap is in the gigabytes, theirs in the tens of MB).
+ */
+export function latestServerHeap(logText: string): ServerHeapReading | null {
+  const samples: ServerHeapReading[] = []
+  for (const line of logText.split('\n')) {
+    const match = HEAP_SAMPLE.exec(line)
+    if (match) samples.push({ at: match[1], pid: Number(match[2]), usedMb: Number(match[3]), limitMb: Number(match[4]) })
+  }
+  if (samples.length === 0) return null
+  const newest = Date.parse(samples[samples.length - 1].at)
+  let best: ServerHeapReading | null = null
+  for (const sample of samples) {
+    if (newest - Date.parse(sample.at) <= HEAP_WINDOW_MS && (best === null || sample.usedMb > best.usedMb)) best = sample
+  }
+  return best
+}
+
+/** A dev server serves at most this many cases before it is replaced. */
+export const MAX_CASES_PER_SERVER = 4
+/** Next restarts the server itself at 80% of its heap limit; replace it well before that. */
+export const RECYCLE_HEAP_FRACTION = 0.5
+
+/** Why the dev server should be replaced before the next case, or null to keep it. */
+export function appRecycleReason(input: { casesOnServer: number; heap: ServerHeapReading | null }): string | null {
+  if (input.casesOnServer >= MAX_CASES_PER_SERVER) return `${input.casesOnServer} cases on this server`
+  const { heap } = input
+  if (heap && heap.usedMb >= heap.limitMb * RECYCLE_HEAP_FRACTION) return `server heap ${heap.usedMb} MB of ${heap.limitMb} MB`
+  return null
+}

@@ -36,7 +36,7 @@ import {
   waitForHttpReady,
   type AppProcess,
 } from './runner-lifecycle'
-import { startAppHealthSampler, type AppHealthSampler } from './app-health'
+import { formatAppHealthSummary, startAppHealthSampler, summarizeAppHealth, type AppHealthSampler } from './app-health'
 import { startMailCapture, type MailCaptureHandle } from './mail-capture'
 import { assertOwnedLoopbackDatabaseTarget, createSafeRunPlan } from '../business-workflow-safety'
 import { BUSINESS_ROUTE_CONFIGURATION_NAMES } from '../business-workflow-fixture'
@@ -112,6 +112,26 @@ export async function copyLogTail(
   }
 }
 
+/** Reads the last maxBytes of a log as text; a missing log reads as empty. */
+export async function readLogTail(source: string, maxBytes = 64 * 1024): Promise<string> {
+  let file
+  try {
+    file = await fs.open(source, 'r')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return ''
+    throw error
+  }
+  try {
+    const { size } = await file.stat()
+    const length = Math.min(size, maxBytes)
+    const buffer = Buffer.alloc(length)
+    if (length > 0) await file.read(buffer, 0, length, size - length)
+    return buffer.toString('utf8')
+  } finally {
+    await file.close()
+  }
+}
+
 /** A run root is disposable only if it is a direct child of the matrix tmp parent. */
 export function isDisposableRuntimeRoot(rootDir: string): boolean {
   const resolved = path.resolve(rootDir)
@@ -157,6 +177,8 @@ export interface MatrixRuntimeHandle {
   app?: AppProcess
   /** Process-table samples of the app's group; read by the pre-stop capture. */
   appHealth?: AppHealthSampler
+  /** Replaces the running dev server (same ports, same log); call between cases only. */
+  recycleApp?: (reason: string) => Promise<void>
   mail?: MailCaptureHandle
   captureArtifacts: () => Promise<void>
   setArtifactCapture(capture: () => Promise<void>): void
@@ -627,10 +649,13 @@ export async function startMatrixRuntime(input: {
     const preloadPath = path.join(refs.appDir, 'tests', 'support', 'native', 'outbound-allowlist-preload.js')
     refs.app = deps.spawnApp(runtime, refs.appDir, preloadPath, path.join(runtime.paths.logsDir, 'next-dev.log'))
     handle.app = refs.app
-    handle.appHealth = deps.startAppHealthSampler?.({
-      pgid: refs.app.pid,
-      logFile: path.join(runtime.paths.logsDir, 'app-health.log'),
-    })
+    const appLogFile = path.join(runtime.paths.logsDir, 'next-dev.log')
+    const healthLogFile = path.join(runtime.paths.logsDir, 'app-health.log')
+    handle.appHealth = deps.startAppHealthSampler?.({ pgid: refs.app.pid, logFile: healthLogFile })
+    handle.recycleApp = async (reason: string) => {
+      await recycleMatrixApp(handle, { preloadPath, logFile: appLogFile, healthLogFile, log: input.log }, deps, reason)
+      refs.app = handle.app
+    }
     tracker.register({ kind: 'app', stop: () => deps.stopAppProcess(refs.app as AppProcess, refs.appDir as string) })
     await deps.waitForHttpReady(`${handle.baseUrl}/sign-in`, runtime.ports.serverPort, refs.app.pid, 240_000)
     await handle.captureArtifacts()
@@ -648,6 +673,43 @@ export async function startMatrixRuntime(input: {
     }
     throw error
   }
+}
+
+export interface RecycleAppDeps {
+  spawnApp: typeof spawnApp
+  stopAppProcess: typeof stopAppProcess
+  waitForHttpReady: typeof waitForHttpReady
+  startAppHealthSampler?: typeof startAppHealthSampler
+}
+
+/**
+ * Replaces the running `next dev` with a fresh one on the same ports and log.
+ * The dev server's heap grows about 160 MB a minute (React's dev-only async
+ * stack tracking and Next's manifest cache) and Next restarts it at 80% of its
+ * limit, cutting a page in flight (RRM-012). A restart chosen between cases
+ * happens when no browser page is open. The new app is put on the handle before
+ * readiness is awaited so the final stop still reaches it if it never comes up.
+ */
+export async function recycleMatrixApp(
+  handle: MatrixRuntimeHandle,
+  paths: { preloadPath: string; logFile: string; healthLogFile: string; log: (message: string) => void },
+  deps: RecycleAppDeps,
+  reason: string,
+): Promise<void> {
+  const old = handle.app
+  if (!old) throw new MatrixRuntimeError('cannot recycle the app: it is not running')
+  paths.log(`matrix runtime ${handle.runtime.runId}: recycling the app (${reason})`)
+  if (handle.appHealth) {
+    await handle.appHealth.sampleOnce()
+    paths.log(formatAppHealthSummary(summarizeAppHealth(old.pid, handle.appHealth.samples())))
+    await handle.appHealth.stop()
+  }
+  await deps.stopAppProcess(old, handle.appDir)
+  const next = deps.spawnApp(handle.runtime, handle.appDir, paths.preloadPath, paths.logFile)
+  handle.app = next
+  handle.appHealth = deps.startAppHealthSampler?.({ pgid: next.pid, logFile: paths.healthLogFile })
+  await deps.waitForHttpReady(`${handle.baseUrl}/sign-in`, handle.runtime.ports.serverPort, next.pid, 240_000)
+  paths.log(`matrix runtime ${handle.runtime.runId}: app ready again at ${handle.baseUrl}`)
 }
 
 /**
