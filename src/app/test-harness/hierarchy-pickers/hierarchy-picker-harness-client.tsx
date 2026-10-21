@@ -19,14 +19,13 @@ interface HarnessUser {
   name: string
   email: string
   role: string
-  departmentName: string
-  level: number
+  unitPathNames: string[]
 }
 
 const HARNESS_USERS: HarnessUser[] = [
-  { id: 'ada', name: 'Ada Lovelace', email: 'ada@example.com', role: 'Engineering', departmentName: 'Research and Development', level: 1 },
-  { id: 'grace', name: 'Grace Hopper', email: 'grace@example.com', role: 'Production', departmentName: 'Manufacturing Operations', level: 2 },
-  { id: 'linus', name: 'Linus Torvalds', email: 'linus@example.com', role: 'Quality', departmentName: 'Quality Assurance', level: 3 },
+  { id: 'ada', name: 'Ada Lovelace', email: 'ada@example.com', role: 'Engineering', unitPathNames: ['Research and Development'] },
+  { id: 'grace', name: 'Grace Hopper', email: 'grace@example.com', role: 'Production', unitPathNames: ['Manufacturing Operations'] },
+  { id: 'linus', name: 'Linus Torvalds', email: 'linus@example.com', role: 'Quality', unitPathNames: ['Quality Assurance'] },
 ]
 
 const ALL_USER_IDS = HARNESS_USERS.map((user) => user.id)

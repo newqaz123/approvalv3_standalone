@@ -19,11 +19,15 @@
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:debug": "playwright test --debug",
     "test:e2e:upload": "playwright test tests/e2e/solution-attachment-upload.spec.ts",
+    "business:native": "tsx tests/support/native/run-native-business-tests.ts",
+    "admin:native": "tsx tests/support/native/run-native-admin-security-tests.ts",
     "test:e2e:formatted": "playwright test tests/e2e/formatted-descriptions.spec.ts",
     "test:phase7": "TEST_BASE_URL=http://localhost:3000 playwright test tests/e2e/phase7/",
     "test:phase7:headed": "TEST_BASE_URL=http://localhost:3000 playwright test tests/e2e/phase7/ --headed",
     "test:phase7:report": "TEST_BASE_URL=http://localhost:3000 playwright test tests/e2e/phase7/ --reporter=html && playwright show-report",
-    "migrate:uploads": "tsx scripts/migrate-uploads.ts"
+    "migrate:uploads": "tsx scripts/migrate-uploads.ts",
+    "seed:dev": "tsx prisma/seed-dev.ts",
+    "upgrade:verify": "bash scripts/upgrade/verify-upgrade.sh"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.1",
@@ -95,6 +99,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/sanitize-html": "^2.16.1",
+    "htmlparser2": "10.1.0",
     "autoprefixer": "^10.4.20",
     "eslint": "^9",
     "eslint-config-next": "^15.1.4",

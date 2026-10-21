@@ -38,7 +38,7 @@ describe('solution-upload-actions contract (Task 4 swap)', () => {
     assert.match(source, /export async function uploadFileAction/)
     assert.match(source, /export async function deleteFileAttachment/)
     assert.match(source, /export async function uploadFileAction[\s\S]*validateAttachmentMetadata/)
-    assert.match(source, /role check|canEngineerUpload/)
+    assert.match(source, /existingUploadAttachmentDecision|assignmentUnitId/)
   })
 })
 

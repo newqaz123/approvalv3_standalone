@@ -129,7 +129,7 @@ async function getNotificationRequestDetails(
 					email: true,
 				},
 			},
-			department: {
+			organizationUnit: {
 				select: {
 					name: true,
 				},
@@ -161,7 +161,7 @@ async function getNotificationRequestDetails(
 		createdAt: request.createdAt,
 		requesterName: request.requester.name,
 		requesterEmail: request.requester.email,
-		departmentName: request.department.name,
+		departmentName: request.organizationUnit?.name ?? "",
 		projectEstimateCost:
 			request.projectEstimateCost === null
 				? null
@@ -454,72 +454,6 @@ export async function createNotification(data: {
 	}
 
 	return notification;
-}
-
-/**
- * Notify all users in a department (with optional exclusions)
- */
-export async function notifyUsersInDepartment(
-	departmentId: string,
-	notification: {
-		type:
-			| "approval_needed"
-			| "approval_granted"
-			| "approval_rejected"
-			| "status_changed"
-			| "request_assigned"
-			| "solution_ready"
-			| "final_approval_needed";
-		title: string;
-		message: string;
-		requestId?: string;
-	},
-	excludeUserIds?: string[],
-) {
-	// Get all active users in the department
-	const users = await prisma.user.findMany({
-		where: {
-			departmentId,
-			isActive: true,
-			...(excludeUserIds && excludeUserIds.length > 0
-				? {
-						id: { notIn: excludeUserIds },
-					}
-				: {}),
-		},
-		select: { id: true, email: true },
-	});
-
-	if (users.length > 0) {
-		await prisma.notifications.createMany({
-			data: users.map((user) => ({
-				userId: user.id,
-				type: notification.type,
-				title: notification.title,
-				message: notification.message,
-				requestId: notification.requestId,
-			})),
-		});
-	}
-
-	const emailRecipients = [
-		...new Set(
-			users
-				.map((user) => user.email)
-				.filter((email): email is string => Boolean(email)),
-		),
-	];
-
-	if (emailRecipients.length > 0) {
-		await sendEmailNotification(notification, emailRecipients).catch(
-			(error) => {
-				// Log error but don't fail the notification creation
-				console.error("Failed to send department email notification:", error);
-			},
-		);
-	}
-
-	return { notified: users.length };
 }
 
 /**

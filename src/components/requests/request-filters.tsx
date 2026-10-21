@@ -19,7 +19,7 @@ import { cn } from "@/lib/utils";
 export interface RequestFilters {
 	status?: string;
 	statuses?: string[];
-	departmentId?: string;
+	unitId?: string;
 	requesterId?: string;
 	dateFrom?: string;
 	dateTo?: string;
@@ -134,9 +134,9 @@ export function RequestFilters({
 
 				<div>
 					<Select
-						value={filters.departmentId || "all"}
+						value={filters.unitId || "all"}
 						onValueChange={(value) =>
-							updateFilter("departmentId", value === "all" ? undefined : value)
+							updateFilter("unitId", value === "all" ? undefined : value)
 						}
 					>
 						<SelectTrigger className="h-10 min-h-10">

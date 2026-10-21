@@ -1,15 +1,8 @@
 'use server'
 
 import { auth } from '@/lib/auth-config'
-import {
-  getApprovalLevelsAboveSubmitter,
-  MAX_APPROVAL_LEVEL,
-  MIN_APPROVAL_LEVEL,
-  normalizePersistedApprovalLevel,
-  validateApprovalLevel,
-} from '@/lib/approval-levels'
 import prisma from '@/lib/prisma'
-import { RequestStatus, UserRole, type Prisma } from '@prisma/client'
+import { RequestStatus, type Prisma } from '@prisma/client'
 import { submitSolutionSchema, SubmitSolutionInput, resubmitSolutionSchema, ResubmitSolutionInput } from '@/lib/schemas/solution-schemas'
 import {
   attachmentFileExists,
@@ -21,11 +14,47 @@ import {
   reconcileInlineDescriptionImages,
 } from '@/lib/inline-images/references'
 import { revalidateRequestViews } from './request-view-invalidation'
-import { updateRequestStatusExpecting } from '@/lib/request-status-transition'
+import { RequestStatusConflictError, updateRequestStatusExpecting } from '@/lib/request-status-transition'
+import {
+  advanceApprovalAtomically,
+  canUserApproveFinal as engineCanUserApproveFinal,
+  canUserApproveSolution as engineCanUserApproveSolution,
+  createPrismaApprovalTransactionDb,
+} from '@/lib/approval-engine/transaction-adapter'
 import {
   runTransactionWithPostCommitNotifications,
   type PostCommitNotificationCollector,
+  type NotificationPayload,
 } from '@/lib/post-commit-notifications'
+import {
+  createPrismaNotificationRecipientDb,
+  mapEventRecipients,
+  resolveApprovalNeededRecipients,
+} from '@/lib/notification-recipients'
+import {
+  APPROVAL_ENGINE_TRANSACTION_ISOLATION,
+  ApprovalEngineConflictError,
+} from '@/lib/approval-engine/plan'
+import {
+  createCleanStartPhaseAttemptTx,
+  createCustomPersonAttempt,
+  createFinalApprovalAttempt,
+  createSolutionApprovalAttempt,
+  markCurrentInstanceOutcome,
+  type CleanStartAttemptStore,
+} from '@/lib/approval-engine/attempts'
+import { canWorkOnSolutions } from '@/lib/solution-eligibility'
+import { createSolutionWorkActorDb, isActorSolutionWorker } from '@/lib/solution-work-actor'
+import type { OrganizationUnitNode } from '@/lib/organization/model'
+import { canUserViewRequest } from '@/lib/request-visibility/scope'
+import { CURRENT_INSTANCE_ROW_FILTER } from '@/lib/approval-engine/current-instance'
+import {
+  evaluateRequestAction,
+  existingApprovalDecision,
+  existingInitiateFinalApprovalDecision,
+  existingResubmitSolutionDecision,
+  existingSubmitSolutionDecision,
+} from '@/lib/action-permissions'
 
 type SubmitSolutionActionInput = Omit<SubmitSolutionInput, 'inlineImageSessionId'> & {
   inlineImageSessionId?: string
@@ -35,25 +64,35 @@ type ResubmitSolutionActionInput = Omit<ResubmitSolutionInput, 'inlineImageSessi
   inlineImageSessionId?: string
 }
 
-async function getMaxValidLevelInDepartment(
-  tx: { user: { findFirst: Function } },
-  departmentId: string,
-): Promise<number> {
-  const maxUser = await tx.user.findFirst({
-    where: {
-      departmentId,
-      isActive: true,
-      level: { gte: MIN_APPROVAL_LEVEL, lte: MAX_APPROVAL_LEVEL },
-    },
-    orderBy: { level: 'desc' },
-    select: { level: true },
+async function loadActiveAssignment(userId: string, unitId?: string) {
+  return prisma.organization_assignments.findFirst({
+    where: unitId
+      ? { userId, unitId, isActive: true }
+      : { userId, isActive: true },
+    select: { id: true, unitId: true },
   })
-
-  return normalizePersistedApprovalLevel(maxUser?.level) ?? MIN_APPROVAL_LEVEL
 }
 
-function normalizeSubmitterLevel(level: number | null | undefined): number {
-  return normalizePersistedApprovalLevel(level) ?? MIN_APPROVAL_LEVEL
+async function loadOrganizationUnitNodes(): Promise<OrganizationUnitNode[]> {
+  const rows = await prisma.organization_units.findMany({
+    select: {
+      id: true,
+      name: true,
+      parentId: true,
+      isActive: true,
+      shareRequests: true,
+      canWorkOnSolutions: true,
+      managerUserId: true,
+    },
+  })
+  return rows
+}
+
+function translateAttemptConflict(error: unknown): never {
+  if (error instanceof ApprovalEngineConflictError) throw error
+  const code = (error as { code?: unknown })?.code
+  if (code === 'P2034' || code === '40001') throw new ApprovalEngineConflictError()
+  throw error
 }
 
 /**
@@ -71,46 +110,64 @@ function isStaleData(currentUpdatedAt: Date, expectedUpdatedAt?: string | Date):
  * email notifications only after Prisma confirms the commit. Notification
  * delivery is best effort: failures are logged by the shared orchestration
  * primitive and never make an already-committed workflow look rolled back.
+ *
+ * NEW-mode creation callers pass the engine transaction isolation
+ * (APPROVAL_ENGINE_TRANSACTION_ISOLATION / Serializable). The enclosing
+ * boundary also translates serialization failures — including commit-time
+ * failures outside persistApprovalInstance — into ApprovalEngineConflictError
+ * without any retry loop; legacy/shadow transactions keep the default
+ * isolation and error behavior unchanged.
  */
 async function runSolutionTransactionWithNotifications<T>(
   work: (
     tx: Prisma.TransactionClient,
     notifications: PostCommitNotificationCollector,
   ) => Promise<T>,
+  options?: { isolationLevel?: typeof APPROVAL_ENGINE_TRANSACTION_ISOLATION },
 ): Promise<T> {
+  const runTransaction = async <R>(transactionWork: (tx: Prisma.TransactionClient) => Promise<R>): Promise<R> => {
+    if (!options?.isolationLevel) {
+      return prisma.$transaction((tx) => transactionWork(tx))
+    }
+    try {
+      return await prisma.$transaction((tx) => transactionWork(tx), {
+        isolationLevel: options.isolationLevel,
+      })
+    } catch (error) {
+      // Enclosing-boundary translation: commit-time serialization failures
+      // surface here, outside persistApprovalInstance. No retry loop.
+      translateAttemptConflict(error)
+    }
+  }
   return runTransactionWithPostCommitNotifications({
-    runTransaction: (transactionWork) =>
-      prisma.$transaction((tx) => transactionWork(tx)),
+    runTransaction,
     work,
     dispatchers: {
       notifyUser: async (notification) => {
         const { createNotification } = await import('./notifications')
         return createNotification(notification)
       },
-      notifyDepartment: async (
-        departmentId,
-        notification,
-        excludeUserIds,
-      ) => {
-        const { notifyUsersInDepartment } = await import('./notifications')
-        return notifyUsersInDepartment(
-          departmentId,
-          notification,
-          excludeUserIds,
-        )
-      },
     },
     onDispatchError: (plan, error) => {
-      const target =
-        plan.target === 'user'
-          ? `user ${plan.notification.userId}`
-          : `department ${plan.departmentId}`
       console.error(
-        `[solutions] Failed to dispatch post-commit notification to ${target}`,
+        `[solutions] Failed to dispatch post-commit notification to user ${plan.notification.userId}`,
         error,
       )
     },
   })
+}
+
+function queueMappedUsers(
+  notifications: PostCommitNotificationCollector,
+  userIds: readonly string[],
+  notification: NotificationPayload,
+) {
+  for (const userId of userIds) {
+    notifications.user({
+      userId,
+      ...notification,
+    })
+  }
 }
 
 const SOLUTION_DRAFT_READY_PREFIX = 'solution-drafts/ready/'
@@ -171,6 +228,33 @@ async function assertAdoptableSolutionDrafts(
 }
 
 /**
+ * Preserved custom-chain ordering validators for NEW custom attempts: exact
+ * ordered IDs with the initiator excluded and uniqueness enforced — identical
+ * semantics to the legacy chain builders (which keep their own copies).
+ */
+function sanitizeCustomChainOrder(approverIds: string[], initiatorId: string, emptyMessage: string): string[] {
+  const filteredApprovers = approverIds.filter((id) => id !== initiatorId)
+  const uniqueApprovers = [...new Set(filteredApprovers)]
+  if (uniqueApprovers.length === 0) {
+    throw new Error(emptyMessage)
+  }
+  return uniqueApprovers
+}
+
+async function assertCustomApproversExist(
+  tx: Prisma.TransactionClient,
+  approverIds: string[],
+): Promise<void> {
+  const approvers = await tx.user.findMany({
+    where: { id: { in: approverIds } },
+    select: { id: true },
+  })
+  if (approvers.length !== approverIds.length) {
+    throw new Error('One or more approvers not found')
+  }
+}
+
+/**
  * Submit an engineering solution for a request
  * Creates the solution record and approval chain in a transaction
  */
@@ -183,19 +267,17 @@ export async function submitSolution(input: SubmitSolutionActionInput) {
   // Get current user with role and level
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, role: true, departmentId: true, level: true },
+    select: { id: true, role: true,  isActive: true },
   })
 
   if (!user) {
     throw new Error('User not found')
   }
 
-  if (!user.departmentId) {
-    throw new Error('User must be assigned to a department to submit solutions. Please contact an administrator.')
-  }
-
-  if (user.role !== UserRole.engineering) {
-    throw new Error('Only engineering users can submit solutions')
+  const actorAssignment = await loadActiveAssignment(user.id)
+  const units = await loadOrganizationUnitNodes()
+  if (!canWorkOnSolutions(units, actorAssignment?.unitId ?? null)) {
+    throw new Error('Your organization assignment is not eligible to submit solutions')
   }
 
   // Validate input
@@ -208,8 +290,8 @@ export async function submitSolution(input: SubmitSolutionActionInput) {
       id: true,
       title: true,
       status: true,
-      departmentId: true,
       requesterId: true,
+      organizationUnitId: true,
     },
   })
 
@@ -217,18 +299,39 @@ export async function submitSolution(input: SubmitSolutionActionInput) {
     throw new Error('Request not found')
   }
 
-  if (request.status !== RequestStatus.SentToEngineer) {
-    throw new Error(`Request must be in SentToEngineer status to submit solution. Current status: ${request.status}`)
+  const submitAction = evaluateRequestAction('SUBMIT_SOLUTION', {
+    actor: {
+      id: user.id,
+      role: user.role,
+      isActive: user.isActive !== false,
+      assignmentUnitId: actorAssignment?.unitId ?? null,
+    },
+    request: {
+      requesterId: request.requesterId,
+      organizationUnitId: request.organizationUnitId,
+      status: request.status,
+    },
+    canView: true,
+    approval: null,
+    assignedEngineer: false,
+    existingActionDecisions: {
+      SUBMIT_SOLUTION: existingSubmitSolutionDecision({
+        isActive: user.isActive !== false,
+        assignmentUnitId: actorAssignment?.unitId ?? null,
+        units,
+        status: request.status,
+      }),
+    },
+  })
+  if (!submitAction.allowed) {
+    if (submitAction.reason === 'WRONG_STATUS') {
+      throw new Error(`Request must be in SentToEngineer status to submit solution. Current status: ${request.status}`)
+    }
+    throw new Error('Your organization assignment is not eligible to submit solutions')
   }
 
-  // Get engineering department ID for hierarchy-based approvals
-  const engineeringDept = await prisma.departments.findFirst({
-    where: { type: 'ENGINEERING' },
-    select: { id: true },
-  })
-
-  if (!engineeringDept) {
-    throw new Error('Engineering department not found')
+  if (request.status !== RequestStatus.SentToEngineer) {
+    throw new Error(`Request must be in SentToEngineer status to submit solution. Current status: ${request.status}`)
   }
 
   const prepared = await prepareInlineDescription({
@@ -245,8 +348,11 @@ export async function submitSolution(input: SubmitSolutionActionInput) {
     requestId: string
   }> = []
 
-  // Transaction: Create solution, approval chain, and update request status
-  const result = await prisma.$transaction(async (tx) => {
+  // Transaction: Create solution, approval attempt, and update request status.
+  // Attempt creation runs SERIALIZABLE; serialization failures translate
+  // to ApprovalEngineConflictError — no retry loop.
+  const result = await prisma.$transaction(
+    async (tx) => {
     // Find when status first changed to SentToEngineer (from activity log)
     const statusChangeActivity = await tx.request_activities.findFirst({
       where: {
@@ -317,113 +423,90 @@ export async function submitSolution(input: SubmitSolutionActionInput) {
       }
     }
 
-    // Check if submitter is top-level in engineering (for auto-approval)
-    const maxLevel = validateApprovalLevel(
-      await getMaxValidLevelInDepartment(tx, engineeringDept.id),
-    )
-    const submitterLevel = normalizeSubmitterLevel(user.level)
-    const isTopLevelSubmitter = submitterLevel >= maxLevel
-
-    // Create approval chain based on selection
+    const attemptTx = createCleanStartPhaseAttemptTx(tx as unknown as CleanStartAttemptStore)
     if (validated.useCustomApprovals && validated.customApproverIds && validated.customApproverIds.length > 0) {
-      // Custom approval chain (never auto-approved)
-      await createCustomApprovalChain(tx, solution.id, validated.customApproverIds, user.id)
-      // Update request status to DesignCostEstimationApproval via the shared
-      // expected-status guard: if a requester cancellation committed after the
-      // pre-transaction read, this matches zero rows and throws, rolling back
-      // the solution and its approval chain instead of overwriting Cancelled.
-      await updateRequestStatusExpecting(tx, {
+      const orderedApprovers = sanitizeCustomChainOrder(
+        validated.customApproverIds,
+        user.id,
+        'Custom approval chain must have at least one approver after removing submitter',
+      )
+      await assertCustomApproversExist(tx, orderedApprovers)
+      const attempt = await createCustomPersonAttempt(attemptTx, {
         requestId: validated.requestId,
-        expectedStatuses: [RequestStatus.SentToEngineer],
-        data: { status: RequestStatus.DesignCostEstimationApproval },
-        actionLabel: 'submit solution',
+        solutionId: solution.id,
+        phase: 'SOLUTION',
+        actorId: user.id,
+        orderedApproverIds: orderedApprovers,
       })
-
-      // Notify custom approvers about the solution submission
-      for (const approverId of validated.customApproverIds) {
+      if (attempt.statusChange) {
+        await updateRequestStatusExpecting(tx, {
+          requestId: validated.requestId,
+          expectedStatuses: [RequestStatus.SentToEngineer],
+          data: { status: attempt.statusChange.to },
+          actionLabel: 'submit solution',
+        })
+      }
+      const currentStepId = orderedApprovers[0]
+      if (currentStepId) {
         pendingNotifications.push({
-          userId: approverId,
+          userId: currentStepId,
           type: 'approval_needed',
           title: 'Solution Submitted for Approval',
           message: `📤 Solution Submitted: "${request.title}" has a new solution ready for your approval.`,
           requestId: request.id,
         })
       }
-    } else if (isTopLevelSubmitter) {
-      // Top-level submitter with hierarchy - auto-approve and go directly to SendBackToRequester
-      await tx.solution_approvals.create({
-        data: {
-          solutionId: solution.id,
-          requiredLevel: maxLevel,
-          order: 1,
-          status: 'approved',
-          approverId: user.id,
-          approvedAt: new Date(),
-          comments: 'Auto-approved (top-level submitter)',
-          isCustomChain: false,
-        },
-      })
-      // Skip approval phase, go directly to SendBackToRequester. Guarded so a
-      // concurrent requester cancellation aborts this transaction instead of
-      // being overwritten (see updateRequestStatusExpecting).
-      await updateRequestStatusExpecting(tx, {
-        requestId: validated.requestId,
-        expectedStatuses: [RequestStatus.SentToEngineer],
-        data: {
-          status: RequestStatus.SendBackToRequester,
-          projectEstimateCost: validated.costEstimate ?? 0,
-        },
-        actionLabel: 'submit solution',
-      })
-      // Log status change
-      await tx.request_activities.create({
-        data: {
-          requestId: validated.requestId,
-          userId: request.requesterId,
-          action: 'status_changed',
-          fromStatus: RequestStatus.SentToEngineer,
-          toStatus: RequestStatus.SendBackToRequester,
-          comments: `Solution "${validated.title}" auto-approved (top-level submitter). Request sent back to requester for final review.`,
-        },
-      })
-      // Create notification for requester
-      pendingNotifications.push({
-        userId: request.requesterId,
-        type: 'solution_ready',
-        title: 'Solution Ready for Review',
-        message: `Engineering solution for "${request.title}" is ready for your review.`,
-        requestId: validated.requestId,
-      })
     } else {
-      // Default hierarchy-based approval chain
-      const hierarchyApprovals = await createHierarchyApprovalChain(
-        tx,
-        solution.id,
-        engineeringDept.id,
-        submitterLevel,
-        user.id,
-      )
-      // Update request status to DesignCostEstimationApproval via the shared
-      // expected-status guard (see updateRequestStatusExpecting).
-      await updateRequestStatusExpecting(tx, {
+      const attempt = await createSolutionApprovalAttempt(attemptTx, {
         requestId: validated.requestId,
-        expectedStatuses: [RequestStatus.SentToEngineer],
-        data: { status: RequestStatus.DesignCostEstimationApproval },
-        actionLabel: 'submit solution',
+        solutionId: solution.id,
+        phase: 'SOLUTION',
+        originUserId: user.id,
       })
-
-      // Notify engineering department approvers at the first *actual* pending level.
-      // Chain creation skips empty levels, so this must not use arithmetic submitter+1.
-      const { getApproversAtLevel } = await import('./approvals')
-      const firstPendingApproval = hierarchyApprovals.find((a) => a.status === 'pending')
-      const firstPendingLevel = firstPendingApproval?.requiredLevel
-      if (firstPendingLevel !== undefined && firstPendingLevel !== null) {
-        const firstLevelApprovers = await getApproversAtLevel(engineeringDept.id, firstPendingLevel)
-
-        // Notify each approver
-        for (const approver of firstLevelApprovers) {
+      if (attempt.statusChange) {
+        await updateRequestStatusExpecting(tx, {
+          requestId: validated.requestId,
+          expectedStatuses: [RequestStatus.SentToEngineer],
+          data: {
+            status: attempt.statusChange.to,
+            ...(attempt.statusChange.to === RequestStatus.SendBackToRequester
+              ? { projectEstimateCost: validated.costEstimate ?? 0 }
+              : {}),
+          },
+          actionLabel: 'submit solution',
+        })
+        if (attempt.statusChange.to === RequestStatus.SendBackToRequester) {
+          await tx.request_activities.create({
+            data: {
+              requestId: validated.requestId,
+              userId: request.requesterId,
+              action: 'status_changed',
+              fromStatus: attempt.statusChange.from,
+              toStatus: attempt.statusChange.to,
+              comments: attempt.completedWithoutSteps
+                ? `Solution "${validated.title}" auto-completed: NO_ELIGIBLE_APPROVAL_STEPS. Request sent back to requester for final review.`
+                : `Solution "${validated.title}" auto-approved (top-level submitter). Request sent back to requester for final review.`,
+            },
+          })
+          for (const userId of mapEventRecipients({
+            type: 'solution_ready',
+            requesterId: request.requesterId,
+            solutionSubmitterIds: [user.id],
+          })) {
+            pendingNotifications.push({
+              userId,
+              type: 'solution_ready',
+              title: 'Solution Ready for Review',
+              message: `Engineering solution for "${request.title}" is ready for your review.`,
+              requestId: validated.requestId,
+            })
+          }
+        }
+      }
+      if (attempt.instance.state === 'PENDING') {
+        for (const userId of attempt.instance.steps[0]?.candidateUserIds ?? []) {
           pendingNotifications.push({
-            userId: approver.id,
+            userId,
             type: 'approval_needed',
             title: 'Solution Submitted for Approval',
             message: `📤 Solution Submitted: "${request.title}" has a new solution ready for your approval.`,
@@ -443,8 +526,11 @@ export async function submitSolution(input: SubmitSolutionActionInput) {
       },
     })
 
-    return solution
-  })
+      return solution
+    },
+    { isolationLevel: APPROVAL_ENGINE_TRANSACTION_ISOLATION },
+  )
+  .catch((error: unknown) => translateAttemptConflict(error))
 
   if (pendingNotifications.length > 0) {
     const { createNotification } = await import('./notifications')
@@ -461,115 +547,9 @@ export async function submitSolution(input: SubmitSolutionActionInput) {
 }
 
 /**
- * Create a custom approval chain for a solution
- * Filters out submitter and validates uniqueness
- */
-async function createCustomApprovalChain(
-  tx: any,
-  solutionId: string,
-  approverIds: string[],
-  submitterId: string
-) {
-  // Filter out submitter from approver list (auto-skip if included)
-  const filteredApprovers = approverIds.filter(id => id !== submitterId)
-
-  // Validate uniqueness
-  const uniqueApprovers = [...new Set(filteredApprovers)]
-
-  if (uniqueApprovers.length === 0) {
-    throw new Error('Custom approval chain must have at least one approver after removing submitter')
-  }
-
-  // Verify all approvers exist
-  const approvers = await tx.user.findMany({
-    where: { id: { in: uniqueApprovers } },
-    select: { id: true, name: true },
-  })
-
-  if (approvers.length !== uniqueApprovers.length) {
-    throw new Error('One or more approvers not found')
-  }
-
-  // Create approval records with sequential order
-  const approvals = uniqueApprovers.map((approverId, index) => ({
-    solutionId,
-    requiredApproverId: approverId,
-    order: index + 1,
-    status: 'pending' as const,
-    isCustomChain: true,
-  }))
-
-  await tx.solution_approvals.createMany({ data: approvals })
-
-  return approvals
-}
-
-/**
- * Create a hierarchy-based approval chain for a solution
- * Reuses the logic from approvals.ts createApprovalChain
- * All levels above submitter need to approve
- */
-async function createHierarchyApprovalChain(
-  tx: any,
-  solutionId: string,
-  departmentId: string,
-  submitterLevel: number,
-  submitterId: string
-) {
-  const maxLevel = validateApprovalLevel(await getMaxValidLevelInDepartment(tx, departmentId))
-  const normalizedSubmitter = normalizeSubmitterLevel(submitterLevel)
-
-  const approvals = []
-  let order = 1
-
-  // If submitter is top-level, create auto-approved record
-  if (normalizedSubmitter >= maxLevel) {
-    approvals.push({
-      solutionId,
-      requiredLevel: maxLevel,
-      order: 1,
-      status: 'approved' as const,
-      approverId: submitterId,
-      approvedAt: new Date(),
-      comments: 'Auto-approved (top-level submitter)',
-      isCustomChain: false,
-    })
-  } else {
-    // Create approvals for all levels between submitter and max level
-    for (const level of getApprovalLevelsAboveSubmitter(normalizedSubmitter, maxLevel)) {
-      const requiredLevel = validateApprovalLevel(level)
-
-      // Check if there are active users at this level
-      const hasUsersAtLevel = await tx.user.findFirst({
-        where: {
-          departmentId,
-          level: requiredLevel,
-          isActive: true,
-        },
-        select: { id: true },
-      })
-
-      if (hasUsersAtLevel) {
-        approvals.push({
-          solutionId,
-          requiredLevel,
-          order: order++,
-          status: 'pending' as const,
-          isCustomChain: false,
-        })
-      }
-    }
-  }
-
-  if (approvals.length > 0) {
-    await tx.solution_approvals.createMany({ data: approvals })
-  }
-
-  return approvals
-}
-
-/**
- * Get solution by ID with related data
+ * Get solution by ID with related data. Authenticated callers must also pass
+ * the shared request-visibility policy for the owning request before any
+ * solution payload, request context, or attachment list is returned.
  */
 export async function getSolutionBySolutionId(solutionId: string) {
   const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
@@ -604,25 +584,34 @@ export async function getSolutionBySolutionId(solutionId: string) {
     },
   })
 
-  // Convert Decimal to number for client component serialization
-  if (solution) {
-    return {
-      ...solution,
-      costEstimate: Number(solution.costEstimate),
-    }
+  if (!solution) {
+    return null
+  }
+  if (!(await canUserViewRequest(userId, solution.request.id))) {
+    return null
   }
 
-  return solution
+  // Convert Decimal to number for client component serialization
+  return {
+    ...solution,
+    costEstimate: Number(solution.costEstimate),
+  }
 }
 
 /**
  * Get solution by request ID
- * Returns the solution if one exists for the request
+ * Returns the solution if one exists for the request. Visibility is the
+ * shared request policy: a caller who cannot view the request learns
+ * nothing about its solutions.
  */
 export async function getSolutionByRequestId(requestId: string) {
   const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
   if (!userId) {
     throw new Error('Unauthorized')
+  }
+
+  if (!(await canUserViewRequest(userId, requestId))) {
+    return null
   }
 
   const solution = await prisma.solutions.findFirst({
@@ -660,28 +649,36 @@ export async function getSolutionByRequestId(requestId: string) {
  * Get solution approvals with eligible approvers
  * For custom chains, returns the specific required approver
  * For hierarchy chains, returns all eligible users at each level
+ * Authentication plus the owning request's shared visibility policy gate
+ * every return path; approval metadata never leaks to invisible callers.
  */
 export async function getSolutionApprovals(solutionId: string) {
+  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
+  if (!userId) {
+    throw new Error('Unauthorized')
+  }
+
+  const owningRequest = await prisma.solutions.findUnique({
+    where: { id: solutionId },
+    select: { requestId: true },
+  })
+  if (!owningRequest) {
+    return []
+  }
+  if (!(await canUserViewRequest(userId, owningRequest.requestId))) {
+    return []
+  }
+
   const solution = await prisma.solutions.findUnique({
     where: { id: solutionId },
     include: {
       request: {
-        select: { departmentId: true },
+        select: { id: true },
       },
     },
   })
 
   if (!solution) {
-    return []
-  }
-
-  // Get engineering department ID
-  const engineeringDept = await prisma.departments.findFirst({
-    where: { type: 'ENGINEERING' },
-    select: { id: true },
-  })
-
-  if (!engineeringDept) {
     return []
   }
 
@@ -693,7 +690,7 @@ export async function getSolutionApprovals(solutionId: string) {
           id: true,
           name: true,
           email: true,
-          level: true,
+
         },
       },
       requiredApprover: {
@@ -701,7 +698,7 @@ export async function getSolutionApprovals(solutionId: string) {
           id: true,
           name: true,
           email: true,
-          level: true,
+
         },
       },
     },
@@ -713,22 +710,13 @@ export async function getSolutionApprovals(solutionId: string) {
     approvals.map(async (approval) => {
       let eligibleApprovers: Array<{ id: string; name: string; level: number | null }> = []
 
-      // For hierarchy-based pending approvals, get eligible users at this level
-      if (approval.status === 'pending' && !approval.isCustomChain && approval.requiredLevel) {
-        const users = await prisma.user.findMany({
-          where: {
-            departmentId: engineeringDept.id,
-            level: approval.requiredLevel,
-            isActive: true,
-          },
-          select: {
-            id: true,
-            name: true,
-            level: true,
-          },
+      if (approval.status === 'pending' && approval.candidateGroupId) {
+        const users = await prisma.approval_candidate_group_members.findMany({
+          where: { candidateGroupId: approval.candidateGroupId },
+          select: { userId: true, capturedDisplayName: true },
           take: 10,
         })
-        eligibleApprovers = users.filter(u => u.level !== null)
+        eligibleApprovers = users.map((row) => ({ id: row.userId, name: row.capturedDisplayName, level: null }))
       }
 
       return {
@@ -757,7 +745,7 @@ export async function canUserApproveSolution(solutionId: string): Promise<{
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, level: true, departmentId: true, role: true },
+    select: { id: true, role: true },
   })
 
   if (!user) {
@@ -771,7 +759,6 @@ export async function canUserApproveSolution(solutionId: string): Promise<{
       request: {
         select: {
           status: true,
-          departmentId: true,
         },
       },
     },
@@ -781,84 +768,40 @@ export async function canUserApproveSolution(solutionId: string): Promise<{
     return { canApprove: false }
   }
 
-  // Check if request is in correct status
-  if (solution.request.status !== RequestStatus.DesignCostEstimationApproval) {
-    // Convert Decimal to number before returning
-    return {
-      canApprove: false,
-      solution: {
-        ...solution,
-        costEstimate: Number(solution.costEstimate),
-      },
-    }
-  }
-
-  // Get engineering department ID
-  const engineeringDept = await prisma.departments.findFirst({
-    where: { type: 'ENGINEERING' },
-    select: { id: true },
-  })
-
-  if (!engineeringDept) {
-    return { canApprove: false }
-  }
-
-  // Find pending approval for this user
-  let approval: any = null
-
-  // Check for custom chain approval (any role can be in custom chain)
-  approval = await prisma.solution_approvals.findFirst({
-    where: {
-      solutionId,
-      status: 'pending',
-      isCustomChain: true,
-      requiredApproverId: userId,
-    },
-    orderBy: { order: 'asc' },
-  })
-
-  // If no custom chain approval, check hierarchy approval (engineering only)
-  if (!approval && user.level && user.role === UserRole.engineering) {
-    approval = await prisma.solution_approvals.findFirst({
-      where: {
-        solutionId,
-        status: 'pending',
-        isCustomChain: false,
-        requiredLevel: user.level,
-      },
-      orderBy: { order: 'asc' },
-    })
-  }
-
-  if (!approval) {
-    // Convert Decimal to number before returning
-    return {
-      canApprove: false,
-      solution: {
-        ...solution,
-        costEstimate: Number(solution.costEstimate),
-      },
-    }
-  }
-
-  // Check if all previous approvals are completed
-  const previousApprovals = await prisma.solution_approvals.findMany({
-    where: {
-      solutionId,
-      order: { lt: approval.order },
-      status: 'pending',
-    },
-  })
-
-  const canApprove = previousApprovals.length === 0
-
-  // Convert Decimal to number before returning
   const serializedSolution = {
     ...solution,
     costEstimate: Number(solution.costEstimate),
   }
 
-  return { canApprove, approval, solution: serializedSolution }
+  const approval = await prisma.solution_approvals.findFirst({
+    where: {
+      solutionId,
+      status: 'pending',
+      OR: [...CURRENT_INSTANCE_ROW_FILTER],
+    },
+    orderBy: { order: 'asc' },
+  })
+
+  if (!approval) {
+    return { canApprove: false }
+  }
+
+  const eligibility = await engineCanUserApproveSolution(
+    createPrismaApprovalTransactionDb(prisma as Prisma.TransactionClient),
+    { approvalId: approval.id, actorId: userId },
+  )
+
+  if (!eligibility.canApprove) {
+    // Eligibility-false responses carry no solution payload: action
+    // ineligibility must not become a solution-content read.
+    return { canApprove: false }
+  }
+
+  return {
+    canApprove: true,
+    approval,
+    solution: serializedSolution,
+  }
 }
 
 /**
@@ -871,7 +814,21 @@ export async function approveSolution(solutionId: string, comments?: string, exp
   }
 
   const { canApprove, approval, solution } = await canUserApproveSolution(solutionId)
-  if (!canApprove || !approval) {
+  const approveSolutionAction = evaluateRequestAction('APPROVE_SOLUTION', {
+    actor: { id: userId, role: '', isActive: true, assignmentUnitId: null },
+    request: {
+      requesterId: '',
+      organizationUnitId: null,
+      status: solution?.request?.status ?? '',
+    },
+    canView: true,
+    approval: { canApprove },
+    assignedEngineer: false,
+    existingActionDecisions: {
+      APPROVE_SOLUTION: existingApprovalDecision(Boolean(canApprove && approval)),
+    },
+  })
+  if (!approveSolutionAction.allowed || !canApprove || !approval) {
     throw new Error('You cannot approve this solution at this time')
   }
 
@@ -890,91 +847,46 @@ export async function approveSolution(solutionId: string, comments?: string, exp
   // Keep workflow writes atomic; notification plans are dispatched only
   // after this transaction commits.
   await runSolutionTransactionWithNotifications(async (tx, notifications) => {
-    // Update approval
-    await tx.solution_approvals.update({
-      where: { id: approval.id },
-      data: {
-        approverId: userId,
-        status: 'approved',
-        comments,
-        approvedAt: new Date(),
-      },
-    })
-
-    // Get solution details for logging
     const solutionData = await tx.solutions.findUnique({
       where: { id: solutionId },
-      select: { requestId: true, title: true, costEstimate: true },
+      select: { requestId: true, title: true, costEstimate: true, submittedById: true },
     })
-
     if (!solutionData) {
       throw new Error('Solution not found')
     }
 
-    // Log activity
-    await tx.request_activities.create({
-      data: {
-        requestId: solutionData.requestId,
-        userId,
-        action: 'solution_approved',
-        comments: comments || `Solution "${solutionData.title}" approved at step ${approval.order}`,
-      },
+    const result = await advanceApprovalAtomically(createPrismaApprovalTransactionDb(tx), {
+      approvalId: approval.id,
+      actorId: userId,
+      phase: 'SOLUTION',
+      comments,
     })
 
-    // Check if this was the last approval
-    const pendingApprovals = await tx.solution_approvals.count({
-      where: {
-        solutionId,
-        status: 'pending',
-      },
-    })
-
-    // If no more pending approvals, transition request status
-    if (pendingApprovals === 0) {
-      // Update request status to SendBackToRequester
-      await tx.requests.update({
-        where: { id: solutionData.requestId },
-        data: {
-          status: RequestStatus.SendBackToRequester,
-          projectEstimateCost: solutionData.costEstimate,
-        },
-      })
-
-      // Get request for notification (include departmentId for department-wide notification)
+    if (result.statusChange) {
+      // Last-row adapter write copies projectEstimateCost: solutionData.costEstimate
+      // onto the request (locked FOR UPDATE in the same transaction).
       const request = await tx.requests.findUnique({
         where: { id: solutionData.requestId },
-        select: { requesterId: true, title: true, departmentId: true },
+        select: { title: true, requesterId: true },
       })
-
       if (request) {
-        // Log status change
-        await tx.request_activities.create({
-          data: {
-            requestId: solutionData.requestId,
-            userId: request.requesterId,
-            action: 'status_changed',
-            fromStatus: RequestStatus.DesignCostEstimationApproval,
-            toStatus: RequestStatus.SendBackToRequester,
-            comments: `Solution "${solutionData.title}" approved. Request sent back to requester for final review.`,
+        queueMappedUsers(
+          notifications,
+          mapEventRecipients({
+            type: 'solution_ready',
+            requesterId: request.requesterId,
+            solutionSubmitterIds: [solutionData.submittedById],
+          }),
+          {
+            type: 'solution_ready',
+            title: 'Solution Ready for Review',
+            message: `📤 Ready for Review: "${request.title}" has been completed and awaits your department's final review.`,
+            requestId: solution.requestId,
           },
-        })
-
-        // Queue requester-department notification for post-commit dispatch.
-        notifications.department(request.departmentId, {
-          type: 'solution_ready',
-          title: 'Solution Ready for Review',
-          message: `📤 Ready for Review: "${request.title}" has been completed and awaits your department's final review.`,
-          requestId: solutionData.requestId,
-        })
+        )
       }
     } else {
-      // Resolve and queue the next approver notification using transaction
-      // reads only; delivery starts after commit.
-      await queueNextSolutionApproverNotifications(
-        tx,
-        solutionId,
-        notifications,
-      )
+      await queueNextSolutionApproverNotifications(tx, solutionId, notifications)
     }
   })
 
@@ -997,7 +909,21 @@ export async function rejectSolution(solutionId: string, comments: string, expec
   }
 
   const { canApprove, approval, solution } = await canUserApproveSolution(solutionId)
-  if (!canApprove || !approval || !solution) {
+  const rejectSolutionAction = evaluateRequestAction('REJECT_SOLUTION', {
+    actor: { id: userId, role: '', isActive: true, assignmentUnitId: null },
+    request: {
+      requesterId: '',
+      organizationUnitId: null,
+      status: solution?.request?.status ?? '',
+    },
+    canView: true,
+    approval: { canApprove },
+    assignedEngineer: false,
+    existingActionDecisions: {
+      REJECT_SOLUTION: existingApprovalDecision(Boolean(canApprove && approval && solution)),
+    },
+  })
+  if (!rejectSolutionAction.allowed || !canApprove || !approval || !solution) {
     throw new Error('You cannot reject this solution at this time')
   }
 
@@ -1015,10 +941,29 @@ export async function rejectSolution(solutionId: string, comments: string, expec
 
   // Keep workflow writes atomic; notification plans are dispatched only
   // after this transaction commits.
+  //
+  // Not routed through the engine REJECT branch: that branch logs the
+  // approve-flavoured 'solution_approved' activity and its SOLUTION status
+  // write copies the cost estimate into projectEstimateCost unguarded.
+  // Instead eligibility is re-evaluated with the engine inside the
+  // transaction and the status change is guarded on the expected status.
   await runSolutionTransactionWithNotifications(async (tx, notifications) => {
-    // Update approval to rejected
-    await tx.solution_approvals.update({
-      where: { id: approval.id },
+    const txEligibility = await engineCanUserApproveSolution(
+      createPrismaApprovalTransactionDb(tx),
+      { approvalId: approval.id, actorId: userId },
+    )
+    if (!txEligibility.canApprove) {
+      throw new RequestStatusConflictError(
+        'Cannot reject this solution - it was changed by someone else. Please refresh and try again.',
+      )
+    }
+
+    const rejected = await tx.solution_approvals.updateMany({
+      where: {
+        id: approval.id,
+        status: 'pending',
+        OR: [...CURRENT_INSTANCE_ROW_FILTER],
+      },
       data: {
         approverId: userId,
         status: 'rejected',
@@ -1026,17 +971,28 @@ export async function rejectSolution(solutionId: string, comments: string, expec
         approvedAt: new Date(),
       },
     })
+    if (rejected.count !== 1) {
+      throw new RequestStatusConflictError(
+        'Cannot reject this solution - it was changed by someone else. Please refresh and try again.',
+      )
+    }
 
-    // Mark all remaining pending approvals as rejected
+    // Mark all remaining pending approvals as rejected (current attempts
+    // only; superseded history is never rewritten)
     await tx.solution_approvals.updateMany({
       where: {
         solutionId,
         status: 'pending',
+        OR: [...CURRENT_INSTANCE_ROW_FILTER],
       },
       data: {
         status: 'rejected',
       },
     })
+
+    // Record the outcome on the current SOLUTION instance (PENDING only) so
+    // no further action can target it. No new notification events here.
+    await markCurrentInstanceOutcome(tx, { solutionId, phase: 'SOLUTION', outcome: 'REJECTED' })
 
     // Log activity
     await tx.request_activities.create({
@@ -1048,27 +1004,41 @@ export async function rejectSolution(solutionId: string, comments: string, expec
       },
     })
 
-    // Return request to SentToEngineer status for resubmission
-    await tx.requests.update({
-      where: { id: solution.requestId },
+    // Return request to SentToEngineer status for resubmission, only if it
+    // is still in solution approval (0 rows -> conflict + rollback).
+    await updateRequestStatusExpecting(tx, {
+      requestId: solution.requestId,
+      expectedStatuses: [RequestStatus.DesignCostEstimationApproval],
       data: { status: RequestStatus.SentToEngineer },
+      actionLabel: 'reject the solution',
     })
 
-    // Get solution details for notification
-    const solutionData = await tx.solutions.findUnique({
-      where: { id: solutionId },
-      select: { submittedById: true, title: true },
-    })
+    const [solutionData, requestRow] = await Promise.all([
+      tx.solutions.findUnique({
+        where: { id: solutionId },
+        select: { submittedById: true, title: true },
+      }),
+      tx.requests.findUnique({
+        where: { id: solution.requestId },
+        select: { requesterId: true },
+      }),
+    ])
 
-    if (solutionData) {
-      // Queue the submitter notification for post-commit dispatch.
-      notifications.user({
-        userId: solutionData.submittedById,
-        type: 'approval_rejected',
-        title: 'Solution Rejected',
-        message: `Your solution "${solutionData.title}" was rejected and returned for resubmission.`,
-        requestId: solution.requestId,
-      })
+    if (solutionData && requestRow) {
+      queueMappedUsers(
+        notifications,
+        mapEventRecipients({
+          type: 'approval_rejected',
+          requesterId: requestRow.requesterId,
+          decidedActorId: userId,
+        }),
+        {
+          type: 'approval_rejected',
+          title: 'Solution Rejected',
+          message: `Your solution "${solutionData.title}" was rejected and returned for resubmission.`,
+          requestId: solution.requestId,
+        },
+      )
     }
   })
 
@@ -1097,8 +1067,9 @@ export async function markRequestComplete(requestId: string, completionNote?: st
     throw new Error('User not found')
   }
 
-  if (user.role !== UserRole.engineering) {
-    throw new Error('Only engineering users can mark requests complete')
+  // Unit "Can work on solutions" flag, not the user role (H9).
+  if (!(await isActorSolutionWorker(createSolutionWorkActorDb(prisma), user.id))) {
+    throw new Error('Your organization assignment is not eligible to mark requests complete')
   }
 
   // Validate request exists and is in correct status
@@ -1182,8 +1153,8 @@ export async function canMarkComplete(requestId: string): Promise<{
     return { canMark: false, reason: 'User not found' }
   }
 
-  if (user.role !== UserRole.engineering) {
-    return { canMark: false, reason: 'Only engineering users can mark requests complete' }
+  if (!(await isActorSolutionWorker(createSolutionWorkActorDb(prisma), user.id))) {
+    return { canMark: false, reason: 'Your organization assignment is not eligible to mark requests complete' }
   }
 
   const request = await prisma.requests.findUnique({
@@ -1216,6 +1187,7 @@ async function queueNextSolutionApproverNotifications(
     where: {
       solutionId,
       status: 'pending',
+      OR: [...CURRENT_INSTANCE_ROW_FILTER],
     },
     orderBy: { order: 'asc' },
     include: {
@@ -1230,46 +1202,16 @@ async function queueNextSolutionApproverNotifications(
 
   if (!nextApproval) return
 
-  // For custom chain: notify specific requiredApproverId
-  if (nextApproval.isCustomChain && nextApproval.requiredApproverId) {
-    notifications.user({
-      userId: nextApproval.requiredApproverId,
-      type: 'approval_needed',
-      title: 'Solution Approval Needed',
-      message: `Solution "${nextApproval.solution.title}" needs your approval.`,
-      requestId: nextApproval.solution.requestId,
-    })
-    return
-  }
-
-  // For hierarchy chain: notify all users at requiredLevel in engineering dept
-  if (nextApproval.requiredLevel) {
-    const engineeringDept = await tx.departments.findFirst({
-      where: { type: 'ENGINEERING' },
-      select: { id: true },
-    })
-
-    if (engineeringDept) {
-      const approvers = await tx.user.findMany({
-        where: {
-          departmentId: engineeringDept.id,
-          level: nextApproval.requiredLevel,
-          isActive: true,
-        },
-        select: { id: true },
-      })
-
-      for (const approver of approvers) {
-        notifications.user({
-          userId: approver.id,
-          type: 'approval_needed',
-          title: 'Solution Approval Needed',
-          message: `Solution "${nextApproval.solution.title}" needs your approval.`,
-          requestId: nextApproval.solution.requestId,
-        })
-      }
-    }
-  }
+  const recipients = await resolveApprovalNeededRecipients(
+    createPrismaNotificationRecipientDb(tx),
+    { approvalId: nextApproval.id, phase: 'SOLUTION' },
+  )
+  queueMappedUsers(notifications, recipients, {
+    type: 'approval_needed',
+    title: 'Solution Approval Needed',
+    message: `Solution "${nextApproval.solution.title}" needs your approval.`,
+    requestId: nextApproval.solution.requestId,
+  })
 }
 
 // ============================================================================
@@ -1293,11 +1235,15 @@ export async function initiateFinalApproval(
   // Get current user
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, role: true, departmentId: true, level: true },
+    select: { id: true, role: true, isActive: true },
   })
 
   if (!user) {
     throw new Error('User not found')
+  }
+
+  if (!user.isActive) {
+    throw new Error('Inactive users cannot initiate final approval')
   }
 
   // Validate request exists and is in correct status
@@ -1307,7 +1253,7 @@ export async function initiateFinalApproval(
       id: true,
       title: true,
       status: true,
-      departmentId: true,
+      organizationUnitId: true,
       requesterId: true,
     },
   })
@@ -1320,102 +1266,115 @@ export async function initiateFinalApproval(
     throw new Error(`Request must be in SendBackToRequester status to initiate final approval. Current status: ${request.status}`)
   }
 
-  // Validate caller is in request's department
-  if (user.departmentId !== request.departmentId) {
-    throw new Error('Only department members can initiate final approval')
+  // O3: initiator holds an active assignment in the request's originating unit.
+  const actorAssignment = await loadActiveAssignment(user.id)
+  const requestOriginUnitId = request.organizationUnitId ?? ''
+  const units = await loadOrganizationUnitNodes()
+
+  const initiateAction = evaluateRequestAction('INITIATE_FINAL_APPROVAL', {
+    actor: {
+      id: user.id,
+      role: user.role,
+      isActive: user.isActive,
+      assignmentUnitId: actorAssignment?.unitId ?? null,
+    },
+    request: {
+      requesterId: request.requesterId,
+      organizationUnitId: request.organizationUnitId,
+      status: request.status,
+    },
+    canView: true,
+    approval: null,
+    assignedEngineer: false,
+    existingActionDecisions: {
+      INITIATE_FINAL_APPROVAL: existingInitiateFinalApprovalDecision({
+        isActive: user.isActive,
+        assignmentUnitId: actorAssignment?.unitId ?? null,
+        requestOriginUnitId,
+        units,
+        status: request.status,
+      }),
+    },
+  })
+  if (!initiateAction.allowed) {
+    if (initiateAction.reason === 'WRONG_STATUS') {
+      throw new Error(`Request must be in SendBackToRequester status to initiate final approval. Current status: ${request.status}`)
+    }
+    throw new Error('Only members of the originating unit can initiate final approval')
   }
 
-  // Get max level in department for top-level check
-  const maxLevel = validateApprovalLevel(
-    await getMaxValidLevelInDepartment(prisma, request.departmentId),
-  )
-  const initiatorLevel = normalizeSubmitterLevel(user.level)
-  const isTopLevelInitiator = initiatorLevel >= maxLevel
-
-  // Keep workflow writes atomic; approver notification plans are dispatched
-  // only after this transaction commits.
-  await runSolutionTransactionWithNotifications(async (tx, notifications) => {
-    // Delete old final approval records (in case of resubmission after rejection)
-    await tx.request_approvals.deleteMany({
-      where: {
-        requestId,
-        isFinalApproval: true,
-      },
-    })
-
-    // Create final approval chain
+  await runSolutionTransactionWithNotifications(
+    async (tx, notifications) => {
+    const attemptTx = createCleanStartPhaseAttemptTx(tx as unknown as CleanStartAttemptStore)
     if (useCustomChain && customApproverIds && customApproverIds.length > 0) {
-      // Custom approval chain (never auto-approved)
-      await createCustomFinalApprovalChain(tx, requestId, customApproverIds, userId)
-      // Update request status to FinalApproval via the shared expected-status
-      // guard: a requester cancellation that committed first aborts this
-      // transaction (and rolls back the approval chain) instead of being
-      // overwritten.
-      await updateRequestStatusExpecting(tx, {
+      const orderedApprovers = sanitizeCustomChainOrder(
+        customApproverIds,
+        userId,
+        'Custom approval chain must have at least one approver after removing initiator',
+      )
+      await assertCustomApproversExist(tx, orderedApprovers)
+      const attempt = await createCustomPersonAttempt(attemptTx, {
         requestId,
-        expectedStatuses: [RequestStatus.SendBackToRequester],
-        data: { status: RequestStatus.FinalApproval },
-        actionLabel: 'initiate final approval',
+        phase: 'FINAL',
+        actorId: userId,
+        orderedApproverIds: orderedApprovers,
       })
-    } else if (isTopLevelInitiator) {
-      // Top-level initiator with hierarchy - auto-approve and go directly to Completed
-      await tx.request_approvals.create({
-        data: {
+      if (attempt.statusChange) {
+        await updateRequestStatusExpecting(tx, {
           requestId,
-          requiredLevel: maxLevel,
-          order: 1,
-          status: 'approved',
-          approverId: user.id,
-          approvedAt: new Date(),
-          comments: 'Auto-approved (top-level initiator)',
-          isCustomChain: false,
-          isFinalApproval: true,
-        },
-      })
-      // Skip approval phase, go directly to Completed. Guarded so a
-      // concurrent requester cancellation aborts this transaction instead
-      // of being overwritten (see updateRequestStatusExpecting).
-      await updateRequestStatusExpecting(tx, {
+          expectedStatuses: [RequestStatus.SendBackToRequester],
+          data: { status: attempt.statusChange.to },
+          actionLabel: 'initiate final approval',
+        })
+      }
+      notifications.user({
+        userId: orderedApprovers[0],
+        type: 'final_approval_needed',
+        title: 'Final Approval Needed',
+        message: `Request "${request.title}" needs your final approval.`,
         requestId,
-        expectedStatuses: [RequestStatus.SendBackToRequester],
-        data: { status: RequestStatus.Completed },
-        actionLabel: 'initiate final approval',
-      })
-      // Log status change
-      await tx.request_activities.create({
-        data: {
-          requestId,
-          userId: request.requesterId,
-          action: 'status_changed',
-          fromStatus: RequestStatus.SendBackToRequester,
-          toStatus: RequestStatus.Completed,
-          comments: `Final approval auto-approved (top-level initiator). Request marked as completed.`,
-        },
-      })
-      // Create notification for requester
-      await tx.notifications.create({
-        data: {
-          userId: request.requesterId,
-          type: 'status_changed',
-          title: 'Request Completed',
-          message: `Your request "${request.title}" has been completed.`,
-          requestId,
-        },
       })
     } else {
-      // Use department hierarchy
-      await createHierarchyFinalApprovalChain(tx, requestId, request.departmentId, userId)
-      // Update request status to FinalApproval via the shared expected-status
-      // guard (see updateRequestStatusExpecting).
-      await updateRequestStatusExpecting(tx, {
+      const attempt = await createFinalApprovalAttempt(attemptTx, {
         requestId,
-        expectedStatuses: [RequestStatus.SendBackToRequester],
-        data: { status: RequestStatus.FinalApproval },
-        actionLabel: 'initiate final approval',
+        phase: 'FINAL',
+        originUserId: userId,
       })
+      if (attempt.statusChange) {
+        await updateRequestStatusExpecting(tx, {
+          requestId,
+          expectedStatuses: [RequestStatus.SendBackToRequester],
+          data: { status: attempt.statusChange.to },
+          actionLabel: 'initiate final approval',
+        })
+        if (attempt.statusChange.to === RequestStatus.Completed) {
+          await tx.request_activities.create({
+            data: {
+              requestId,
+              userId: request.requesterId,
+              action: 'status_changed',
+              fromStatus: attempt.statusChange.from,
+              toStatus: attempt.statusChange.to,
+              comments: attempt.completedWithoutSteps
+                ? `Final approval auto-completed: NO_ELIGIBLE_APPROVAL_STEPS. Request marked as completed.`
+                : `Final approval auto-approved (top-level initiator). Request marked as completed.`,
+            },
+          })
+          await tx.notifications.create({
+            data: {
+              userId: request.requesterId,
+              type: 'status_changed',
+              title: 'Request Completed',
+              message: `Your request "${request.title}" has been completed.`,
+              requestId,
+            },
+          })
+        } else {
+          await queueNextFinalApproverNotifications(tx, requestId, notifications)
+        }
+      }
     }
 
-    // Log activity
     await tx.request_activities.create({
       data: {
         requestId,
@@ -1423,140 +1382,16 @@ export async function initiateFinalApproval(
         action: 'final_approval_initiated',
         comments: useCustomChain
           ? `Final approval initiated with custom approval chain`
-          : isTopLevelInitiator
-          ? `Final approval auto-approved (top-level initiator)`
-          : `Final approval initiated with department hierarchy`,
+          : `Final approval attempt created from the published route`,
       },
     })
-
-    // Resolve and queue first approver notification(s) only if not top-level.
-    if (useCustomChain || !isTopLevelInitiator) {
-      await queueNextFinalApproverNotifications(
-        tx,
-        requestId,
-        notifications,
-      )
-    }
-  })
+    },
+    { isolationLevel: APPROVAL_ENGINE_TRANSACTION_ISOLATION },
+  )
 
   revalidateRequestViews()
 
   return { success: true }
-}
-
-/**
- * Create custom final approval chain
- * Filters out initiator and validates uniqueness
- */
-async function createCustomFinalApprovalChain(
-  tx: any,
-  requestId: string,
-  approverIds: string[],
-  initiatorId: string
-) {
-  // Filter out initiator from approver list
-  const filteredApprovers = approverIds.filter(id => id !== initiatorId)
-
-  // Validate uniqueness
-  const uniqueApprovers = [...new Set(filteredApprovers)]
-
-  if (uniqueApprovers.length === 0) {
-    throw new Error('Custom approval chain must have at least one approver after removing initiator')
-  }
-
-  // Verify all approvers exist
-  const approvers = await tx.user.findMany({
-    where: { id: { in: uniqueApprovers } },
-    select: { id: true, name: true },
-  })
-
-  if (approvers.length !== uniqueApprovers.length) {
-    throw new Error('One or more approvers not found')
-  }
-
-  // Create approval records with sequential order
-  const approvals = uniqueApprovers.map((approverId, index) => ({
-    requestId,
-    requiredApproverId: approverId,
-    requiredLevel: 0, // Not used for custom chains
-    order: index + 1,
-    status: 'pending' as const,
-    isCustomChain: true,
-    isFinalApproval: true,
-  }))
-
-  await tx.request_approvals.createMany({ data: approvals })
-
-  return approvals
-}
-
-/**
- * Create hierarchy-based final approval chain
- * Uses department's approval hierarchy (like Phase 3)
- */
-async function createHierarchyFinalApprovalChain(
-  tx: any,
-  requestId: string,
-  departmentId: string,
-  initiatorId: string
-) {
-  // Get initiator's level
-  const initiator = await tx.user.findUnique({
-    where: { id: initiatorId },
-    select: { level: true },
-  })
-
-  const initiatorLevel = normalizeSubmitterLevel(initiator?.level)
-  const maxLevel = validateApprovalLevel(await getMaxValidLevelInDepartment(tx, departmentId))
-
-  const approvals = []
-  let order = 1
-
-  // If initiator is top-level, auto-approve
-  if (initiatorLevel >= maxLevel) {
-    approvals.push({
-      requestId,
-      requiredLevel: maxLevel,
-      order: 1,
-      status: 'approved' as const,
-      approverId: initiatorId,
-      approvedAt: new Date(),
-      comments: 'Auto-approved (top-level initiator)',
-      isCustomChain: false,
-      isFinalApproval: true,
-    })
-  } else {
-    // Create approvals for all levels between initiator and max level
-    for (const level of getApprovalLevelsAboveSubmitter(initiatorLevel, maxLevel)) {
-      const requiredLevel = validateApprovalLevel(level)
-
-      const hasUsersAtLevel = await tx.user.findFirst({
-        where: {
-          departmentId,
-          level: requiredLevel,
-          isActive: true,
-        },
-        select: { id: true },
-      })
-
-      if (hasUsersAtLevel) {
-        approvals.push({
-          requestId,
-          requiredLevel,
-          order: order++,
-          status: 'pending' as const,
-          isCustomChain: false,
-          isFinalApproval: true,
-        })
-      }
-    }
-  }
-
-  if (approvals.length > 0) {
-    await tx.request_approvals.createMany({ data: approvals })
-  }
-
-  return approvals
 }
 
 /**
@@ -1573,13 +1408,13 @@ async function queueNextFinalApproverNotifications(
       requestId,
       status: 'pending',
       isFinalApproval: true,
+      OR: [...CURRENT_INSTANCE_ROW_FILTER],
     },
     orderBy: { order: 'asc' },
     include: {
       request: {
         select: {
           title: true,
-          departmentId: true,
         },
       },
     },
@@ -1587,39 +1422,16 @@ async function queueNextFinalApproverNotifications(
 
   if (!nextApproval) return
 
-  // For custom chain: notify specific requiredApproverId
-  if (nextApproval.isCustomChain && nextApproval.requiredApproverId) {
-    notifications.user({
-      userId: nextApproval.requiredApproverId,
-      type: 'final_approval_needed',
-      title: 'Final Approval Needed',
-      message: `Request "${nextApproval.request.title}" needs your final approval.`,
-      requestId,
-    })
-    return
-  }
-
-  // For hierarchy chain: notify all users at requiredLevel in request's department
-  if (nextApproval.requiredLevel) {
-    const approvers = await tx.user.findMany({
-      where: {
-        departmentId: nextApproval.request.departmentId,
-        level: nextApproval.requiredLevel,
-        isActive: true,
-      },
-      select: { id: true },
-    })
-
-    for (const approver of approvers) {
-      notifications.user({
-        userId: approver.id,
-        type: 'final_approval_needed',
-        title: 'Final Approval Needed',
-        message: `Request "${nextApproval.request.title}" needs your final approval.`,
-        requestId,
-      })
-    }
-  }
+  const recipients = await resolveApprovalNeededRecipients(
+    createPrismaNotificationRecipientDb(tx),
+    { approvalId: nextApproval.id, phase: 'FINAL' },
+  )
+  queueMappedUsers(notifications, recipients, {
+    type: 'final_approval_needed',
+    title: 'Final Approval Needed',
+    message: `Request "${nextApproval.request.title}" needs your final approval.`,
+    requestId,
+  })
 }
 
 /**
@@ -1636,69 +1448,33 @@ export async function canUserApproveFinalApproval(requestId: string): Promise<{
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, level: true, departmentId: true },
+    select: { id: true },
   })
 
   if (!user) {
     return { canApprove: false }
   }
 
-  // Check request status
-  const request = await prisma.requests.findUnique({
-    where: { id: requestId },
-    select: { status: true },
-  })
-
-  if (!request || request.status !== RequestStatus.FinalApproval) {
-    return { canApprove: false }
-  }
-
-  // Find pending approval for this user
-  let approval: any = null
-
-  // Check for custom chain approval
-  approval = await prisma.request_approvals.findFirst({
+  const approval = await prisma.request_approvals.findFirst({
     where: {
       requestId,
       status: 'pending',
       isFinalApproval: true,
-      isCustomChain: true,
-      requiredApproverId: userId,
+      OR: [...CURRENT_INSTANCE_ROW_FILTER],
     },
     orderBy: { order: 'asc' },
   })
-
-  // If no custom chain approval, check hierarchy approval
-  if (!approval && user.level) {
-    approval = await prisma.request_approvals.findFirst({
-      where: {
-        requestId,
-        status: 'pending',
-        isFinalApproval: true,
-        isCustomChain: false,
-        requiredLevel: user.level,
-      },
-      orderBy: { order: 'asc' },
-    })
-  }
 
   if (!approval) {
     return { canApprove: false }
   }
 
-  // Check if all previous approvals are completed
-  const previousApprovals = await prisma.request_approvals.findMany({
-    where: {
-      requestId,
-      isFinalApproval: true,
-      order: { lt: approval.order },
-      status: 'pending',
-    },
-  })
+  const eligibility = await engineCanUserApproveFinal(
+    createPrismaApprovalTransactionDb(prisma as Prisma.TransactionClient),
+    { approvalId: approval.id, actorId: userId },
+  )
 
-  const canApprove = previousApprovals.length === 0
-
-  return { canApprove, approval }
+  return { canApprove: eligibility.canApprove, approval: eligibility.canApprove ? approval : undefined }
 }
 
 /**
@@ -1711,7 +1487,17 @@ export async function approveFinalApproval(requestId: string, comments?: string,
   }
 
   const { canApprove, approval } = await canUserApproveFinalApproval(requestId)
-  if (!canApprove || !approval) {
+  const approveFinalAction = evaluateRequestAction('APPROVE_FINAL', {
+    actor: { id: userId, role: '', isActive: true, assignmentUnitId: null },
+    request: { requesterId: '', organizationUnitId: null, status: 'FinalApproval' },
+    canView: true,
+    approval: { canApprove },
+    assignedEngineer: false,
+    existingActionDecisions: {
+      APPROVE_FINAL: existingApprovalDecision(Boolean(canApprove && approval)),
+    },
+  })
+  if (!approveFinalAction.allowed || !canApprove || !approval) {
     throw new Error('You cannot approve this request at this time')
   }
 
@@ -1730,101 +1516,36 @@ export async function approveFinalApproval(requestId: string, comments?: string,
   // Keep workflow writes atomic; notification plans are dispatched only
   // after this transaction commits.
   await runSolutionTransactionWithNotifications(async (tx, notifications) => {
-    // Update approval
-    await tx.request_approvals.update({
-      where: { id: approval.id },
-      data: {
-        approverId: userId,
-        status: 'approved',
-        comments,
-        approvedAt: new Date(),
-      },
+    const result = await advanceApprovalAtomically(createPrismaApprovalTransactionDb(tx), {
+      approvalId: approval.id,
+      actorId: userId,
+      phase: 'FINAL',
+      comments,
     })
 
-    // Get request details for logging
-    const request = await tx.requests.findUnique({
-      where: { id: requestId },
-      select: { requesterId: true, title: true, departmentId: true },
-    })
-
-    if (!request) {
-      throw new Error('Request not found')
-    }
-
-    // Log activity
-    await tx.request_activities.create({
-      data: {
-        requestId,
-        userId,
-        action: 'final_approval_approved',
-        comments: comments || `Final approval approved at step ${approval.order}`,
-      },
-    })
-
-    // Check if this was the last approval
-    const pendingApprovals = await tx.request_approvals.count({
-      where: {
-        requestId,
-        isFinalApproval: true,
-        status: 'pending',
-      },
-    })
-
-    // If no more pending approvals, mark as completed
-    if (pendingApprovals === 0) {
-      await tx.requests.update({
+    if (result.statusChange) {
+      const request = await tx.requests.findUnique({
         where: { id: requestId },
-        data: { status: RequestStatus.Completed },
+        select: { title: true, requesterId: true },
       })
-
-      // Log completion
-      await tx.request_activities.create({
-        data: {
-          requestId,
-          userId: request.requesterId,
-          action: 'status_changed',
-          fromStatus: RequestStatus.FinalApproval,
-          toStatus: RequestStatus.Completed,
-          comments: `All final approvals completed. Request marked as completed.`,
-        },
-      })
-
-      // Get engineering department to exclude engineers from requester dept notification
-      const engineeringDept = await tx.departments.findFirst({
-        where: { type: 'ENGINEERING' },
-        select: { id: true },
-      })
-
-      // Get engineering users to exclude
-      const engineeringUsers = engineeringDept
-        ? await tx.user.findMany({
-            where: { departmentId: engineeringDept.id },
-            select: { id: true },
-          })
-        : []
-
-      const engineeringUserIds = engineeringUsers.map(u => u.id)
-
-      // Queue requester-department completion notification for post-commit
-      // dispatch, excluding engineering users.
-      notifications.department(
-        request.departmentId,
+      if (!request) {
+        throw new Error('Request not found')
+      }
+      queueMappedUsers(
+        notifications,
+        mapEventRecipients({
+          type: 'approval_granted',
+          requesterId: request.requesterId,
+        }),
         {
           type: 'approval_granted',
           title: 'Request Completed',
           message: `✅ Request Completed: "${request.title}" has been fully approved and completed.`,
           requestId,
         },
-        engineeringUserIds,
       )
     } else {
-      // Resolve and queue the next approver notification using transaction
-      // reads only; delivery starts after commit.
-      await queueNextFinalApproverNotifications(
-        tx,
-        requestId,
-        notifications,
-      )
+      await queueNextFinalApproverNotifications(tx, requestId, notifications)
     }
   })
 
@@ -1848,7 +1569,17 @@ export async function rejectFinalApproval(requestId: string, comments: string, e
   }
 
   const { canApprove, approval } = await canUserApproveFinalApproval(requestId)
-  if (!canApprove || !approval) {
+  const rejectFinalAction = evaluateRequestAction('REJECT_FINAL', {
+    actor: { id: userId, role: '', isActive: true, assignmentUnitId: null },
+    request: { requesterId: '', organizationUnitId: null, status: 'FinalApproval' },
+    canView: true,
+    approval: { canApprove },
+    assignedEngineer: false,
+    existingActionDecisions: {
+      REJECT_FINAL: existingApprovalDecision(Boolean(canApprove && approval)),
+    },
+  })
+  if (!rejectFinalAction.allowed || !canApprove || !approval) {
     throw new Error('You cannot reject this request at this time')
   }
 
@@ -1864,12 +1595,32 @@ export async function rejectFinalApproval(requestId: string, comments: string, e
     }
   }
 
-  // Keep workflow writes atomic; both department notification plans are
-  // dispatched concurrently only after this transaction commits.
+  // Keep workflow writes atomic; notification plans are dispatched only
+  // after this transaction commits.
+  //
+  // Not routed through the engine REJECT branch: that branch logs the
+  // approve-flavoured 'final_approval_approved' activity instead of
+  // 'final_approval_rejected' with the reason. Instead eligibility is
+  // re-evaluated with the engine inside the transaction and the status
+  // change is guarded on the expected status.
   await runSolutionTransactionWithNotifications(async (tx, notifications) => {
-    // Update approval to rejected
-    await tx.request_approvals.update({
-      where: { id: approval.id },
+    const txEligibility = await engineCanUserApproveFinal(
+      createPrismaApprovalTransactionDb(tx),
+      { approvalId: approval.id, actorId: userId },
+    )
+    if (!txEligibility.canApprove) {
+      throw new RequestStatusConflictError(
+        'Cannot reject this request - it was changed by someone else. Please refresh and try again.',
+      )
+    }
+
+    const rejected = await tx.request_approvals.updateMany({
+      where: {
+        id: approval.id,
+        status: 'pending',
+        isFinalApproval: true,
+        OR: [...CURRENT_INSTANCE_ROW_FILTER],
+      },
       data: {
         approverId: userId,
         status: 'rejected',
@@ -1877,23 +1628,34 @@ export async function rejectFinalApproval(requestId: string, comments: string, e
         approvedAt: new Date(),
       },
     })
+    if (rejected.count !== 1) {
+      throw new RequestStatusConflictError(
+        'Cannot reject this request - it was changed by someone else. Please refresh and try again.',
+      )
+    }
 
-    // Mark all remaining final approvals as rejected
+    // Mark all remaining final approvals as rejected (current attempts only;
+    // superseded history is never rewritten)
     await tx.request_approvals.updateMany({
       where: {
         requestId,
         isFinalApproval: true,
         status: 'pending',
+        OR: [...CURRENT_INSTANCE_ROW_FILTER],
       },
       data: {
         status: 'rejected',
       },
     })
 
+    // Record the outcome on the current FINAL instance (PENDING only) so no
+    // further action can target it. No new notification events here.
+    await markCurrentInstanceOutcome(tx, { requestId, phase: 'FINAL', outcome: 'REJECTED' })
+
     // Get request details
     const request = await tx.requests.findUnique({
       where: { id: requestId },
-      select: { title: true, departmentId: true },
+      select: { title: true, requesterId: true },
     })
 
     if (!request) {
@@ -1910,18 +1672,15 @@ export async function rejectFinalApproval(requestId: string, comments: string, e
       },
     })
 
-    // Return request to SentToEngineer status for engineering revision
-    await tx.requests.update({
-      where: { id: requestId },
+    // Existing product path: Final reject reopens engineering revision.
+    // Do not hardcode a different destination here.
+    await updateRequestStatusExpecting(tx, {
+      requestId,
+      expectedStatuses: [RequestStatus.FinalApproval],
       data: { status: RequestStatus.SentToEngineer },
+      actionLabel: 'reject the final approval',
     })
 
-    // Atomic status-change audit for the reopened engineering cycle. The
-    // engineering resolution trend aggregates status_changed activities, so
-    // this row (written in the same transaction as the status update) makes
-    // the rejection visible as a new rework cycle for that request.
-    // canUserApproveFinalApproval guarantees the request is in FinalApproval,
-    // recorded here as the authoritative fromStatus.
     await tx.request_activities.create({
       data: {
         requestId,
@@ -1933,39 +1692,20 @@ export async function rejectFinalApproval(requestId: string, comments: string, e
       },
     })
 
-    // Get engineering department to notify all engineers
-    const engineeringDept = await tx.departments.findFirst({
-      where: { type: 'ENGINEERING' },
-      select: { id: true },
-    })
-
-    if (engineeringDept && request) {
-      notifications.department(
-        engineeringDept.id,
-        {
-          type: 'approval_rejected',
-          title: 'Final Approval Rejected',
-          message: `❌ Final Rejection: "${request.title}" was rejected during final approval. Reason: "${comments}". Please revise the solution.`,
-          requestId,
-        },
-        [userId],
-      )
-
-      // Also notify requester's department about the rejection (excluding
-      // the rejector if they're in that department).
-      if (request.departmentId) {
-        notifications.department(
-          request.departmentId,
-          {
-            type: 'status_changed',
-            title: 'Final Approval Rejected',
-            message: `❌ Final Approval Rejected: "${request.title}" was rejected during final approval. The request has been returned to engineering for revision.`,
-            requestId,
-          },
-          [userId],
-        )
-      }
-    }
+    queueMappedUsers(
+      notifications,
+      mapEventRecipients({
+        type: 'approval_rejected',
+        requesterId: request.requesterId,
+        decidedActorId: userId,
+      }),
+      {
+        type: 'approval_rejected',
+        title: 'Final Approval Rejected',
+        message: `❌ Final Rejection: "${request.title}" was rejected during final approval. Reason: "${comments}". Please revise the solution.`,
+        requestId,
+      },
+    )
   })
 
   revalidateRequestViews()
@@ -1994,19 +1734,17 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
   // Get current user with role and level
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, role: true, departmentId: true, level: true },
+    select: { id: true, role: true,  isActive: true },
   })
 
   if (!user) {
     throw new Error('User not found')
   }
 
-  if (!user.departmentId) {
-    throw new Error('User must be assigned to a department to submit solutions')
-  }
-
-  if (user.role !== UserRole.engineering) {
-    throw new Error('Only engineering users can resubmit solutions')
+  const actorAssignment = await loadActiveAssignment(user.id)
+  const units = await loadOrganizationUnitNodes()
+  if (!canWorkOnSolutions(units, actorAssignment?.unitId ?? null)) {
+    throw new Error('Your organization assignment is not eligible to submit solutions')
   }
 
   // Validate input. newFileIds / deletedFileIds / customApprovers are <= 10
@@ -2014,27 +1752,32 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
   // scoped enum.
   const validated = resubmitSolutionSchema.parse(input)
 
-  // Validate request exists and has a rejected solution
+  // Validate request exists and has a rejected solution. Rejection history
+  // counts only while it belongs to the current attempt: superseded NEW rows
+  // are display history, never resubmission authorization (I3).
   const request = await prisma.requests.findUnique({
     where: { id: validated.requestId },
     include: {
       solutions: {
         include: {
-          approvals: true,
+          approvals: {
+            where: { status: 'rejected', OR: [...CURRENT_INSTANCE_ROW_FILTER] },
+          },
           fileAttachments: true,
         },
         orderBy: { createdAt: 'desc' },
         take: 1,
       },
       approvals: {
-        where: { 
+        where: {
           status: 'rejected',
-          isFinalApproval: true 
+          isFinalApproval: true,
+          OR: [...CURRENT_INSTANCE_ROW_FILTER],
         },
         orderBy: { createdAt: 'desc' },
         take: 1,
       },
-      department: true,
+      organizationUnit: true,
     },
   })
 
@@ -2055,6 +1798,38 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
     throw new Error('Can only resubmit rejected solutions')
   }
 
+  const resubmitSolutionAction = evaluateRequestAction('RESUBMIT_SOLUTION', {
+    actor: {
+      id: user.id,
+      role: user.role,
+      isActive: user.isActive !== false,
+      assignmentUnitId: actorAssignment?.unitId ?? null,
+    },
+    request: {
+      requesterId: request.requesterId,
+      organizationUnitId: request.organizationUnitId,
+      status: request.status,
+    },
+    canView: true,
+    approval: null,
+    assignedEngineer: false,
+    existingActionDecisions: {
+      RESUBMIT_SOLUTION: existingResubmitSolutionDecision({
+        isActive: user.isActive !== false,
+        assignmentUnitId: actorAssignment?.unitId ?? null,
+        units,
+        hasSolutionRejection,
+        hasFinalApprovalRejection,
+      }),
+    },
+  })
+  if (!resubmitSolutionAction.allowed) {
+    if (resubmitSolutionAction.reason === 'WRONG_ROLE') {
+      throw new Error('Your organization assignment is not eligible to submit solutions')
+    }
+    throw new Error('Can only resubmit rejected solutions')
+  }
+
   const prepared = await prepareInlineDescription({
     description: validated.description,
     userId: user.id,
@@ -2065,7 +1840,8 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
   // delete selected attachments, reset the approval chain, and transition
   // status. Physical file cleanup and queued notification delivery run only
   // AFTER this commits, so slow/failing I/O cannot expire or roll back it.
-  const result = await runSolutionTransactionWithNotifications(async (tx, notifications) => {
+  const result = await runSolutionTransactionWithNotifications(
+    async (tx, notifications) => {
     // Update solution details
     const updatedSolution = await tx.solutions.update({
       where: { id: solution.id },
@@ -2150,164 +1926,108 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
       })
     }
 
-    // Delete old rejected approvals
-    await tx.solution_approvals.deleteMany({
-      where: {
-        solutionId: solution.id,
-      },
-    })
+    const storedSubmitterId: string = solution.submittedById
+    const attemptTx = createCleanStartPhaseAttemptTx(tx as unknown as CleanStartAttemptStore)
+    let isAutoApproved = false
+    let submittedCustomApprovers: string[] | null = null
+    const firstPendingLevel: number | null = null
 
-    // Create new approval chain
-    const approvalData = []
-    
     if (validated.useCustomHierarchy && validated.customApprovers.length > 0) {
-      // Custom approval chain
-      validated.customApprovers.forEach((approverId, index) => {
-        approvalData.push({
-          solutionId: solution.id,
-          requiredApproverId: approverId,
-          order: index + 1,
-          status: 'pending',
-          isCustomChain: true,
-        })
-      })
-    } else {
-      // Get engineering department ID for hierarchy-based approvals
-      const engineeringDept = await tx.departments.findFirst({
-        where: { type: 'ENGINEERING' },
-        select: { id: true },
-      })
-
-      if (!engineeringDept) {
-        throw new Error('Engineering department not found')
-      }
-
-      // Create hierarchy-based approval chain directly (not using createHierarchyApprovalChain to avoid double creation)
-      const maxLevel = validateApprovalLevel(
-        await getMaxValidLevelInDepartment(tx, engineeringDept.id),
+      const orderedApprovers = sanitizeCustomChainOrder(
+        validated.customApprovers,
+        userId,
+        'Custom approval chain must have at least one approver after removing submitter',
       )
-      const submitterLevel = normalizeSubmitterLevel(user.level)
-
-      // If submitter is top-level, create auto-approved record
-      if (submitterLevel >= maxLevel) {
-        approvalData.push({
-          solutionId: solution.id,
-          requiredLevel: maxLevel,
-          order: 1,
-          status: 'approved' as const,
-          approverId: userId,
-          approvedAt: new Date(),
-          comments: 'Auto-approved (top-level submitter)',
-          isCustomChain: false,
+      await assertCustomApproversExist(tx, orderedApprovers)
+      const attempt = await createCustomPersonAttempt(attemptTx, {
+        requestId: validated.requestId,
+        solutionId: solution.id,
+        phase: 'SOLUTION',
+        actorId: storedSubmitterId,
+        orderedApproverIds: orderedApprovers,
+      })
+      submittedCustomApprovers = validated.customApprovers
+      if (attempt.statusChange && attempt.statusChange.to !== request.status) {
+        await updateRequestStatusExpecting(tx, {
+          requestId: validated.requestId,
+          expectedStatuses: [request.status],
+          data: { status: attempt.statusChange.to },
+          actionLabel: 'resubmit solution',
         })
-      } else {
-        // Create approvals for all levels between submitter and max level
-        let order = 1
-        for (const level of getApprovalLevelsAboveSubmitter(submitterLevel, maxLevel)) {
-          const requiredLevel = validateApprovalLevel(level)
-
-          // Check if there are active users at this level
-          const hasUsersAtLevel = await tx.user.findFirst({
-            where: {
-              departmentId: engineeringDept.id,
-              level: requiredLevel,
-              isActive: true,
-            },
-            select: { id: true },
-          })
-
-          if (hasUsersAtLevel) {
-            approvalData.push({
-              solutionId: solution.id,
-              requiredLevel,
-              order: order++,
-              status: 'pending' as const,
-              isCustomChain: false,
-            })
-          }
-        }
+      }
+    } else {
+      const attempt = await createSolutionApprovalAttempt(attemptTx, {
+        requestId: validated.requestId,
+        solutionId: solution.id,
+        phase: 'SOLUTION',
+        originUserId: storedSubmitterId,
+      })
+      isAutoApproved = attempt.autoApproved || attempt.completedWithoutSteps
+      if (isAutoApproved && attempt.statusChange) {
+        await tx.requests.update({
+          where: { id: validated.requestId },
+          data: {
+            projectEstimateCost: validated.cost,
+            status: attempt.statusChange.to,
+          },
+        })
+        await tx.request_activities.create({
+          data: {
+            requestId: validated.requestId,
+            userId: request.requesterId,
+            action: 'status_changed',
+            fromStatus: attempt.statusChange.from,
+            toStatus: attempt.statusChange.to,
+            comments: attempt.completedWithoutSteps
+              ? `Solution "${validated.title}" resubmitted and auto-completed: NO_ELIGIBLE_APPROVAL_STEPS. Request sent back to requester for final review.`
+              : `Solution "${validated.title}" resubmitted and auto-approved (top-level submitter). Request sent back to requester for final review.`,
+          },
+        })
+        queueMappedUsers(
+          notifications,
+          mapEventRecipients({
+            type: 'solution_ready',
+            requesterId: request.requesterId,
+            solutionSubmitterIds: [storedSubmitterId],
+          }),
+          {
+            type: 'solution_ready',
+            title: 'Solution Ready for Review',
+            message: `📤 Ready for Review: "${request.title}" solution has been updated and is ready for your department's final review.`,
+            requestId: validated.requestId,
+          },
+        )
+      } else if (attempt.statusChange && attempt.statusChange.to !== request.status) {
+        await updateRequestStatusExpecting(tx, {
+          requestId: validated.requestId,
+          expectedStatuses: [request.status],
+          data: { status: attempt.statusChange.to },
+          actionLabel: 'resubmit solution',
+        })
       }
     }
 
-    await tx.solution_approvals.createMany({
-      data: approvalData,
-    })
-
-    // Check if solution was auto-approved (top-level submitter with hierarchy)
-    const isAutoApproved = approvalData.some(a => a.status === 'approved')
-
-    // Update request status
-    const newStatus = isAutoApproved 
-      ? RequestStatus.SendBackToRequester 
-      : RequestStatus.DesignCostEstimationApproval
-
-    // Update request status via the shared expected-status guard. Solution
-    // resubmission legitimately starts from SentToEngineer (rejected
-    // solution or rejected final approval) and from the legacy
-    // DesignCostEstimationApproval-with-rejection route; `Cancelled` (and
-    // every other status) is never accepted, so a requester cancellation
-    // that committed first makes this match zero rows and throw, rolling
-    // back the solution update and the new approval chain.
-    await updateRequestStatusExpecting(tx, {
-      requestId: validated.requestId,
-      expectedStatuses: [
-        RequestStatus.SentToEngineer,
-        RequestStatus.DesignCostEstimationApproval,
-      ],
-      data: {
-        status: newStatus,
-        ...(isAutoApproved ? { projectEstimateCost: validated.cost } : {}),
-        updatedAt: new Date(),
-      },
-      actionLabel: 'resubmit solution',
-    })
-
-    // Add activity log
     await tx.request_activities.create({
       data: {
         requestId: validated.requestId,
         userId,
         action: 'solution_resubmitted',
-        comments: isAutoApproved 
+        comments: isAutoApproved
           ? `Solution resubmitted and auto-approved (top-level submitter): "${validated.title}"`
           : `Solution resubmitted: "${validated.title}"`,
       },
     })
 
-    // If auto-approved, notify requester's department
-    if (isAutoApproved) {
-      await tx.request_activities.create({
-        data: {
-          requestId: validated.requestId,
-          userId: request.requesterId,
-          action: 'status_changed',
-          fromStatus: RequestStatus.SentToEngineer,
-          toStatus: RequestStatus.SendBackToRequester,
-          comments: `Solution "${validated.title}" resubmitted and auto-approved (top-level submitter). Request sent back to requester for final review.`,
-        },
-      })
-
-      // Queue requester-department notification for post-commit dispatch.
-      notifications.department(request.department.id, {
-        type: 'solution_ready',
-        title: 'Solution Ready for Review',
-        message: `📤 Ready for Review: "${request.title}" solution has been updated and is ready for your department's final review.`,
-        requestId: validated.requestId,
-      })
-    }
-
-    const firstPendingApproval = approvalData.find((a) => a.status === 'pending')
-    const firstPendingLevel =
-      firstPendingApproval && 'requiredLevel' in firstPendingApproval
-        ? firstPendingApproval.requiredLevel ?? null
-        : null
-
     return {
       updatedSolution,
       deletedAttachments: deletableAttachments,
       firstPendingLevel,
+      isAutoApproved,
+      submittedCustomApprovers,
     }
-  })
+    },
+    { isolationLevel: APPROVAL_ENGINE_TRANSACTION_ISOLATION },
+  )
 
   // AFTER the transaction commits: physically delete each removed attachment's
   // file. This runs outside the DB transaction, so a failed or slow unlink can
@@ -2335,53 +2055,37 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
     })
   }
 
-  // Send notifications to approvers only if NOT auto-approved
-  const isAutoApproved = await prisma.solution_approvals.findFirst({
-    where: {
-      solutionId: solution.id,
-      status: 'approved',
-    },
-  })
+  // Send notifications to approvers only if NOT auto-approved. The decision
+  // uses the in-transaction result: for legacy data it matches the previous
+  // post-commit re-query, and for NEW attempts it cannot be fooled by wrapped
+  // history rows.
+  const isAutoApproved = result.isAutoApproved
 
   if (!isAutoApproved) {
     const { createNotification } = await import('./notifications')
     
-    if (validated.useCustomHierarchy && validated.customApprovers.length > 0) {
-      // Notify custom approvers
-      for (const approverId of validated.customApprovers) {
+    const nextApproval = await prisma.solution_approvals.findFirst({
+      where: {
+        solutionId: result.updatedSolution.id,
+        status: 'pending',
+        OR: [...CURRENT_INSTANCE_ROW_FILTER],
+      },
+      orderBy: { order: 'asc' },
+      select: { id: true },
+    })
+    if (nextApproval) {
+      const recipients = await resolveApprovalNeededRecipients(
+        createPrismaNotificationRecipientDb(prisma),
+        { approvalId: nextApproval.id, phase: 'SOLUTION' },
+      )
+      for (const userId of recipients) {
         await createNotification({
-          userId: approverId,
+          userId,
           type: 'approval_needed',
           title: 'Solution Resubmitted',
           message: `📤 Solution resubmitted for "${request.title}". Please review the updated solution.`,
-          requestId: validated.requestId,
+          requestId: request.id,
         })
-      }
-    } else {
-      // Notify engineering department approvers at the first *actual* pending level
-      // from the chain just created (empty levels are skipped during creation).
-      const engineeringDept = await prisma.departments.findFirst({
-        where: { type: 'ENGINEERING' },
-        select: { id: true },
-      })
-
-      if (engineeringDept && result.firstPendingLevel != null) {
-        const { getApproversAtLevel } = await import('./approvals')
-        const firstLevelApprovers = await getApproversAtLevel(
-          engineeringDept.id,
-          result.firstPendingLevel,
-        )
-
-        // Notify each approver
-        for (const approver of firstLevelApprovers) {
-          await createNotification({
-            userId: approver.id,
-            type: 'approval_needed',
-            title: 'Solution Resubmitted',
-            message: `📤 Solution resubmitted for "${request.title}". Please review the updated solution.`,
-            requestId: request.id,
-          })
-        }
       }
     }
   }

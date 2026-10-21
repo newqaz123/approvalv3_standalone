@@ -22,6 +22,9 @@ import {
   ENGINEERING_LIFECYCLE_STATUSES,
   buildEngineeringResolutionTrend,
 } from '@/lib/engineering-resolution-trend'
+import { buildRequestVisibilityWhere, createRequestVisibilityDb } from '@/lib/request-visibility/scope'
+import { buildUnitSubtreeRequestFilter } from '@/lib/unit-labels'
+import type { OrganizationUnitNode } from '@/lib/organization/model'
 
 /**
  * Get analytics data with applied filters
@@ -34,26 +37,55 @@ export async function getAnalyticsData(filters: AnalyticsFilters): Promise<Analy
     throw new Error('Unauthorized')
   }
 
+  const visibilityWhere = await buildRequestVisibilityWhere(createRequestVisibilityDb(prisma), {
+    userId,
+    includeArchived: true,
+  })
+
   // Calculate date range filter
   const dateFilter = getDateRangeFilter(filters.dateRange)
 
-  // Build where clause for Prisma queries
-  const whereClause: any = {
-    isDeleted: false,
+  let unitFilter: { organizationUnitId: { in: string[] } } | undefined
+  if (filters.unitId) {
+    const units = await prisma.organization_units.findMany({
+      select: {
+        id: true,
+        name: true,
+        parentId: true,
+        isActive: true,
+        shareRequests: true,
+        canWorkOnSolutions: true,
+        managerUserId: true,
+      },
+    }) as OrganizationUnitNode[]
+    unitFilter = buildUnitSubtreeRequestFilter(units, filters.unitId)
+  }
+
+  const extraFilters = {
     ...(dateFilter && { createdAt: dateFilter }),
-    ...(filters.departmentId && { departmentId: filters.departmentId }),
+    ...(unitFilter ?? {}),
     ...(filters.status && { status: filters.status }),
     ...(filters.requesterId && { requesterId: filters.requesterId }),
+  }
+
+  // Build where clause for Prisma queries. Visibility AND filters so a filter OR
+  // cannot overwrite the visibility OR.
+  const whereClause: any = {
+    AND: [visibilityWhere, extraFilters],
   }
 
   // Calculate previous period where clause for trend comparison
   const prevDateFilter = getPreviousPeriodFilter(filters.dateRange)
   const prevWhereClause: any = {
-    isDeleted: false,
-    ...(prevDateFilter && { createdAt: prevDateFilter }),
-    ...(filters.departmentId && { departmentId: filters.departmentId }),
-    ...(filters.status && { status: filters.status }),
-    ...(filters.requesterId && { requesterId: filters.requesterId }),
+    AND: [
+      visibilityWhere,
+      {
+        ...(prevDateFilter && { createdAt: prevDateFilter }),
+        ...(unitFilter ?? {}),
+        ...(filters.status && { status: filters.status }),
+        ...(filters.requesterId && { requesterId: filters.requesterId }),
+      },
+    ],
   }
 
   // Scoping for the engineering resolution trend. Unlike the other widgets
@@ -61,10 +93,14 @@ export async function getAnalyticsData(filters: AnalyticsFilters): Promise<Analy
   // have to contribute carry-in backlog, so the date range only controls the
   // displayed periods (passed separately).
   const trendScopeWhere: any = {
-    isDeleted: false,
-    ...(filters.departmentId && { departmentId: filters.departmentId }),
-    ...(filters.status && { status: filters.status }),
-    ...(filters.requesterId && { requesterId: filters.requesterId }),
+    AND: [
+      visibilityWhere,
+      {
+        ...(unitFilter ?? {}),
+        ...(filters.status && { status: filters.status }),
+        ...(filters.requesterId && { requesterId: filters.requesterId }),
+      },
+    ],
   }
 
   // Fetch all data sources in parallel to eliminate waterfalls
@@ -75,7 +111,7 @@ export async function getAnalyticsData(filters: AnalyticsFilters): Promise<Analy
     fetchSummaryMetrics(whereClause),
     fetchSummaryMetrics(prevWhereClause),
     fetchEngineeringResolutionTrend(trendScopeWhere, filters.dateRange),
-    fetchBottlenecks(),
+    fetchBottlenecks(visibilityWhere),
     fetchEngineeringMetrics(whereClause),
     fetchDepartmentSpeeds(whereClause),
   ])
@@ -110,8 +146,8 @@ export async function getAnalyticsFilters(): Promise<{
     throw new Error('Unauthorized')
   }
 
-  // Fetch all departments
-  const departments = await prisma.departments.findMany({
+  const departments = await prisma.organization_units.findMany({
+    where: { isActive: true },
     select: {
       id: true,
       name: true,
@@ -231,7 +267,7 @@ async function fetchDepartmentData(
       status: { not: 'Cancelled' },
     },
     select: {
-      department: {
+      organizationUnit: {
         select: {
           name: true,
         },
@@ -239,9 +275,9 @@ async function fetchDepartmentData(
     },
   })
 
-  // Group by department name
+  // Group by organization unit name
   const deptCounts = requests.reduce((acc, req) => {
-    const deptName = req.department?.name || 'Unknown'
+    const deptName = req.organizationUnit?.name || 'Unknown'
     acc[deptName] = (acc[deptName] || 0) + 1
     return acc
   }, {} as Record<string, number>)
@@ -515,7 +551,7 @@ async function fetchEngineeringResolutionTrend(
  * Fetch bottleneck data - requests stuck at each workflow step
  * Only considers non-terminal statuses with significant wait times
  */
-async function fetchBottlenecks(): Promise<Bottleneck[]> {
+async function fetchBottlenecks(visibilityWhere: any): Promise<Bottleneck[]> {
   const stepLabels: Record<string, string> = {
     ImprovementRequest: 'Improvement Request',
     SentToEngineer: 'Sent to Engineer',
@@ -528,8 +564,7 @@ async function fetchBottlenecks(): Promise<Bottleneck[]> {
 
   const requests = await prisma.requests.findMany({
     where: {
-      isDeleted: false,
-      status: { in: activeStatuses as any },
+      AND: [visibilityWhere, { status: { in: activeStatuses as any } }],
     },
     select: {
       status: true,
@@ -706,7 +741,7 @@ async function fetchEngineeringMetrics(whereClause: any): Promise<EngineeringMet
  *   - Final Approval: SendBackToRequester → Completed
  */
 async function fetchDepartmentSpeeds(whereClause: any): Promise<DepartmentApprovalSpeed[]> {
-  // Get completed requests with their department
+  // Get completed requests with their organization unit
   const requests = await prisma.requests.findMany({
     where: {
       ...whereClause,
@@ -715,7 +750,7 @@ async function fetchDepartmentSpeeds(whereClause: any): Promise<DepartmentApprov
     select: {
       id: true,
       createdAt: true,
-      department: {
+      organizationUnit: {
         select: { name: true },
       },
     },
@@ -764,7 +799,7 @@ async function fetchDepartmentSpeeds(whereClause: any): Promise<DepartmentApprov
   const deptData: Record<string, StepTimes> = {}
 
   for (const req of requests) {
-    const deptName = req.department?.name || 'Unknown'
+    const deptName = req.organizationUnit?.name || 'Unknown'
     const transitions = activityMap.get(req.id)
     if (!transitions) continue
 

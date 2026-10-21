@@ -115,7 +115,7 @@ describe("Gapforimprove regressions", () => {
 		assert.match(page, /id: request\.id/);
 		assert.match(page, /title: request\.title/);
 		assert.match(page, /status: request\.status/);
-		assert.match(page, /department: request\.department/);
+		assert.match(page, /department: request\.organizationUnit/);
 		assert.match(page, /requester: request\.requester/);
 		assert.doesNotMatch(
 			requests,
@@ -128,11 +128,10 @@ describe("Gapforimprove regressions", () => {
 	it("notification refresh does not replace an open notification list with loading state", () => {
 		const bell = read("src/components/notifications/notification-bell.tsx");
 
-		assert.match(bell, /hasLoadedNotifications/);
-		assert.match(
-			bell,
-			/if \(!hasLoadedNotifications\) \{\s*setIsLoading\(true\)\s*\}/,
-		);
+		assert.match(bell, /let loaded = false/);
+		assert.match(bell, /if \(!loaded\) setIsLoading\(true\)/);
+		assert.doesNotMatch(bell, /\[userId, hasLoadedNotifications\]/);
+		assert.match(bell, /\}, \[userId\]\)/);
 		assert.match(bell, /<RequestModalRouter/);
 	});
 
@@ -277,14 +276,14 @@ describe("Gapforimprove regressions", () => {
 			"";
 
 		assert.match(postCommitDispatcher, /createNotification/);
-		assert.match(postCommitDispatcher, /notifyUsersInDepartment/);
-		assert.match(queueNextSolutionApprover, /notifications\.user/);
+		assert.doesNotMatch(postCommitDispatcher, /notifyUsersInDepartment/);
+		assert.match(queueNextSolutionApprover, /queueMappedUsers/);
 		assert.doesNotMatch(queueNextSolutionApprover, /createNotification/);
 		assert.doesNotMatch(queueNextSolutionApprover, /tx\.notifications\.create/);
-		assert.match(queueNextFinalApprover, /notifications\.user/);
+		assert.match(queueNextFinalApprover, /queueMappedUsers/);
 		assert.doesNotMatch(queueNextFinalApprover, /createNotification/);
 		assert.doesNotMatch(queueNextFinalApprover, /tx\.notifications\.create/);
-		assert.match(rejectSolution, /notifications\.user/);
+		assert.match(rejectSolution, /queueMappedUsers/);
 		assert.doesNotMatch(rejectSolution, /createNotification/);
 		assert.doesNotMatch(rejectSolution, /tx\.notifications\.create/);
 
@@ -344,25 +343,12 @@ describe("Gapforimprove regressions", () => {
 		);
 	});
 
-	it("merges department-wide notification emails while keeping per-user in-app notifications", () => {
+	it("does not expose department-wide notification helpers", () => {
 		const notifications = read("src/server-actions/notifications.ts");
-		const notifyUsersInDepartment =
-			notifications.match(
-				/export async function notifyUsersInDepartment[\s\S]*?^}/m,
-			)?.[0] ?? "";
-
-		assert.match(
-			notifyUsersInDepartment,
-			/select:\s*\{\s*id:\s*true,\s*email:\s*true\s*\}/,
+		assert.doesNotMatch(
+			notifications,
+			/export async function notifyUsersInDepartment/,
 		);
-		assert.match(notifyUsersInDepartment, /prisma\.notifications\.createMany/);
-		assert.match(notifyUsersInDepartment, /emailRecipients/);
-		assert.match(notifyUsersInDepartment, /new Set/);
-		assert.match(
-			notifyUsersInDepartment,
-			/sendEmailNotification\(\s*notification,\s*emailRecipients/,
-		);
-		assert.doesNotMatch(notifyUsersInDepartment, /createNotification\(/);
 	});
 
 	it("rich description validation uses the 20000-character server limit", () => {

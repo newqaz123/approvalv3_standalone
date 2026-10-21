@@ -93,7 +93,7 @@ interface User {
 	name: string;
 	email: string;
 	role: string;
-	departmentName: string | null;
+	unitPathNames: string[];
 	level?: number;
 }
 
@@ -102,7 +102,7 @@ interface SolutionModalProps {
 		id: string;
 		referenceId: string;
 		title: string;
-		status: "solution" | "solution_rejected";
+		status: "solution" | "solution_rejected" | "final_rejected";
 		submitter: {
 			name: string;
 			role: string;
@@ -156,6 +156,11 @@ const statusConfig = {
 	},
 	solution_rejected: {
 		label: "Solution Rejected",
+		className: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
+		dotClass: "bg-red-500",
+	},
+	final_rejected: {
+		label: "Final Approval Rejected",
 		className: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
 		dotClass: "bg-red-500",
 	},
@@ -431,7 +436,7 @@ function CustomApprovalPicker({
 											{user.name}
 										</p>
 										<p className="text-xs text-slate-400">
-											{user.departmentName ?? "No department"} • {user.email}
+											{(user.unitPathNames.length ? user.unitPathNames.join(' / ') : 'No unit')} • {user.email}
 										</p>
 									</div>
 									<div className="flex items-center gap-1">
@@ -497,7 +502,7 @@ function CustomApprovalPicker({
 												{user.name}
 											</p>
 											<p className="text-xs text-slate-400">
-												{user.departmentName ?? "No department"} • {user.email}
+												{(user.unitPathNames.length ? user.unitPathNames.join(' / ') : 'No unit')} • {user.email}
 											</p>
 										</div>
 										<Plus className="w-4 h-4 text-slate-400" />
@@ -699,7 +704,9 @@ export function SolutionModal({
 								</div>
 								<div className="flex-1">
 									<h4 className="text-sm font-bold text-red-900 dark:text-red-400">
-										Solution Rejected
+										{data.status === "final_rejected"
+											? "Final Approval Rejected — solution needs revision"
+											: "Solution Rejected"}
 									</h4>
 									<p className="text-xs text-red-600 dark:text-red-300 mt-1">
 										Rejected by {data.rejection.rejectedBy} on{" "}

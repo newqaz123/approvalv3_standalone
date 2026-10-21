@@ -11,26 +11,21 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 import { UserForm } from '@/components/admin/user-form'
-import { AdditionalDepartmentsSection } from '@/components/admin/additional-departments-section'
 import { Pencil } from 'lucide-react'
 import { useRouter } from 'next/navigation'
-import type { departments as Department } from '@prisma/client'
 
 interface EditUserDialogProps {
   user: {
     id: string
     name: string
     email: string
-    departmentId: string | null
     role: 'admin' | 'general_dept' | 'engineering'
-    level: number | null
   }
-  departments: Department[]
   open?: boolean
   onOpenChange?: (open: boolean) => void
 }
 
-export function EditUserDialog({ user, departments, open: externalOpen, onOpenChange: externalOnOpenChange }: EditUserDialogProps) {
+export function EditUserDialog({ user, open: externalOpen, onOpenChange: externalOnOpenChange }: EditUserDialogProps) {
   const [internalOpen, setInternalOpen] = useState(false)
   const open = externalOpen !== undefined ? externalOpen : internalOpen
   const setOpen = externalOnOpenChange || setInternalOpen
@@ -54,27 +49,18 @@ export function EditUserDialog({ user, departments, open: externalOpen, onOpenCh
         <DialogHeader>
           <DialogTitle>Edit User</DialogTitle>
           <DialogDescription>
-            Update user details and assign approval level.
+            Update user details. Organization assignment is managed in Organization & Approvals.
           </DialogDescription>
         </DialogHeader>
         <UserForm
-          departments={departments as (Department & { levelNames: Record<string, string> | null })[]}
           initialData={{
             id: user.id,
             name: user.name,
             email: user.email,
-            departmentId: user.departmentId || '',
             role: user.role,
-            level: user.level,
           }}
           onSuccess={handleSuccess}
           onCancel={() => setOpen(false)}
-        />
-        <AdditionalDepartmentsSection
-          userId={user.id}
-          userRole={user.role}
-          userHomeDepartmentId={user.departmentId || ''}
-          departments={departments as (Department & { levelNames: Record<string, string> | null })[]}
         />
       </DialogContent>
     </Dialog>

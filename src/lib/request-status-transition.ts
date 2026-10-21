@@ -1,4 +1,5 @@
 import type { Prisma, RequestStatus } from '@prisma/client'
+import { CURRENT_INSTANCE_ROW_FILTER } from './approval-engine/current-instance'
 
 /**
  * Shared guarded request status transition.
@@ -34,6 +35,8 @@ export interface GuardedRequestStatusDb {
  * Rejected-request state required by requester cancellation. `updatedAt` is
  * the scalar compare-and-set token shared with same-status resubmission;
  * relation predicates keep the business policy atomic with the status write.
+ * Pending predicates use the current-instance identity filter so superseded
+ * NEW pending rows (resubmission history) can never block a cancellation.
  */
 export function buildRejectedRequestCancellationWhere(
   expectedUpdatedAt: Date,
@@ -46,17 +49,21 @@ export function buildRejectedRequestCancellationWhere(
           some: { status: 'rejected', isFinalApproval: false },
         },
       },
-      { approvals: { none: { status: 'pending' } } },
+      { approvals: { none: { status: 'pending', OR: [...CURRENT_INSTANCE_ROW_FILTER] } } },
       {
         solutions: {
-          none: { approvals: { some: { status: 'pending' } } },
+          none: { approvals: { some: { status: 'pending', OR: [...CURRENT_INSTANCE_ROW_FILTER] } } },
         },
       },
     ],
   }
 }
 
-/** Rejected-request state required before resubmission removes approvals. */
+/** Rejected-request state required before resubmission removes approvals.
+ *  The rejection predicate uses the current-instance identity filter so a
+ *  superseded NEW attempt's rejection (resubmission history) can never
+ *  re-authorize another resubmission while the current attempt is pending.
+ */
 export function buildRejectedRequestResubmissionWhere(
   expectedUpdatedAt: Date,
 ): Prisma.requestsWhereInput {
@@ -65,7 +72,11 @@ export function buildRejectedRequestResubmissionWhere(
       { updatedAt: expectedUpdatedAt },
       {
         approvals: {
-          some: { status: 'rejected', isFinalApproval: false },
+          some: {
+            status: 'rejected',
+            isFinalApproval: false,
+            OR: [...CURRENT_INSTANCE_ROW_FILTER],
+          },
         },
       },
     ],
@@ -78,6 +89,14 @@ export class RequestStatusConflictError extends Error {
     super(message)
     this.name = 'RequestStatusConflictError'
   }
+}
+
+/** Committed status transition, for post-commit notifications. */
+export interface RequestStatusChangeResult {
+  fromStatus: RequestStatus
+  toStatus: RequestStatus
+  requesterId: string
+  title: string
 }
 
 /**

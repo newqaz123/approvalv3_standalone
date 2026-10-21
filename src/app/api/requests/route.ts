@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
       statuses: searchParams.getAll('statuses').length > 0
         ? searchParams.getAll('statuses')
         : undefined,
-      departmentId: searchParams.get('departmentId') || undefined,
+      unitId: searchParams.get('unitId') || undefined,
       requesterId: searchParams.get('requesterId') || undefined,
       dateFrom: searchParams.get('dateFrom') || undefined,
       dateTo: searchParams.get('dateTo') || undefined,

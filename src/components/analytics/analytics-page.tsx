@@ -104,7 +104,7 @@ export function AnalyticsPage({ initialData, filters, userId }: AnalyticsPagePro
 
     return {
       dateRange: validDateRange,
-      departmentId: searchParams.get('departmentId') || undefined,
+      unitId: searchParams.get('unitId') || undefined,
       status: searchParams.get('status') || undefined,
       requesterId: searchParams.get('requesterId') || undefined,
     }
@@ -129,8 +129,8 @@ export function AnalyticsPage({ initialData, filters, userId }: AnalyticsPagePro
       // Update URL with new filter params
       const params = new URLSearchParams()
       params.set('dateRange', newFilters.dateRange)
-      if (newFilters.departmentId) {
-        params.set('departmentId', newFilters.departmentId)
+      if (newFilters.unitId) {
+        params.set('unitId', newFilters.unitId)
       }
       if (newFilters.status) {
         params.set('status', newFilters.status)

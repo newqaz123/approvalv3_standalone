@@ -769,3 +769,254 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
   padding: 0;
   white-space: nowrap;
 }
+
+/*
+ * Organization flowchart surface. Child groups keep the historical Tailwind
+ * class names (border-l-2 / pl-6 / space-y-5) so existing render contracts
+ * still match, but the visual language is a centered card flowchart: compact
+ * white cards, desktop sibling rows, and slate T-connectors. Nested nodes
+ * grow with their subtree (max-content) so siblings stay in one row; the
+ * canvas scrolls horizontally instead of wrapping into a fake stack.
+ * Wrap only on genuinely narrow viewports.
+ */
+.organization-flowchart {
+  --organization-flowchart-line: #64748b;
+  background-image: radial-gradient(#cbd5e1 1px, transparent 1px);
+  background-size: 16px 16px;
+  padding: 1.25rem 0.5rem 1.5rem;
+  border-radius: 1rem;
+  overflow-x: auto;
+  max-width: 100%;
+}
+.organization-unit-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: max-content;
+  min-width: 0;
+}
+.organization-unit-card {
+  width: 30rem;
+  max-width: 30rem;
+  min-width: 0;
+  overflow: visible;
+  container-type: inline-size;
+  container-name: organization-unit-card;
+}
+.organization-unit-header {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  min-width: 0;
+}
+.organization-unit-name {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+.organization-unit-name [data-testid="inline-name-edit"] {
+  display: flex;
+  flex-wrap: wrap;
+  max-width: 100%;
+  min-width: 0;
+}
+/* The unit title stays on ONE line: it never wraps and never breaks mid-word
+   ("Engineeri ng"); overflow ends in an ellipsis and the full unit name
+   remains on the header tooltip. */
+.organization-unit-name [data-testid="inline-name-edit"] > span {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.organization-unit-name [data-testid="inline-name-edit-input"] {
+  width: 100%;
+  max-width: 100%;
+}
+.organization-unit-flags {
+  flex-shrink: 0;
+}
+.organization-unit-hover-actions {
+  flex-shrink: 0;
+}
+.organization-unit-header-overflow {
+  display: none;
+  flex-shrink: 0;
+  align-items: center;
+}
+@container organization-unit-card (max-width: 30rem) {
+  .organization-unit-hover-actions {
+    display: none !important;
+  }
+  .organization-unit-header-overflow {
+    display: flex;
+  }
+}
+@media (pointer: coarse) {
+  .organization-unit-hover-actions {
+    display: none !important;
+  }
+  .organization-unit-header-overflow {
+    display: flex;
+  }
+}
+@media (max-width: 767px) {
+  .organization-unit-header-overflow {
+    display: flex;
+  }
+}
+.organization-unit-children {
+  position: relative;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1.25rem 1rem;
+  width: max-content;
+  min-width: 100%;
+  margin-top: 1.5rem;
+  padding: 1.5rem 0.5rem 0;
+  border-left-color: transparent;
+}
+/* Historical pl-6 / md:pl-8 / border-l-2 class names stay on the node for render
+   contracts. Compiled Tailwind emits md:pl-8 after these unlayered rules, which
+   would indent the only child and leave the 50% stem as a parallel disconnected
+   segment. Cancel that box effect so stem and stub share an x. */
+.organization-flowchart .organization-unit-children {
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+  border-left-width: 0;
+}
+.organization-unit-children:empty,
+.organization-unit-children[hidden],
+.organization-unit-people[hidden] {
+  display: none;
+}
+.organization-unit-children::before {
+  content: "";
+  position: absolute;
+  top: -1.5rem;
+  left: 50%;
+  width: 2px;
+  height: 1.5rem;
+  transform: translateX(-50%);
+  background: var(--organization-flowchart-line);
+}
+.organization-unit-children::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0.5rem;
+  left: 0.5rem;
+  height: 2px;
+  background: var(--organization-flowchart-line);
+  /* Desktop rail is owned by the per-child half-segments below, which span
+     EXACTLY first-child center → last-child center. This group-wide line
+     spans the whole (possibly min-width:100%) group box and dangled past the
+     outer siblings, so it is desktop-off and only re-enabled for the wrapped
+     mobile stack in the max-width: 640px media query. */
+  display: none;
+}
+.organization-unit-children:has(> .organization-unit-child:only-child)::after {
+  display: none;
+}
+.organization-unit-children > .organization-unit-child {
+  margin-top: 0 !important;
+}
+.organization-unit-child {
+  position: relative;
+  flex: 0 0 auto;
+  width: max-content;
+  min-width: 30rem;
+  padding-top: 1.5rem;
+}
+.organization-unit-child > .organization-flowchart-connector {
+  /* Reach the child-group rail / parent stem (group padding is 1.5rem above
+     the wrapper) and continue through the child's own 1.5rem padding to the card. */
+  position: absolute;
+  top: -1.5rem;
+  left: 50%;
+  width: 2px;
+  height: 3rem;
+  transform: translateX(-50%);
+  background: var(--organization-flowchart-line);
+}
+/* Desktop sibling rail, drawn as two chained half-segments per child so it
+   spans EXACTLY first-child center → last-child center with no dangling
+   overshoot past the outer siblings:
+   - a non-FIRST child draws the left half [wrapper left edge, own center]
+   - a non-LAST child draws the right half [own center, right edge + 1rem
+     column gap], which lands on the next wrapper's left edge where that
+     wrapper's left half picks up
+   A single (only) child draws neither half, so the colinear parent
+   stem → stub join stays rail-free. The vertical stub keeps meeting the
+   card TOP CENTER (both halves sit at the same rail y as the stub top). */
+.organization-unit-child:not(:first-child)::before {
+  content: "";
+  position: absolute;
+  top: -1.5rem;
+  left: 0;
+  width: 50%;
+  height: 2px;
+  background: var(--organization-flowchart-line);
+}
+.organization-unit-child:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: -1.5rem;
+  left: 50%;
+  width: calc(50% + 1rem);
+  height: 2px;
+  background: var(--organization-flowchart-line);
+}
+.organization-unit-people,
+.organization-staff-list,
+.organization-manager-row {
+  min-width: 0;
+}
+.organization-manager-row {
+  border-top: 1px solid #e2e8f0;
+  padding-top: 0.75rem;
+}
+.organization-team-group {
+  border-left-color: #cbd5e1;
+}
+.organization-unassigned-dock {
+  min-width: 0;
+}
+.organization-unassigned-dock-list {
+  scrollbar-width: thin;
+}
+@media (max-width: 640px) {
+  .organization-flowchart {
+    overflow-x: hidden;
+  }
+  .organization-unit-node {
+    width: 100%;
+  }
+  .organization-unit-card {
+    width: 100%;
+    max-width: none;
+  }
+  .organization-unit-children {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+  /* Wrapped mobile stack keeps the historical group-wide top rail; the
+     per-child half-segments are desktop-only and would paint stray
+     horizontal arms next to stacked full-width cards. */
+  .organization-unit-children::after {
+    display: block;
+  }
+  .organization-unit-child:not(:first-child)::before,
+  .organization-unit-child:not(:last-child)::after {
+    display: none;
+  }
+  .organization-unit-child {
+    min-width: 100%;
+    max-width: 100%;
+    width: 100%;
+    flex: 1 1 100%;
+  }
+}

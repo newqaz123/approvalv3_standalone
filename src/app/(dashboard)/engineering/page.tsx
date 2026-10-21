@@ -1,6 +1,8 @@
 import { auth } from "@/lib/auth-config";
 import { redirect } from "next/navigation";
 import prisma from "@/lib/prisma";
+import { createSolutionWorkActorDb, isActorSolutionWorker } from "@/lib/solution-work-actor";
+import { buildRequestVisibilityWhere, createRequestVisibilityDb } from "@/lib/request-visibility/scope";
 import {
 	getRequestsNeedingEngineeringAction,
 	getEngineeringUsers,
@@ -23,44 +25,44 @@ export default async function EngineeringDashboardPage() {
 		redirect("/sign-in");
 	}
 
-	// Get current user with role
-	const user = await prisma.user.findUnique({
-		where: { id: userId },
-		select: {
-			id: true,
-			role: true,
-			departmentId: true,
-		},
-	});
-
-	// Validate user has engineering role
-	if (!user || user.role !== "engineering") {
-		redirect("/dashboard");
+	// Solution-work eligibility is the unit "Can work on solutions" flag
+	// (inherited by descendants), never the user role. Ineligible users land
+	// on /requests: /dashboard may bounce engineering-role users back here.
+	if (!(await isActorSolutionWorker(createSolutionWorkActorDb(prisma), userId))) {
+		redirect("/requests");
 	}
 
-	// Fetch needs action data
-	const needsActionData = await getRequestsNeedingEngineeringAction(userId);
+	// Fetch needs action data (actor derived from the session)
+	const needsActionData = await getRequestsNeedingEngineeringAction();
 
 	// Fetch engineering users for Person in Charge selector
 	const engineeringUsers = await getEngineeringUsers();
 
 	const subTaskOptions = await getEngineeringSubTaskOptions();
 
+	const visibilityWhere = await buildRequestVisibilityWhere(createRequestVisibilityDb(prisma), {
+		userId,
+		includeArchived: false,
+	});
+
 	// Fetch engineering requests for the Follow up work tab
 	const allEngineeringRequestsRaw = await prisma.requests.findMany({
 		where: {
-			status: {
-				in: ["SentToEngineer", "SendBackToRequester", "FinalApproval"],
-			},
-			isDeleted: false,
-			isArchived: false,
-			OR: [
-				{ workRequisitionReceived: false },
-				{ subTasks: { some: { isCompleted: false } } },
+			AND: [
+				visibilityWhere,
+				{
+					status: {
+						in: ["SentToEngineer", "SendBackToRequester", "FinalApproval"],
+					},
+					OR: [
+						{ workRequisitionReceived: false },
+						{ subTasks: { some: { isCompleted: false } } },
+					],
+				},
 			],
 		},
 		include: {
-			department: {
+			organizationUnit: {
 				select: {
 					name: true,
 				},
@@ -129,7 +131,7 @@ export default async function EngineeringDashboardPage() {
 		status: request.status,
 		createdAt: request.createdAt.toISOString(),
 		workRequisitionReceived: request.workRequisitionReceived,
-		department: request.department,
+		department: request.organizationUnit,
 		requester: request.requester,
 		hasRejection:
 			request.solutions.some((s) => s.approvals.length > 0) ||
@@ -149,34 +151,27 @@ export default async function EngineeringDashboardPage() {
 	}));
 
 	// Calculate quick stats
+	const pipelineStatuses = [
+		"SentToEngineer",
+		"SendBackToRequester",
+		"DesignCostEstimationApproval",
+		"FinalApproval",
+	] as const;
 	const totalInPipeline = await prisma.requests.count({
 		where: {
-			status: {
-				in: [
-					"SentToEngineer",
-					"SendBackToRequester",
-					"DesignCostEstimationApproval",
-					"FinalApproval",
-				],
-			},
-			isDeleted: false,
-			isArchived: false,
+			AND: [visibilityWhere, { status: { in: [...pipelineStatuses] } }],
 		},
 	});
 
 	const awaitingSolution = await prisma.requests.count({
 		where: {
-			status: "SentToEngineer",
-			isDeleted: false,
-			isArchived: false,
+			AND: [visibilityWhere, { status: "SentToEngineer" }],
 		},
 	});
 
 	const inApprovalProcess = await prisma.requests.count({
 		where: {
-			status: "DesignCostEstimationApproval",
-			isDeleted: false,
-			isArchived: false,
+			AND: [visibilityWhere, { status: "DesignCostEstimationApproval" }],
 		},
 	});
 
@@ -188,33 +183,32 @@ export default async function EngineeringDashboardPage() {
 		await Promise.all([
 			prisma.requests.count({
 				where: {
-					status: {
-						in: [
-							"SentToEngineer",
-							"SendBackToRequester",
-							"DesignCostEstimationApproval",
-							"FinalApproval",
-						],
-					},
-					isDeleted: false,
-					createdAt: { gte: startOfYesterday },					isArchived: false,
-
+					AND: [
+						visibilityWhere,
+						{
+							status: { in: [...pipelineStatuses] },
+							createdAt: { gte: startOfYesterday },
+						},
+					],
 				},
 			}),
 			prisma.requests.count({
 				where: {
-					status: "SentToEngineer",
-					isDeleted: false,
-					createdAt: { gte: startOfYesterday },					isArchived: false,
-
+					AND: [
+						visibilityWhere,
+						{ status: "SentToEngineer", createdAt: { gte: startOfYesterday } },
+					],
 				},
 			}),
 			prisma.requests.count({
 				where: {
-					status: "DesignCostEstimationApproval",
-					isDeleted: false,
-					createdAt: { gte: startOfYesterday },					isArchived: false,
-
+					AND: [
+						visibilityWhere,
+						{
+							status: "DesignCostEstimationApproval",
+							createdAt: { gte: startOfYesterday },
+						},
+					],
 				},
 			}),
 		]);

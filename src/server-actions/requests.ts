@@ -5,9 +5,9 @@ import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 import { revalidateRequestViews } from './request-view-invalidation'
 import { z } from 'zod'
-import { createApprovalChain, getApproversAtLevel } from './approvals'
 import { requireAdmin } from '@/lib/auth'
-import { getCurrentUser, getUserById } from '@/lib/cache/user-cache'
+import { createSolutionWorkActorDb, isActorSolutionWorker } from '@/lib/solution-work-actor'
+import { getCurrentUser } from '@/lib/cache/user-cache'
 import {
   attachmentFileExists,
   deleteAttachmentFile,
@@ -21,6 +21,7 @@ import {
 } from '@/lib/inline-images/references'
 import { cancellationReasonSchema } from '@/lib/schemas/cancellation-schemas'
 import { buildRequestExportRows } from '@/lib/request-export'
+import { APPROVAL_DISPLAY_SELECT, withApprovalDisplay } from '@/lib/approval-display'
 import {
   evaluateRequesterCancellation,
   getCancellationBlockedMessage,
@@ -30,11 +31,52 @@ import {
   buildRejectedRequestResubmissionWhere,
   updateRequestStatusExpecting,
 } from '@/lib/request-status-transition'
+import {
+  APPROVAL_ENGINE_TRANSACTION_ISOLATION,
+  ApprovalEngineConflictError,
+  ApprovalEnginePlanError,
+} from '@/lib/approval-engine/plan'
+import {
+  canSubmitRequests,
+  createCleanStartPhaseAttemptTx,
+  createRequestApprovalAttempt,
+  markCurrentInstanceOutcome,
+  requireAssignableSubmitter,
+  SubmissionDeniedError,
+  type CleanStartAttemptStore,
+} from '@/lib/approval-engine/attempts'
+import { CURRENT_INSTANCE_ROW_FILTER, snapshotGroupActionWhere } from '@/lib/approval-engine/current-instance'
+import { ApprovalRouteConfigurationError } from '@/lib/approval-routes/definition'
+import { buildRequestVisibilityWhere, canUserViewRequest, createRequestVisibilityDb } from '@/lib/request-visibility/scope'
+import { mapEventRecipients } from '@/lib/notification-recipients'
+import { descendantUnitIds } from '@/lib/organization/hierarchy'
+import type { OrganizationUnitNode } from '@/lib/organization/model'
+import {
+  evaluateRequestAction,
+  existingAssignEngineersDecision,
+  existingCancelRequestDecision,
+  existingResubmitRequestDecision,
+} from '@/lib/action-permissions'
+
 import type { Prisma } from '@prisma/client'
 import * as XLSX from 'xlsx'
 
 const REQUEST_DRAFT_READY_PREFIX = 'request-drafts/ready/'
 const ATTACHMENT_ADOPTION_ERROR = 'One or more attachments are invalid or no longer available'
+
+async function loadOrganizationUnitNodes(): Promise<OrganizationUnitNode[]> {
+  return prisma.organization_units.findMany({
+    select: {
+      id: true,
+      name: true,
+      parentId: true,
+      isActive: true,
+      shareRequests: true,
+      canWorkOnSolutions: true,
+      managerUserId: true,
+    },
+  })
+}
 
 function readyRequestDraftWhere(ids: string[], uploadedById: string) {
   return {
@@ -75,10 +117,20 @@ export interface CreateRequestInput {
 export async function createRequest(input: CreateRequestInput) {
   const user = await getCurrentUser()
 
-  if (!user || !user.departmentId) {
+  if (!user) {
     return {
       success: false,
-      error: 'User must belong to a department to create requests',
+      error: 'Active organization assignment is required to create requests',
+    }
+  }
+  const existingAssignment = await prisma.organization_assignments.findFirst({
+    where: { userId: user.id, isActive: true },
+    select: { unitId: true },
+  })
+  if (!canSubmitRequests({ isActiveUser: user.isActive, hasActiveAssignment: Boolean(existingAssignment) })) {
+    return {
+      success: false,
+      error: 'Active organization assignment is required to create requests',
     }
   }
 
@@ -125,16 +177,26 @@ export async function createRequest(input: CreateRequestInput) {
   }
 
   let request: { id: string; title: string }
-  let approvals: Awaited<ReturnType<typeof createApprovalChain>>
+  let pendingCandidateUserIds: readonly string[] = []
 
   try {
-    const txResult = await prisma.$transaction(async (tx) => {
+    const txResult = await prisma.$transaction(
+      async (tx) => {
+      const assignment = await tx.organization_assignments.findFirst({
+        where: { userId: user.id, isActive: true },
+        select: { unitId: true },
+      })
+      const { unitId: organizationUnitId } = requireAssignableSubmitter({
+        isActiveUser: user.isActive,
+        assignment,
+      })
+
       let newRequest = await tx.requests.create({
         data: {
           title: validatedFields.data.title,
           description: prepared.html,
           requesterId: user.id,
-          departmentId: user.departmentId!, // checked above
+          organizationUnitId,
           status: 'ImprovementRequest',
         },
       })
@@ -164,60 +226,73 @@ export async function createRequest(input: CreateRequestInput) {
         },
       })
 
-      const chain = await createApprovalChain(
-        newRequest.id,
-        user.departmentId!,
-        user.level || 1,
-        user.id,
-        tx,
+      const attempt = await createRequestApprovalAttempt(
+        createCleanStartPhaseAttemptTx(tx as unknown as CleanStartAttemptStore),
+        { requestId: newRequest.id, phase: 'REQUEST', originUserId: user.id },
       )
-
-      const isTopLevel = chain.length > 0 && chain[0].status === 'approved'
-      if (isTopLevel) {
+      if (attempt.statusChange) {
         newRequest = await tx.requests.update({
           where: { id: newRequest.id },
-          data: { status: 'SentToEngineer' },
+          data: { status: attempt.statusChange.to },
         })
         await tx.request_activities.create({
           data: {
             requestId: newRequest.id,
             userId: user.id,
             action: 'status_changed',
-            fromStatus: 'ImprovementRequest',
-            toStatus: 'SentToEngineer',
-            comments: 'Auto-approved by top-level user',
+            fromStatus: attempt.statusChange.from,
+            toStatus: attempt.statusChange.to,
+            comments: attempt.completedWithoutSteps
+              ? 'Auto-completed: NO_ELIGIBLE_APPROVAL_STEPS (no eligible approval steps)'
+              : 'Auto-approved by position ceiling',
           },
         })
       }
 
-      return { request: newRequest, approvals: chain }
-    })
+      return {
+        request: newRequest,
+        pendingCandidateUserIds: attempt.instance.state === 'PENDING'
+          ? (attempt.instance.steps[0]?.candidateUserIds ?? [])
+          : [],
+      }
+        },
+        { isolationLevel: APPROVAL_ENGINE_TRANSACTION_ISOLATION },
+      )
+      .catch((error: unknown) => {
+        if (error instanceof ApprovalEngineConflictError) throw error
+        const code = (error as { code?: unknown })?.code
+        if (code === 'P2034' || code === '40001') {
+          throw new ApprovalEngineConflictError()
+        }
+        throw error
+      })
 
     request = txResult.request
-    approvals = txResult.approvals
+    pendingCandidateUserIds = txResult.pendingCandidateUserIds
   } catch (error) {
     console.error('Failed to create request atomically:', error)
     if (error instanceof Error && error.message === ATTACHMENT_ADOPTION_ERROR) {
       return { success: false, error: ATTACHMENT_ADOPTION_ERROR }
     }
+    if (
+      error instanceof SubmissionDeniedError
+      || error instanceof ApprovalRouteConfigurationError
+      || error instanceof ApprovalEnginePlanError
+      || error instanceof ApprovalEngineConflictError
+    ) {
+      return { success: false, error: error.message }
+    }
     return { success: false, error: 'Failed to create request — please try again' }
   }
 
-  // Notify department approvers if there are pending approvals (not auto-approved)
-  const pendingApprovals = approvals.filter(a => a.status === 'pending')
-  if (pendingApprovals.length > 0) {
-    const firstLevel = pendingApprovals[0].requiredLevel
-    const { getApproversAtLevel } = await import('./approvals')
-    const approvers = await getApproversAtLevel(user.departmentId, firstLevel)
-    
-    // Notify each approver
+  if (pendingCandidateUserIds.length > 0) {
     const { createNotification } = await import('./notifications')
-    for (const approver of approvers) {
+    for (const userId of pendingCandidateUserIds) {
       await createNotification({
-        userId: approver.id,
+        userId,
         type: 'approval_needed',
         title: 'New Approval Request',
-        message: `📋 New Approval Request: "${request.title}" requires your approval (Level ${firstLevel}).`,
+        message: `📋 New Approval Request: "${request.title}" requires your approval.`,
         requestId: request.id,
       })
     }
@@ -231,7 +306,7 @@ export async function createRequest(input: CreateRequestInput) {
 export interface GetRequestsFilters {
   status?: string
   statuses?: string[]
-  departmentId?: string
+  unitId?: string
   requesterId?: string
   dateFrom?: string
   dateTo?: string
@@ -240,10 +315,56 @@ export interface GetRequestsFilters {
   includeArchived?: boolean
 }
 
+function buildRequestFilters(
+  filters?: GetRequestsFilters,
+  unitSubtreeIds?: readonly string[],
+): Prisma.requestsWhereInput {
+  if (!filters && (!unitSubtreeIds || unitSubtreeIds.length === 0)) return {}
+  const clauses: Prisma.requestsWhereInput[] = []
+  if (filters?.statuses && filters.statuses.length > 0) {
+    clauses.push({ status: { in: filters.statuses as never } })
+  } else if (filters?.status) {
+    clauses.push({ status: filters.status as never })
+  }
+  if (filters?.wrStatus === 'received') {
+    clauses.push({ workRequisitionReceived: true })
+  } else if (filters?.wrStatus === 'not-received') {
+    clauses.push({ workRequisitionReceived: false })
+  }
+  if (unitSubtreeIds && unitSubtreeIds.length > 0) {
+    clauses.push({ organizationUnitId: { in: [...unitSubtreeIds] } })
+  }
+  if (filters?.requesterId) {
+    clauses.push({ requesterId: filters.requesterId })
+  }
+  if (filters?.dateFrom || filters?.dateTo) {
+    const createdAt: Prisma.DateTimeFilter = {}
+    if (filters.dateFrom) {
+      createdAt.gte = new Date(filters.dateFrom)
+    }
+    if (filters.dateTo) {
+      const endDate = new Date(filters.dateTo)
+      endDate.setHours(23, 59, 59, 999)
+      createdAt.lte = endDate
+    }
+    clauses.push({ createdAt })
+  }
+  if (filters?.search) {
+    clauses.push({
+      OR: [
+        { title: { contains: filters.search, mode: 'insensitive' } },
+        { description: { contains: filters.search, mode: 'insensitive' } },
+        { id: { contains: filters.search, mode: 'insensitive' } },
+        { requester: { name: { contains: filters.search, mode: 'insensitive' } } },
+      ],
+    })
+  }
+  return clauses.length > 0 ? { AND: clauses } : {}
+}
+
 /**
- * Get requests visible to the current user:
- * - Admins see ALL requests across all departments
- * - Regular users see all requests from their department
+ * Get requests visible to the current user through the shared visibility predicate.
+ * Status, archive, search, and other filters are ANDed and never overwrite visibility OR.
  */
 export async function getMyRequests(filters?: GetRequestsFilters) {
   const currentUser = await getCurrentUser()
@@ -252,93 +373,21 @@ export async function getMyRequests(filters?: GetRequestsFilters) {
     throw new Error('User not found')
   }
 
-  // Build where clause based on user role and department type
-  // By default exclude archived requests unless caller opts in
-  const showArchived = filters?.includeArchived === true
-  let whereClause: any
-
-  if (currentUser.role === 'admin') {
-    // Admins see all non-deleted requests
-    whereClause = { isDeleted: false, ...(showArchived ? {} : { isArchived: false }) }
-  } else if (currentUser.department?.type === 'ENGINEERING') {
-    // Engineering users see all non-deleted requests for monitoring purposes
-    whereClause = { isDeleted: false, ...(showArchived ? {} : { isArchived: false }) }
-  } else {
-    // General dept users see:
-    // 1. Requests from their own department, OR
-    // 2. Requests where they are a required approver in request approval chain, OR
-    // 3. Requests where they are a required approver in solution approval chain
-    whereClause = {
-      isDeleted: false,
-      ...(showArchived ? {} : { isArchived: false }),
-      OR: [
-        // Requests from user's own department
-        { departmentId: currentUser.departmentId ?? undefined },
-        // Requests where user is a required approver in request approval chain
-        {
-          approvals: {
-            some: {
-              requiredApproverId: currentUser.id,
-            },
-          },
-        },
-        // Requests where user is a required approver in solution approval chain
-        {
-          solutions: {
-            some: {
-              approvals: {
-                some: {
-                  requiredApproverId: currentUser.id,
-                },
-              },
-            },
-          },
-        },
-      ],
-    }
+  const visibilityWhere = await buildRequestVisibilityWhere(createRequestVisibilityDb(prisma), {
+    userId: currentUser.id,
+    includeArchived: filters?.includeArchived === true,
+  })
+  let unitSubtreeIds: readonly string[] | undefined
+  if (filters?.unitId) {
+    const units = await loadOrganizationUnitNodes()
+    unitSubtreeIds = descendantUnitIds(units, filters.unitId)
   }
-
-  // Apply filters
-  if (filters) {
-    if (filters.statuses && filters.statuses.length > 0) {
-      whereClause.status = { in: filters.statuses as any }
-    } else if (filters.status) {
-      whereClause.status = filters.status
-    }
-    if (filters.wrStatus === 'received') {
-      whereClause.workRequisitionReceived = true
-    } else if (filters.wrStatus === 'not-received') {
-      whereClause.workRequisitionReceived = false
-    }
-    if (filters.departmentId) {
-      whereClause.departmentId = filters.departmentId
-    }
-    if (filters.requesterId) {
-      whereClause.requesterId = filters.requesterId
-    }
-    if (filters.dateFrom || filters.dateTo) {
-      whereClause.createdAt = {}
-      if (filters.dateFrom) {
-        whereClause.createdAt.gte = new Date(filters.dateFrom)
-      }
-      if (filters.dateTo) {
-        const endDate = new Date(filters.dateTo)
-        endDate.setHours(23, 59, 59, 999)
-        whereClause.createdAt.lte = endDate
-      }
-    }
-    if (filters.search) {
-      whereClause.OR = [
-        { title: { contains: filters.search, mode: 'insensitive' } },
-        { description: { contains: filters.search, mode: 'insensitive' } },
-        { id: { contains: filters.search, mode: 'insensitive' } },
-        { requester: { name: { contains: filters.search, mode: 'insensitive' } } },
-      ]
-    }
+  const requestWhere: Prisma.requestsWhereInput = {
+    AND: [visibilityWhere, buildRequestFilters(filters, unitSubtreeIds)],
   }
 
   const requests = await prisma.requests.findMany({
-    where: whereClause,
+    where: requestWhere,
     select: {
       id: true,
       title: true,
@@ -354,9 +403,9 @@ export async function getMyRequests(filters?: GetRequestsFilters) {
         },
       },
       requesterId: true,
-      departmentId: true,
-      department: {
+      organizationUnit: {
         select: {
+          id: true,
           name: true,
         },
       },
@@ -374,11 +423,6 @@ export async function getMyRequests(filters?: GetRequestsFilters) {
       solutions: {
         select: {
           id: true,
-          submittedBy: {
-            select: {
-              departmentId: true,
-            },
-          },
           approvals: {
             select: {
               id: true,
@@ -389,9 +433,16 @@ export async function getMyRequests(filters?: GetRequestsFilters) {
               requiredApprover: {
                 select: { name: true },
               },
-              requiredLevel: true,
-              order: true,
+                            order: true,
               approvedAt: true,
+              candidateGroup: {
+                select: {
+                  members: {
+                    select: { capturedDisplayName: true },
+                    take: 10,
+                  },
+                },
+              },
             },
           },
         },
@@ -421,8 +472,7 @@ export async function getMyRequests(filters?: GetRequestsFilters) {
         select: {
           id: true,
           status: true,
-          requiredLevel: true,
-          order: true,
+                    order: true,
           approvedAt: true,
           isFinalApproval: true,
           approver: {
@@ -435,6 +485,14 @@ export async function getMyRequests(filters?: GetRequestsFilters) {
               name: true,
             },
           },
+          candidateGroup: {
+            select: {
+              members: {
+                select: { capturedDisplayName: true },
+                take: 10,
+              },
+            },
+          },
         },
       },
     },
@@ -443,8 +501,20 @@ export async function getMyRequests(filters?: GetRequestsFilters) {
     },
   })
 
-  // Import getApproversAtLevel for loading potential approvers
-  const { getApproversAtLevel } = await import('./approvals')
+  const withCandidateNames = <T extends {
+    status: string
+    requiredApprover?: { name: string } | null
+    candidateGroup?: { members: Array<{ capturedDisplayName: string }> } | null
+  }>(approval: T) => {
+    const { candidateGroup, ...rest } = approval
+    if (approval.status !== 'pending' || approval.requiredApprover) {
+      return rest
+    }
+    return {
+      ...rest,
+      potentialApprovers: (candidateGroup?.members ?? []).map((member) => ({ name: member.capturedDisplayName })),
+    }
+  }
 
   // Map requests to include proper approvals based on status
   // DesignCostEstimationApproval shows solution approvals, otherwise show request approvals
@@ -458,37 +528,18 @@ export async function getMyRequests(filters?: GetRequestsFilters) {
           status: sa.status,
           approver: sa.approver ? { name: sa.approver.name } : null,
           requiredApprover: sa.requiredApprover ? { name: sa.requiredApprover.name } : null,
-          requiredLevel: sa.requiredLevel ?? 0,
+          requiredLevel: sa.order,
           order: sa.order,
           approvedAt: sa.approvedAt,
           isFinalApproval: false, // Solution approvals are not final approvals
+          candidateGroup: sa.candidateGroup,
         }))
       : []
 
     const rawApprovals = useSolutionApprovals ? solutionApprovals : req.approvals
-
-    // For solution approvals, use the Engineering department (submitter's department)
-    // For request approvals, use the request's department
-    const approvalDepartmentId = useSolutionApprovals && req.solutions[0]?.submittedBy?.departmentId
-      ? req.solutions[0].submittedBy.departmentId
-      : req.departmentId
-
-    // Load potential approvers for pending approvals that don't have a requiredApprover
-    const approvals = await Promise.all(rawApprovals.map(async (approval) => {
-      // If pending and no specific requiredApprover, load potential approvers at this level
-      if (approval.status === 'pending' && !approval.requiredApprover && approvalDepartmentId) {
-        try {
-          const potentialApprovers = await getApproversAtLevel(approvalDepartmentId, approval.requiredLevel)
-          return {
-            ...approval,
-            potentialApprovers: potentialApprovers.map(p => ({ name: p.name })),
-          }
-        } catch (error) {
-          console.error('[getMyRequests] Error loading potential approvers:', error)
-          return approval
-        }
-      }
-      return approval
+    const approvals = rawApprovals.map((approval) => ({
+      ...withCandidateNames(approval),
+      requiredLevel: approval.order,
     }))
 
     return {
@@ -501,7 +552,7 @@ export async function getMyRequests(filters?: GetRequestsFilters) {
       workRequisitionReceivedAt: req.workRequisitionReceivedAt,
       workRequisitionReceivedBy: req.workRequisitionReceivedBy,
       requesterId: req.requesterId,
-      department: req.department,
+      department: req.organizationUnit,
       requester: req.requester,
       _count: req._count,
       hasRejection: req.solutions.some(s =>
@@ -525,6 +576,10 @@ export async function getRequest(id: string) {
     throw new Error('Unauthorized')
   }
 
+  if (!(await canUserViewRequest(userId, id))) {
+    return null
+  }
+
   const request = await prisma.requests.findUnique({
     where: { id },
     include: {
@@ -535,7 +590,7 @@ export async function getRequest(id: string) {
           email: true,
         },
       },
-      department: {
+      organizationUnit: {
         select: {
           name: true,
         },
@@ -628,8 +683,10 @@ export async function getRequest(id: string) {
           status: true,
           comments: true,
           isFinalApproval: true,
-          requiredLevel: true,
-          order: true,
+          ...APPROVAL_DISPLAY_SELECT,
+          instanceId: true,
+          instance: { select: { supersededAt: true } },
+                    order: true,
           createdAt: true,
           approvedAt: true,
           approver: {
@@ -667,7 +724,6 @@ export async function getRequest(id: string) {
               id: true,
               name: true,
               email: true,
-              departmentId: true,
             },
           },
           approvals: {
@@ -675,8 +731,10 @@ export async function getRequest(id: string) {
               id: true,
               status: true,
               comments: true,
-              requiredLevel: true,
-              order: true,
+              ...APPROVAL_DISPLAY_SELECT,
+              instanceId: true,
+              instance: { select: { supersededAt: true } },
+                            order: true,
               createdAt: true,
               approvedAt: true,
               approver: {
@@ -735,7 +793,7 @@ export async function getRequest(id: string) {
   // solution payloads are loaded.
   if (request) {
     const pendingSolutionApprovals = await prisma.solution_approvals.count({
-      where: { solution: { requestId: id }, status: 'pending' },
+      where: { solution: { requestId: id }, status: 'pending', OR: [...CURRENT_INSTANCE_ROW_FILTER] },
     })
     ;(request as any).hasPendingSolutionApprovals = pendingSolutionApprovals > 0
   }
@@ -750,45 +808,24 @@ export async function getRequest(id: string) {
   }
 
   if (request) {
-    const addPotentialApprovers = async <T extends {
-      status: string
-      requiredLevel: number | null
-      requiredApprover?: { id: string; name: string | null; email: string } | null
-    }>(approvals: T[], departmentId: string | null | undefined) => {
-      return Promise.all(approvals.map(async (approval) => {
-        if (approval.status !== 'pending' || approval.requiredApprover || !approval.requiredLevel || !departmentId) {
-          return approval
-        }
-
-        try {
-          const potentialApprovers = await getApproversAtLevel(departmentId, approval.requiredLevel)
-          return {
-            ...approval,
-            potentialApprovers: potentialApprovers.map((approver) => ({ name: approver.name })),
-          }
-        } catch (error) {
-          console.error('[getRequest] Error loading potential approvers:', error)
-          return approval
-        }
-      }))
-    }
-
-    request.approvals = await addPotentialApprovers(request.approvals, request.departmentId) as any
-
+    // Candidate display comes only from the stored snapshot selected above.
+    request.approvals = request.approvals.map(withApprovalDisplay)
     if (request.solutions?.[0]) {
-      const solutionDepartmentId = request.solutions[0].submittedBy?.departmentId
-      request.solutions[0].approvals = await addPotentialApprovers(
-        request.solutions[0].approvals,
-        solutionDepartmentId
-      ) as any
+      request.solutions[0].approvals = request.solutions[0].approvals.map(withApprovalDisplay)
     }
   }
 
-  return request
+  if (!request) return null
+
+  return {
+    ...request,
+    department: request.organizationUnit ?? null,
+  }
 }
 
 /**
- * Get filter options (departments and requesters)
+ * Get filter options (organization units and requesters).
+ * unitId values are organization_units.id so descendantUnitIds can consume them.
  */
 export async function getRequestFilterOptions() {
   const currentUser = await getCurrentUser()
@@ -797,14 +834,14 @@ export async function getRequestFilterOptions() {
     throw new Error('User not found')
   }
 
-  const isAdmin = currentUser.role === 'admin'
-  const isEngineering = currentUser.department?.type === 'ENGINEERING'
+  const visibilityWhere = await buildRequestVisibilityWhere(createRequestVisibilityDb(prisma), {
+    userId: currentUser.id,
+    includeArchived: false,
+  })
 
-  // Get departments based on user role
-  let departments
-  if (isAdmin || isEngineering) {
-    // Admin and engineering users see all departments
-    departments = await prisma.departments.findMany({
+  const [departments, requesters] = await Promise.all([
+    prisma.organization_units.findMany({
+      where: { isActive: true },
       select: {
         id: true,
         name: true,
@@ -812,27 +849,9 @@ export async function getRequestFilterOptions() {
       orderBy: {
         name: 'asc',
       },
-    })
-  } else {
-    // Non-admin, non-engineering: get departments from visible requests
-    // (own dept + cross-department via custom approval chains)
-    const visibleRequests = await prisma.requests.findMany({
-      where: {
-        isDeleted: false,
-        OR: [
-          { departmentId: currentUser.departmentId ?? undefined },
-          { approvals: { some: { requiredApproverId: currentUser.id } } },
-          { solutions: { some: { approvals: { some: { requiredApproverId: currentUser.id } } } } },
-        ],
-      },
-      select: { departmentId: true },
-      distinct: ['departmentId'],
-    })
-
-    const visibleDeptIds = [...new Set(visibleRequests.map(r => r.departmentId))]
-
-    departments = await prisma.departments.findMany({
-      where: { id: { in: visibleDeptIds } },
+    }),
+    prisma.user.findMany({
+      where: { createdRequests: { some: visibilityWhere } },
       select: {
         id: true,
         name: true,
@@ -840,51 +859,8 @@ export async function getRequestFilterOptions() {
       orderBy: {
         name: 'asc',
       },
-    })
-  }
-
-  // Get requesters (users who have created requests in visible departments)
-  let requesters
-  if (isAdmin || isEngineering) {
-    // Admin and engineering users see all requesters who have created requests
-    requesters = await prisma.user.findMany({
-      where: { createdRequests: { some: {} } },
-      select: {
-        id: true,
-        name: true,
-      },
-      orderBy: {
-        name: 'asc',
-      },
-    })
-  } else {
-    // Non-admin, non-engineering: get requesters from visible requests
-    const visibleRequests = await prisma.requests.findMany({
-      where: {
-        isDeleted: false,
-        OR: [
-          { departmentId: currentUser.departmentId ?? undefined },
-          { approvals: { some: { requiredApproverId: currentUser.id } } },
-          { solutions: { some: { approvals: { some: { requiredApproverId: currentUser.id } } } } },
-        ],
-      },
-      select: { requesterId: true },
-      distinct: ['requesterId'],
-    })
-
-    const visibleRequesterIds = visibleRequests.map(r => r.requesterId)
-
-    requesters = await prisma.user.findMany({
-      where: { id: { in: visibleRequesterIds } },
-      select: {
-        id: true,
-        name: true,
-      },
-      orderBy: {
-        name: 'asc',
-      },
-    })
-  }
+    }),
+  ])
 
   return { departments, requesters }
 }
@@ -899,46 +875,29 @@ export async function getMyActionItems() {
     return []
   }
 
-  // Build OR conditions for request_approvals (department-aware)
+  // Action eligibility stays on Task 9 discriminator predicates. Visibility is
+  // not approval permission; returned rows are the actionable requests only.
+
+  // Build OR conditions for request_approvals (discriminator-aware)
   const requestOrConditions: any[] = [
-    // Custom chain approvals (always include)
+    // Custom chain / CUSTOM_PERSON approvals (always include)
     { requiredApproverId: user.id },
+    snapshotGroupActionWhere(user.id),
   ]
 
-  // Add hierarchy-based approvals scoped to user's own department
-  if (user.level && user.departmentId) {
-    requestOrConditions.push({
-      requiredLevel: user.level,
-      request: { departmentId: user.departmentId },
-    })
-  }
-
-  // Add cross-department approver assignments
-  const crossDeptApprovals = await prisma.department_approvers.findMany({
-    where: { approverId: user.id },
-    select: { departmentId: true, approverLevel: true },
-  })
-  for (const cda of crossDeptApprovals) {
-    requestOrConditions.push({
-      requiredLevel: cda.approverLevel,
-      request: { departmentId: cda.departmentId },
-    })
-  }
-
-  // Build OR conditions for solution_approvals (engineering-role-aware)
+  // Build OR conditions for solution_approvals (discriminator-aware)
   const solutionOrConditions: any[] = [
     { requiredApproverId: user.id },
+    snapshotGroupActionWhere(user.id),
   ]
-  // Only match by level for engineering users (matches canUserApproveSolution logic)
-  if (user.level && user.role === 'engineering') {
-    solutionOrConditions.push({ requiredLevel: user.level })
-  }
 
   // Find all pending approvals for user's level OR custom approver ID
   const pendingApprovals = await prisma.request_approvals.findMany({
     where: {
       OR: requestOrConditions,
       status: 'pending',
+      // Superseded resubmission history is never actionable.
+      AND: [{ OR: [...CURRENT_INSTANCE_ROW_FILTER] }],
       request: {
         isDeleted: false, // Exclude soft-deleted requests
         isArchived: false, // Archived requests are not actionable
@@ -947,7 +906,7 @@ export async function getMyActionItems() {
     include: {
       request: {
         include: {
-          department: {
+          organizationUnit: {
             select: {
               name: true,
             },
@@ -984,6 +943,7 @@ export async function getMyActionItems() {
         requestId: approval.requestId,
         order: { lt: approval.order },
         status: 'pending',
+        OR: [...CURRENT_INSTANCE_ROW_FILTER],
       },
     })
 
@@ -998,7 +958,7 @@ export async function getMyActionItems() {
           createdAt: approval.request.createdAt,
           updatedAt: approval.request.updatedAt,
           requesterId: approval.request.requesterId,
-          department: approval.request.department,
+          department: approval.request.organizationUnit,
           requester: approval.request.requester,
           _count: approval.request._count,
         })
@@ -1011,6 +971,8 @@ export async function getMyActionItems() {
     where: {
       OR: solutionOrConditions,
       status: 'pending',
+      // Superseded resubmission history is never actionable.
+      AND: [{ OR: [...CURRENT_INSTANCE_ROW_FILTER] }],
       solution: {
         request: {
           isDeleted: false,
@@ -1023,7 +985,7 @@ export async function getMyActionItems() {
         include: {
           request: {
             include: {
-              department: {
+              organizationUnit: {
                 select: {
                   name: true,
                 },
@@ -1061,6 +1023,7 @@ export async function getMyActionItems() {
         solutionId: approval.solutionId,
         order: { lt: approval.order },
         status: 'pending',
+        OR: [...CURRENT_INSTANCE_ROW_FILTER],
       },
     })
 
@@ -1078,7 +1041,7 @@ export async function getMyActionItems() {
           createdAt: request.createdAt,
           updatedAt: request.updatedAt,
           requesterId: request.requesterId,
-          department: request.department,
+          department: request.organizationUnit,
           requester: request.requester,
           _count: request._count,
         })
@@ -1132,6 +1095,12 @@ export async function cancelRequest(input: { requestId: string; reason: string }
   // under READ COMMITTED), so a concurrent transition or resubmission cannot
   // race past cancellation.
   await prisma.$transaction(async (tx) => {
+    // Serialize cancel against concurrent approval advancement on the same
+    // request. Prisma has no first-class FOR UPDATE on findUnique; the tagged
+    // $queryRaw lock matches createPrismaApprovalTransactionDb.
+    if (typeof tx.$queryRaw === 'function') {
+      await tx.$queryRaw`SELECT id FROM requests WHERE id = ${requestId} FOR UPDATE`
+    }
     const request = await tx.requests.findUnique({
       where: { id: requestId },
       select: { id: true, requesterId: true, status: true, updatedAt: true },
@@ -1149,13 +1118,15 @@ export async function cancelRequest(input: { requestId: string; reason: string }
       rejectedRequestApprovals,
     ] = await Promise.all([
       tx.request_approvals.count({
-        where: { requestId, status: 'pending' },
+        where: { requestId, status: 'pending', OR: [...CURRENT_INSTANCE_ROW_FILTER] },
       }),
       tx.solution_approvals.count({
-        where: { solution: { requestId }, status: 'pending' },
+        where: { solution: { requestId }, status: 'pending', OR: [...CURRENT_INSTANCE_ROW_FILTER] },
       }),
       tx.request_approvals.count({
-        where: { requestId, status: 'rejected', isFinalApproval: false },
+        // Rejection history authorizes cancellation only while it belongs to
+        // the current attempt; superseded NEW rows are display history.
+        where: { requestId, status: 'rejected', isFinalApproval: false, OR: [...CURRENT_INSTANCE_ROW_FILTER] },
       }),
     ])
 
@@ -1167,9 +1138,29 @@ export async function cancelRequest(input: { requestId: string; reason: string }
       hasPendingRequestApprovals: pendingRequestApprovals > 0,
       hasPendingSolutionApprovals: pendingSolutionApprovals > 0,
     })
+    const cancelAction = evaluateRequestAction('CANCEL_REQUEST', {
+      actor: { id: userId, role: '', isActive: true, assignmentUnitId: null },
+      request: { requesterId: request.requesterId, organizationUnitId: null, status: request.status },
+      canView: true,
+      approval: null,
+      assignedEngineer: false,
+      existingActionDecisions: {
+        CANCEL_REQUEST: existingCancelRequestDecision({
+          userId,
+          requesterId: request.requesterId,
+          status: request.status,
+          hasRejectedRequestApproval: rejectedRequestApprovals > 0,
+          hasPendingRequestApprovals: pendingRequestApprovals > 0,
+          hasPendingSolutionApprovals: pendingSolutionApprovals > 0,
+        }),
+      },
+    })
 
     if (!decision.canCancel) {
       throw new Error(getCancellationBlockedMessage(decision.reason, request.status))
+    }
+    if (!cancelAction.allowed) {
+      throw new Error(getCancellationBlockedMessage('not-requester', request.status))
     }
 
     // Only flip the status while the expected state still matches. The
@@ -1189,6 +1180,14 @@ export async function cancelRequest(input: { requestId: string; reason: string }
       data: { status: 'Cancelled' },
       actionLabel: 'cancel',
     })
+
+    // Record the cancellation on the current NEW instances (REQUEST, and any
+    // SOLUTION/FINAL attempts of the request's documents) so no further
+    // action can target them. Only PENDING instances transition — a terminal
+    // outcome is preserved — and cancellation adds no notification events.
+    await markCurrentInstanceOutcome(tx, { requestId, phase: 'REQUEST', outcome: 'CANCELLED' })
+    await markCurrentInstanceOutcome(tx, { requestId, phase: 'SOLUTION', outcome: 'CANCELLED' })
+    await markCurrentInstanceOutcome(tx, { requestId, phase: 'FINAL', outcome: 'CANCELLED' })
 
     // Audit trail with the actual previous status. Approvals, solutions,
     // files, engineer assignments, and subtasks are intentionally preserved.
@@ -1341,7 +1340,7 @@ export async function getDeletedRequests() {
           email: true,
         },
       },
-      department: {
+      organizationUnit: {
         select: {
           name: true,
         },
@@ -1664,7 +1663,7 @@ export async function bulkDeleteRequestsByDateRange(input: {
             email: true,
           },
         },
-        department: {
+        organizationUnit: {
           select: {
             name: true,
           },
@@ -1763,33 +1762,28 @@ export interface NeedsActionResult {
  * 1. Requests needing solution submission (SentToEngineer status)
  * 2. Solutions needing user's approval (DesignCostEstimationApproval status)
  */
-export async function getRequestsNeedingEngineeringAction(userId: string): Promise<NeedsActionResult> {
-  const user = await getUserById(userId)
-
-  if (!user || user.role !== 'engineering') {
+export async function getRequestsNeedingEngineeringAction(): Promise<NeedsActionResult> {
+  // Identity comes from the session, never from a client-supplied id (IDOR).
+  // Eligibility is the unit "Can work on solutions" flag, not the user role.
+  const { user: authUser } = (await auth()) ?? {}
+  const userId = authUser?.id
+  if (!userId || !(await isActorSolutionWorker(createSolutionWorkActorDb(prisma), userId))) {
     return { needsSolution: [], needsApproval: [] }
   }
 
-  // Get engineering department
-  const engineeringDept = await prisma.departments.findFirst({
-    where: { type: 'ENGINEERING' },
-    select: { id: true },
+  const visibilityWhere = await buildRequestVisibilityWhere(createRequestVisibilityDb(prisma), {
+    userId,
+    includeArchived: false,
   })
-
-  if (!engineeringDept) {
-    return { needsSolution: [], needsApproval: [] }
-  }
 
   // Category 1: Requests needing solution submission
   // Status = SentToEngineer, no solution submitted yet
   const needsSolution = await prisma.requests.findMany({
     where: {
-      status: 'SentToEngineer',
-      isDeleted: false,
-      isArchived: false,
+      AND: [visibilityWhere, { status: 'SentToEngineer' }],
     },
     include: {
-      department: {
+      organizationUnit: {
         select: {
           id: true,
           name: true,
@@ -1839,7 +1833,7 @@ export async function getRequestsNeedingEngineeringAction(userId: string): Promi
         title: request.title,
         status: request.status,
         createdAt: request.createdAt,
-        department: request.department,
+        department: request.organizationUnit,
         requester: request.requester,
         hasRejection: requestIdsWithSolution.includes(request.id),
       },
@@ -1848,13 +1842,11 @@ export async function getRequestsNeedingEngineeringAction(userId: string): Promi
 
   // Category 2: Solutions needing user's approval
   // For custom chains: requiredApproverId === userId AND status === pending AND all previous orders approved
-  // For hierarchy: requiredLevel === user.level AND status === pending AND all previous orders approved
+  // For snapshot groups: current-instance candidate membership AND status === pending AND all previous orders approved
   const needsApproval = await prisma.solutions.findMany({
     where: {
       request: {
-        status: 'DesignCostEstimationApproval',
-        isDeleted: false,
-        isArchived: false,
+        AND: [visibilityWhere, { status: 'DesignCostEstimationApproval' }],
       },
     },
     include: {
@@ -1883,6 +1875,7 @@ export async function getRequestsNeedingEngineeringAction(userId: string): Promi
       where: {
         solutionId: solution.id,
         status: 'pending',
+        OR: [...CURRENT_INSTANCE_ROW_FILTER],
       },
       orderBy: {
         order: 'asc',
@@ -1897,15 +1890,25 @@ export async function getRequestsNeedingEngineeringAction(userId: string): Promi
           solutionId: solution.id,
           order: { lt: approval.order },
           status: 'pending',
+          OR: [...CURRENT_INSTANCE_ROW_FILTER],
         },
       })
 
       if (blockingApprovals === 0) {
-        // This is the next actionable approval
-        // Check if it's for this user
+        // This is the next actionable approval. SNAPSHOT_GROUP uses persisted
+        // candidate membership, never a live requiredLevel match.
+        const snapshotGroupId = approval.routingMode === 'SNAPSHOT_GROUP' ? approval.candidateGroupId : null
+        const isSnapshotMember =
+          snapshotGroupId !== null &&
+          Boolean(
+            await prisma.approval_candidate_group_members.findFirst({
+              where: { candidateGroupId: snapshotGroupId, userId },
+              select: { userId: true },
+            }),
+          )
         const isForUser =
-          (approval.requiredApproverId === userId) ||
-          (approval.requiredLevel === user.level && !approval.isCustomChain)
+          Boolean(isSnapshotMember) ||
+          (approval.requiredApproverId === userId)
 
         if (isForUser) {
           needsApprovalFiltered.push({
@@ -1921,9 +1924,9 @@ export async function getRequestsNeedingEngineeringAction(userId: string): Promi
               id: approval.id,
               status: approval.status,
               order: approval.order,
-              requiredLevel: approval.requiredLevel,
+              requiredLevel: approval.order,
               requiredApproverId: approval.requiredApproverId,
-              isCustomChain: approval.isCustomChain,
+              isCustomChain: approval.routingMode === 'CUSTOM_PERSON',
             },
           })
           break // Only add one approval per solution
@@ -1952,38 +1955,57 @@ export async function assignEngineers(requestId: string, engineerIds: string[]) 
   // Validate request exists and is in correct status
   const request = await prisma.requests.findUnique({
     where: { id: requestId },
-    select: { status: true, title: true },
+    select: { status: true, title: true, requesterId: true, organizationUnitId: true },
   })
 
   if (!request) {
     throw new Error('Request not found')
   }
 
-  if (request.status !== 'SentToEngineer') {
+  const assignAction = evaluateRequestAction('ASSIGN_ENGINEERS', {
+    actor: {
+      id: user.id,
+      role: user.role,
+      isActive: user.isActive !== false,
+      assignmentUnitId: null,
+    },
+    request: {
+      requesterId: request.requesterId,
+      organizationUnitId: request.organizationUnitId,
+      status: request.status,
+    },
+    canView: true,
+    approval: null,
+    assignedEngineer: false,
+    existingActionDecisions: {
+      ASSIGN_ENGINEERS: existingAssignEngineersDecision({
+        userRole: user.role,
+        status: request.status,
+      }),
+    },
+  })
+  if (!assignAction.allowed) {
+    if (assignAction.reason === 'WRONG_ROLE') {
+      throw new Error('Only engineering users can assign engineers')
+    }
     throw new Error('Can only assign engineers to requests in SentToEngineer status')
   }
 
-  // Validate all engineers exist and are in engineering department
-  const engineeringDept = await prisma.departments.findFirst({
-    where: { type: 'ENGINEERING' },
-    select: { id: true },
-  })
-
-  if (!engineeringDept) {
-    throw new Error('Engineering department not found')
+  if (request.status !== 'SentToEngineer') {
+    throw new Error('Can only assign engineers to requests in SentToEngineer status')
   }
 
   const engineers = await prisma.user.findMany({
     where: {
       id: { in: engineerIds },
-      departmentId: engineeringDept.id,
       role: 'engineering',
+      isActive: true,
     },
     select: { id: true },
   })
 
   if (engineers.length !== engineerIds.length) {
-    throw new Error('One or more engineers not found or not in engineering department')
+    throw new Error('One or more engineers not found or not in the engineering role')
   }
 
   // Delete existing assignments
@@ -2012,19 +2034,23 @@ export async function assignEngineers(requestId: string, engineerIds: string[]) 
     },
   })
 
-  // Notify assigned engineers (reusing request variable from above)
   if (engineerIds.length > 0 && request) {
     const { createNotification } = await import('./notifications')
+    const recipients = mapEventRecipients({
+      type: 'request_assigned',
+      requesterId: request.requesterId,
+      assignedEngineerIds: engineerIds,
+    })
     await Promise.all(
-      engineerIds.map(engineerId =>
+      recipients.map((userId) =>
         createNotification({
-          userId: engineerId,
+          userId,
           type: 'request_assigned',
           title: 'PIC Assignment',
           message: `👤 PIC Assignment: You have been assigned to "${request.title}". Please review and submit your solution.`,
           requestId,
-        })
-      )
+        }),
+      ),
     )
   }
 
@@ -2043,18 +2069,8 @@ export async function getEngineeringUsers() {
     throw new Error('Unauthorized')
   }
 
-  const engineeringDept = await prisma.departments.findFirst({
-    where: { type: 'ENGINEERING' },
-    select: { id: true },
-  })
-
-  if (!engineeringDept) {
-    return []
-  }
-
   const users = await prisma.user.findMany({
     where: {
-      departmentId: engineeringDept.id,
       role: 'engineering',
       isActive: true,
     },
@@ -2062,10 +2078,8 @@ export async function getEngineeringUsers() {
       id: true,
       name: true,
       email: true,
-      level: true,
     },
     orderBy: [
-      { level: 'desc' },
       { name: 'asc' },
     ],
   })
@@ -2074,7 +2088,7 @@ export async function getEngineeringUsers() {
 }
 
 export interface GetRequestsForEngineeringFilters {
-  departmentId?: string
+  unitId?: string
   assignedEngineerId?: string
   status?: string
   dateFrom?: string
@@ -2093,43 +2107,47 @@ export async function getRequestsForEngineering(filters?: GetRequestsForEngineer
     throw new Error('Only engineering users can access engineering requests')
   }
 
-  // Build where clause
-  const whereClause: any = {
+  const visibilityWhere = await buildRequestVisibilityWhere(createRequestVisibilityDb(prisma), {
+    userId: user.id,
+    includeArchived: false,
+  })
+  const engineeringFilters: Prisma.requestsWhereInput = {
     status: {
       in: ['SentToEngineer', 'DesignCostEstimationApproval'],
     },
-    isDeleted: false,
-    isArchived: false,
   }
 
-  // Apply filters
   if (filters) {
-    if (filters.departmentId) {
-      whereClause.departmentId = filters.departmentId
+    if (filters.unitId) {
+      const units = await loadOrganizationUnitNodes()
+      engineeringFilters.organizationUnitId = {
+        in: descendantUnitIds(units, filters.unitId),
+      }
     }
     if (filters.assignedEngineerId) {
-      whereClause.engineerAssignments = {
+      engineeringFilters.engineerAssignments = {
         some: {
           engineerId: filters.assignedEngineerId,
         },
       }
     }
     if (filters.status) {
-      whereClause.status = filters.status
+      engineeringFilters.status = filters.status as never
     }
     if (filters.dateFrom || filters.dateTo) {
-      whereClause.createdAt = {}
+      const createdAt: Prisma.DateTimeFilter = {}
       if (filters.dateFrom) {
-        whereClause.createdAt.gte = new Date(filters.dateFrom)
+        createdAt.gte = new Date(filters.dateFrom)
       }
       if (filters.dateTo) {
         const endDate = new Date(filters.dateTo)
         endDate.setHours(23, 59, 59, 999)
-        whereClause.createdAt.lte = endDate
+        createdAt.lte = endDate
       }
+      engineeringFilters.createdAt = createdAt
     }
     if (filters.search) {
-      whereClause.OR = [
+      engineeringFilters.OR = [
         { title: { contains: filters.search, mode: 'insensitive' } },
         { description: { contains: filters.search, mode: 'insensitive' } },
         { id: { contains: filters.search, mode: 'insensitive' } },
@@ -2139,9 +2157,9 @@ export async function getRequestsForEngineering(filters?: GetRequestsForEngineer
   }
 
   const requests = await prisma.requests.findMany({
-    where: whereClause,
+    where: { AND: [visibilityWhere, engineeringFilters] },
     include: {
-      department: {
+      organizationUnit: {
         select: {
           name: true,
         },
@@ -2205,16 +2223,16 @@ export async function resubmitRequest(input: {
     throw new Error('Unauthorized')
   }
 
-  // Get request with approvals
+  // Get request with approvals. Rejection history counts only while it
+  // belongs to the current attempt: superseded NEW rows are display history,
+  // never resubmission authorization (I3).
   const request = await prisma.requests.findUnique({
     where: { id: input.requestId },
     include: {
-      approvals: true,
-      requester: {
-        include: {
-          department: true,
-        },
+      approvals: {
+        where: { OR: [...CURRENT_INSTANCE_ROW_FILTER] },
       },
+      requester: true,
     },
   })
 
@@ -2240,6 +2258,32 @@ export async function resubmitRequest(input: {
     throw new Error(
       'Request can only be resubmitted during department approval phase'
     )
+  }
+
+  const resubmitAction = evaluateRequestAction('RESUBMIT_REQUEST', {
+    actor: { id: userId, role: '', isActive: true, assignmentUnitId: null },
+    request: {
+      requesterId: request.requesterId,
+      organizationUnitId: request.organizationUnitId,
+      status: request.status,
+    },
+    canView: true,
+    approval: null,
+    assignedEngineer: false,
+    existingActionDecisions: {
+      RESUBMIT_REQUEST: existingResubmitRequestDecision({
+        actorId: userId,
+        requesterId: request.requesterId,
+        status: request.status,
+        hasRejection,
+      }),
+    },
+  })
+  if (!resubmitAction.allowed) {
+    if (resubmitAction.reason === 'NOT_OWNER') {
+      throw new Error('Only the requester can resubmit this request')
+    }
+    throw new Error('Request can only be resubmitted during department approval phase')
   }
 
   // Validate optional updates
@@ -2275,8 +2319,12 @@ export async function resubmitRequest(input: {
     throw new Error('An inline image session id is only allowed when updating the description')
   }
 
-  // Perform resubmit in transaction
-  const result = await prisma.$transaction(async (tx) => {
+  // Perform resubmit in transaction. NEW resubmission transactions run under
+  // the engine's SERIALIZABLE isolation; serialization failures (including
+  // commit-time ones) translate to ApprovalEngineConflictError at this
+  // boundary. Legacy/shadow keep default isolation and error behavior.
+  const result = await prisma.$transaction(
+    async (tx) => {
     // The same-status guarded update locks the request row and requires the
     // rejected approval to still exist. If cancellation committed first, the
     // status no longer matches; if resubmission removed the rejection first,
@@ -2304,12 +2352,30 @@ export async function resubmitRequest(input: {
       })
     }
 
-    // Delete all existing approvals
-    await tx.request_approvals.deleteMany({
-      where: {
+    const attempt = await createRequestApprovalAttempt(
+      createCleanStartPhaseAttemptTx(tx as unknown as CleanStartAttemptStore),
+      { requestId: input.requestId, phase: 'REQUEST', originUserId: userId },
+    )
+    if (attempt.statusChange) {
+      await updateRequestStatusExpecting(tx, {
         requestId: input.requestId,
-      },
-    })
+        expectedStatuses: ['ImprovementRequest'],
+        data: { status: attempt.statusChange.to },
+        actionLabel: 'resubmit request',
+      })
+      await tx.request_activities.create({
+        data: {
+          requestId: input.requestId,
+          userId,
+          action: 'status_changed',
+          fromStatus: attempt.statusChange.from,
+          toStatus: attempt.statusChange.to,
+          comments: attempt.completedWithoutSteps
+            ? 'Auto-completed: NO_ELIGIBLE_APPROVAL_STEPS (no eligible approval steps)'
+            : 'Auto-approved by position ceiling',
+        },
+      })
+    }
 
     // Log resubmit activity
     await tx.request_activities.create({
@@ -2325,12 +2391,17 @@ export async function resubmitRequest(input: {
     return tx.requests.findUniqueOrThrow({
       where: { id: input.requestId },
     })
+    },
+    { isolationLevel: APPROVAL_ENGINE_TRANSACTION_ISOLATION },
+  )
+  .catch((error: unknown) => {
+    if (error instanceof ApprovalEngineConflictError) throw error
+    const code = (error as { code?: unknown })?.code
+    if (code === 'P2034' || code === '40001') {
+      throw new ApprovalEngineConflictError()
+    }
+    throw error
   })
-
-  // Create fresh approval chain
-  const userLevel = request.requester.level || 1
-  const departmentId = request.requester.departmentId!
-  await createApprovalChain(input.requestId, departmentId, userLevel, userId)
 
   revalidateRequestViews()
 
@@ -2516,7 +2587,7 @@ export async function getAllRequestsForRetention(includeArchived: boolean = true
       requester: {
         select: { name: true, email: true },
       },
-      department: {
+      organizationUnit: {
         select: { name: true },
       },
     },

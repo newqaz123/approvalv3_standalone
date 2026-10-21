@@ -16,7 +16,7 @@ import {
   deleteInlineImageFile,
   writeInlineImageFile,
 } from '@/lib/inline-images/storage'
-import { canUserViewRequest } from '@/lib/request-access'
+import { canUserViewRequest } from '@/lib/request-visibility/scope'
 
 export const INLINE_IMAGE_EXPIRY_MS = 24 * 60 * 60 * 1000
 const DEFAULT_CLEANUP_LIMIT = 100

@@ -9,6 +9,7 @@ import { buildRetentionBackupEntries } from '@/lib/retention-policy'
 const MAX_REQUESTS = 10
 
 export async function POST(request: NextRequest) {
+  // Privileged admin retention backup: ordinary list exclusions are not applied.
   const adminId = await requireAdmin()
   if (!adminId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })

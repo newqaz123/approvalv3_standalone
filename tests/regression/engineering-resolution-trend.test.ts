@@ -359,17 +359,12 @@ describe('final approval rejection rework producer contract', () => {
   it('rejectFinalApproval logs an atomic FinalApproval -> SentToEngineer status_changed activity', () => {
     const source = read('src/server-actions/solutions.ts')
 
-    // Locate the rejectFinalApproval transaction body.
     const fn = source.match(/export async function rejectFinalApproval[\s\S]*?\n\}\n/)
     assert.ok(fn, 'rejectFinalApproval must exist')
     const body = fn[0]
 
-    // The rejection audit stays.
     assert.match(body, /action: 'final_approval_rejected'/)
 
-    // The reopened cycle is visible to analytics via a status_changed
-    // activity carrying toStatus SentToEngineer, written with the same
-    // transaction client (tx) as the status update itself.
     const statusChanged = body.match(
       /tx\.request_activities\.create\(\{[\s\S]*?action: 'status_changed'\s*[\s\S]*?toStatus: RequestStatus\.SentToEngineer[\s\S]*?\}\)/,
     )
@@ -383,9 +378,9 @@ describe('final approval rejection rework producer contract', () => {
       'the reopened cycle must record fromStatus FinalApproval',
     )
 
-    // Both writes stay inside one transaction (tx, not prisma).
+    // L10: the status write is the expected-status guard on the tx client.
     const statusUpdate = body.match(
-      /tx\.requests\.update\(\{[\s\S]*?status: RequestStatus\.SentToEngineer[\s\S]*?\}\)/,
+      /updateRequestStatusExpecting\(tx, \{[\s\S]*?expectedStatuses: \[RequestStatus\.FinalApproval\][\s\S]*?status: RequestStatus\.SentToEngineer[\s\S]*?\}\)/,
     )
     assert.ok(statusUpdate, 'status update must remain on the transaction client')
   })

@@ -11,8 +11,8 @@ export type DateRangePreset = '7days' | '30days' | '90days' | 'all'
 export interface AnalyticsFilters {
   /** Date range preset for filtering */
   dateRange: DateRangePreset
-  /** Optional department filter */
-  departmentId?: string
+  /** Optional organization unit filter (unit subtree) */
+  unitId?: string
   /** Optional status filter (pending, approved, rejected, etc.) */
   status?: string
   /** Optional requester filter */

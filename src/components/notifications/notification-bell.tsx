@@ -23,38 +23,46 @@ export function NotificationBell({ userId }: NotificationBellProps) {
   const [unreadCount, setUnreadCount] = useState(0)
   const [isOpen, setIsOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
-  const [hasLoadedNotifications, setHasLoadedNotifications] = useState(false)
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
 
-  // Fetch notifications on mount
+  // Fetch once per user, then refresh in place. A loaded-flag dependency
+  // restarts this effect, fetches again, and replaces the open list while a
+  // click is in progress.
   useEffect(() => {
+    let cancelled = false
+    let loaded = false
+
     async function fetchNotifications() {
-      if (!hasLoadedNotifications) {
-        setIsLoading(true)
-      }
+      if (!loaded) setIsLoading(true)
       try {
         const [notifs, count] = await Promise.all([
           getNotifications(userId, 20),
           getUnreadCount(userId),
         ])
+        if (cancelled) return
         setNotifications(notifs)
         setUnreadCount(count)
-        setHasLoadedNotifications(true)
+        loaded = true
       } catch (error) {
+        if (cancelled) return
         console.error('Failed to fetch notifications:', error)
         toast.error('Failed to load notifications')
       } finally {
-        setIsLoading(false)
+        if (!cancelled) setIsLoading(false)
       }
     }
 
-    fetchNotifications()
+    void fetchNotifications()
 
-    // Refresh every 30 seconds
-    const interval = setInterval(fetchNotifications, 30000)
-    return () => clearInterval(interval)
-  }, [userId, hasLoadedNotifications])
+    const interval = setInterval(() => {
+      void fetchNotifications()
+    }, 30000)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [userId])
 
   const handleMarkAsRead = async (notificationId: string) => {
     try {

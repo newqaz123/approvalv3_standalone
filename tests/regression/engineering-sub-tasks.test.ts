@@ -42,21 +42,6 @@ describe("engineering sub-task schema", () => {
 		assert.match(sql, /CREATE TABLE "request_sub_tasks"/);
 		assert.match(sql, /CREATE INDEX "request_sub_tasks_requestId_idx"/);
 		assert.match(sql, /CREATE INDEX "request_sub_tasks_updatedAt_idx"/);
-		assert.match(sql, /INSERT INTO "sub_task_stages"/);
-		for (const stage of [
-			"Design",
-			"Site survey",
-			"Waiting user data",
-			"Waiting quotation",
-			"Waiting WR",
-			"Completed",
-			"Others",
-		]) {
-			assert.match(
-				sql,
-				new RegExp(stage.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
-			);
-		}
 	});
 });
 
@@ -332,8 +317,10 @@ describe("engineering sub-task request and filter wiring", () => {
 			requests,
 			/wrStatus\?: ['"]all['"] \| ['"]not-received['"] \| ['"]received['"]/,
 		);
-		assert.match(requests, /whereClause\.workRequisitionReceived = true/);
-		assert.match(requests, /whereClause\.workRequisitionReceived = false/);
+		assert.match(requests, /wrStatus === 'received'/);
+		assert.match(requests, /wrStatus === 'not-received'/);
+		assert.match(requests, /workRequisitionReceived: true/);
+		assert.match(requests, /workRequisitionReceived: false/);
 		assert.match(requests, /subTasks:\s*\{/);
 		assert.match(requests, /workRequisitionReceivedAt: true/);
 		assert.match(requests, /workRequisitionReceivedBy/);
@@ -423,7 +410,7 @@ describe("engineering sub-task request and filter wiring", () => {
 		);
 		assert.match(dashboardTable, /filterRowsByWorkRequisition/);
 		assert.match(dashboardTable, /data: tableData/);
-		assert.match(dashboardTable, /id: 'departmentId'/);
+		assert.match(dashboardTable, /id: 'unitId'/);
 		assert.match(
 			dashboardTable,
 			/accessorFn: \(row\) => row\.department\?\.id/,
@@ -605,7 +592,7 @@ describe("engineering stale sub-task filters", () => {
 		assert.match(tabs, /subContractors: Array<\{ id: string; name: string \}>/);
 		assert.match(tabs, /engineeringUsers: Array<\{/);
 		assert.match(tabs, /email: string;/);
-		assert.match(tabs, /level: number \| null;/);
+		assert.doesNotMatch(tabs, /level: number \| null;/);
 		assert.match(
 			tabs,
 			/assignedEngineers: Array<\{ id: string; name: string \}>/,

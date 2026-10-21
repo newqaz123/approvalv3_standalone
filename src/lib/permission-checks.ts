@@ -1,40 +1,47 @@
 /**
- * Permission check utilities for conditional modal/button visibility
- * Based on user roles, departments, and request status
+ * Assignment-based action policy helpers (Plan B Task 10).
+ * Solution work is A5 canWorkOnSolutions (unit flag inherited by descendants).
+ * Final initiation is an active assignment in the request origin unit
+ * only (ancestor units are not eligible).
+ * Request submission is every active assignment. Admin is separate.
+ * Approval is chain-only — there is no level helper.
+ * The engineering ROLE remains only for engineer-assignment / sub-task
+ * administration, never for solution-work eligibility or visibility.
  */
+import type { OrganizationUnitNode } from '@/lib/organization/model'
+import { canWorkOnSolutions } from '@/lib/solution-eligibility'
+
+export function canSubmitSolutionWork(input: {
+  isActive: boolean
+  assignmentUnitId: string | null
+  units: readonly OrganizationUnitNode[]
+}): boolean {
+  if (!input.isActive) return false
+  return canWorkOnSolutions(input.units, input.assignmentUnitId)
+}
+
+export function canInitiateFinalApproval(input: {
+  isActive: boolean
+  assignmentUnitId: string | null
+  requestOriginUnitId: string
+  units: readonly OrganizationUnitNode[]
+}): boolean {
+  if (!input.isActive) return false
+  if (input.assignmentUnitId === null) return false
+  if (input.requestOriginUnitId === '') return false
+  // Owner decision (H6): only an active assignment in the request ORIGIN
+  // unit may initiate Final approval; ancestor units are not eligible.
+  return input.assignmentUnitId === input.requestOriginUnitId
+}
 
 /**
- * Check if user can submit a solution (Engineering department only)
+ * Existing assignEngineers role guard. Assignment stays role-based
+ * (`user.role === 'engineering'`), not PIC-only.
  */
-export function canUserSubmitSolution(
-  userDepartmentType: string | null | undefined,
+export function canUserAssignEngineers(
   userRole: string | null | undefined
 ): boolean {
-  return userDepartmentType === 'ENGINEERING' || userRole === 'engineering'
-}
-
-/**
- * Check if user can submit final approval (requester's department only)
- */
-export function canUserSubmitFinalApproval(
-  userId: string,
-  requesterId: string,
-  userDepartmentId: string | null | undefined,
-  requesterDepartmentId: string | null | undefined
-): boolean {
-  // User must be from the same department as the original requester
-  return userDepartmentId === requesterDepartmentId && userDepartmentId != null
-}
-
-/**
- * Check if user can approve at a specific level
- */
-export function canUserApproveAtLevel(
-  userLevel: number | null | undefined,
-  requiredLevel: number
-): boolean {
-  if (!userLevel) return false
-  return userLevel >= requiredLevel
+  return userRole === 'engineering'
 }
 
 /**
@@ -141,17 +148,19 @@ export function isUserAdmin(userRole: string | null | undefined): boolean {
 }
 
 /**
- * Get available actions for a user on a specific request
+ * Get available actions for a user on a specific request.
+ * Admin is application administration, not a workflow blanket.
+ * Approval is chain-only. Solution work is the unit flag. Submit is any
+ * active assignment.
  */
-export function getAvailableActions(
-  status: string,
-  userRole: string | null | undefined,
-  userDepartmentType: string | null | undefined,
-  userDepartmentId: string | null | undefined,
-  requesterDepartmentId: string | null | undefined,
-  userLevel: number | null | undefined,
+export function getAvailableActions(input: {
+  status: string
+  isActive: boolean
+  assignmentUnitId: string | null
+  units: readonly OrganizationUnitNode[]
+  requestOriginUnitId: string
   canApprove: boolean
-): {
+}): {
   canSubmitRequest: boolean
   canSubmitSolution: boolean
   canReviewRequest: boolean
@@ -160,52 +169,16 @@ export function getAvailableActions(
   canReviewFinalApproval: boolean
   canExportPDF: boolean
 } {
-  const isAdmin = isUserAdmin(userRole)
-  const isEngineering = canUserSubmitSolution(userDepartmentType, userRole)
-  const isRequesterDept = userDepartmentId === requesterDepartmentId
+  const canSolution = canSubmitSolutionWork(input)
+  const canFinal = canInitiateFinalApproval(input)
 
   return {
-    canSubmitRequest: isAdmin || (userDepartmentType !== 'ENGINEERING'),
-    canSubmitSolution: isAdmin || (isEngineering && status === 'SentToEngineer'),
-    canReviewRequest: isAdmin || (canApprove && status === 'ImprovementRequest'),
-    canReviewSolution: isAdmin || (canApprove && status === 'DesignCostEstimationApproval'),
-    canSubmitFinalApproval: isAdmin || (isRequesterDept && status === 'SendBackToRequester'),
-    canReviewFinalApproval: isAdmin || (canApprove && status === 'FinalApproval'),
-    canExportPDF: status === 'Completed',
-  }
-}
-
-/**
- * Determine if a button should be visible based on user permissions
- */
-export function shouldShowActionButton(
-  action: 'submit-solution' | 'submit-final-approval' | 'approve' | 'reject' | 'export-pdf',
-  userRole: string | null | undefined,
-  userDepartmentType: string | null | undefined,
-  userDepartmentId: string | null | undefined,
-  requesterDepartmentId: string | null | undefined,
-  status: string,
-  canApprove: boolean
-): boolean {
-  const isAdmin = isUserAdmin(userRole)
-  const isEngineering = canUserSubmitSolution(userDepartmentType, userRole)
-  const isRequesterDept = userDepartmentId === requesterDepartmentId
-
-  switch (action) {
-    case 'submit-solution':
-      return isAdmin || (isEngineering && status === 'SentToEngineer')
-    
-    case 'submit-final-approval':
-      return isAdmin || (isRequesterDept && status === 'SendBackToRequester')
-    
-    case 'approve':
-    case 'reject':
-      return isAdmin || canApprove
-    
-    case 'export-pdf':
-      return status === 'Completed'
-    
-    default:
-      return false
+    canSubmitRequest: input.isActive && input.assignmentUnitId !== null,
+    canSubmitSolution: canSolution && input.status === 'SentToEngineer',
+    canReviewRequest: input.canApprove && input.status === 'ImprovementRequest',
+    canReviewSolution: input.canApprove && input.status === 'DesignCostEstimationApproval',
+    canSubmitFinalApproval: canFinal && input.status === 'SendBackToRequester',
+    canReviewFinalApproval: input.canApprove && input.status === 'FinalApproval',
+    canExportPDF: input.status === 'Completed',
   }
 }

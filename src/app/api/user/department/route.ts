@@ -1,44 +1,54 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
+import { unitPathNames } from '@/lib/unit-labels'
+import type { OrganizationUnitNode } from '@/lib/organization/model'
+import { createSolutionWorkActorDb, isActorSolutionWorker } from '@/lib/solution-work-actor'
 
 export async function GET() {
   try {
     const session = await auth()
-    
+
     if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const user = await prisma.user.findUnique({
-      where: { id: session.user.id },
-      select: {
-        departmentId: true,
-        department: {
-          select: {
-            id: true,
-            name: true,
-            type: true,
-          },
-        },
-      },
+    const assignment = await prisma.organization_assignments.findFirst({
+      where: { userId: session.user.id, isActive: true },
+      select: { unitId: true },
     })
 
-    if (!user || !user.department) {
-      return NextResponse.json({ 
+    if (!assignment) {
+      return NextResponse.json({
         id: null,
         name: null,
-        type: null,
+        unitPathNames: [],
+        canWorkOnSolutions: false,
       })
     }
 
+    const units = await prisma.organization_units.findMany({
+      select: {
+        id: true,
+        name: true,
+        parentId: true,
+        isActive: true,
+        shareRequests: true,
+        canWorkOnSolutions: true,
+        managerUserId: true,
+      },
+    }) as OrganizationUnitNode[]
+    const names = unitPathNames(units, assignment.unitId)
+
     return NextResponse.json({
-      id: user.department.id,
-      name: user.department.name,
-      type: user.department.type,
+      id: assignment.unitId,
+      name: names[0] ?? null,
+      unitPathNames: names,
+      // Drives the Engineering navigation entry: unit flag, not user role.
+      canWorkOnSolutions: await isActorSolutionWorker(createSolutionWorkActorDb(prisma), session.user.id),
     })
   } catch (error) {
-    console.error('Failed to fetch user department:', error)
+    console.error('Failed to fetch user unit:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

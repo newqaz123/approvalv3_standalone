@@ -104,26 +104,16 @@ describe('profile and approval-chain user menu', () => {
 
     assert.match(profilePage, /getCurrentUserProfile/)
     assert.match(profilePage, /ProfileForm/)
-    assert.match(approvalChainPage, /getCurrentUserApprovalChain/)
-    assert.match(approvalChainPage, /HierarchyView/)
-    assert.match(approvalChainPage, /readOnly/)
+    assert.doesNotMatch(approvalChainPage, /getCurrentUserApprovalChain/)
+    assert.doesNotMatch(approvalChainPage, /HierarchyView/)
+    assert.match(approvalChainPage, /published organization routes/)
   })
 
-  it('builds the current user approval chain with external department approvers included', () => {
-    const hierarchyAction = readFileSync('src/server-actions/hierarchy.ts', 'utf8')
-
-    assert.match(hierarchyAction, /export async function getCurrentUserApprovalChain\b/)
-
-    const actionBody = hierarchyAction.slice(
-      hierarchyAction.indexOf('export async function getCurrentUserApprovalChain'),
-      hierarchyAction.indexOf('/**', hierarchyAction.indexOf('export async function getCurrentUserApprovalChain') + 1)
-    )
-
-    assert.match(actionBody, /session\.user\.id/)
-    assert.match(actionBody, /departmentApprovers/)
-    assert.match(actionBody, /isExternal:\s*true/)
-    assert.match(actionBody, /processedUserIds/)
-    assert.doesNotMatch(actionBody, /admin access required/i)
-    assert.doesNotMatch(actionBody, /role !== 'admin'/)
+  it('C1: approval-chain is informational and does not load legacy hierarchy actions', () => {
+    assert.equal(existsSync('src/server-actions/hierarchy.ts'), false)
+    const approvalChainPage = readFileSync('src/app/(dashboard)/approval-chain/page.tsx', 'utf8')
+    assert.match(approvalChainPage, /organization_assignments/)
+    assert.match(approvalChainPage, /unitPathNames/)
+    assert.doesNotMatch(approvalChainPage, /from '@\/server-actions\/hierarchy'/)
   })
 })

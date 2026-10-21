@@ -4,6 +4,7 @@
  */
 
 import { format } from 'date-fns'
+import { isCurrentInstanceApproval } from '@/lib/approval-engine/current-instance'
 
 // Types for the new modal components
 export interface ModalSubmitter {
@@ -60,6 +61,7 @@ export interface ModalSolution {
 
 type ApprovalDisplaySource = {
   requiredLevel?: number | null
+  requiredPositionName?: string | null
   approver?: {
     name: string | null
   } | null
@@ -84,6 +86,17 @@ function getApprovalDisplayName(approval: ApprovalDisplaySource): string {
   }
 
   return approval.requiredLevel ? `Level ${approval.requiredLevel} approver` : 'Unassigned approver'
+}
+
+function getApprovalDisplayRole(approval: {
+  order: number
+  isCustomChain: boolean
+  requiredLevel?: number | null
+  requiredPositionName?: string | null
+}): string {
+  if (approval.isCustomChain) return `Custom Level ${approval.order}`
+  if (approval.requiredPositionName) return approval.requiredPositionName
+  return approval.requiredLevel ? `Level ${approval.requiredLevel}` : 'Approval step'
 }
 
 /**
@@ -138,6 +151,7 @@ export function transformApprovalsToStages(
   approvals: Array<{
     id: string
     requiredLevel: number
+    requiredPositionName?: string | null
     order: number
     status: string
     comments?: string | null
@@ -181,9 +195,7 @@ export function transformApprovalsToStages(
           return {
             id: approval.id,
             name: approverName,
-            role: approval.isCustomChain 
-              ? `Custom Level ${approval.order}` 
-              : `Level ${approval.requiredLevel}`,
+            role: getApprovalDisplayRole(approval),
             status: approval.status as 'submitted' | 'approved' | 'pending' | 'rejected',
             comment: approval.comments || 
                     (approval.status === 'pending' ? 'Awaiting review' : 'No comment'),
@@ -310,6 +322,7 @@ export function transformRequestToModalData(request: {
   approvals: Array<{
     id: string
     requiredLevel: number
+    requiredPositionName?: string | null
     order: number
     status: string
     comments?: string | null
@@ -317,6 +330,8 @@ export function transformRequestToModalData(request: {
     createdAt: Date
     isCustomChain: boolean
     isFinalApproval: boolean
+    instanceId?: string | null
+    instance?: { supersededAt: Date | string | null } | null
     approver?: {
       name: string | null
       email: string
@@ -360,12 +375,15 @@ export function transformRequestToModalData(request: {
     approvals: Array<{
       id: string
       requiredLevel: number
+    requiredPositionName?: string | null
       order: number
       status: string
       comments?: string | null
       approvedAt?: Date | null
       createdAt: Date
       isCustomChain: boolean
+      instanceId?: string | null
+      instance?: { supersededAt: Date | string | null } | null
       approver?: {
         name: string | null
         email: string
@@ -389,8 +407,9 @@ export function transformRequestToModalData(request: {
   let rejectionInfo = undefined
   
   if (request.status === 'ImprovementRequest' || request.status === 'RequestRejected') {
-    // Show request rejection
-    const rejectedRequestApproval = requestApprovals.find(a => a.status === 'rejected')
+    // Show request rejection from the CURRENT attempt only. A superseded
+    // rejection is history; hiding Approve/Reject behind it blocks resubmit.
+    const rejectedRequestApproval = requestApprovals.find(a => a.status === 'rejected' && isCurrentInstanceApproval(a))
     if (rejectedRequestApproval) {
       rejectionInfo = {
         reason: rejectedRequestApproval.comments || 'No reason provided',
@@ -400,9 +419,9 @@ export function transformRequestToModalData(request: {
     }
   } else if (request.status === 'SentToEngineer' || request.status === 'DesignCostEstimationApproval') {
     // Show solution rejection only if solution approvals are rejected
-    const rejectedSolutionApproval = solutionApprovals.find(a => a.status === 'rejected')
+    const rejectedSolutionApproval = solutionApprovals.find(a => a.status === 'rejected' && isCurrentInstanceApproval(a))
     // Also check for final approval rejection that sent it back to engineering
-    const rejectedFinalApproval = finalApprovals.find(a => a.status === 'rejected')
+    const rejectedFinalApproval = finalApprovals.find(a => a.status === 'rejected' && isCurrentInstanceApproval(a))
     const rejection = rejectedSolutionApproval || rejectedFinalApproval
     if (rejection) {
       rejectionInfo = {
@@ -413,7 +432,7 @@ export function transformRequestToModalData(request: {
     }
   } else if (request.status === 'FinalApproval' || request.status === 'FinalRejected') {
     // Show final approval rejection
-    const rejectedFinalApproval = finalApprovals.find(a => a.status === 'rejected')
+    const rejectedFinalApproval = finalApprovals.find(a => a.status === 'rejected' && isCurrentInstanceApproval(a))
     if (rejectedFinalApproval) {
       rejectionInfo = {
         reason: rejectedFinalApproval.comments || 'No reason provided',
@@ -456,9 +475,7 @@ export function transformRequestToModalData(request: {
         return {
           id: approval.id,
           name: approverName,
-          role: approval.isCustomChain 
-            ? `Custom Level ${approval.order}` 
-            : `Level ${approval.requiredLevel}`,
+          role: getApprovalDisplayRole(approval),
           status: approval.status as 'submitted' | 'approved' | 'pending' | 'rejected',
           comment: approval.comments || 
                   (approval.status === 'pending' ? 'Awaiting review' : 'No comment'),
@@ -487,9 +504,7 @@ export function transformRequestToModalData(request: {
         return {
           id: approval.id,
           name: approverName,
-          role: approval.isCustomChain 
-            ? `Custom Level ${approval.order}` 
-            : `Level ${approval.requiredLevel}`,
+          role: getApprovalDisplayRole(approval),
           status: approval.status as 'submitted' | 'approved' | 'pending' | 'rejected',
           comment: approval.comments || 
                   (approval.status === 'pending' ? 'Awaiting review' : 'No comment'),
@@ -518,9 +533,7 @@ export function transformRequestToModalData(request: {
         return {
           id: approval.id,
           name: approverName,
-          role: approval.isCustomChain 
-            ? `Custom Level ${approval.order}` 
-            : `Level ${approval.requiredLevel}`,
+          role: getApprovalDisplayRole(approval),
           status: approval.status as 'submitted' | 'approved' | 'pending' | 'rejected',
           comment: approval.comments || 
                   (approval.status === 'pending' ? 'Awaiting review' : 'No comment'),

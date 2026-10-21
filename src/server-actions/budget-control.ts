@@ -13,6 +13,8 @@ import {
   normalizeBudgetCode,
 } from '@/lib/budget-control'
 import type { BudgetMonitorData, BudgetMonitorFilters, BudgetRequestRecord } from '@/types/budget'
+import { buildRequestVisibilityWhere, createRequestVisibilityDb } from '@/lib/request-visibility/scope'
+import type { Prisma } from '@prisma/client'
 
 const MAX_BUDGET_MONEY_AMOUNT = 9999999999999.99
 
@@ -45,7 +47,7 @@ const requiredMoneySchema = z.preprocess((value) => {
 const filtersSchema = z.object({
   budgetCodeSearch: z.string().optional(),
   requestSearch: z.string().optional(),
-  departmentId: z.string().optional(),
+  unitId: z.string().optional(),
   status: z.string().optional(),
   dateFrom: z.string().optional(),
   dateTo: z.string().optional(),
@@ -56,7 +58,7 @@ const assignSchema = z.object({
   budgetCodeId: z.string().min(1).optional(),
   budgetCode: z.string().min(1).optional(),
   budgetAmount: moneySchema,
-  departmentId: z.string().min(1).nullable().optional(),
+  unitId: z.string().min(1).nullable().optional(),
 }).superRefine((data, ctx) => {
   if (Boolean(data.budgetCodeId) === Boolean(data.budgetCode)) {
     ctx.addIssue({
@@ -76,14 +78,14 @@ const budgetAmountSchema = z.object({
   budgetCodeId: z.string().min(1),
   name: z.string().trim().min(1),
   budgetAmount: requiredMoneySchema,
-  departmentId: z.string().min(1).nullable().optional(),
+  unitId: z.string().min(1).nullable().optional(),
 })
 
 const createBudgetCodeSchema = z.object({
   budgetCode: z.string().min(1),
   name: z.string().trim().min(1),
   budgetAmount: requiredMoneySchema,
-  departmentId: z.string().min(1).nullable().optional(),
+  unitId: z.string().min(1).nullable().optional(),
 })
 
 const pasteBudgetCodesSchema = z.object({
@@ -94,20 +96,11 @@ const pasteBudgetCodesSchema = z.object({
   })).min(1),
 })
 
-function buildVisibleRequestWhere(user: NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>) {
-  if (user.role === 'admin' || user.department?.type === 'ENGINEERING') {
-    return { isDeleted: false, isArchived: false }
-  }
-
-  return {
-    isDeleted: false,
-    isArchived: false,
-    OR: [
-      { departmentId: user.departmentId ?? undefined },
-      { approvals: { some: { requiredApproverId: user.id } } },
-      { solutions: { some: { approvals: { some: { requiredApproverId: user.id } } } } },
-    ],
-  }
+async function buildVisibleRequestWhere(user: NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>): Promise<Prisma.requestsWhereInput> {
+  return buildRequestVisibilityWhere(createRequestVisibilityDb(prisma), {
+    userId: user.id,
+    includeArchived: false,
+  })
 }
 
 function applyBudgetFilters(where: any, filters: BudgetMonitorFilters) {
@@ -137,7 +130,7 @@ function mapBudgetCodeSummary(budgetCode: any): NonNullable<BudgetRequestRecord[
     displayCode: budgetCode.displayCode,
     name: typeof budgetCode.name === 'string' ? budgetCode.name : null,
     budgetAmount: decimalToNumber(budgetCode.budgetAmount),
-    department: budgetCode.department ? { id: budgetCode.department.id, name: budgetCode.department.name } : null,
+    department: budgetCode.organizationUnit ? { id: budgetCode.organizationUnit.id, name: budgetCode.organizationUnit.name } : null,
   }
 }
 
@@ -149,7 +142,7 @@ function mapBudgetRequest(request: any): BudgetRequestRecord {
     title: request.title,
     status: request.status,
     createdAt: request.createdAt,
-    department: request.department ? { id: request.department.id, name: request.department.name } : null,
+    department: request.organizationUnit ? { id: request.organizationUnit.id, name: request.organizationUnit.name } : null,
     budgetCode: request.budgetCode ? mapBudgetCodeSummary(request.budgetCode) : null,
     projectEstimateCost: decimalToNumber(request.projectEstimateCost),
     engineeringEstimateCost: decimalToNumber(latestSolution?.costEstimate),
@@ -176,7 +169,7 @@ function mergeBudgetCodes(
     displayCode: string
     name?: string | null
     budgetAmount: unknown
-    department: { id: string; name: string } | null
+    organizationUnit: { id: string; name: string } | null
   }>,
 ) {
   const budgetCodesById = new Map<string, NonNullable<BudgetRequestRecord['budgetCode']>>()
@@ -198,8 +191,7 @@ async function requireVisibleRequest(requestId: string) {
 
   const request = await prisma.requests.findFirst({
     where: {
-      id: requestId,
-      ...buildVisibleRequestWhere(user),
+      AND: [{ id: requestId }, await buildVisibleRequestWhere(user)],
     },
     select: { id: true },
   })
@@ -213,7 +205,8 @@ export async function getBudgetMonitorData(input: BudgetMonitorFilters = {}): Pr
   if (!user) throw new Error('Unauthorized')
 
   const filters = filtersSchema.parse(input)
-  const where = applyBudgetFilters(buildVisibleRequestWhere(user), filters)
+  const visibilityWhere = await buildVisibleRequestWhere(user)
+  const where = applyBudgetFilters({ AND: [visibilityWhere] }, filters)
   const visibleWhere = { ...where, status: where.status ?? { not: 'Cancelled' } }
 
   const [requests, departments, creatorBudgetCodes] = await Promise.all([
@@ -225,7 +218,7 @@ export async function getBudgetMonitorData(input: BudgetMonitorFilters = {}): Pr
         status: true,
         createdAt: true,
         projectEstimateCost: true,
-        department: { select: { id: true, name: true } },
+        organizationUnit: { select: { id: true, name: true } },
         budgetCode: {
           select: {
             id: true,
@@ -233,7 +226,7 @@ export async function getBudgetMonitorData(input: BudgetMonitorFilters = {}): Pr
             displayCode: true,
             name: true,
             budgetAmount: true,
-            department: { select: { id: true, name: true } },
+            organizationUnit: { select: { id: true, name: true } },
           },
         },
         solutions: {
@@ -244,7 +237,11 @@ export async function getBudgetMonitorData(input: BudgetMonitorFilters = {}): Pr
       },
       orderBy: { createdAt: 'desc' },
     }),
-    prisma.departments.findMany({ select: { id: true, name: true }, orderBy: { name: 'asc' } }),
+    prisma.organization_units.findMany({
+      where: { isActive: true },
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' },
+    }),
     prisma.budget_codes.findMany({
       where: { createdById: user.id },
       select: {
@@ -253,7 +250,7 @@ export async function getBudgetMonitorData(input: BudgetMonitorFilters = {}): Pr
         displayCode: true,
         name: true,
         budgetAmount: true,
-        department: { select: { id: true, name: true } },
+        organizationUnit: { select: { id: true, name: true } },
       },
       orderBy: { displayCode: 'asc' },
     }),
@@ -262,16 +259,16 @@ export async function getBudgetMonitorData(input: BudgetMonitorFilters = {}): Pr
   let mapped = requests.map(mapBudgetRequest)
   const assignedRequests = mapped.filter((request) => request.budgetCode)
   let budgetRequests = assignedRequests
-  if (filters.departmentId) {
-    budgetRequests = budgetRequests.filter((request) => request.budgetCode?.department?.id === filters.departmentId)
+  if (filters.unitId) {
+    budgetRequests = budgetRequests.filter((request) => request.budgetCode?.department?.id === filters.unitId)
   }
   if (filters.budgetCodeSearch) {
     budgetRequests = budgetRequests.filter((request) => matchesBudgetMonitorSearch(request, filters.budgetCodeSearch!))
   }
 
   let remainingRequests = mapped.filter((request) => !request.budgetCode)
-  if (filters.departmentId) {
-    remainingRequests = remainingRequests.filter((request) => request.department?.id === filters.departmentId)
+  if (filters.unitId) {
+    remainingRequests = remainingRequests.filter((request) => request.department?.id === filters.unitId)
   }
   if (filters.requestSearch) {
     const requestSearch = filters.requestSearch.toLowerCase()
@@ -281,8 +278,8 @@ export async function getBudgetMonitorData(input: BudgetMonitorFilters = {}): Pr
   }
 
   let pageRequests = mapped
-  if (filters.departmentId) {
-    pageRequests = pageRequests.filter((request) => request.department?.id === filters.departmentId)
+  if (filters.unitId) {
+    pageRequests = pageRequests.filter((request) => request.department?.id === filters.unitId)
   }
   if (filters.budgetCodeSearch) {
     pageRequests = pageRequests.filter((request) =>
@@ -291,8 +288,8 @@ export async function getBudgetMonitorData(input: BudgetMonitorFilters = {}): Pr
   }
 
   let budgetCodes = mergeBudgetCodes(mapped, creatorBudgetCodes)
-  if (filters.departmentId) {
-    budgetCodes = budgetCodes.filter((budgetCode) => budgetCode.department?.id === filters.departmentId)
+  if (filters.unitId) {
+    budgetCodes = budgetCodes.filter((budgetCode) => budgetCode.department?.id === filters.unitId)
   }
   if (filters.budgetCodeSearch) {
     budgetCodes = budgetCodes.filter((budgetCode) =>
@@ -332,7 +329,7 @@ export async function assignRequestToBudgetCode(input: z.infer<typeof assignSche
           code: normalizedCode,
           displayCode: data.budgetCode!.trim(),
           budgetAmount: data.budgetAmount ?? null,
-          departmentId: data.departmentId ?? null,
+          unitId: data.unitId ?? null,
           createdById: user.id,
         },
       })
@@ -373,8 +370,7 @@ export async function updateBudgetCodeAmount(input: z.infer<typeof budgetAmountS
 
   const visibleUsage = await prisma.requests.findFirst({
     where: {
-      ...buildVisibleRequestWhere(user),
-      budgetCodeId: data.budgetCodeId,
+      AND: [await buildVisibleRequestWhere(user), { budgetCodeId: data.budgetCodeId }],
     },
     select: { id: true },
   })
@@ -390,7 +386,7 @@ export async function updateBudgetCodeAmount(input: z.infer<typeof budgetAmountS
     data: {
       name: data.name,
       budgetAmount: data.budgetAmount,
-      ...(data.departmentId !== undefined ? { departmentId: data.departmentId } : {}),
+      ...(data.unitId !== undefined ? { unitId: data.unitId } : {}),
     },
   })
   revalidatePath('/budget-monitor')
@@ -412,7 +408,7 @@ export async function createBudgetCode(input: z.infer<typeof createBudgetCodeSch
         displayCode: data.budgetCode.trim(),
         name: data.name,
         budgetAmount: data.budgetAmount,
-        departmentId: data.departmentId ?? null,
+        unitId: data.unitId ?? null,
         createdById: user.id,
       },
     })
@@ -451,8 +447,7 @@ export async function pasteBudgetCodes(input: z.infer<typeof pasteBudgetCodesSch
 
     const visibleUsage = await prisma.requests.findFirst({
       where: {
-        ...buildVisibleRequestWhere(user),
-        budgetCodeId: existing.id,
+        AND: [await buildVisibleRequestWhere(user), { budgetCodeId: existing.id }],
       },
       select: { id: true },
     })

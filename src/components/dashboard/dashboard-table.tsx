@@ -116,7 +116,7 @@ export function DashboardTable({
     }
 
     if (externalFilters?.department) {
-      newFilters.push({ id: 'departmentId', value: externalFilters.department })
+      newFilters.push({ id: 'unitId', value: externalFilters.department })
     }
 
     if (externalFilters?.dateFrom || externalFilters?.dateTo) {
@@ -204,9 +204,9 @@ export function DashboardTable({
       cell: ({ row }) => row.original.requester?.name || '—',
     },
     {
-      id: 'departmentId',
+      id: 'unitId',
       accessorFn: (row) => row.department?.id ?? '',
-      header: 'Department',
+      header: 'Unit',
       cell: ({ row }) => row.original.department?.name || '—',
     },
     {

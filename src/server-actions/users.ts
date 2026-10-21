@@ -5,26 +5,21 @@ import prisma from '@/lib/prisma'
 import { requireAdmin } from '@/lib/auth'
 import { revalidatePath } from 'next/cache'
 import { auth } from '@/lib/auth-config'
-import { validateApprovalLevel } from '@/lib/approval-levels'
 
 export type UserRole = 'admin' | 'general_dept' | 'engineering'
 
 export interface CreateUserInput {
   name: string
   email: string
-  departmentId: string
   role: UserRole
   password?: string
-  level?: number | null
 }
 
 export interface UpdateUserInput {
   id: string
   name: string
   email: string
-  departmentId: string
-  role?: UserRole // Optional to allow manual override
-  level?: number | null
+  role?: UserRole
 }
 
 export type UserWithDepartment = {
@@ -33,10 +28,13 @@ export type UserWithDepartment = {
   email: string
   role: UserRole
   department: { id: string; name: string } | null
-  level: number | null
   isActive: boolean
   createdAt: Date
-  departmentApproverRoles?: { id: string; department: { id: string; name: string } }[]
+  organizationAssignment?: {
+    unitId: string
+    unitName: string
+    positionName: string
+  } | null
 }
 
 export type CurrentUserProfile = {
@@ -48,47 +46,89 @@ export type CurrentUserProfile = {
 }
 
 /**
+ * Every exported action here is an invocable Server Action and must abort
+ * when authorization fails. requireAdmin stays nullable for callers that
+ * inspect its result; this wrapper enforces denial before any read/write.
+ */
+async function requireAdminUser(): Promise<string> {
+  const adminUserId = await requireAdmin()
+  if (!adminUserId) {
+    throw new Error('Admin authorization is required for user actions')
+  }
+  return adminUserId
+}
+
+/**
  * Get all users with their department information
  */
 export async function getUsers() {
-  await requireAdmin()
+  await requireAdminUser()
 
   const users = await prisma.user.findMany({
     include: {
-      department: true,
-      departmentApproverRoles: {
+      organizationAssignments: {
+        where: { isActive: true },
         include: {
-          department: {
-            select: {
-              id: true,
-              name: true
-            }
-          }
-        }
-      }
+          unit: {
+            select: { id: true, name: true },
+          },
+          position: {
+            select: { name: true },
+          },
+        },
+        take: 1,
+      },
     },
     orderBy: {
       name: 'asc',
     },
   })
 
-  return users
+  return users.map((user) => {
+    const primary = user.organizationAssignments[0]
+    const { organizationAssignments, ...rest } = user
+    return {
+      ...rest,
+      department: primary ? { id: primary.unit.id, name: primary.unit.name } : null,
+      organizationAssignment: primary
+        ? {
+            unitId: primary.unit.id,
+            unitName: primary.unit.name,
+            positionName: primary.position.name,
+          }
+        : null,
+    }
+  })
 }
 
 /**
  * Get a single user by ID
  */
 export async function getUser(id: string) {
-  await requireAdmin()
+  await requireAdminUser()
 
   const user = await prisma.user.findUnique({
     where: { id },
     include: {
-      department: true,
+      organizationAssignments: {
+        where: { isActive: true },
+        include: {
+          unit: {
+            select: { id: true, name: true },
+          },
+        },
+        take: 1,
+      },
     },
   })
 
-  return user
+  if (!user) return user
+  const primary = user.organizationAssignments[0]
+  const { organizationAssignments, ...rest } = user
+  return {
+    ...rest,
+    department: primary ? { id: primary.unit.id, name: primary.unit.name } : null,
+  }
 }
 
 /**
@@ -96,18 +136,9 @@ export async function getUser(id: string) {
  */
 export async function createUser(input: CreateUserInput) {
   const adminUserId = await requireAdmin()
-  const level = validateApprovalLevel(input.level, { allowNull: true })
-
-  // Check if department exists
-  const department = await prisma.departments.findUnique({
-    where: { id: input.departmentId },
-  })
-
-  if (!department) {
-    throw new Error('Department not found')
+  if (!adminUserId) {
+    throw new Error('Admin authorization is required for user actions')
   }
-
-  // Check if email already exists
   const existing = await prisma.user.findUnique({
     where: { email: input.email },
   })
@@ -115,10 +146,8 @@ export async function createUser(input: CreateUserInput) {
     throw new Error('A user with this email already exists')
   }
 
-  // Automatically determine role based on department
-  const autoRole: UserRole = input.departmentId === 'ENG' ? 'engineering' : 'general_dept'
+  const finalRole: UserRole = input.role
 
-  // Hash default password (admin sets it, or use default)
   const password = input.password || 'changeme'
   const passwordHash = await hash(password, 12)
 
@@ -127,9 +156,7 @@ export async function createUser(input: CreateUserInput) {
       email: input.email,
       name: input.name,
       passwordHash,
-      departmentId: input.departmentId,
-      role: autoRole,
-      level,
+      role: finalRole,
       isActive: true,
       forcePasswordChange: true,
       updatedAt: new Date(),
@@ -147,9 +174,6 @@ export async function createUser(input: CreateUserInput) {
  */
 export async function updateUser(input: UpdateUserInput) {
   const adminUserId = await requireAdmin()
-  const level = validateApprovalLevel(input.level, { allowNull: true })
-
-  // Verify admin authentication
   if (!adminUserId) {
     throw new Error('Admin authentication failed')
   }
@@ -162,43 +186,11 @@ export async function updateUser(input: UpdateUserInput) {
     throw new Error('User not found')
   }
 
-  // Use provided role, or auto-determine based on department
-  const autoRole: UserRole = input.departmentId === 'ENG' ? 'engineering' : 'general_dept'
-  const finalRole: UserRole = input.role || autoRole
+  const finalRole: UserRole = input.role || existingUser.role
 
-  // Track original values for audit logging
   const originalName = existingUser.name
   const originalEmail = existingUser.email
   const originalRole = existingUser.role
-  const originalDepartmentId = existingUser.departmentId
-  const originalLevel = existingUser.level
-
-  // Check for pending approvals before changing department
-  if (input.departmentId && input.departmentId !== originalDepartmentId) {
-    // Check for pending request approvals
-    const pendingRequestApprovals = await prisma.request_approvals.findMany({
-      where: {
-        requiredApproverId: input.id,
-        status: 'pending',
-      },
-    })
-
-    // Check for pending solution approvals
-    const pendingSolutionApprovals = await prisma.solution_approvals.findMany({
-      where: {
-        requiredApproverId: input.id,
-        status: 'pending',
-      },
-    })
-
-    const totalPending = pendingRequestApprovals.length + pendingSolutionApprovals.length
-
-    if (totalPending > 0) {
-      throw new Error(
-        `User has ${totalPending} pending approval${totalPending > 1 ? 's' : ''}. Cannot change department. Please contact user to complete approvals or reassign manually.`
-      )
-    }
-  }
 
   // Check if email is being changed to one that already exists
   if (input.email !== originalEmail) {
@@ -210,25 +202,20 @@ export async function updateUser(input: UpdateUserInput) {
     }
   }
 
+  const changes: string[] = []
+  if (input.name !== originalName) changes.push(`name: "${originalName}" → "${input.name}"`)
+  if (input.email !== originalEmail) changes.push(`email: "${originalEmail}" → "${input.email}"`)
+  if (finalRole !== originalRole) changes.push(`role: "${originalRole}" → "${finalRole}"`)
+
   const user = await prisma.user.update({
     where: { id: input.id },
     data: {
       name: input.name,
       email: input.email,
-      departmentId: input.departmentId,
       role: finalRole,
-      level,
       updatedAt: new Date(),
     },
   })
-
-  // Audit logging: Track all admin changes
-  const changes: string[] = []
-  if (input.name !== originalName) changes.push(`name: "${originalName}" → "${input.name}"`)
-  if (input.email !== originalEmail) changes.push(`email: "${originalEmail}" → "${input.email}"`)
-  if (finalRole !== originalRole) changes.push(`role: "${originalRole}" → "${finalRole}"`)
-  if (input.departmentId !== originalDepartmentId) changes.push(`departmentId: "${originalDepartmentId}" → "${input.departmentId}"`)
-  if (level !== originalLevel) changes.push(`level: "${String(originalLevel ?? 'null')}" → "${String(level ?? 'null')}"`)
 
   if (changes.length > 0) {
     await prisma.request_activities.create({
@@ -258,7 +245,7 @@ export async function updateUser(input: UpdateUserInput) {
  * Deactivate a user (soft delete — Prisma only)
  */
 export async function deactivateUser(userId: string) {
-  await requireAdmin()
+  await requireAdminUser()
 
   await prisma.user.update({
     where: { id: userId },
@@ -273,7 +260,7 @@ export async function deactivateUser(userId: string) {
  * Reactivate a user
  */
 export async function activateUser(userId: string) {
-  await requireAdmin()
+  await requireAdminUser()
 
   await prisma.user.update({
     where: { id: userId },
@@ -288,7 +275,7 @@ export async function activateUser(userId: string) {
  * Reset a user's password (admin action)
  */
 export async function resetUserPassword(userId: string, newPassword: string) {
-  await requireAdmin()
+  await requireAdminUser()
 
   const passwordHash = await hash(newPassword, 12)
   await prisma.user.update({
@@ -321,11 +308,17 @@ export async function getCurrentUserProfile(): Promise<CurrentUserProfile> {
       email: true,
       role: true,
       isActive: true,
-      department: {
+      organizationAssignments: {
+        where: { isActive: true },
         select: {
-          id: true,
-          name: true,
+          unit: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
         },
+        take: 1,
       },
     },
   })
@@ -339,7 +332,7 @@ export async function getCurrentUserProfile(): Promise<CurrentUserProfile> {
     name: user.name,
     email: user.email,
     role: user.role,
-    department: user.department,
+    department: user.organizationAssignments[0]?.unit ?? null,
   }
 }
 
@@ -443,37 +436,4 @@ export async function changePassword(currentPassword: string, newPassword: strin
   })
 
   return { success: true }
-}
-
-/**
- * Get users from a specific department for custom approval hierarchy
- * Returns users with level >= specified minimum level
- */
-export async function getUsersForCustomHierarchy(departmentId: string, minLevel: number = 1) {
-  const session = await auth()
-  if (!session?.user?.id) {
-    throw new Error('Not authenticated')
-  }
-
-  const users = await prisma.user.findMany({
-    where: {
-      departmentId,
-      isActive: true,
-      level: {
-        gte: minLevel,
-      },
-    },
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      level: true,
-    },
-    orderBy: [
-      { level: 'desc' },
-      { name: 'asc' },
-    ],
-  })
-
-  return users
 }

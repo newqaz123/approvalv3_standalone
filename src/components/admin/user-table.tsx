@@ -33,21 +33,25 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Badge } from '@/components/ui/badge'
 import { deactivateUser, activateUser } from '@/server-actions/users'
 import { UserWithDepartment } from '@/server-actions/users'
-import type { departments as Department } from '@prisma/client'
 import { EditUserDialog } from '@/components/admin/edit-user-dialog'
 import { ResetPasswordDialog } from '@/components/admin/reset-password-dialog'
 import { AdminCard, AdminCardsEmptyState } from '@/components/mobile/admin-card'
-import { Mail, Building, Shield, Hash } from 'lucide-react'
+import { Mail, Building, Shield } from 'lucide-react'
 
 interface UserTableProps {
   data: UserWithDepartment[]
-  departments: Department[]
 }
 
-export function UserTable({ data, departments }: UserTableProps) {
+function organizationLabel(user: UserWithDepartment): string {
+  if (user.organizationAssignment) {
+    return `${user.organizationAssignment.unitName} · ${user.organizationAssignment.positionName}`
+  }
+  return 'Unassigned'
+}
+
+export function UserTable({ data }: UserTableProps) {
   const router = useRouter()
   const [processingId, setProcessingId] = useState<string | null>(null)
   const [userToDeactivate, setUserToDeactivate] = useState<{ id: string; name: string } | null>(null)
@@ -62,7 +66,6 @@ export function UserTable({ data, departments }: UserTableProps) {
       } else {
         await activateUser(userId)
       }
-      // Refresh data without full page reload
       router.refresh()
     } finally {
       setProcessingId(null)
@@ -82,36 +85,8 @@ export function UserTable({ data, departments }: UserTableProps) {
     },
     {
       accessorKey: 'department',
-      header: 'Department',
-      cell: ({ row }) => row.original.department?.name || 'None',
-    },
-    {
-      id: 'additionalDepts',
-      header: 'Additional Depts',
-      cell: ({ row }) => {
-        const additionalDepts = row.original.departmentApproverRoles || []
-        const primaryDeptId = row.original.department?.id
-        
-        // Filter out the user's primary department from additional departments
-        const filteredDepts = additionalDepts.filter(
-          role => role.department.id !== primaryDeptId
-        )
-        
-        if (filteredDepts.length === 0) {
-          return <span className="text-muted-foreground text-xs">-</span>
-        }
-        
-        // Display department names as badges
-        return (
-          <div className="flex flex-wrap gap-1">
-            {filteredDepts.map((role) => (
-              <Badge key={role.id} variant="secondary" className="text-xs">
-                {role.department.name}
-              </Badge>
-            ))}
-          </div>
-        )
-      },
+      header: 'Unit / Position',
+      cell: ({ row }) => organizationLabel(row.original),
     },
     {
       accessorKey: 'role',
@@ -124,20 +99,6 @@ export function UserTable({ data, departments }: UserTableProps) {
           engineering: 'Engineering',
         }
         return roleLabels[role] || role
-      },
-    },
-    {
-      accessorKey: 'level',
-      header: 'Level',
-      cell: ({ row }) => {
-        const level = row.original.level
-        return level !== null && level !== undefined ? (
-          <span className="px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-800">
-            Level {level}
-          </span>
-        ) : (
-          <span className="text-muted-foreground text-xs">-</span>
-        )
       },
     },
     {
@@ -161,9 +122,9 @@ export function UserTable({ data, departments }: UserTableProps) {
         return (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button 
-                variant="ghost" 
-                size="sm" 
+              <Button
+                variant="ghost"
+                size="sm"
                 className="h-8 w-8 p-0 hover:bg-muted/50 transition-colors"
               >
                 <span className="sr-only">Open menu</span>
@@ -229,84 +190,63 @@ export function UserTable({ data, departments }: UserTableProps) {
 
   return (
     <>
-      {/* Mobile card view */}
       <div className="md:hidden space-y-3">
         {data.length > 0 ? (
-          data.map((user) => {
-            const additionalDepts = user.departmentApproverRoles || []
-            const primaryDeptId = user.department?.id
-            
-            // Filter out the user's primary department from additional departments
-            const filteredDepts = additionalDepts.filter(
-              role => role.department.id !== primaryDeptId
-            )
-            
-            return (
-              <AdminCard
-                key={user.id}
-                title={user.name || 'Unnamed User'}
-                status={{
-                  label: user.isActive ? 'Active' : 'Inactive',
-                  variant: user.isActive ? 'success' : 'secondary',
-                }}
-                details={[
-                  {
-                    label: 'Email',
-                    value: user.email,
-                    icon: <Mail className="h-3.5 w-3.5" />,
-                  },
-                  {
-                    label: 'Department',
-                    value: user.department?.name || 'None',
-                    icon: <Building className="h-3.5 w-3.5" />,
-                  },
-                  {
-                    label: 'Role',
-                    value: {
-                      admin: 'Admin',
-                      general_dept: 'General Dept',
-                      engineering: 'Engineering',
-                    }[user.role] || user.role,
-                    icon: <Shield className="h-3.5 w-3.5" />,
-                  },
-                  ...(user.level !== null && user.level !== undefined ? [{
-                    label: 'Level',
-                    value: `Level ${user.level}`,
-                    icon: <Hash className="h-3.5 w-3.5" />,
-                  }] : []),
-                  ...(filteredDepts.length > 0 ? [{
-                    label: 'Additional Depts',
-                    value: filteredDepts.map(role => role.department.name).join(', '),
-                  }] : []),
-                ]}
-                badges={[]}
-                actions={[
-                  {
-                    label: 'Edit',
-                    onClick: () => setEditingUserId(user.id),
-                  },
-                  {
-                    label: 'Reset Password',
-                    onClick: () => setResetPasswordUser({ id: user.id, name: user.name || 'this user' }),
-                  },
-                  {
-                    label: user.isActive ? 'Deactivate' : 'Activate',
-                    onClick: user.isActive 
-                      ? () => setUserToDeactivate({ id: user.id, name: user.name || 'this user' })
-                      : () => handleToggleActive(user.id, false),
-                    destructive: user.isActive,
-                    disabled: processingId === user.id,
-                  },
-                ]}
-              />
-            )
-          })
+          data.map((user) => (
+            <AdminCard
+              key={user.id}
+              title={user.name || 'Unnamed User'}
+              status={{
+                label: user.isActive ? 'Active' : 'Inactive',
+                variant: user.isActive ? 'success' : 'secondary',
+              }}
+              details={[
+                {
+                  label: 'Email',
+                  value: user.email,
+                  icon: <Mail className="h-3.5 w-3.5" />,
+                },
+                {
+                  label: 'Unit / Position',
+                  value: organizationLabel(user),
+                  icon: <Building className="h-3.5 w-3.5" />,
+                },
+                {
+                  label: 'Role',
+                  value: {
+                    admin: 'Admin',
+                    general_dept: 'General Dept',
+                    engineering: 'Engineering',
+                  }[user.role] || user.role,
+                  icon: <Shield className="h-3.5 w-3.5" />,
+                },
+              ]}
+              badges={[]}
+              actions={[
+                {
+                  label: 'Edit',
+                  onClick: () => setEditingUserId(user.id),
+                },
+                {
+                  label: 'Reset Password',
+                  onClick: () => setResetPasswordUser({ id: user.id, name: user.name || 'this user' }),
+                },
+                {
+                  label: user.isActive ? 'Deactivate' : 'Activate',
+                  onClick: user.isActive
+                    ? () => setUserToDeactivate({ id: user.id, name: user.name || 'this user' })
+                    : () => handleToggleActive(user.id, false),
+                  destructive: user.isActive,
+                  disabled: processingId === user.id,
+                },
+              ]}
+            />
+          ))
         ) : (
           <AdminCardsEmptyState message="No users found" />
         )}
       </div>
 
-      {/* Desktop table view */}
       <div className="hidden md:block border rounded-md">
         <Table>
           <TableHeader>
@@ -347,24 +287,19 @@ export function UserTable({ data, departments }: UserTableProps) {
         </Table>
       </div>
 
-      {/* Single edit dialog controlled by state */}
       {editingUserId && (
         <EditUserDialog
           user={{
             id: data.find(u => u.id === editingUserId)!.id,
             name: data.find(u => u.id === editingUserId)!.name,
             email: data.find(u => u.id === editingUserId)!.email,
-            departmentId: data.find(u => u.id === editingUserId)!.department?.id || null,
             role: data.find(u => u.id === editingUserId)!.role,
-            level: data.find(u => u.id === editingUserId)!.level,
           }}
-          departments={departments}
           open={true}
           onOpenChange={(open) => !open && setEditingUserId(null)}
         />
       )}
 
-      {/* AlertDialog for deactivation confirmation */}
       <AlertDialog open={!!userToDeactivate} onOpenChange={(open) => !open && setUserToDeactivate(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -391,7 +326,6 @@ export function UserTable({ data, departments }: UserTableProps) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      {/* Reset Password Dialog */}
       <ResetPasswordDialog
         userId={resetPasswordUser?.id || ''}
         userName={resetPasswordUser?.name || ''}

@@ -10,6 +10,8 @@ import {
   type ExportableAttachment,
   type ExportPackageRequestItem,
 } from '@/lib/pdf-package'
+import { canUserViewRequest } from '@/lib/request-visibility/scope'
+import { requireAdmin } from '@/lib/auth'
 
 /**
  * In-memory rate limiting for PDF exports
@@ -83,7 +85,7 @@ async function getExportableRequest(requestId: string) {
     where: { id: requestId },
     include: {
       requester: { select: { id: true, name: true, email: true } },
-      department: { select: { id: true, name: true } },
+      organizationUnit: { select: { id: true, name: true } },
       fileAttachments: {
         include: { uploadedBy: { select: { id: true, name: true } } },
         orderBy: { createdAt: 'asc' },
@@ -94,10 +96,10 @@ async function getExportableRequest(requestId: string) {
       },
       approvals: {
         include: {
-          approver: { select: { id: true, name: true, email: true, role: true, department: { select: { name: true } } } },
-          requiredApprover: { select: { id: true, name: true, email: true, role: true, department: { select: { name: true } } } },
+          approver: { select: { id: true, name: true, email: true, role: true, } },
+          requiredApprover: { select: { id: true, name: true, email: true, role: true, } },
         },
-        orderBy: [{ requiredLevel: 'asc' }, { order: 'asc' }],
+        orderBy: [{ order: 'asc' }],
       },
       solutions: {
         include: {
@@ -108,8 +110,8 @@ async function getExportableRequest(requestId: string) {
           },
           approvals: {
             include: {
-              approver: { select: { id: true, name: true, email: true, role: true, department: { select: { name: true } } } },
-              requiredApprover: { select: { id: true, name: true, email: true, role: true, department: { select: { name: true } } } },
+              approver: { select: { id: true, name: true, email: true, role: true, } },
+              requiredApprover: { select: { id: true, name: true, email: true, role: true, } },
             },
             orderBy: [{ order: 'asc' }],
           },
@@ -129,37 +131,21 @@ async function getCurrentExportUser(userId: string) {
     select: {
       id: true,
       name: true,
-      role: true,
-      departmentId: true,
       isActive: true,
-      department: { select: { type: true } },
     },
   })
-}
-
-function canUserExportRequest(user: NonNullable<Awaited<ReturnType<typeof getCurrentExportUser>>>, request: ExportableRequest): boolean {
-  return (
-    user.role === 'admin' ||
-    user.department?.type === 'ENGINEERING' ||
-    request.requesterId === user.id ||
-    request.departmentId === user.departmentId ||
-    request.approvals.some((a) => a.requiredApproverId === user.id || a.approverId === user.id) ||
-    request.solutions.some((solution) =>
-      solution.approvals.some((a) => a.requiredApproverId === user.id || a.approverId === user.id)
-    )
-  )
 }
 
 function buildApprovalPhases(request: ExportableRequest): RequestPDFData['approvalPhases'] {
   const phases: RequestPDFData['approvalPhases'] = []
 
   const initialApprovals = request.approvals
-    .filter((approval) => !approval.isFinalApproval && !approval.isCustomChain)
+    .filter((approval) => !approval.isFinalApproval && approval.routingMode !== 'CUSTOM_PERSON')
     .map((approval, index) => ({
       approverName: approval.approver?.name || approval.requiredApprover?.name || request.requester.name || 'Unknown',
       approverRole: approval.approver?.role || approval.requiredApprover?.role,
-      approverDepartment: approval.approver?.department?.name || approval.requiredApprover?.department?.name,
-      requiredLevel: approval.requiredLevel,
+      approverDepartment: '',
+      requiredLevel: approval.order,
       status: approval.status as 'approved' | 'rejected' | 'pending',
       comments: approval.comments || undefined,
       approvedAt: approval.approvedAt || undefined,
@@ -180,8 +166,8 @@ function buildApprovalPhases(request: ExportableRequest): RequestPDFData['approv
       approvals: solution.approvals.map((approval, index) => ({
         approverName: approval.approver?.name || approval.requiredApprover?.name || 'Engineering',
         approverRole: approval.approver?.role || approval.requiredApprover?.role || 'Engineering',
-        approverDepartment: approval.approver?.department?.name || approval.requiredApprover?.department?.name || 'Engineering',
-        requiredLevel: approval.requiredLevel || 1,
+        approverDepartment: 'Engineering',
+        requiredLevel: approval.order,
         status: approval.status as 'approved' | 'rejected' | 'pending',
         comments: approval.comments || undefined,
         approvedAt: approval.approvedAt || undefined,
@@ -197,8 +183,8 @@ function buildApprovalPhases(request: ExportableRequest): RequestPDFData['approv
     .map((approval, index) => ({
       approverName: approval.approver?.name || approval.requiredApprover?.name || 'Pending',
       approverRole: approval.approver?.role || approval.requiredApprover?.role,
-      approverDepartment: approval.approver?.department?.name || approval.requiredApprover?.department?.name,
-      requiredLevel: approval.requiredLevel,
+      approverDepartment: '',
+      requiredLevel: approval.order,
       status: approval.status as 'approved' | 'rejected' | 'pending',
       comments: approval.comments || undefined,
       approvedAt: approval.approvedAt || undefined,
@@ -223,18 +209,22 @@ async function buildRequestPDFData(
   request: ExportableRequest
   generatedBy: string
 }> {
-  const request = await getExportableRequest(requestId)
-  if (!request) {
-    throw new Error('Request not found. Please verify the request ID.')
-  }
-
   const currentUser = await getCurrentExportUser(userId)
   if (!currentUser?.isActive) {
     throw new Error('Authentication required. Please log in to export PDFs.')
   }
 
-  if (!canUserExportRequest(currentUser, request)) {
+  // Ordinary document exports use the shared read policy. Privileged admin
+  // backup (allowIncomplete) is only reached after generateAdminBackupPdf
+  // calls requireAdmin; it may include incomplete history without ordinary
+  // list exclusions.
+  if (!options?.allowIncomplete && !(await canUserViewRequest(userId, requestId))) {
     throw new Error('You are not authorized to export this request.')
+  }
+
+  const request = await getExportableRequest(requestId)
+  if (!request) {
+    throw new Error('Request not found. Please verify the request ID.')
   }
 
   if (!options?.allowIncomplete) {
@@ -265,9 +255,9 @@ async function buildRequestPDFData(
     requester: {
       name: request.requester.name,
       email: request.requester.email,
-      department: request.department.name,
+      department: request.organizationUnit?.name ?? '',
     },
-    department: request.department.name,
+    department: request.organizationUnit?.name ?? '',
     status: request.status,
     createdAt: request.createdAt,
     completedAt,
@@ -437,7 +427,11 @@ export async function exportRequestPackageAsPDF(requestId: string, items: Export
   }
 }
 
-export async function generateAdminBackupPdf(requestId: string, adminId: string): Promise<Buffer> {
-  const { pdfData } = await buildRequestPDFData(requestId, adminId, { allowIncomplete: true })
+export async function generateAdminBackupPdf(requestId: string, _adminId: string): Promise<Buffer> {
+  const sessionAdminId = await requireAdmin()
+  if (!sessionAdminId) {
+    throw new Error('Unauthorized - Admin access required')
+  }
+  const { pdfData } = await buildRequestPDFData(requestId, sessionAdminId, { allowIncomplete: true })
   return generateRequestPDF(pdfData)
 }

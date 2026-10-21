@@ -22,37 +22,23 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { createUser, updateUser } from '@/server-actions/users'
-import {
-  APPROVAL_LEVELS,
-  MAX_APPROVAL_LEVEL,
-  MIN_APPROVAL_LEVEL,
-} from '@/lib/approval-levels'
-import type { departments as Department } from '@prisma/client'
-
-// Extended Department type with levelNames
-type DepartmentWithLevelNames = Department & {
-  levelNames: Record<string, string> | null
-}
 
 const userFormSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters'),
   email: z.string().email('Invalid email address'),
-  departmentId: z.string().min(1, 'Department is required'),
   role: z.enum(['admin', 'general_dept', 'engineering'] as const).optional(),
-  level: z.number().int().min(MIN_APPROVAL_LEVEL).max(MAX_APPROVAL_LEVEL).optional().nullable(),
   password: z.union([z.string().min(8, 'Password must be at least 8 characters'), z.literal('')]).optional(),
 })
 
 export type UserFormValues = z.infer<typeof userFormSchema>
 
 interface UserFormProps {
-  departments: DepartmentWithLevelNames[]
   initialData?: UserFormValues & { id?: string }
   onSuccess?: () => void
   onCancel?: () => void
 }
 
-export function UserForm({ departments, initialData, onSuccess, onCancel }: UserFormProps) {
+export function UserForm({ initialData, onSuccess, onCancel }: UserFormProps) {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -61,27 +47,20 @@ export function UserForm({ departments, initialData, onSuccess, onCancel }: User
     defaultValues: initialData || {
       name: '',
       email: '',
-      departmentId: '',
       role: 'general_dept',
-      level: null,
       password: '',
     },
   })
-
-  // Watch department selection to auto-determine role (as default)
-  const selectedDepartmentId = form.watch('departmentId')
-  const autoRole = selectedDepartmentId === 'ENG' ? 'engineering' : 'general_dept'
 
   async function onSubmit(data: UserFormValues) {
     setIsSubmitting(true)
     setError(null)
 
     try {
-      // Use provided role, or autoRole as fallback
       const submitData = {
-        ...data,
-        role: data.role || autoRole,
-        level: data.level ?? null,
+        name: data.name,
+        email: data.email,
+        role: data.role || 'general_dept',
       }
 
       if (initialData?.id) {
@@ -142,32 +121,6 @@ export function UserForm({ departments, initialData, onSuccess, onCancel }: User
 
         <FormField
           control={form.control}
-          name="departmentId"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Department</FormLabel>
-              <Select onValueChange={field.onChange} defaultValue={field.value}>
-                <FormControl>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select department" />
-                  </SelectTrigger>
-                </FormControl>
-                <SelectContent>
-                  {departments.map((dept) => (
-                    <SelectItem key={dept.id} value={dept.id}>
-                      {dept.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-
-        {/* Role selection - editable with auto-determination as default */}
-        <FormField
-          control={form.control}
           name="role"
           render={({ field }) => (
             <FormItem>
@@ -189,74 +142,6 @@ export function UserForm({ departments, initialData, onSuccess, onCancel }: User
           )}
         />
 
-        {/* Approval Level — shown when department is selected */}
-        {selectedDepartmentId && (
-          <FormField
-            control={form.control}
-            name="level"
-            render={({ field }) => {
-              const selectedDept = departments.find(d => d.id === selectedDepartmentId)
-              const levelNames = selectedDept?.levelNames
-              const configuredLevels = levelNames
-                ? Object.entries(levelNames)
-                    .filter(([key]) => APPROVAL_LEVELS.includes(Number(key)))
-                    .sort(([a], [b]) => Number(a) - Number(b))
-                : []
-              const hasLevelNames = configuredLevels.length > 0
-
-              return (
-                <FormItem>
-                  <FormLabel>Approval Level</FormLabel>
-                  <FormControl>
-                    {hasLevelNames ? (
-                      <Select
-                        onValueChange={(val) => field.onChange(val === 'none' ? null : Number(val))}
-                        value={field.value?.toString() || 'none'}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select approval level" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">None</SelectItem>
-                          {configuredLevels.map(([key, value]) => (
-                              <SelectItem key={key} value={key}>
-                                Level {key} - {String(value)}
-                              </SelectItem>
-                            ))}
-                        </SelectContent>
-                      </Select>
-                    ) : (
-                      <Select
-                        onValueChange={(val) => field.onChange(val === 'none' ? null : Number(val))}
-                        value={field.value?.toString() || 'none'}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select approval level" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">None</SelectItem>
-                          {APPROVAL_LEVELS.map((level) => (
-                            <SelectItem key={level} value={String(level)}>
-                              Level {level}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
-                  </FormControl>
-                  <p className="text-xs text-muted-foreground">
-                    {hasLevelNames
-                      ? 'Select the approval hierarchy level for this user'
-                      : 'Select the approval hierarchy level (1 = lowest, higher = more authority), or None if not applicable.'}
-                  </p>
-                  <FormMessage />
-                </FormItem>
-              )
-            }}
-          />
-        )}
-
-        {/* Password - only for new users */}
         {!initialData?.id && (
           <FormField
             control={form.control}

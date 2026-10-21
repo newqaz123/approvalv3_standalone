@@ -115,14 +115,14 @@ describe("CustomApprovalPicker search", () => {
 		assert.doesNotMatch(source, /No users found\./);
 	});
 
-	it("resets search on close and after selection and shows non-null level metadata", () => {
+	it("resets search on close and after selection and shows unit path metadata", () => {
 		assert.match(
 			source,
 			/const handleOpenChange = \(nextOpen: boolean\) => \{\s*setOpen\(nextOpen\)\s*if \(!nextOpen\) setSearchValue\(['"]{2}\)\s*\}/,
 		);
 		assert.match(source, /setOpen\(false\)\s*setSearchValue\(['"]{2}\)/);
-		assert.match(source, /user\.level != null/);
-		assert.match(source, /Level \{user\.level\}/);
+		assert.match(source, /unitPathNames/);
+		assert.doesNotMatch(source, /user\.level/);
 	});
 });
 
@@ -249,7 +249,7 @@ describe("Legacy solution modal CustomApprovalPicker search", () => {
 		);
 		assert.match(source, /max-h-\[260px\] overflow-y-auto/);
 		assert.match(source, /user\.email/);
-		assert.match(source, /user\.departmentName/);
+		assert.match(source, /user\.unitPathNames/);
 		assert.match(source, /<Switch checked=\{isExpanded\}/);
 		assert.match(source, /setIsExpanded\(false\)/);
 		assert.match(source, /setSearchQuery\(['"]{2}\)/);

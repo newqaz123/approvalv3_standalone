@@ -1,61 +1,45 @@
-import { Suspense } from 'react'
 import { auth } from '@/lib/auth-config'
 import { redirect } from 'next/navigation'
-import { getHierarchyDataForUser, getDepartmentsForHierarchyView } from '@/server-actions/hierarchy'
-import { HierarchyView } from '@/components/admin/hierarchy-view'
-import { DepartmentSelector } from '@/components/admin/department-selector'
+import prisma from '@/lib/prisma'
+import { unitPathNames } from '@/lib/unit-labels'
+import type { OrganizationUnitNode } from '@/lib/organization/model'
 
-interface WorkflowPageProps {
-  searchParams: Promise<{ departmentId?: string }>
-}
-
-async function WorkflowContent({ departmentId }: { departmentId: string }) {
-  const hierarchyData = await getHierarchyDataForUser(departmentId)
-
-  return (
-    <HierarchyView
-      department={hierarchyData.department}
-      initialUsersByLevel={hierarchyData.usersByLevel}
-      maxLevel={hierarchyData.maxLevel}
-      pendingApprovalsCount={0}
-      readOnly={true}
-    />
-  )
-}
-
-export default async function WorkflowPage({ searchParams }: WorkflowPageProps) {
+export default async function WorkflowPage() {
   const session = await auth()
   if (!session?.user?.id) redirect('/sign-in')
 
-  const departments = await getDepartmentsForHierarchyView()
+  const assignment = await prisma.organization_assignments.findFirst({
+    where: { userId: session.user.id, isActive: true },
+    select: { unitId: true },
+  })
 
-  const { departmentId } = await searchParams
-  const selectedDeptId = departmentId || departments[0]?.id
+  const units = await prisma.organization_units.findMany({
+    select: {
+      id: true,
+      name: true,
+      parentId: true,
+      isActive: true,
+      shareRequests: true,
+      canWorkOnSolutions: true,
+      managerUserId: true,
+    },
+  }) as OrganizationUnitNode[]
+
+  const path = assignment ? unitPathNames(units, assignment.unitId) : []
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Approval Workflow</h1>
         <p className="text-muted-foreground">
-          This is the approval workflow for your department. Shows who approves requests at each level.
+          Approval follows published organization routes for your assignment unit, not numeric department levels.
         </p>
       </div>
-
-      {departments.length > 1 && (
-        <DepartmentSelector
-          departments={departments}
-          selectedDepartmentId={selectedDeptId}
-          basePath="/dashboard/workflow"
-        />
-      )}
-
-      {selectedDeptId ? (
-        <Suspense fallback={<div className="text-muted-foreground">Loading workflow...</div>}>
-          <WorkflowContent departmentId={selectedDeptId} />
-        </Suspense>
+      {path.length > 0 ? (
+        <p className="text-sm text-muted-foreground">Your unit: {path.join(' / ')}</p>
       ) : (
         <p className="text-muted-foreground">
-          You are not assigned to a department. Please contact your administrator.
+          You are not assigned to an organization unit. Please contact your administrator.
         </p>
       )}
     </div>

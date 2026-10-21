@@ -6,11 +6,21 @@ export default auth((req) => {
 	const user = req.auth?.user;
 
 	/*
-	 * Build the origin from request headers. Next dev synthesizes
-	 * req.url's origin as localhost:<default port> regardless of the actual
-	 * port, which once bounced unauthenticated users to a different local
-	 * app. Proxies also require the forwarded headers to keep redirects
-	 * on-host.
+	 * Redirects built here must stay origin-safe for the browser. In
+	 * next dev the middleware adapter rewrites any Location whose host
+	 * matches the request (after NextURL's 127.0.0.1 → localhost
+	 * normalization) to a synthesized localhost origin, and throws on
+	 * relative Locations, so middleware redirects cannot be made
+	 * host-stable when the server and the browser disagree about the host
+	 * (e.g. tests browse http://127.0.0.1:<port> while the dev server was
+	 * started with --hostname 127.0.0.1). Cookies are host-scoped, so a
+	 * flipped host silently drops the session cookie.
+	 *
+	 * That is why ROLE-based denial of /admin/* is NOT redirected here:
+	 * src/app/admin/layout.tsx performs the authoritative DB-backed role
+	 * check and issues a server-side redirect(), which emits an
+	 * origin-relative Location the browser resolves against the origin it
+	 * is already on. Middleware still guards authentication.
 	 */
 	const origin = (() => {
 		const host =
@@ -20,7 +30,8 @@ export default auth((req) => {
 			(host.startsWith("https") ? "https" : "http");
 		return host ? `${proto}://${host}` : req.nextUrl.origin;
 	})();
-	const absolute = (path: string) => new URL(path, origin);
+	const redirectTo = (path: string): NextResponse =>
+		NextResponse.redirect(new URL(path, origin));
 
 	// Define route patterns
 	const isAdminRoute = pathname.startsWith("/admin");
@@ -35,7 +46,7 @@ export default auth((req) => {
 		const callbackUrl = encodeURIComponent(
 			req.nextUrl.pathname + req.nextUrl.search,
 		);
-		return NextResponse.redirect(absolute(`/sign-in?callbackUrl=${callbackUrl}`));
+		return redirectTo(`/sign-in?callbackUrl=${callbackUrl}`);
 	};
 	const callbackUrl = req.nextUrl.searchParams.get("callbackUrl");
 	const safeCallbackUrl =
@@ -43,13 +54,11 @@ export default auth((req) => {
 			? callbackUrl
 			: null;
 
-	// Protect admin routes
+	// Protect admin routes: authentication only. Non-admin ROLE denial is
+	// handled by the admin layout's DB-backed redirect (see comment above).
 	if (isAdminRoute) {
 		if (!user) {
 			return redirectToSignIn();
-		}
-		if (user.role !== "admin") {
-			return NextResponse.redirect(absolute(getRoleDashboard(user.role)));
 		}
 	}
 
@@ -62,10 +71,10 @@ export default auth((req) => {
 		// Role-based redirects from /dashboard
 		if (pathname === "/dashboard") {
 			if (user.role === "engineering") {
-				return NextResponse.redirect(absolute("/engineering"));
+				return redirectTo("/engineering");
 			}
 			if (user.role === "admin") {
-				return NextResponse.redirect(absolute("/admin"));
+				return redirectTo("/admin");
 			}
 		}
 	}
@@ -73,14 +82,14 @@ export default auth((req) => {
 	// Redirect authenticated users from sign-in to appropriate dashboard
 	if (isSignInRoute && user) {
 		if (safeCallbackUrl) {
-			return NextResponse.redirect(absolute(safeCallbackUrl));
+			return redirectTo(safeCallbackUrl);
 		}
-		return NextResponse.redirect(absolute(getRoleDashboard(user.role)));
+		return redirectTo(getRoleDashboard(user.role));
 	}
 
 	// Redirect authenticated users from root to appropriate dashboard
 	if (pathname === "/" && user) {
-		return NextResponse.redirect(absolute(getRoleDashboard(user.role)));
+		return redirectTo(getRoleDashboard(user.role));
 	}
 
 	return NextResponse.next();

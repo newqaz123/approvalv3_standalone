@@ -4,6 +4,7 @@ import { getAuditTrailForRequest } from '@/server-actions/audit'
 import { generateCSVExport, generateJSONExport } from '@/lib/export'
 import type { RequestSnapshot } from '@/lib/export'
 import prisma from '@/lib/prisma'
+import type { OrganizationUnitNode } from '@/lib/organization/model'
 
 /**
  * Export audit trail for a single request
@@ -21,7 +22,7 @@ export async function GET(
     // Await params to get requestId (Next.js 15 async params pattern)
     const { requestId } = await params
 
-    // Admin-only access check
+    // Privileged admin audit export: ordinary request visibility is not applied.
     const adminUserId = await requireAdmin()
     if (!adminUserId) {
       return NextResponse.json(
@@ -58,7 +59,7 @@ export async function GET(
         where: { id: requestId },
         include: {
           requester: true,
-          department: {
+          organizationUnit: {
             select: {
               id: true,
               name: true,
@@ -98,8 +99,20 @@ export async function GET(
         )
       }
 
+      const units = await prisma.organization_units.findMany({
+        select: {
+          id: true,
+          name: true,
+          parentId: true,
+          isActive: true,
+          shareRequests: true,
+          canWorkOnSolutions: true,
+          managerUserId: true,
+        },
+      }) as OrganizationUnitNode[]
+
       // Generate JSON export
-      const jsonData = generateJSONExport([requestSnapshot as RequestSnapshot])
+      const jsonData = generateJSONExport([requestSnapshot as RequestSnapshot], units)
 
       // Return JSON with download headers
       return new Response(jsonData, {

@@ -7,35 +7,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model department_approvers {
-  id            String      @id @default(uuid())
-  departmentId  String
-  approverId    String
-  approverLevel Int
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
-  approver      User       @relation(fields: [approverId], references: [id], onDelete: Cascade)
-  department    departments @relation(fields: [departmentId], references: [id], onDelete: Cascade)
-
-  @@unique([departmentId, approverId, approverLevel])
-  @@index([approverId])
-  @@index([departmentId])
-}
-
-model departments {
-  id                    String                  @id @default(uuid())
-  name                  String                  @unique
-  type                  DepartmentType
-  createdAt             DateTime                @default(now())
-  updatedAt             DateTime                @updatedAt
-  levelNames            Json?
-  departmentApprovers   department_approvers[]
-  budgetCodes           budget_codes[]
-  hierarchyChangeLogs   hierarchy_change_logs[]
-  requests              requests[]
-  users                 User[]
-}
-
 model file_attachments {
   id           String     @id @default(uuid())
   requestId    String?
@@ -99,25 +70,6 @@ model inline_description_image_references {
   @@index([templateId])
 }
 
-model hierarchy_change_logs {
-  id                                              String      @id @default(uuid())
-  departmentId                                    String
-  adminUserId                                     String
-  targetUserId                                    String
-  oldLevel                                        Int?
-  newLevel                                        Int
-  reason                                          String?
-  createdAt                                       DateTime    @default(now())
-  adminUser                                       User       @relation("hierarchy_change_logs_adminUserIdTousers", fields: [adminUserId], references: [id])
-  department                                      departments @relation(fields: [departmentId], references: [id])
-  targetUser                                      User       @relation("hierarchy_change_logs_targetUserIdTousers", fields: [targetUserId], references: [id])
-
-  @@index([adminUserId])
-  @@index([createdAt])
-  @@index([departmentId])
-  @@index([targetUserId])
-}
-
 model notifications {
   id        String           @id @default(uuid())
   userId    String
@@ -154,27 +106,34 @@ model request_activities {
 }
 
 model request_approvals {
-  id                                                String         @id @default(uuid())
+  id                                                String                       @id @default(uuid())
   requestId                                         String
   approverId                                        String?
-  requiredLevel                                     Int
   order                                             Int
-  status                                            ApprovalStatus @default(pending)
+  status                                            ApprovalStatus               @default(pending)
   comments                                          String?
   approvedAt                                        DateTime?
-  createdAt                                         DateTime       @default(now())
-  isCustomChain                                     Boolean        @default(false)
-  isFinalApproval                                   Boolean        @default(false)
+  createdAt                                         DateTime                     @default(now())
+  isFinalApproval                                   Boolean                      @default(false)
   requiredApproverId                                String?
-  approver                                          User?         @relation("request_approvals_approverIdTousers", fields: [approverId], references: [id])
-  request                                           requests       @relation(fields: [requestId], references: [id], onDelete: Cascade)
-  requiredApprover                                  User?         @relation("request_approvals_requiredApproverIdTousers", fields: [requiredApproverId], references: [id])
+  instanceId                                        String?
+  requiredPositionId                                String?
+  candidateGroupId                                  String?
+  routingMode                                       ApprovalRoutingMode          @default(SNAPSHOT_GROUP)
+  approver                                          User?                        @relation("request_approvals_approverIdTousers", fields: [approverId], references: [id])
+  request                                           requests                     @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  requiredApprover                                  User?                        @relation("request_approvals_requiredApproverIdTousers", fields: [requiredApproverId], references: [id])
+  instance                                          approval_instances?          @relation("request_approval_instance", fields: [instanceId], references: [id], onDelete: Restrict)
+  candidateGroup                                    approval_candidate_groups?   @relation("request_approval_candidate_group", fields: [candidateGroupId], references: [id], onDelete: Restrict)
+  requiredPositionRef                               positions?                    @relation("request_approvals_requiredPosition", fields: [requiredPositionId], references: [id], onDelete: Restrict)
 
   @@index([approverId])
   @@index([requestId])
   @@index([requiredApproverId])
-  @@index([requiredLevel])
   @@index([status])
+  @@index([instanceId])
+  @@index([candidateGroupId])
+  @@index([requiredPositionId])
 }
 
 model request_engineer_assignments {
@@ -260,17 +219,17 @@ model budget_codes {
   displayCode  String
   name         String?
   budgetAmount Decimal?   @db.Decimal(15, 2)
-  departmentId String?
+  unitId       String?
   createdById  String?
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
   createdBy    User?      @relation("budget_codes_createdByIdTousers", fields: [createdById], references: [id])
-  department   departments? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  organizationUnit organization_units? @relation("budget_codes_unit", fields: [unitId], references: [id], onDelete: SetNull)
   requests     requests[]
 
   @@index([createdById])
-  @@index([departmentId])
   @@index([displayCode])
+  @@index([unitId])
 }
 
 model requests {
@@ -279,7 +238,7 @@ model requests {
   description                       String
   status                            RequestStatus                  @default(ImprovementRequest)
   requesterId                       String
-  departmentId                      String
+  organizationUnitId                String?
   createdAt                         DateTime                       @default(now())
   updatedAt                         DateTime                       @updatedAt
   engineeringCostEstimate           Decimal?                       @db.Decimal(15, 2)
@@ -302,15 +261,16 @@ model requests {
   subTasks                          request_sub_tasks[]
   budgetCode                        budget_codes?                 @relation(fields: [budgetCodeId], references: [id], onDelete: SetNull)
   deletedByUser                     User?                         @relation("requests_deletedByTousers", fields: [deletedBy], references: [id])
-  department                        departments                    @relation(fields: [departmentId], references: [id])
+  organizationUnit                  organization_units?           @relation(fields: [organizationUnitId], references: [id])
   requester                         User                          @relation("requests_requesterIdTousers", fields: [requesterId], references: [id])
   workRequisitionReceivedBy         User?                         @relation("requests_workRequisitionReceivedByIdTousers", fields: [workRequisitionReceivedById], references: [id])
   solutions                         solutions[]
+  approvalInstances                 approval_instances[]
 
   @@index([budgetCodeId])
   @@index([createdAt])
-  @@index([departmentId])
   @@index([isDeleted])
+  @@index([organizationUnitId])
   @@index([requesterId])
   @@index([status])
   @@index([workRequisitionReceived])
@@ -318,26 +278,34 @@ model requests {
 }
 
 model solution_approvals {
-  id                                                 String         @id @default(uuid())
+  id                                                 String                       @id @default(uuid())
   solutionId                                         String
-  requiredLevel                                      Int?
   requiredApproverId                                 String?
   approverId                                         String?
   order                                              Int
-  status                                             ApprovalStatus @default(pending)
+  status                                             ApprovalStatus               @default(pending)
   comments                                           String?
-  isCustomChain                                      Boolean        @default(false)
   approvedAt                                         DateTime?
-  createdAt                                          DateTime       @default(now())
-  approver                                           User?         @relation("solution_approvals_approverIdTousers", fields: [approverId], references: [id])
-  requiredApprover                                   User?         @relation("solution_approvals_requiredApproverIdTousers", fields: [requiredApproverId], references: [id])
-  solution                                           solutions      @relation(fields: [solutionId], references: [id], onDelete: Cascade)
+  createdAt                                          DateTime                     @default(now())
+  instanceId                                         String?
+  requiredPositionId                                 String?
+  candidateGroupId                                   String?
+  routingMode                                        ApprovalRoutingMode          @default(SNAPSHOT_GROUP)
+  approver                                           User?                        @relation("solution_approvals_approverIdTousers", fields: [approverId], references: [id])
+  requiredApprover                                   User?                        @relation("solution_approvals_requiredApproverIdTousers", fields: [requiredApproverId], references: [id])
+  solution                                           solutions                    @relation(fields: [solutionId], references: [id], onDelete: Cascade)
+  instance                                           approval_instances?          @relation("solution_approval_instance", fields: [instanceId], references: [id], onDelete: Restrict)
+  candidateGroup                                     approval_candidate_groups?   @relation("solution_approval_candidate_group", fields: [candidateGroupId], references: [id], onDelete: Restrict)
+  requiredPositionRef                                positions?                    @relation("solution_approvals_requiredPosition", fields: [requiredPositionId], references: [id], onDelete: Restrict)
 
   @@index([approverId])
   @@index([order])
   @@index([requiredApproverId])
   @@index([solutionId])
   @@index([status])
+  @@index([instanceId])
+  @@index([candidateGroupId])
+  @@index([requiredPositionId])
 }
 
 model solutions {
@@ -356,6 +324,7 @@ model solutions {
   fileAttachments                 file_attachments[]
   inlineDescriptionImageReferences inline_description_image_references[]
   approvals                       solution_approvals[]
+  approvalInstances               approval_instances[]
   request            requests             @relation(fields: [requestId], references: [id], onDelete: Cascade)
   submittedBy        User                @relation(fields: [submittedById], references: [id])
 
@@ -425,18 +394,13 @@ model User {
   email                                                           String                         @unique
   name                                                            String
   passwordHash                                                    String?
-  departmentId                                                    String?
   role                                                            UserRole                       @default(general_dept)
-  level                                                           Int?
   isActive                                                        Boolean                        @default(true)
   forcePasswordChange                                             Boolean                        @default(false)
   createdAt                                                       DateTime                       @default(now())
   updatedAt                                                       DateTime                       @updatedAt
-  departmentApproverRoles                                        department_approvers[]
   fileAttachments                                                file_attachments[]
   inlineDescriptionImages                                        inline_description_images[]
-  adminHierarchyChanges                                          hierarchy_change_logs[]        @relation("hierarchy_change_logs_adminUserIdTousers")
-  targetHierarchyChanges                                         hierarchy_change_logs[]        @relation("hierarchy_change_logs_targetUserIdTousers")
   notifications                                                   notifications[]
   requestActivities                                              request_activities[]
   approvedRequests                                               request_approvals[]            @relation("request_approvals_approverIdTousers")
@@ -455,11 +419,13 @@ model User {
   requiredApprovalSolutions                                      solution_approvals[]           @relation("solution_approvals_requiredApproverIdTousers")
   solutions                                                       solutions[]
   createdStoragePlanEvents                                        storage_plan_events[]         @relation("storage_plan_events_createdByIdTousers")
-  department                                                     departments?                   @relation(fields: [departmentId], references: [id])
+  createdApprovalRouteVersions                                    approval_route_versions[]
+  approvalInstancesOrigin                                         approval_instances[]           @relation("approval_instances_originUser")
+  organizationAssignments                                         organization_assignments[]      @relation("organization_assignments_user")
+  managedOrganizationUnits                                        organization_units[]            @relation("organization_units_manager")
+  restartedApprovalInstances                                      approval_instances[]            @relation("approval_instances_restartedBy")
 
-  @@index([departmentId])
   @@index([isActive])
-  @@index([level])
   @@map("users")
 }
 
@@ -467,11 +433,6 @@ enum ApprovalStatus {
   pending
   approved
   rejected
-}
-
-enum DepartmentType {
-  GENERAL
-  ENGINEERING
 }
 
 enum NotificationType {
@@ -498,4 +459,261 @@ enum UserRole {
   admin
   general_dept
   engineering
+}
+
+enum ApprovalPhase {
+  REQUEST
+  SOLUTION
+  FINAL
+}
+
+enum ApprovalRouteStatus {
+  DRAFT
+  PUBLISHED
+  RETIRED
+}
+
+enum ApprovalRoutingMode {
+  SNAPSHOT_GROUP
+  CUSTOM_PERSON
+}
+
+enum ApprovalInstanceState {
+  PENDING
+  AUTO_APPROVED
+  COMPLETED_NO_ELIGIBLE_STEPS
+  APPROVED
+  REJECTED
+  CANCELLED
+  SUPERSEDED
+}
+
+enum ApprovalSkipReason {
+  VACANT_POSITION
+}
+
+model organization_units {
+  id                    String                               @id @default(uuid())
+  name                  String
+  parentId              String?
+  isActive              Boolean                              @default(true)
+  shareRequests         Boolean                              @default(false)
+  canWorkOnSolutions    Boolean                              @default(false)
+  managerUserId         String?
+  createdAt             DateTime                             @default(now())
+  updatedAt             DateTime                             @updatedAt
+  parent                organization_units?                  @relation("organization_units_parent", fields: [parentId], references: [id])
+  children              organization_units[]                 @relation("organization_units_parent")
+  routeVersions         approval_route_versions[]
+  approvalInstances     approval_instances[]
+  requests              requests[]
+  manager               User?                                @relation("organization_units_manager", fields: [managerUserId], references: [id], onDelete: Restrict)
+  assignments           organization_assignments[]           @relation("organization_assignments_unit")
+  teams                 teams[]                              @relation("teams_unit")
+  budgetCodes           budget_codes[]                      @relation("budget_codes_unit")
+  companyRootSetting    company_settings?                    @relation("company_settings_rootUnit")
+
+  @@index([parentId])
+  @@index([isActive])
+  @@index([managerUserId])
+}
+
+model approval_route_versions {
+  id                   String                  @id @default(uuid())
+  scopeUnitId          String
+  phase                ApprovalPhase
+  version              Int
+  status               ApprovalRouteStatus     @default(DRAFT)
+  createdById          String
+  createdAt            DateTime                @default(now())
+  publishedAt          DateTime?
+  approvalLimitPositionId String
+  scopeUnit            organization_units      @relation(fields: [scopeUnitId], references: [id], onDelete: Restrict)
+  createdBy            User                    @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  approvalLimitPosition positions              @relation("approval_route_versions_approvalLimitPosition", fields: [approvalLimitPositionId], references: [id], onDelete: Restrict)
+  steps                approval_route_steps[]
+  instances            approval_instances[]
+
+  @@unique([scopeUnitId, phase, version])
+  @@index([scopeUnitId, phase, status])
+  @@index([approvalLimitPositionId])
+}
+
+model approval_route_steps {
+  id               String                    @id @default(uuid())
+  routeVersionId   String
+  stepOrder        Int
+  positionId       String
+  createdAt        DateTime                  @default(now())
+  routeVersion     approval_route_versions   @relation(fields: [routeVersionId], references: [id], onDelete: Cascade)
+  position         positions                 @relation("approval_route_steps_position", fields: [positionId], references: [id], onDelete: Restrict)
+  skippedInstances approval_instance_skips[]
+
+  @@unique([routeVersionId, stepOrder])
+  @@unique([routeVersionId, positionId])
+  @@index([positionId])
+}
+
+model approval_instances {
+  id               String                     @id @default(uuid())
+  requestId        String?
+  solutionId       String?
+  phase            ApprovalPhase
+  routeVersionId   String?
+  originUserId     String
+  originUnitId     String
+  routingMode      ApprovalRoutingMode
+  state            ApprovalInstanceState      @default(PENDING)
+  attempt          Int                        @default(1)
+  completionReason String?
+  createdAt        DateTime                   @default(now())
+  // Task 8 ruling: supersession sets supersededAt while PRESERVING the prior
+  // terminal state — AUTO_APPROVED is never erased into SUPERSEDED. The state
+  // stays the durable audit proof for group-less auto self-rows.
+  supersededAt     DateTime?
+  originAssignmentId  String
+  originPositionId    String
+  restartOfInstanceId String?
+  restartReason       String?
+  restartedById       String?
+  request          requests?                  @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  solution         solutions?                 @relation(fields: [solutionId], references: [id], onDelete: Cascade)
+  routeVersion     approval_route_versions?   @relation(fields: [routeVersionId], references: [id], onDelete: Restrict)
+  originUser       User                       @relation("approval_instances_originUser", fields: [originUserId], references: [id], onDelete: Restrict)
+  originUnit       organization_units         @relation(fields: [originUnitId], references: [id], onDelete: Restrict)
+  originAssignment organization_assignments   @relation("approval_instances_originAssignment", fields: [originAssignmentId], references: [id], onDelete: Restrict)
+  originPosition   positions                  @relation("approval_instances_originPosition", fields: [originPositionId], references: [id], onDelete: Restrict)
+  restartOf        approval_instances?        @relation("approval_instances_restart", fields: [restartOfInstanceId], references: [id], onDelete: Restrict)
+  restartedFrom    approval_instances[]       @relation("approval_instances_restart")
+  restartedBy      User?                      @relation("approval_instances_restartedBy", fields: [restartedById], references: [id], onDelete: Restrict)
+  requestApprovals request_approvals[]        @relation("request_approval_instance")
+  solutionApprovals solution_approvals[]      @relation("solution_approval_instance")
+  skips            approval_instance_skips[]
+  candidateGroups  approval_candidate_groups[]
+
+  @@index([requestId, phase, supersededAt])
+  @@index([solutionId, phase, supersededAt])
+  @@index([routeVersionId])
+  @@index([originAssignmentId])
+  @@index([originPositionId])
+  @@index([restartOfInstanceId])
+  @@index([restartedById])
+  @@unique([requestId, phase, attempt])
+  @@unique([solutionId, phase, attempt])
+}
+
+model approval_instance_skips {
+  id                String                    @id @default(uuid())
+  approvalInstanceId String
+  routeStepId       String?
+  requiredPositionId String
+  reason            ApprovalSkipReason
+  createdAt         DateTime                  @default(now())
+  approvalInstance  approval_instances        @relation(fields: [approvalInstanceId], references: [id], onDelete: Cascade)
+  routeStep         approval_route_steps?     @relation(fields: [routeStepId], references: [id], onDelete: SetNull)
+  requiredPositionRef positions               @relation("approval_instance_skips_requiredPosition", fields: [requiredPositionId], references: [id], onDelete: Restrict)
+
+  @@unique([approvalInstanceId, requiredPositionId])
+  @@index([requiredPositionId])
+}
+
+model approval_candidate_groups {
+  id                 String                               @id @default(uuid())
+  approvalInstanceId String
+  scopeUnitId        String
+  requiredPositionId String
+  capturedAt         DateTime                             @default(now())
+  approvalInstance   approval_instances                   @relation(fields: [approvalInstanceId], references: [id], onDelete: Cascade)
+  requiredPositionRef positions                             @relation("approval_candidate_groups_requiredPosition", fields: [requiredPositionId], references: [id], onDelete: Restrict)
+  members            approval_candidate_group_members[]
+  requestApprovals   request_approvals[]                  @relation("request_approval_candidate_group")
+  solutionApprovals  solution_approvals[]                 @relation("solution_approval_candidate_group")
+
+  @@unique([approvalInstanceId, requiredPositionId])
+  @@index([scopeUnitId])
+  @@index([requiredPositionId])
+}
+
+model approval_candidate_group_members {
+  candidateGroupId    String
+  userId              String
+  capturedAt          DateTime                    @default(now())
+  capturedDisplayName String
+  candidateGroup      approval_candidate_groups   @relation(fields: [candidateGroupId], references: [id], onDelete: Cascade)
+
+  @@id([candidateGroupId, userId])
+  @@index([userId])
+}
+
+// Clean-start organization schema (Plan B Task 15). Snapshot-constraint notes:
+// every position reference uses Restrict so referenced positions can never be
+// hard-deleted (deactivation is the removal path); the restart self-relation
+// on approval_instances preserves the old attempt row; team-name uniqueness
+// is a PARTIAL unique index on ACTIVE rows per unit (accepted A3 rule 7),
+// carried in the squashed init migration because Prisma cannot express
+// partial indexes.
+
+model company_settings {
+  id         String             @id @default("default")
+  name       String
+  rootUnitId String             @unique
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+  rootUnit   organization_units @relation("company_settings_rootUnit", fields: [rootUnitId], references: [id], onDelete: Restrict)
+}
+
+model positions {
+  id                                  String                      @id @default(uuid())
+  name                                String                      @unique
+  rank                                Int
+  isActive                            Boolean                     @default(true)
+  createdAt                           DateTime                    @default(now())
+  updatedAt                           DateTime                    @updatedAt
+  assignments                         organization_assignments[]  @relation("organization_assignments_position")
+  routeVersionsApprovalLimit          approval_route_versions[]   @relation("approval_route_versions_approvalLimitPosition")
+  routeStepsPosition                  approval_route_steps[]      @relation("approval_route_steps_position")
+  instancesOrigin                     approval_instances[]        @relation("approval_instances_originPosition")
+  skipRowsRequiredPosition            approval_instance_skips[]    @relation("approval_instance_skips_requiredPosition")
+  candidateGroupsRequiredPosition     approval_candidate_groups[]  @relation("approval_candidate_groups_requiredPosition")
+  requestApprovalRows                 request_approvals[]          @relation("request_approvals_requiredPosition")
+  solutionApprovalRows                solution_approvals[]        @relation("solution_approvals_requiredPosition")
+}
+
+model organization_assignments {
+  id             String     @id @default(uuid())
+  userId         String
+  unitId         String
+  positionId     String
+  teamId         String?
+  isActive       Boolean    @default(true)
+  deactivatedAt  DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  user            User                 @relation("organization_assignments_user", fields: [userId], references: [id], onDelete: Restrict)
+  unit            organization_units   @relation("organization_assignments_unit", fields: [unitId], references: [id], onDelete: Restrict)
+  position        positions            @relation("organization_assignments_position", fields: [positionId], references: [id], onDelete: Restrict)
+  team            teams?               @relation("organization_assignments_team", fields: [teamId], references: [id], onDelete: SetNull)
+  reportsForTeams teams[]              @relation("teams_reportsTo")
+  originInstances approval_instances[] @relation("approval_instances_originAssignment")
+
+  @@index([userId])
+  @@index([unitId])
+  @@index([positionId])
+  @@index([teamId])
+}
+
+model teams {
+  id                    String     @id @default(uuid())
+  unitId                String
+  name                  String
+  reportsToAssignmentId String
+  isActive              Boolean    @default(true)
+  createdAt             DateTime   @default(now())
+  updatedAt             DateTime   @updatedAt
+  unit      organization_units       @relation("teams_unit", fields: [unitId], references: [id], onDelete: Restrict)
+  reportsTo organization_assignments @relation("teams_reportsTo", fields: [reportsToAssignmentId], references: [id], onDelete: Restrict)
+  members   organization_assignments[] @relation("organization_assignments_team")
+
+  @@index([unitId])
+  @@index([reportsToAssignmentId])
 }

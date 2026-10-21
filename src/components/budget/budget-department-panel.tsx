@@ -24,7 +24,7 @@ export function BudgetDepartmentPanel({
   return (
     <div className="space-y-8">
       {departments.map((department) => (
-        <section key={department.departmentId ?? 'none'}>
+        <section key={department.unitId ?? 'none'}>
           <div className="mb-3 flex items-baseline justify-between gap-2">
             <h3 className="text-xs font-bold uppercase tracking-wide text-gray-900">{department.departmentName}</h3>
             <span className="text-xs text-muted-foreground">

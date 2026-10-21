@@ -35,14 +35,14 @@ test.describe.serial("rejected request authorization", () => {
 		const [requester, engineer] = await Promise.all([
 			prisma.user.findUnique({
 				where: { email: requesterEmail },
-				select: { id: true, departmentId: true },
+				select: { id: true },
 			}),
 			prisma.user.findUnique({
 				where: { email: engineerEmail },
 				select: { id: true },
 			}),
 		]);
-		if (!requester?.departmentId || !engineer) {
+		if (!requester || !engineer) {
 			throw new Error(
 				`Rejected-request authorization E2E requires ${requesterEmail} and ${engineerEmail}`,
 			);
@@ -55,7 +55,6 @@ test.describe.serial("rejected request authorization", () => {
 				description: "Rejected request authorization fixture",
 				status: "ImprovementRequest",
 				requesterId: requester.id,
-				departmentId: requester.departmentId,
 			},
 			select: { id: true },
 		});
@@ -63,7 +62,6 @@ test.describe.serial("rejected request authorization", () => {
 		await prisma.request_approvals.create({
 			data: {
 				requestId,
-				requiredLevel: 2,
 				order: 1,
 				status: "rejected",
 				isFinalApproval: false,

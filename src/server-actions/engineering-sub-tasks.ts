@@ -9,6 +9,11 @@ import {
   isSubTaskVisibleForRequestStatus,
   validateSubTaskInput,
 } from '@/lib/engineering-sub-tasks'
+import { buildRequestVisibilityWhere, canUserViewRequest, createRequestVisibilityDb } from '@/lib/request-visibility/scope'
+import {
+  evaluateRequestAction,
+  existingManageSubTasksDecision,
+} from '@/lib/action-permissions'
 
 type ActionResult<T = undefined> = T extends undefined
   ? { success: true } | { success: false; error: string }
@@ -24,6 +29,11 @@ async function requireSubTaskManager() {
 }
 
 async function requireVisibleStageRequest(requestId: string) {
+  const user = await getCurrentUser()
+  if (!user || !(await canUserViewRequest(user.id, requestId))) {
+    throw new Error('Request not found')
+  }
+
   const request = await prisma.requests.findUnique({
     where: { id: requestId },
     select: { id: true, status: true, isDeleted: true },
@@ -35,6 +45,38 @@ async function requireVisibleStageRequest(requestId: string) {
   }
 
   return request
+}
+
+function assertCanManageSubTasks(
+  user: { id: string; role: string; isActive?: boolean | null },
+  request: { requesterId?: string | null; organizationUnitId?: string | null; status: string },
+) {
+  const manageAction = evaluateRequestAction('MANAGE_SUB_TASKS', {
+    actor: {
+      id: user.id,
+      role: user.role,
+      isActive: user.isActive !== false,
+      assignmentUnitId: null,
+    },
+    request: {
+      requesterId: request.requesterId ?? '',
+      organizationUnitId: request.organizationUnitId ?? null,
+      status: request.status,
+    },
+    canView: true,
+    approval: null,
+    assignedEngineer: false,
+    existingActionDecisions: {
+      MANAGE_SUB_TASKS: existingManageSubTasksDecision({
+        userRole: user.role,
+        isActive: user.isActive,
+        status: request.status,
+      }),
+    },
+  })
+  if (!manageAction.allowed) {
+    throw new Error('Only engineering and admin users can manage sub-tasks')
+  }
 }
 
 async function getStage(stageId: string) {
@@ -85,7 +127,8 @@ export async function createSubTask(input: {
 }): Promise<ActionResult<{ id: string }>> {
   try {
     const user = await requireSubTaskManager()
-    await requireVisibleStageRequest(input.requestId)
+    const request = await requireVisibleStageRequest(input.requestId)
+    assertCanManageSubTasks(user, request)
     const stage = await getStage(input.stageId)
     const validation = validateSubTaskInput({
       description: input.description,
@@ -129,7 +172,8 @@ export async function updateSubTask(input: {
       select: { requestId: true },
     })
     if (!existing) throw new Error('Sub-task not found')
-    await requireVisibleStageRequest(existing.requestId)
+    const request = await requireVisibleStageRequest(existing.requestId)
+    assertCanManageSubTasks(user, request)
     const stage = await getStage(input.stageId)
     const validation = validateSubTaskInput({
       description: input.description,
@@ -165,7 +209,8 @@ export async function setSubTaskCompleted(id: string, completed: boolean): Promi
       select: { requestId: true },
     })
     if (!existing) throw new Error('Sub-task not found')
-    await requireVisibleStageRequest(existing.requestId)
+    const request = await requireVisibleStageRequest(existing.requestId)
+    assertCanManageSubTasks(user, request)
     const completedStage = completed
       ? await prisma.sub_task_stages.findFirst({
           where: { name: 'Completed', isActive: true },
@@ -197,13 +242,14 @@ export async function setSubTaskCompleted(id: string, completed: boolean): Promi
 
 export async function deleteSubTask(id: string): Promise<ActionResult> {
   try {
-    await requireSubTaskManager()
+    const user = await requireSubTaskManager()
     const existing = await prisma.request_sub_tasks.findUnique({
       where: { id },
       select: { requestId: true },
     })
     if (!existing) throw new Error('Sub-task not found')
-    await requireVisibleStageRequest(existing.requestId)
+    const request = await requireVisibleStageRequest(existing.requestId)
+    assertCanManageSubTasks(user, request)
 
     await prisma.request_sub_tasks.delete({ where: { id } })
 
@@ -217,7 +263,8 @@ export async function deleteSubTask(id: string): Promise<ActionResult> {
 export async function toggleWorkRequisitionReceived(requestId: string, received: boolean): Promise<ActionResult> {
   try {
     const user = await requireSubTaskManager()
-    await requireVisibleStageRequest(requestId)
+    const request = await requireVisibleStageRequest(requestId)
+    assertCanManageSubTasks(user, request)
 
     await prisma.requests.update({
       where: { id: requestId },
@@ -278,24 +325,32 @@ export async function getStaleSubTaskRequests(input: { olderThanDays?: number; s
   const threshold = new Date()
   threshold.setDate(threshold.getDate() - input.olderThanDays)
 
+  const visibilityWhere = await buildRequestVisibilityWhere(createRequestVisibilityDb(prisma), {
+    userId: user.id,
+    includeArchived: false,
+  })
+
   return prisma.requests.findMany({
     where: {
-      isDeleted: false,
-      isArchived: false,
-      status: { in: ['SentToEngineer', 'SendBackToRequester', 'FinalApproval', 'Completed'] as any },
-      subTasks: {
-        some: {
-          isCompleted: false,
-          updatedAt: { lte: threshold },
-          ...(input.stageId ? { stageId: input.stageId } : {}),
+      AND: [
+        visibilityWhere,
+        {
+          status: { in: ['SentToEngineer', 'SendBackToRequester', 'FinalApproval', 'Completed'] as any },
+          subTasks: {
+            some: {
+              isCompleted: false,
+              updatedAt: { lte: threshold },
+              ...(input.stageId ? { stageId: input.stageId } : {}),
+            },
+          },
         },
-      },
+      ],
     },
     select: {
       id: true,
       title: true,
       status: true,
-      department: { select: { name: true } },
+      organizationUnit: { select: { name: true } },
       requester: { select: { name: true } },
       subTasks: {
         where: {

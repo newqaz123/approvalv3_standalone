@@ -64,7 +64,6 @@ interface EngineeringDashboardTabsProps extends NeedsActionListProps {
 		id: string;
 		name: string;
 		email: string;
-		level: number | null;
 	}>;
 }
 
@@ -162,7 +161,6 @@ function AllEngineeringRequests({
 		id: string;
 		name: string;
 		email: string;
-		level: number | null;
 	}>;
 	currentUserId: string;
 }) {
@@ -777,7 +775,6 @@ function FollowUpRequestRow({
 		id: string;
 		name: string;
 		email: string;
-		level: number | null;
 	}>;
 	currentUserId: string;
 	showSubmitSolution?: boolean;

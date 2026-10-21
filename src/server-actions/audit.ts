@@ -23,7 +23,7 @@ export interface AuditQueryOptions {
  * @throws Error if not authenticated or not admin
  */
 export async function getAuditTrailForRequest(requestId: string) {
-  // Admin-only access
+  // Privileged admin audit: ordinary request visibility and list exclusions are not applied.
   const adminUserId = await requireAdmin()
   if (!adminUserId) {
     throw new Error('Unauthorized - Admin access required')
@@ -45,7 +45,7 @@ export async function getAuditTrailForRequest(requestId: string) {
         select: {
           id: true,
           title: true,
-          departmentId: true,
+          organizationUnitId: true,
           status: true,
         },
       },
@@ -99,7 +99,7 @@ export async function getAuditTrailForDateRange(
         select: {
           id: true,
           title: true,
-          departmentId: true,
+          organizationUnitId: true,
           status: true,
         },
       },
@@ -183,7 +183,7 @@ export async function getAuditTrailForUser(
         select: {
           id: true,
           title: true,
-          departmentId: true,
+          organizationUnitId: true,
           status: true,
         },
       },

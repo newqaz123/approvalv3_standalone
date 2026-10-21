@@ -83,10 +83,10 @@ export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorD
   )
   const activeFilterCount = useMemo(
     () =>
-      [filters.budgetCodeSearch, filters.departmentId, filters.status].filter((value) =>
+      [filters.budgetCodeSearch, filters.unitId, filters.status].filter((value) =>
         Boolean(value)
       ).length,
-    [filters.budgetCodeSearch, filters.departmentId, filters.status]
+    [filters.budgetCodeSearch, filters.unitId, filters.status]
   )
 
   const refresh = useCallback(
@@ -248,21 +248,21 @@ export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorD
                 onChange={(value) => setFilters({ ...filters, budgetCodeSearch: value || undefined })}
               />
             </div>
-            {filters.departmentId ? (
+            {filters.unitId ? (
               <button
                 type="button"
                 className="inline-flex h-9 items-center gap-1 rounded-full bg-gray-900 px-3 text-xs font-semibold text-white"
-                onClick={() => setFilters({ ...filters, departmentId: undefined })}
+                onClick={() => setFilters({ ...filters, unitId: undefined })}
                 title="Clear department filter"
               >
-                {data.filters.departments.find((d) => d.id === filters.departmentId)?.name ?? 'Department'}
+                {data.filters.departments.find((d) => d.id === filters.unitId)?.name ?? 'Department'}
                 <span aria-hidden>✕</span>
               </button>
             ) : (
               <Select
-                value={filters.departmentId ?? 'all'}
+                value={filters.unitId ?? 'all'}
                 onValueChange={(value) =>
-                  setFilters({ ...filters, departmentId: value === 'all' ? undefined : value })
+                  setFilters({ ...filters, unitId: value === 'all' ? undefined : value })
                 }
               >
                 <SelectTrigger className="h-9 w-auto min-w-[9rem] text-xs text-muted-foreground">
@@ -374,9 +374,9 @@ export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorD
             <div className="space-y-2">
               <Label className="text-xs text-muted-foreground">Department</Label>
               <Select
-                value={filters.departmentId ?? 'all'}
+                value={filters.unitId ?? 'all'}
                 onValueChange={(value) =>
-                  setFilters({ ...filters, departmentId: value === 'all' ? undefined : value })
+                  setFilters({ ...filters, unitId: value === 'all' ? undefined : value })
                 }
               >
                 <SelectTrigger className="h-10">
@@ -430,13 +430,13 @@ export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorD
         budgetCode={editDialog?.type === 'budget' ? editDialog.group.budgetCode : null}
         departments={data.filters.departments}
         onOpenChange={(open) => !open && setEditDialog(null)}
-        onSave={async ({ name, budgetAmount, departmentId }) => {
+        onSave={async ({ name, budgetAmount, unitId }) => {
           if (editDialog?.type !== 'budget') return
           await updateBudgetCodeAmount({
             budgetCodeId: editDialog.group.budgetCode.id,
             name,
             budgetAmount,
-            departmentId,
+            unitId,
           })
           refresh()
         }}

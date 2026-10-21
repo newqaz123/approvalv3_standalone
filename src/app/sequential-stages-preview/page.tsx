@@ -26,11 +26,11 @@ import { cn } from '@/lib/utils'
 
 // Sample data
 const sampleAvailableUsers = [
-  { id: '1', name: 'Dr. Alan Grant', email: 'alan@firm.com', role: 'Chief Engineer', departmentName: 'Engineering', level: 1 },
-  { id: '2', name: 'Ellie Sattler', email: 'ellie@firm.com', role: 'Senior Engineer', departmentName: 'Engineering', level: 2 },
-  { id: '3', name: 'Ian Malcolm', email: 'ian@firm.com', role: 'Risk Analyst', departmentName: 'Risk Management', level: 2 },
-  { id: '4', name: 'John Hammond', email: 'john@firm.com', role: 'Director', departmentName: 'Executive Office', level: 3 },
-  { id: '5', name: 'M. Sterling', email: 'sterling@firm.com', role: 'Dept. Head', departmentName: 'Operations', level: 3 },
+  { id: '1', name: 'Dr. Alan Grant', email: 'alan@firm.com', role: 'Chief Engineer', unitPathNames: ['Engineering'] },
+  { id: '2', name: 'Ellie Sattler', email: 'ellie@firm.com', role: 'Senior Engineer', unitPathNames: ['Engineering'] },
+  { id: '3', name: 'Ian Malcolm', email: 'ian@firm.com', role: 'Risk Analyst', unitPathNames: ['Risk Management'] },
+  { id: '4', name: 'John Hammond', email: 'john@firm.com', role: 'Director', unitPathNames: ['Executive Office'] },
+  { id: '5', name: 'M. Sterling', email: 'sterling@firm.com', role: 'Dept. Head', unitPathNames: ['Operations'] },
 ]
 
 const sampleActivities = [

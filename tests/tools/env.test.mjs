@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import {
@@ -219,8 +219,9 @@ test("createRuntimeReport requires a PostgreSQL DATABASE_URL", () => {
 	assert.match(report.issues.join("\n"), /PostgreSQL/);
 });
 
-test("env-check CLI exits 1 on runtime issues and never prints secret values", async () => {
+test("env-check CLI exits 1 on runtime issues and never prints secret values", async (t) => {
 	const dir = await mkdtemp(path.join(os.tmpdir(), "approval-envcheck-"));
+	t.after(() => rm(dir, { recursive: true, force: true }));
 	const envPath = path.join(dir, ".env.production");
 	const templatePath = path.join(dir, ".env.example");
 	const secretValue = "SUPER-SECRET-SENTINEL";
@@ -270,8 +271,9 @@ test("env-check CLI exits 1 on runtime issues and never prints secret values", a
 	assert.doesNotMatch(result.stdout + result.stderr, /SUPER-SECRET-SENTINEL/);
 });
 
-test("env-check CLI exits 0 and reports success for a valid production config", async () => {
+test("env-check CLI exits 0 and reports success for a valid production config", async (t) => {
 	const dir = await mkdtemp(path.join(os.tmpdir(), "approval-envcheck-"));
+	t.after(() => rm(dir, { recursive: true, force: true }));
 	const envPath = path.join(dir, ".env.production");
 	const templatePath = path.join(dir, ".env.example");
 

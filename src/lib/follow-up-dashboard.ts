@@ -37,7 +37,7 @@ export type FollowUpVisibleRequest = {
 	estimateLabel?: string | null;
 	approvals?: Array<{
 		status: string;
-		requiredLevel: number;
+		requiredLevel: number | null;
 		requiredApprover?: { name: string } | null;
 		potentialApprovers?: Array<{ name: string }>;
 	}>;

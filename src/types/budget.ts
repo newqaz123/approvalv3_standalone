@@ -35,7 +35,7 @@ export interface BudgetCodeGroup {
 export interface BudgetMonitorFilters {
   budgetCodeSearch?: string
   requestSearch?: string
-  departmentId?: string
+  unitId?: string
   status?: string
   dateFrom?: string
   dateTo?: string

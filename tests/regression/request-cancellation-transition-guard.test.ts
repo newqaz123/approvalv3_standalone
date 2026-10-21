@@ -14,8 +14,8 @@ import { evaluateRequesterCancelControl } from '@/lib/cancellation-policy'
  *    first, the conditional update matches zero rows and throws so the
  *    caller's transaction rolls back instead of overwriting `Cancelled`.
  *    (The atomic approval core that relies on this guard - the exact
- *    transaction approveRequest runs - is covered by
- *    request-approval-transaction.test.ts.)
+ *    transaction approveRequest runs - was re-based into
+ *    clean-start-engine-decisions.test.ts in Plan B Task 5.)
  *
  * 2. Requester visibility: the cancel control's visibility follows the
  *    cancellation policy alone. `viewOnly` (set by the follow-up dashboard

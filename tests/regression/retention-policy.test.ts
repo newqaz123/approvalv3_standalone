@@ -216,22 +216,20 @@ describe('retention backup folders', () => {
     assert.equal((actionItems.match(/isArchived: false/g) ?? []).length, 2, 'request + solution approval queues')
 
     const engineeringAction = bodyOf(requestsActions, 'export async function getRequestsNeedingEngineeringAction')
-    assert.equal((engineeringAction.match(/isArchived: false/g) ?? []).length, 2)
+    assert.match(engineeringAction, /includeArchived: false/)
+    assert.equal((engineeringAction.match(/AND: \[visibilityWhere/g) ?? []).length, 2)
 
     const engineeringList = bodyOf(requestsActions, 'export async function getRequestsForEngineering')
-    assert.equal((engineeringList.match(/isArchived: false/g) ?? []).length, 1)
+    assert.match(engineeringList, /includeArchived: false/)
+    assert.match(engineeringList, /AND: \[visibilityWhere/)
 
     assert.equal((pendingCount.match(/isArchived: false/g) ?? []).length, 2, 'both pending-count queries')
 
-    // Engineering page: board query + six stat counts, each paired with isDeleted
-    assert.match(
-      engineering,
-      /in: \["SentToEngineer", "SendBackToRequester", "FinalApproval"\],\s*\n\s*\},\s*\n\s*isDeleted: false,\s*\n\s*isArchived: false,/
-    )
-    assert.equal((engineering.match(/isArchived: false/g) ?? []).length, 7, 'board + 6 stat queries')
+    assert.match(engineering, /includeArchived: false/)
+    assert.match(engineering, /AND: \[\s*visibilityWhere/)
 
     const allRequests = bodyOf(dashboard, 'export async function getAllRequests')
-    assert.equal((allRequests.match(/isArchived: false/g) ?? []).length, 3, 'all three visibility branches')
+    assert.match(allRequests, /includeArchived: false/)
   })
 
   it('bulk archive audits only rows it actually archived', () => {

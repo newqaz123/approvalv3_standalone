@@ -27,9 +27,19 @@ playwright-report/
 test-results/
 image*.png
 
+# Clean-start worktree local runtime state (A1 fix: durable non-env runtime location + isolated uploads)
+/.local-runtime/
+/uploads/
+
 # Playwright MCP session logs
 .playwright-mcp/
 
 # Pi session artifacts
 .pi/
 .pi-subagents/
+
+# Local debug/run output (not source)
+/scratch/
+/failures/
+/docs/superpowers/e2e-runs/
+/sql-probe.cjs

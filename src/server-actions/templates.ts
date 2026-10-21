@@ -31,6 +31,19 @@ export interface GetTemplatesOptions {
   includeInactive?: boolean
 }
 
+/**
+ * Every exported action here is an invocable Server Action and must abort
+ * when authorization fails. requireAdmin stays nullable for callers that
+ * inspect its result; this wrapper enforces denial before any read/write.
+ */
+async function requireAdminUser(): Promise<string> {
+  const userId = await requireAdmin()
+  if (!userId) {
+    throw new Error('Unauthorized')
+  }
+  return userId
+}
+
 // Zod validation schemas
 const createTemplateSchema = z.object({
   name: z.string().min(1, 'Template name is required'),
@@ -53,7 +66,7 @@ const updateTemplateSchema = z.object({
  * Get all templates with optional filtering (admin only)
  */
 export async function getTemplates(options: GetTemplatesOptions = {}) {
-  await requireAdmin()
+  await requireAdminUser()
 
   const { includeInactive = false } = options
 
@@ -120,7 +133,7 @@ export async function getDefaultTemplatePublic() {
  * Get a single template by ID
  */
 export async function getTemplate(id: string) {
-  await requireAdmin()
+  await requireAdminUser()
 
   const template = await prisma.templates.findUnique({
     where: { id },
@@ -251,7 +264,7 @@ export async function updateTemplate(input: UpdateTemplateInput) {
  * Toggle template availability without deleting it
  */
 export async function toggleTemplateStatus(id: string) {
-  await requireAdmin()
+  await requireAdminUser()
 
   const template = await prisma.templates.findUnique({
     where: { id },
@@ -283,7 +296,7 @@ export async function toggleTemplateStatus(id: string) {
  * Uses transaction to ensure only one default template exists
  */
 export async function setTemplateDefault(id: string) {
-  await requireAdmin()
+  await requireAdminUser()
 
   const template = await prisma.templates.findUnique({
     where: { id },
@@ -319,7 +332,7 @@ export async function setTemplateDefault(id: string) {
  * Inline image references cascade; shared images retain their other references.
  */
 export async function deleteTemplate(id: string) {
-  await requireAdmin()
+  await requireAdminUser()
 
   const template = await prisma.templates.findUnique({
     where: { id },

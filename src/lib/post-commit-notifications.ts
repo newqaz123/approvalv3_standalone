@@ -18,34 +18,17 @@ export interface UserNotification extends NotificationPayload {
   userId: string
 }
 
-export type PostCommitNotificationPlan =
-  | {
-      target: 'user'
-      notification: UserNotification
-    }
-  | {
-      target: 'department'
-      departmentId: string
-      notification: NotificationPayload
-      excludeUserIds?: string[]
-    }
+export type PostCommitNotificationPlan = {
+  target: 'user'
+  notification: UserNotification
+}
 
 export interface PostCommitNotificationCollector {
   user(notification: UserNotification): void
-  department(
-    departmentId: string,
-    notification: NotificationPayload,
-    excludeUserIds?: readonly string[],
-  ): void
 }
 
 export interface PostCommitNotificationDispatchers {
   notifyUser(notification: UserNotification): Promise<unknown>
-  notifyDepartment(
-    departmentId: string,
-    notification: NotificationPayload,
-    excludeUserIds?: string[],
-  ): Promise<unknown>
 }
 
 export async function runTransactionWithPostCommitNotifications<T, Tx>(options: {
@@ -62,16 +45,6 @@ export async function runTransactionWithPostCommitNotifications<T, Tx>(options: 
         notification: { ...notification },
       })
     },
-    department: (departmentId, notification, excludeUserIds) => {
-      plans.push({
-        target: 'department',
-        departmentId,
-        notification: { ...notification },
-        ...(excludeUserIds
-          ? { excludeUserIds: [...excludeUserIds] }
-          : {}),
-      })
-    },
   }
 
   // The transaction must resolve (commit) before any global-Prisma or SMTP
@@ -82,17 +55,7 @@ export async function runTransactionWithPostCommitNotifications<T, Tx>(options: 
   )
 
   const outcomes = await Promise.allSettled(
-    plans.map((plan) => {
-      if (plan.target === 'user') {
-        return options.dispatchers.notifyUser(plan.notification)
-      }
-
-      return options.dispatchers.notifyDepartment(
-        plan.departmentId,
-        plan.notification,
-        plan.excludeUserIds,
-      )
-    }),
+    plans.map((plan) => options.dispatchers.notifyUser(plan.notification)),
   )
 
   outcomes.forEach((outcome, index) => {

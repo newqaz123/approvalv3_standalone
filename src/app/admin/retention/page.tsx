@@ -22,7 +22,7 @@ export default async function RetentionPage() {
     status: request.status,
     isArchived: request.isArchived,
     updatedAt: request.updatedAt.toISOString(),
-    departmentName: request.department?.name ?? null,
+    departmentName: request.organizationUnit?.name ?? null,
     eligible: isEligibleForAutoArchive(
       {
         status: request.status,

@@ -3,14 +3,14 @@ import { Users, Building2, FileText, Trash2, Archive, ClipboardList, LayoutTempl
 import prisma from '@/lib/prisma'
 
 async function getStats() {
-  const [userCount, deptCount, requestCount, deletedCount] = await Promise.all([
+  const [userCount, unitCount, requestCount, deletedCount] = await Promise.all([
     prisma.user.count(),
-    prisma.departments.count(),
+    prisma.organization_units.count(),
     prisma.requests.count({ where: { isDeleted: false } }),
     prisma.requests.count({ where: { isDeleted: true } }),
   ])
 
-  return { userCount, deptCount, requestCount, deletedCount }
+  return { userCount, unitCount, requestCount, deletedCount }
 }
 
 export default async function AdminPage() {
@@ -21,11 +21,10 @@ export default async function AdminPage() {
       <div>
         <h1 className="text-3xl font-bold">Admin Dashboard</h1>
         <p className="text-muted-foreground mt-2">
-          Manage users, departments, and system settings
+          Manage users, organization, and system settings
         </p>
       </div>
 
-      {/* Stats Cards */}
       <div className="grid gap-4 md:grid-cols-4">
         <div className="rounded-lg border bg-card p-6">
           <div className="flex items-center gap-2">
@@ -38,9 +37,9 @@ export default async function AdminPage() {
         <div className="rounded-lg border bg-card p-6">
           <div className="flex items-center gap-2">
             <Building2 className="h-5 w-5 text-muted-foreground" />
-            <h3 className="text-sm font-medium text-muted-foreground">Departments</h3>
+            <h3 className="text-sm font-medium text-muted-foreground">Organization units</h3>
           </div>
-          <p className="text-3xl font-bold mt-2">{stats.deptCount}</p>
+          <p className="text-3xl font-bold mt-2">{stats.unitCount}</p>
         </div>
 
         <div className="rounded-lg border bg-card p-6">
@@ -60,7 +59,6 @@ export default async function AdminPage() {
         </div>
       </div>
 
-      {/* Quick Actions */}
       <div>
         <h2 className="text-xl font-semibold mb-4">Quick Actions</h2>
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -82,7 +80,7 @@ export default async function AdminPage() {
           </Link>
 
           <Link
-            href="/admin/departments"
+            href="/admin/organization"
             className="rounded-lg border bg-card p-6 hover:bg-accent transition-colors cursor-pointer"
           >
             <div className="flex items-center gap-4">
@@ -90,9 +88,9 @@ export default async function AdminPage() {
                 <Building2 className="h-6 w-6 text-primary" />
               </div>
               <div>
-                <h3 className="font-semibold">Manage Departments</h3>
+                <h3 className="font-semibold">Organization</h3>
                 <p className="text-sm text-muted-foreground">
-                  Create and manage departments
+                  Tree workspace, assignments, and approval chains
                 </p>
               </div>
             </div>
