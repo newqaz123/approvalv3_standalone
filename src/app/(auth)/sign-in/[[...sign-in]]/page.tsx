@@ -73,7 +73,7 @@ export default function SignInPage() {
 						</div>
 					)}
 
-					<form onSubmit={handleSubmit} className="space-y-5">
+					<form method="post" onSubmit={handleSubmit} className="space-y-5">
 						{/* Email Field */}
 						<div className="space-y-2">
 							<label
