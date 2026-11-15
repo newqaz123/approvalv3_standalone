@@ -19,7 +19,7 @@ interface EditUserDialogProps {
     id: string
     name: string
     email: string
-    role: 'admin' | 'general_dept' | 'engineering'
+    isAdmin: boolean
   }
   open?: boolean
   onOpenChange?: (open: boolean) => void
@@ -57,7 +57,7 @@ export function EditUserDialog({ user, open: externalOpen, onOpenChange: externa
             id: user.id,
             name: user.name,
             email: user.email,
-            role: user.role,
+            isAdmin: user.isAdmin,
           }}
           onSuccess={handleSuccess}
           onCancel={() => setOpen(false)}

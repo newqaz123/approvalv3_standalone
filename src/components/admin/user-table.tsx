@@ -37,6 +37,7 @@ import { deactivateUser, activateUser } from '@/server-actions/users'
 import { UserWithDepartment } from '@/server-actions/users'
 import { EditUserDialog } from '@/components/admin/edit-user-dialog'
 import { ResetPasswordDialog } from '@/components/admin/reset-password-dialog'
+import { isAdminRole } from '@/lib/user-role'
 import { AdminCard, AdminCardsEmptyState } from '@/components/mobile/admin-card'
 import { Mail, Building, Shield } from 'lucide-react'
 
@@ -91,15 +92,7 @@ export function UserTable({ data }: UserTableProps) {
     {
       accessorKey: 'role',
       header: 'Role',
-      cell: ({ row }) => {
-        const role = row.getValue('role') as string
-        const roleLabels: Record<string, string> = {
-          admin: 'Admin',
-          general_dept: 'General Dept',
-          engineering: 'Engineering',
-        }
-        return roleLabels[role] || role
-      },
+      cell: ({ row }) => isAdminRole(row.original.role) ? 'Admin' : '',
     },
     {
       accessorKey: 'isActive',
@@ -213,11 +206,7 @@ export function UserTable({ data }: UserTableProps) {
                 },
                 {
                   label: 'Role',
-                  value: {
-                    admin: 'Admin',
-                    general_dept: 'General Dept',
-                    engineering: 'Engineering',
-                  }[user.role] || user.role,
+                  value: isAdminRole(user.role) ? 'Admin' : '',
                   icon: <Shield className="h-3.5 w-3.5" />,
                 },
               ]}
@@ -293,7 +282,7 @@ export function UserTable({ data }: UserTableProps) {
             id: data.find(u => u.id === editingUserId)!.id,
             name: data.find(u => u.id === editingUserId)!.name,
             email: data.find(u => u.id === editingUserId)!.email,
-            role: data.find(u => u.id === editingUserId)!.role,
+            isAdmin: isAdminRole(data.find(u => u.id === editingUserId)!.role),
           }}
           open={true}
           onOpenChange={(open) => !open && setEditingUserId(null)}
