@@ -398,9 +398,13 @@ export function transformRequestToModalData(request: {
   }>
 }) {
   const solution = request.solutions?.[0]
-  const requestApprovals = (request.approvals || []).filter(a => !a.isFinalApproval)
-  const finalApprovals = (request.approvals || []).filter(a => a.isFinalApproval)
-  const solutionApprovals = solution?.approvals || []
+  // Only the current attempt is drawn. Rows of a superseded attempt (rejected,
+  // then resubmitted) stay in the database and the activity timeline; drawing
+  // them next to the new attempt showed every step twice.
+  const currentApprovals = (request.approvals || []).filter(isCurrentInstanceApproval)
+  const requestApprovals = currentApprovals.filter(a => !a.isFinalApproval)
+  const finalApprovals = currentApprovals.filter(a => a.isFinalApproval)
+  const solutionApprovals = (solution?.approvals || []).filter(isCurrentInstanceApproval)
 
   // Determine rejection info based on current status
   // Only show rejection if it's relevant to the current workflow stage

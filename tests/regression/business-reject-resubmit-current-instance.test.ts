@@ -96,3 +96,16 @@ describe('current-instance rejection does not keep the resubmit modal after a ne
     assert.doesNotMatch(t14c[0], /restartFinalApprovalViaUi/)
   })
 })
+
+describe('request list approval badge after a resubmit', () => {
+  it('getMyRequests hands only current-attempt rows to the approval badge', () => {
+    const source = read('src/server-actions/requests.ts')
+    const fn = source.match(/export async function getMyRequests[\s\S]*?\nexport async function/)
+    assert.ok(fn, 'getMyRequests must exist')
+    // Both the request and the solution approval selects load the instance.
+    assert.equal((fn[0].match(/instance: \{ select: \{ supersededAt: true \} \}/g) ?? []).length, 2)
+    assert.match(fn[0], /rawApprovals\.filter\(isCurrentInstanceApproval\)/)
+    // "Has ever been rejected" still looks at every attempt.
+    assert.match(fn[0], /req\.approvals\.some\(\(a: any\) => a\.status === 'rejected'\)/)
+  })
+})

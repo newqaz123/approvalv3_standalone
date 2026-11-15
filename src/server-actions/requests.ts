@@ -46,7 +46,7 @@ import {
   SubmissionDeniedError,
   type CleanStartAttemptStore,
 } from '@/lib/approval-engine/attempts'
-import { CURRENT_INSTANCE_ROW_FILTER, snapshotGroupActionWhere } from '@/lib/approval-engine/current-instance'
+import { CURRENT_INSTANCE_ROW_FILTER, isCurrentInstanceApproval, snapshotGroupActionWhere } from '@/lib/approval-engine/current-instance'
 import { ApprovalRouteConfigurationError } from '@/lib/approval-routes/definition'
 import { buildRequestVisibilityWhere, canUserViewRequest, createRequestVisibilityDb } from '@/lib/request-visibility/scope'
 import { mapEventRecipients } from '@/lib/notification-recipients'
@@ -428,6 +428,8 @@ export async function getMyRequests(filters?: GetRequestsFilters) {
             select: {
               id: true,
               status: true,
+              instanceId: true,
+              instance: { select: { supersededAt: true } },
               approver: {
                 select: { name: true },
               },
@@ -473,6 +475,8 @@ export async function getMyRequests(filters?: GetRequestsFilters) {
         select: {
           id: true,
           status: true,
+          instanceId: true,
+          instance: { select: { supersededAt: true } },
                     order: true,
           approvedAt: true,
           isFinalApproval: true,
@@ -534,14 +538,21 @@ export async function getMyRequests(filters?: GetRequestsFilters) {
           approvedAt: sa.approvedAt,
           isFinalApproval: false, // Solution approvals are not final approvals
           candidateGroup: sa.candidateGroup,
+          instanceId: sa.instanceId,
+          instance: sa.instance,
         }))
       : []
 
     const rawApprovals = useSolutionApprovals ? solutionApprovals : req.approvals
-    const approvals = rawApprovals.map((approval) => ({
-      ...withCandidateNames(approval),
-      requiredLevel: approval.order,
-    }))
+    // The badge shows the current attempt only; a superseded rejection
+    // would otherwise hide a resubmitted request's "Approving" state.
+    const approvals = rawApprovals.filter(isCurrentInstanceApproval).map((approval) => {
+      const { instanceId: _instanceId, instance: _instance, ...row } = approval
+      return {
+        ...withCandidateNames(row),
+        requiredLevel: row.order,
+      }
+    })
 
     return {
       id: req.id,

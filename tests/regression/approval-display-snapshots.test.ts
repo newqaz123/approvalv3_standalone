@@ -53,3 +53,33 @@ test('custom-person display keeps the required person and ordered custom role', 
   assert.equal(step.name, 'Cross-check Person')
   assert.equal(step.role, 'Custom Level 1')
 })
+
+// Business flow test finding: after a Section manager rejection and a
+// resubmit, the Approval Flow drew the superseded attempt next to the new
+// one, so every step appeared twice.
+test('approval flow shows only the current attempt after a rejected request is resubmitted', () => {
+  const superseded = { instanceId: 'attempt-1', instance: { supersededAt: date } }
+  const current = { instanceId: 'attempt-2', instance: { supersededAt: null } }
+  const rows = [
+    { ...approval('old-sup', 1, 'H1 Supervisor', 'Supervisor', 2), ...superseded, status: 'approved' },
+    { ...approval('old-sec', 2, 'PD1 Section Manager', 'Section Manager', 3), ...superseded, status: 'rejected', comments: 'test reject' },
+    { ...approval('old-dept', 3, 'Production Department Manager', 'Department Manager', 4), ...superseded, status: 'rejected' },
+    { ...approval('new-sup', 1, 'H1 Supervisor', 'Supervisor', 2), ...current },
+    { ...approval('new-sec', 2, 'PD1 Section Manager', 'Section Manager', 3), ...current },
+    { ...approval('new-dept', 3, 'Production Department Manager', 'Department Manager', 4), ...current },
+  ].map(withApprovalDisplay)
+  const steps = transformRequestToModalData(request(rows)).stages[0].steps
+  assert.deepEqual(steps.map(step => step.id), ['new-sup', 'new-sec', 'new-dept'])
+  assert.deepEqual(steps.map(step => step.status), ['pending', 'pending', 'pending'])
+})
+
+test('approval flow keeps a rejected attempt visible until it is resubmitted', () => {
+  const current = { instanceId: 'attempt-1', instance: { supersededAt: null } }
+  const rows = [
+    { ...approval('sup', 1, 'H1 Supervisor', 'Supervisor', 2), ...current, status: 'approved' },
+    { ...approval('sec', 2, 'PD1 Section Manager', 'Section Manager', 3), ...current, status: 'rejected', comments: 'test reject' },
+  ].map(withApprovalDisplay)
+  const steps = transformRequestToModalData(request(rows)).stages[0].steps
+  assert.deepEqual(steps.map(step => step.status), ['approved', 'rejected'])
+  assert.equal(steps[1].comment, 'test reject')
+})
