@@ -773,7 +773,7 @@ describe("engineering stale sub-task filters", () => {
 		assert.match(tabs, /EngineerPicPicker/);
 		assert.match(tabs, /currentUserId/);
 		assert.match(tabs, /requestId=\{request\.id\}/);
-		assert.match(tabs, /initialAssignedIds=\{request\.assignedEngineers\.map/);
+		assert.match(tabs, /initialAssignedUsers=\{request\.assignedEngineers\}/);
 		assert.doesNotMatch(tabs, /PIC: \{request\.assignedEngineers/);
 		assert.match(tabs, /request\.status === ["']SentToEngineer["']/);
 		assert.match(tabs, /Submit solution/);

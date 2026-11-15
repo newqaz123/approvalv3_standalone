@@ -1968,7 +1968,13 @@ export async function assignEngineers(requestId: string, engineerIds: string[]) 
   // Validate request exists and is in correct status
   const request = await prisma.requests.findUnique({
     where: { id: requestId },
-    select: { status: true, title: true, requesterId: true, organizationUnitId: true },
+    select: {
+      status: true,
+      title: true,
+      requesterId: true,
+      organizationUnitId: true,
+      engineerAssignments: { select: { engineerId: true, engineer: { select: { isActive: true } } } },
+    },
   })
 
   if (!request) {
@@ -2009,9 +2015,14 @@ export async function assignEngineers(requestId: string, engineerIds: string[]) 
     throw new Error('Can only assign engineers to requests in SentToEngineer status')
   }
 
-  const engineers = await filterSolutionWorkUserIds(prisma, engineerIds)
+  // Existing active PICs may remain; solution-work eligibility is required only for additions.
+  const retainedEngineerIds = new Set(
+    request.engineerAssignments.filter((assignment) => assignment.engineer.isActive).map((assignment) => assignment.engineerId),
+  )
+  const newEngineerIds = engineerIds.filter((id) => !retainedEngineerIds.has(id))
+  const engineers = await filterSolutionWorkUserIds(prisma, newEngineerIds)
 
-  if (engineers.length !== engineerIds.length) {
+  if (new Set(engineerIds).size !== engineerIds.length || engineers.length !== newEngineerIds.length) {
     throw new Error('One or more engineers not found or not in the engineering role')
   }
 

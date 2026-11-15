@@ -7,6 +7,7 @@ import { listSolutionWorkUsers, filterSolutionWorkUserIds } from '@/lib/solution
 import type { OrganizationUnitNode } from '@/lib/organization/model'
 import { evaluateRequestAction, existingAssignEngineersDecision } from '@/lib/action-permissions'
 import { isActorSolutionWorker, type SolutionWorkActorDb } from '@/lib/solution-work-actor'
+import { mapEventRecipients } from '@/lib/notification-recipients'
 
 const u = (id: string, parentId: string | null, over: Partial<OrganizationUnitNode> = {}): OrganizationUnitNode =>
   ({ id, name: id, parentId, isActive: true, shareRequests: false, canWorkOnSolutions: false, managerUserId: null, ...over })
@@ -84,7 +85,104 @@ describe('requests use solution-work users, not engineering roles', () => {
   it('removes role-based guards and picker queries', () => {
     assert.doesNotMatch(source, /role:\s*'engineering'|role\s*!==\s*'engineering'/)
     assert.match(source, /return listSolutionWorkUsers\(prisma\)/)
-    assert.match(source, /await filterSolutionWorkUserIds\(prisma, engineerIds\)/)
+    assert.match(source, /await filterSolutionWorkUserIds\(prisma, newEngineerIds\)/)
+  })
+
+  function assignmentHarness(initialIds = ['legacy']) {
+    const file = ts.createSourceFile('requests.ts', source, ts.ScriptTarget.Latest, true)
+    const action = file.statements.find((node): node is ts.FunctionDeclaration =>
+      ts.isFunctionDeclaration(node) && node.name?.text === 'assignEngineers')
+    assert.ok(action)
+    const compiled = ts.transpileModule(action.getText(file), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    }).outputText
+    const writes: string[] = []
+    const candidateChecks: string[][] = []
+    let assignedIds = [...initialIds]
+    const actorDb: SolutionWorkActorDb = {
+      async findUser() { return { isActive: true } },
+      async findActiveAssignmentUnitIds() { return ['solutions'] },
+      async findUnits() { return units },
+    }
+    const actions = {} as { assignEngineers(requestId: string, engineerIds: string[]): Promise<unknown> }
+    runInNewContext(compiled, {
+      exports: actions,
+      getCurrentUser: async () => ({ id: 'direct', role: 'general_dept', isActive: true }),
+      createSolutionWorkActorDb: () => actorDb,
+      isActorSolutionWorker,
+      evaluateRequestAction,
+      existingAssignEngineersDecision,
+      mapEventRecipients,
+      canUserViewRequest: async () => true,
+      filterSolutionWorkUserIds: async (_client: unknown, ids: string[]) => {
+        candidateChecks.push(Array.from(ids))
+        return filterSolutionWorkUserIds(fakeClient(), ids)
+      },
+      revalidateRequestViews: () => {},
+      require: (name: string) => {
+        assert.equal(name, './notifications')
+        return { createNotification: async () => {} }
+      },
+      prisma: {
+        requests: {
+          async findUnique() {
+            return {
+              status: 'SentToEngineer', title: 'Request', requesterId: 'requester', organizationUnitId: 'sales',
+              engineerAssignments: assignedIds.map((id) => ({ engineerId: id, engineer: { isActive: users.find((user) => user.id === id)?.isActive === true } })),
+            }
+          },
+        },
+        request_engineer_assignments: {
+          async deleteMany() { writes.push('assignments-delete'); assignedIds = [] },
+          async createMany({ data }: { data: Array<{ engineerId: string }> }) {
+            writes.push('assignments-create')
+            assignedIds = Array.from(data, (row) => row.engineerId)
+          },
+        },
+        request_activities: { async create() { writes.push('activity-create') } },
+      },
+    })
+    return { actions, writes, candidateChecks, assignedIds: () => assignedIds }
+  }
+
+  it('retains an active legacy PIC alongside a newly eligible PIC', async () => {
+    const fixture = assignmentHarness()
+    await fixture.actions.assignEngineers('request', ['legacy', 'direct'])
+    assert.deepEqual(fixture.assignedIds(), ['legacy', 'direct'])
+    assert.deepEqual(fixture.candidateChecks, [['direct']])
+    assert.deepEqual(fixture.writes, ['assignments-delete', 'assignments-create', 'activity-create'])
+  })
+
+  it('removes a legacy PIC or replaces it with an eligible PIC', async () => {
+    for (const ids of [[], ['direct']]) {
+      const fixture = assignmentHarness()
+      await fixture.actions.assignEngineers('request', ids)
+      assert.deepEqual(fixture.assignedIds(), ids)
+    }
+  })
+
+  it('rejects an ineligible new PIC without any writes, including re-adding a removed legacy PIC', async () => {
+    for (const [initialIds, nextIds] of [
+      [['legacy'], ['legacy', 'unflagged']],
+      [[], ['legacy']],
+    ]) {
+      const fixture = assignmentHarness(initialIds)
+      await assert.rejects(fixture.actions.assignEngineers('request', nextIds), {
+        message: 'One or more engineers not found or not in the engineering role',
+      })
+      assert.deepEqual(fixture.assignedIds(), initialIds)
+      assert.deepEqual(fixture.writes, [])
+    }
+  })
+
+  it('does not retain inactive PICs or accept duplicate retained ids', async () => {
+    for (const ids of [['inactive'], ['legacy', 'legacy']]) {
+      const fixture = assignmentHarness(['legacy', 'inactive'])
+      await assert.rejects(fixture.actions.assignEngineers('request', ids), {
+        message: 'One or more engineers not found or not in the engineering role',
+      })
+      assert.deepEqual(fixture.writes, [])
+    }
   })
 
   it('assignEngineers denies an eligible caller who cannot view a deleted request without loading it or writing', async () => {

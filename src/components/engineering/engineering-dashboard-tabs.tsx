@@ -857,9 +857,7 @@ function FollowUpRequestRow({
 						<EngineerPicPicker
 							requestId={request.id}
 							engineeringUsers={engineeringUsers}
-							initialAssignedIds={request.assignedEngineers.map(
-								(engineer) => engineer.id,
-							)}
+							initialAssignedUsers={request.assignedEngineers}
 							currentUserId={currentUserId}
 						/>
 					</div>
