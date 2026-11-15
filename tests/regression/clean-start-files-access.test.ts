@@ -99,7 +99,7 @@ function fakeScopeDb(): RequestVisibilityDb {
     pat: actor('pat', 'operations'),
     alice: actor('alice', 'section-a'),
     bob: actor('bob', 'section-b'),
-    'eng-outsider': actor('eng-outsider', null, { role: 'engineering' }),
+    'eng-outsider': actor('eng-outsider', null, { role: 'general_dept' }),
     admin: actor('admin', 'operations', { role: 'admin' }),
   }
   const requests: VisibilityRequest[] = [

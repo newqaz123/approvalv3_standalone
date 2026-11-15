@@ -3,6 +3,7 @@
 import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 import { getCurrentUser } from '@/lib/cache/user-cache'
+import { createSolutionWorkActorDb, isActorSolutionWorker } from '@/lib/solution-work-actor'
 import { revalidateRequestViews } from './request-view-invalidation'
 import {
   canManageEngineeringSubTasks,
@@ -21,11 +22,13 @@ type ActionResult<T = undefined> = T extends undefined
 
 async function requireSubTaskManager() {
   const user = await getCurrentUser()
-  if (!user || !canManageEngineeringSubTasks(user)) {
+  if (!user) throw new Error('Only engineering and admin users can manage sub-tasks')
+  const isSolutionWorker = await isActorSolutionWorker(createSolutionWorkActorDb(prisma), user.id)
+  if (!canManageEngineeringSubTasks({ ...user, isSolutionWorker })) {
     throw new Error('Only engineering and admin users can manage sub-tasks')
   }
 
-  return user
+  return { ...user, isSolutionWorker }
 }
 
 async function requireVisibleStageRequest(requestId: string) {
@@ -48,7 +51,7 @@ async function requireVisibleStageRequest(requestId: string) {
 }
 
 function assertCanManageSubTasks(
-  user: { id: string; role: string; isActive?: boolean | null },
+  user: { id: string; role: string; isActive?: boolean | null; isSolutionWorker: boolean },
   request: { requesterId?: string | null; organizationUnitId?: string | null; status: string },
 ) {
   const manageAction = evaluateRequestAction('MANAGE_SUB_TASKS', {
@@ -70,6 +73,7 @@ function assertCanManageSubTasks(
       MANAGE_SUB_TASKS: existingManageSubTasksDecision({
         userRole: user.role,
         isActive: user.isActive,
+        isSolutionWorker: user.isSolutionWorker,
         status: request.status,
       }),
     },
@@ -319,7 +323,9 @@ export async function deactivateSubContractor(id: string): Promise<ActionResult>
 
 export async function getStaleSubTaskRequests(input: { olderThanDays?: number; stageId?: string }) {
   const user = await getCurrentUser()
-  if (!user || !canManageEngineeringSubTasks(user)) return []
+  if (!user) return []
+  const isSolutionWorker = await isActorSolutionWorker(createSolutionWorkActorDb(prisma), user.id)
+  if (!canManageEngineeringSubTasks({ ...user, isSolutionWorker })) return []
   if (!input.olderThanDays || input.olderThanDays <= 0) return []
 
   const threshold = new Date()

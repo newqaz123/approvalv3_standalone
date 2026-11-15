@@ -151,7 +151,7 @@ function fakeScopeDb(): RequestVisibilityDb {
     }),
     'eng-outsider': actor({
       id: 'eng-outsider',
-      role: 'engineering',
+      role: 'general_dept',
       assignmentUnitId: null,
     }),
     admin: actor({ id: 'admin', role: 'admin' }),

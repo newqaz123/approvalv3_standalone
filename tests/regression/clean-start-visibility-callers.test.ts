@@ -237,7 +237,7 @@ describe('production findActor — users + active assignment + A5 sharing + mana
     const db = createRequestVisibilityDb(specPrisma())
     const eng = await db.findActor('eng-outsider')
     assert.ok(eng)
-    assert.equal(eng.role, 'engineering')
+    assert.equal(eng.role, 'general_dept')
     assert.equal(eng.assignmentUnitId, null)
     assert.deepEqual(eng.sharingScopeUnitIds, [])
     assert.deepEqual(eng.managedUnitIds, [])

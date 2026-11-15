@@ -114,3 +114,26 @@ describe('solution-work surfaces are unit-flag gated, not role gated', () => {
     }
   })
 })
+
+describe('engineer assignment and request capabilities resolve solution-work eligibility', () => {
+  it('assignEngineers resolves eligibility once and passes it to its decision', () => {
+    const body = bodyOf('src/server-actions/requests.ts', 'export async function assignEngineers')
+    assert.equal((body.match(/await isActorSolutionWorker\(/g) ?? []).length, 1)
+    assert.match(body, /if \(!user \|\| !isSolutionWorker\)/)
+    assert.match(body, /existingAssignEngineersDecision\(\{\s*isActive: user\.isActive,\s*isSolutionWorker,/)
+  })
+
+  it('getRequestsForEngineering keeps its existing error text and uses unit eligibility', () => {
+    const body = bodyOf('src/server-actions/requests.ts', 'export async function getRequestsForEngineering')
+    assert.match(body, /isActorSolutionWorker\(createSolutionWorkActorDb\(prisma\), user\.id\)/)
+    assert.doesNotMatch(body, /role\s*!==\s*'engineering'/)
+    assert.match(body, /Only engineering users can access engineering requests/)
+  })
+
+  it('capabilities resolve eligibility once and pass it to both engineering decisions', () => {
+    const source = read('src/server-actions/request-action-capabilities.ts')
+    assert.equal((source.match(/await isActorSolutionWorker\(/g) ?? []).length, 1)
+    assert.match(source, /existingAssignEngineersDecision\(\{\s*isActive: user\.isActive,\s*isSolutionWorker,/)
+    assert.match(source, /existingManageSubTasksDecision\(\{\s*userRole: user\.role,\s*isActive: user\.isActive,\s*isSolutionWorker,/)
+  })
+})

@@ -5,8 +5,8 @@
  * only (ancestor units are not eligible).
  * Request submission is every active assignment. Admin is separate.
  * Approval is chain-only — there is no level helper.
- * The engineering ROLE remains only for engineer-assignment / sub-task
- * administration, never for solution-work eligibility or visibility.
+ * Engineer assignment follows active solution-work eligibility. Sub-task
+ * administration also allows admins; visibility remains separate.
  */
 import type { OrganizationUnitNode } from '@/lib/organization/model'
 import { canWorkOnSolutions } from '@/lib/solution-eligibility'
@@ -34,14 +34,12 @@ export function canInitiateFinalApproval(input: {
   return input.assignmentUnitId === input.requestOriginUnitId
 }
 
-/**
- * Existing assignEngineers role guard. Assignment stays role-based
- * (`user.role === 'engineering'`), not PIC-only.
- */
-export function canUserAssignEngineers(
-  userRole: string | null | undefined
-): boolean {
-  return userRole === 'engineering'
+/** Engineer assignment requires an active solution worker. */
+export function canUserAssignEngineers(input: {
+  isActive: boolean
+  isSolutionWorker: boolean
+}): boolean {
+  return input.isActive && input.isSolutionWorker
 }
 
 /**

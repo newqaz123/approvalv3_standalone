@@ -1,6 +1,8 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { canWorkOnSolutions } from '@/lib/solution-eligibility'
+import { canManageEngineeringSubTasks } from '@/lib/engineering-sub-tasks'
+import { canUserAssignEngineers } from '@/lib/permission-checks'
 import type { OrganizationUnitNode } from '@/lib/organization/model'
 
 const u = (id: string, parentId: string | null, over: Partial<OrganizationUnitNode> = {}): OrganizationUnitNode =>
@@ -87,5 +89,19 @@ describe('solution-work eligibility — fail-closed corrupt/missing input', () =
     canWorkOnSolutions(units, 'web')
     canWorkOnSolutions(units, null)
     assert.deepEqual(JSON.parse(JSON.stringify(units)), before)
+  })
+})
+
+describe('engineering decisions consume inherited unit eligibility', () => {
+  it('allows a general user in a flagged descendant without a legacy engineering role', () => {
+    const isSolutionWorker = canWorkOnSolutions(units, 'web')
+    assert.equal(canUserAssignEngineers({ isActive: true, isSolutionWorker }), true)
+    assert.equal(canManageEngineeringSubTasks({ role: 'general_dept', isSolutionWorker }), true)
+  })
+
+  it('denies both abilities when the only flagged unit is inactive', () => {
+    const isSolutionWorker = canWorkOnSolutions([u('company', null, { isActive: false, canWorkOnSolutions: true }), u('leaf', 'company')], 'leaf')
+    assert.equal(canUserAssignEngineers({ isActive: true, isSolutionWorker }), false)
+    assert.equal(canManageEngineeringSubTasks({ role: 'engineering', isSolutionWorker }), false)
   })
 })

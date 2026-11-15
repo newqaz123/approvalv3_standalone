@@ -7,6 +7,7 @@ import { revalidateRequestViews } from './request-view-invalidation'
 import { z } from 'zod'
 import { requireAdmin } from '@/lib/auth'
 import { createSolutionWorkActorDb, isActorSolutionWorker } from '@/lib/solution-work-actor'
+import { filterSolutionWorkUserIds, listSolutionWorkUsers } from '@/lib/solution-work-users'
 import { getCurrentUser } from '@/lib/cache/user-cache'
 import {
   attachmentFileExists,
@@ -593,6 +594,13 @@ export async function getRequest(id: string) {
       organizationUnit: {
         select: {
           name: true,
+        },
+      },
+      engineerAssignments: {
+        include: {
+          engineer: {
+            select: { id: true, name: true },
+          },
         },
       },
       workRequisitionReceivedBy: {
@@ -1943,12 +1951,13 @@ export async function getRequestsNeedingEngineeringAction(): Promise<NeedsAction
 
 /**
  * Assign engineers to a request
- * Validates caller is engineering user and request is in SentToEngineer status
+ * Validates caller is a solution worker and request is in SentToEngineer status
  */
 export async function assignEngineers(requestId: string, engineerIds: string[]) {
   const user = await getCurrentUser()
 
-  if (!user || user.role !== 'engineering') {
+  const isSolutionWorker = user ? await isActorSolutionWorker(createSolutionWorkActorDb(prisma), user.id) : false
+  if (!user || !isSolutionWorker) {
     throw new Error('Only engineering users can assign engineers')
   }
 
@@ -1979,7 +1988,8 @@ export async function assignEngineers(requestId: string, engineerIds: string[]) 
     assignedEngineer: false,
     existingActionDecisions: {
       ASSIGN_ENGINEERS: existingAssignEngineersDecision({
-        userRole: user.role,
+        isActive: user.isActive,
+        isSolutionWorker,
         status: request.status,
       }),
     },
@@ -1995,14 +2005,7 @@ export async function assignEngineers(requestId: string, engineerIds: string[]) 
     throw new Error('Can only assign engineers to requests in SentToEngineer status')
   }
 
-  const engineers = await prisma.user.findMany({
-    where: {
-      id: { in: engineerIds },
-      role: 'engineering',
-      isActive: true,
-    },
-    select: { id: true },
-  })
+  const engineers = await filterSolutionWorkUserIds(prisma, engineerIds)
 
   if (engineers.length !== engineerIds.length) {
     throw new Error('One or more engineers not found or not in the engineering role')
@@ -2069,22 +2072,7 @@ export async function getEngineeringUsers() {
     throw new Error('Unauthorized')
   }
 
-  const users = await prisma.user.findMany({
-    where: {
-      role: 'engineering',
-      isActive: true,
-    },
-    select: {
-      id: true,
-      name: true,
-      email: true,
-    },
-    orderBy: [
-      { name: 'asc' },
-    ],
-  })
-
-  return users
+  return listSolutionWorkUsers(prisma)
 }
 
 export interface GetRequestsForEngineeringFilters {
@@ -2103,7 +2091,7 @@ export interface GetRequestsForEngineeringFilters {
 export async function getRequestsForEngineering(filters?: GetRequestsForEngineeringFilters) {
   const user = await getCurrentUser()
 
-  if (!user || user.role !== 'engineering') {
+  if (!user || !(await isActorSolutionWorker(createSolutionWorkActorDb(prisma), user.id))) {
     throw new Error('Only engineering users can access engineering requests')
   }
 
