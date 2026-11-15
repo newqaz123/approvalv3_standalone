@@ -60,7 +60,7 @@ export function UserForm({ initialData, onSuccess, onCancel }: UserFormProps) {
       const submitData = {
         name: data.name,
         email: data.email,
-        role: data.role || 'general_dept',
+        isAdmin: data.role === 'admin',
       }
 
       if (initialData?.id) {

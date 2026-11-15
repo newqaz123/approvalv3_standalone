@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { runInNewContext } from 'node:vm'
 import ts from 'typescript'
 import { z } from 'zod'
+import * as userRole from '../../src/lib/user-role'
 
 // Executes the real src/lib/auth.ts and the real admin server actions with
 // only the true boundaries faked (session, role row, data prisma, bcrypt).
@@ -126,8 +127,14 @@ function loadUsersActions(persona: Persona): UsersFixture {
       forcePasswordChange: false,
     },
   }
-  const prisma = {
+  const client = {
     user: {
+      count: async ({ where }: { where: { role: string; isActive: boolean; id: { not: string } } }) => {
+        actionCalls.push({ model: 'user', op: 'count' })
+        return Object.values(stored).filter(
+          (row) => row.role === where.role && row.isActive === where.isActive && row.id !== where.id.not
+        ).length
+      },
       findUnique: async ({ where }: { where: { id: string } }) => {
         actionCalls.push({ model: 'user', op: 'findUnique' })
         const row = stored[where.id]
@@ -153,7 +160,15 @@ function loadUsersActions(persona: Persona): UsersFixture {
       },
     },
   }
+  const prisma = {
+    ...client,
+    $transaction: async (operation: (tx: typeof client) => Promise<unknown>) => {
+      actionCalls.push({ model: '$transaction', op: 'callback' })
+      return operation(client)
+    },
+  }
   const dependencies: Record<string, unknown> = {
+    '@/lib/user-role': userRole,
     bcryptjs: {
       hash: async (password: string, rounds: number) => {
         hashed.push({ password, rounds })
