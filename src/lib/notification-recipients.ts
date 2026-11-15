@@ -75,7 +75,6 @@ export interface EventRecipientInput {
   assignedEngineerIds?: readonly string[]
   currentStepActiveCandidateIds?: readonly string[]
   nextStepActiveCandidateIds?: readonly string[]
-  decidedActorId?: string
 }
 
 export function mapEventRecipients(input: EventRecipientInput): readonly string[] {
@@ -89,7 +88,8 @@ export function mapEventRecipients(input: EventRecipientInput): readonly string[
         ...(input.nextStepActiveCandidateIds ?? []),
       ])
     case 'approval_rejected':
-      return uniqueIds([input.requesterId, input.decidedActorId])
+      // The person who rejected is never notified about their own decision.
+      return uniqueIds([input.requesterId])
     case 'status_changed':
       return uniqueIds([input.requesterId])
     case 'request_assigned':
@@ -103,6 +103,28 @@ export function mapEventRecipients(input: EventRecipientInput): readonly string[
         ...(input.solutionSubmitterIds ?? []),
       ])
   }
+}
+
+export interface EngineeringRejectionRecipientInput {
+  /** Engineer who submitted the rejected (or finally rejected) solution. */
+  solutionSubmitterId?: string | null
+  /** Approvers who already approved in the current attempt of that chain. */
+  priorApproverIds: readonly (string | null | undefined)[]
+  /** The person who rejected; never notified about their own decision. */
+  rejectedById: string
+}
+
+/**
+ * Solution rejection and final-approval rejection both return the request to
+ * engineering. Recipients are the engineering participants: the solution
+ * submitter and the approvers who already approved. The requester is not a
+ * recipient (nothing for them to do) and neither is the person who rejected.
+ */
+export function mapEngineeringRejectionRecipients(
+  input: EngineeringRejectionRecipientInput,
+): readonly string[] {
+  return uniqueIds([input.solutionSubmitterId, ...input.priorApproverIds])
+    .filter((userId) => userId !== input.rejectedById)
 }
 
 function isCurrentInstance(

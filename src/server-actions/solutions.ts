@@ -28,6 +28,7 @@ import {
 } from '@/lib/post-commit-notifications'
 import {
   createPrismaNotificationRecipientDb,
+  mapEngineeringRejectionRecipients,
   mapEventRecipients,
   resolveApprovalNeededRecipients,
 } from '@/lib/notification-recipients'
@@ -1013,29 +1014,36 @@ export async function rejectSolution(solutionId: string, comments: string, expec
       actionLabel: 'reject the solution',
     })
 
-    const [solutionData, requestRow] = await Promise.all([
+    // Recipients: the engineer who submitted the solution and the approvers
+    // who already approved this attempt. Not the requester, never the rejector.
+    const [solutionData, priorApprovals] = await Promise.all([
       tx.solutions.findUnique({
         where: { id: solutionId },
         select: { submittedById: true, title: true },
       }),
-      tx.requests.findUnique({
-        where: { id: solution.requestId },
-        select: { requesterId: true },
+      tx.solution_approvals.findMany({
+        where: {
+          solutionId,
+          status: 'approved',
+          OR: [...CURRENT_INSTANCE_ROW_FILTER],
+        },
+        orderBy: { order: 'asc' },
+        select: { approverId: true },
       }),
     ])
 
-    if (solutionData && requestRow) {
+    if (solutionData) {
       queueMappedUsers(
         notifications,
-        mapEventRecipients({
-          type: 'approval_rejected',
-          requesterId: requestRow.requesterId,
-          decidedActorId: userId,
+        mapEngineeringRejectionRecipients({
+          solutionSubmitterId: solutionData.submittedById,
+          priorApproverIds: priorApprovals.map((row) => row.approverId),
+          rejectedById: userId,
         }),
         {
           type: 'approval_rejected',
           title: 'Solution Rejected',
-          message: `Your solution "${solutionData.title}" was rejected and returned for resubmission.`,
+          message: `❌ Solution Rejected: "${solutionData.title}" was rejected and returned to engineering for revision. Reason: "${comments}"`,
           requestId: solution.requestId,
         },
       )
@@ -1692,12 +1700,48 @@ export async function rejectFinalApproval(requestId: string, comments: string, e
       },
     })
 
+    // Final rejection reopens engineering revision, so it notifies the
+    // engineering participants: the engineer who submitted the solution, the
+    // solution approvers who already approved it, and the final approvers who
+    // already approved this attempt. Not the requester, never the rejector.
+    const latestSolution = await tx.solutions.findFirst({
+      where: { requestId },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, submittedById: true },
+    })
+    const [priorSolutionApprovals, priorFinalApprovals] = await Promise.all([
+      latestSolution
+        ? tx.solution_approvals.findMany({
+            where: {
+              solutionId: latestSolution.id,
+              status: 'approved',
+              OR: [...CURRENT_INSTANCE_ROW_FILTER],
+            },
+            orderBy: { order: 'asc' },
+            select: { approverId: true },
+          })
+        : [],
+      tx.request_approvals.findMany({
+        where: {
+          requestId,
+          isFinalApproval: true,
+          status: 'approved',
+          OR: [...CURRENT_INSTANCE_ROW_FILTER],
+        },
+        orderBy: { order: 'asc' },
+        select: { approverId: true },
+      }),
+    ])
+
     queueMappedUsers(
       notifications,
-      mapEventRecipients({
-        type: 'approval_rejected',
-        requesterId: request.requesterId,
-        decidedActorId: userId,
+      mapEngineeringRejectionRecipients({
+        solutionSubmitterId: latestSolution?.submittedById,
+        priorApproverIds: [
+          ...priorSolutionApprovals.map((row) => row.approverId),
+          ...priorFinalApprovals.map((row) => row.approverId),
+        ],
+        rejectedById: userId,
       }),
       {
         type: 'approval_rejected',

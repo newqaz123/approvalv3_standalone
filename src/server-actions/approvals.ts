@@ -310,7 +310,6 @@ export async function rejectRequest(
     const recipients = mapEventRecipients({
       type: 'approval_rejected',
       requesterId: rejectedRequest.requesterId,
-      decidedActorId: userId,
     })
     await Promise.all(
       recipients.map((recipientId) =>

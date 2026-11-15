@@ -8,6 +8,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
+  mapEngineeringRejectionRecipients,
   mapEventRecipients,
   PARTICIPANTS_ONLY_NOTIFICATION_POLICY,
 } from '@/lib/notification-recipients'
@@ -51,11 +52,19 @@ describe('event mapping is authority', () => {
     )
   })
 
-  it('approval_rejected → requester (+ decided actor)', () => {
+  // Owner decision after the business flow test: the person who rejects
+  // already knows, so they are not notified about their own rejection.
+  it('approval_rejected → requester only (never the person who rejected)', () => {
     assert.deepEqual(
       mapEventRecipients({ type: 'approval_rejected', ...base }),
-      [REQUESTER_ID, DECIDED_ACTOR_ID],
+      [REQUESTER_ID],
     )
+  })
+
+  it('rejection callers do not pass the rejecting user as a recipient', () => {
+    for (const path of ['src/server-actions/approvals.ts', 'src/server-actions/solutions.ts']) {
+      assert.doesNotMatch(readFileSync(path, 'utf8'), /decidedActorId/, path)
+    }
   })
 
   it('status_changed → requester only (not prior actors)', () => {
@@ -102,6 +111,101 @@ describe('event mapping is authority', () => {
     assert.equal(PARTICIPANTS_ONLY_NOTIFICATION_POLICY.allowVisibilityAsSubscription, false)
     assert.equal(PARTICIPANTS_ONLY_NOTIFICATION_POLICY.preserveSectionWideStatusBroadcasts, false)
     assert.equal(PARTICIPANTS_ONLY_NOTIFICATION_POLICY.preserveCustomNotifyAllAtSubmit, false)
+  })
+})
+
+// Owner decision after the business flow test: a rejected solution (or a
+// rejected final approval, which also returns the request to engineering)
+// goes to the engineer who submitted the solution and to the approvers who
+// already approved it — not the requester, and never the person who rejected.
+describe('solution and final rejection notify engineering participants', () => {
+  it('notifies the solution submitter and the approvers who already approved', () => {
+    assert.deepEqual(
+      mapEngineeringRejectionRecipients({
+        solutionSubmitterId: 'engineer',
+        priorApproverIds: ['eng-supervisor', 'eng-manager'],
+        rejectedById: 'dept-manager',
+      }),
+      ['engineer', 'eng-supervisor', 'eng-manager'],
+    )
+  })
+
+  it('never notifies the person who rejected, even if they also approved or submitted', () => {
+    assert.deepEqual(
+      mapEngineeringRejectionRecipients({
+        solutionSubmitterId: 'engineer',
+        priorApproverIds: ['eng-supervisor', 'rejector'],
+        rejectedById: 'rejector',
+      }),
+      ['engineer', 'eng-supervisor'],
+    )
+    assert.deepEqual(
+      mapEngineeringRejectionRecipients({
+        solutionSubmitterId: 'rejector',
+        priorApproverIds: [],
+        rejectedById: 'rejector',
+      }),
+      [],
+    )
+  })
+
+  it('notifies each person once and ignores missing ids', () => {
+    assert.deepEqual(
+      mapEngineeringRejectionRecipients({
+        solutionSubmitterId: 'engineer',
+        priorApproverIds: ['engineer', null, undefined, 'eng-supervisor', 'eng-supervisor'],
+        rejectedById: 'dept-manager',
+      }),
+      ['engineer', 'eng-supervisor'],
+    )
+  })
+
+  it('rejectSolution and rejectFinalApproval use the engineering mapping, not the requester', () => {
+    const source = read('src/server-actions/solutions.ts')
+    const bodyOf = (name: string) => {
+      const start = source.indexOf(`export async function ${name}(`)
+      assert.notEqual(start, -1, `${name} must exist`)
+      const end = source.indexOf('\nexport async function', start + 1)
+      return source.slice(start, end === -1 ? undefined : end)
+    }
+    for (const name of ['rejectSolution', 'rejectFinalApproval']) {
+      const fn = bodyOf(name)
+      assert.match(fn, /mapEngineeringRejectionRecipients\(\{/, name)
+      assert.match(fn, /rejectedById: userId/, name)
+      // Only approvers of the current attempt count as "already approved".
+      assert.match(fn, /status: 'approved',\s*OR: \[\.\.\.CURRENT_INSTANCE_ROW_FILTER\]/, name)
+      assert.doesNotMatch(fn, /mapEventRecipients/, name)
+    }
+  })
+
+  it('final rejection also notifies the solution approvers who already approved', () => {
+    const source = read('src/server-actions/solutions.ts')
+    const start = source.indexOf('export async function rejectFinalApproval(')
+    const fn = source.slice(start, source.indexOf('\nexport async function', start + 1))
+    // Approved solution-chain rows of the current attempt of the latest solution.
+    assert.match(
+      fn,
+      /tx\.solution_approvals\.findMany\(\{\s*where: \{\s*solutionId: latestSolution\.id,\s*status: 'approved',\s*OR: \[\.\.\.CURRENT_INSTANCE_ROW_FILTER\]/,
+    )
+    assert.match(
+      fn,
+      /priorApproverIds: \[\s*\.\.\.priorSolutionApprovals\.map\(\(row\) => row\.approverId\),\s*\.\.\.priorFinalApprovals\.map\(\(row\) => row\.approverId\),\s*\]/,
+    )
+  })
+
+  it('a person who approved both the solution and the final step is notified once', () => {
+    assert.deepEqual(
+      mapEngineeringRejectionRecipients({
+        solutionSubmitterId: 'engineer',
+        priorApproverIds: ['eng-manager', 'dept-manager', 'dept-manager'],
+        rejectedById: 'factory-manager',
+      }),
+      ['engineer', 'eng-manager', 'dept-manager'],
+    )
+  })
+
+  it('request rejection still notifies the requester', () => {
+    assert.match(read('src/server-actions/approvals.ts'), /type: 'approval_rejected',\s*requesterId: rejectedRequest\.requesterId/)
   })
 })
 
