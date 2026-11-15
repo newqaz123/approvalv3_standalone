@@ -1895,6 +1895,11 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
         costEstimate: validated.cost,
         currency: validated.currency,
         timeline: validated.timeline,
+        // Whoever resubmits becomes the submitter: the new approval attempt
+        // starts from their position, so they never approve their own
+        // resubmission. The original submission stays in the activity log.
+        submittedById: userId,
+        submittedAt: new Date(),
         updatedAt: new Date(),
       },
     })
@@ -1970,7 +1975,6 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
       })
     }
 
-    const storedSubmitterId: string = solution.submittedById
     const attemptTx = createCleanStartPhaseAttemptTx(tx as unknown as CleanStartAttemptStore)
     let isAutoApproved = false
     let submittedCustomApprovers: string[] | null = null
@@ -1987,7 +1991,7 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
         requestId: validated.requestId,
         solutionId: solution.id,
         phase: 'SOLUTION',
-        actorId: storedSubmitterId,
+        actorId: userId,
         orderedApproverIds: orderedApprovers,
       })
       submittedCustomApprovers = validated.customApprovers
@@ -2004,7 +2008,7 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
         requestId: validated.requestId,
         solutionId: solution.id,
         phase: 'SOLUTION',
-        originUserId: storedSubmitterId,
+        originUserId: userId,
       })
       isAutoApproved = attempt.autoApproved || attempt.completedWithoutSteps
       if (isAutoApproved && attempt.statusChange) {
@@ -2032,7 +2036,7 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
           mapEventRecipients({
             type: 'solution_ready',
             requesterId: request.requesterId,
-            solutionSubmitterIds: [storedSubmitterId],
+            solutionSubmitterIds: [userId],
           }),
           {
             type: 'solution_ready',
