@@ -372,7 +372,14 @@ export function TreeNodeRow({
           data-testid={`unit-header-${unit.id}`}
           className="organization-unit-header group flex cursor-pointer items-center gap-2 rounded-t-xl bg-muted/60 px-3 py-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
           tabIndex={0}
-          onClick={() => onSelectUnit?.(unit.id)}
+          onClick={(event) => {
+            const target = event.target
+            // Nested controls own their clicks. Radix menu events also bubble
+            // through React even though their portal is outside this header.
+            if (!(target instanceof Element) || !event.currentTarget.contains(target)) return
+            if (target.closest('button, input, textarea, select, a, [role="button"], [role="menuitem"]')) return
+            onSelectUnit?.(unit.id)
+          }}
           onKeyDown={(event) => {
             if (event.key === 'Enter' || event.key === ' ') {
               if (event.target === event.currentTarget) {
