@@ -257,7 +257,7 @@ describe('evaluateRequestAction gating is unchanged (active / visible / current-
   it('denies inactive and not-visible actors even when an existing guard allows the action', () => {
     const inactive = policyContext(
       { ASSIGN_ENGINEERS: { allowed: true, reason: 'ALLOWED' } },
-      { actor: { id: 'worker-1', role: 'engineering', isActive: false, assignmentUnitId: 'web' } },
+      { actor: { id: 'worker-1', role: 'general_dept', isActive: false, assignmentUnitId: 'web' } },
     )
     assert.equal(evaluateRequestAction('ASSIGN_ENGINEERS', inactive).reason, 'INACTIVE')
 

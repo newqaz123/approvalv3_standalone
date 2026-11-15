@@ -81,7 +81,7 @@ describe("engineering sub-task helpers", () => {
 		);
 	});
 
-	it("allows only active solution workers and admins to manage sub-tasks", () => {
+	it("allows only active solution workers and admins, not a legacy engineering-role row, to manage sub-tasks", () => {
 		assert.equal(canManageEngineeringSubTasks({ role: "engineering" }), false);
 		assert.equal(canManageEngineeringSubTasks({ role: "admin" }), true);
 		assert.equal(canManageEngineeringSubTasks({ role: "admin", isActive: false }), false);

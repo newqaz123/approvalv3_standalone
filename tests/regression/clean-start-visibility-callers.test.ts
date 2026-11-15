@@ -233,12 +233,13 @@ describe('production findActor — users + active assignment + A5 sharing + mana
     assert.equal(manager.managedUnitIds.includes('section-b'), true)
   })
 
-  it('engineering role is not blanket visibility; missing/inactive actors fail closed', async () => {
+  it('a legacy engineering-role row is not blanket visibility; missing/inactive actors fail closed', async () => {
     const db = createRequestVisibilityDb(specPrisma())
     const eng = await db.findActor('eng-outsider')
     assert.ok(eng)
     assert.equal(eng.role, 'general_dept')
     assert.equal(eng.assignmentUnitId, null)
+    assert.equal(eng.canWorkOnSolutions, false)
     assert.deepEqual(eng.sharingScopeUnitIds, [])
     assert.deepEqual(eng.managedUnitIds, [])
     assert.equal(await db.findActor('missing'), null)

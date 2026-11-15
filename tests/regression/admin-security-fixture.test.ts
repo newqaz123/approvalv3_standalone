@@ -31,6 +31,13 @@ import {
  *      request identifiers and content.
  */
 
+it('admin-security fixture retains a legacy engineering-role row for non-admin denial coverage', () => {
+  const legacy = createAdminSecurityFixture().users.find((user) => user.id === 'user-engineering')
+  assert.ok(legacy)
+  assert.equal(legacy.role, 'engineering')
+  assert.match(legacy.name, /legacy engineering-role row/i)
+})
+
 describe('admin-security fixture: independent per-persona toggle witnesses', () => {
   const fixture = createAdminSecurityFixture()
 

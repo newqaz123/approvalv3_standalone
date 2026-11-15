@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { expect, test } from '@playwright/test'
 import { PrismaClient } from '@prisma/client'
 import { encode } from 'next-auth/jwt'
+import { createSolutionWorkActorDb, isActorSolutionWorker } from '../../src/lib/solution-work-actor'
 
 const TEST_USERS = {
   engineering: { email: 'eng1@example.com', password: 'changeme' },
@@ -28,7 +29,11 @@ async function login(page: any, email: string, password: string) {
 
   expect(user, `Test user ${email} must exist`).toBeTruthy()
   expect(user?.isActive, `Test user ${email} must be active`).toBe(true)
-  expect(user?.role, `Test user ${email} must be engineering`).toBe('engineering')
+  expect(user?.role, `Test user ${email} must be a non-admin`).toBe('general_dept')
+  expect(
+    await isActorSolutionWorker(createSolutionWorkActorDb(prisma), user!.id),
+    `Test user ${email} must have an active assignment in a solution-work unit or descendant`,
+  ).toBe(true)
   expect(password, 'Engineering test password must be configured').toBeTruthy()
 
   const maxAgeSeconds = 7 * 24 * 60 * 60
@@ -66,7 +71,7 @@ async function login(page: any, email: string, password: string) {
 }
 
 test.describe('engineering sub-tasks', () => {
-  test('engineer manages request sub-tasks and WR from a collapsed panel', async ({ page }) => {
+  test('non-admin solution worker manages request sub-tasks and WR from a collapsed panel', async ({ page }) => {
     test.setTimeout(90_000)
 
     await login(page, TEST_USERS.engineering.email, TEST_USERS.engineering.password)

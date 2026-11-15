@@ -47,7 +47,7 @@ export interface SeedUserRow {
   email: string
   name: string
   passwordHash: string
-  role: 'admin' | 'general_dept' | 'engineering'
+  role: 'admin' | 'general_dept'
   isActive: boolean
   forcePasswordChange: boolean
 }
@@ -115,12 +115,6 @@ export interface BusinessSeedPlan {
  */
 export const BUSINESS_FIXTURE_OUTBOUND_SENDER_ADDRESS = 'business-workflow-test@business.test'
 
-function roleForActor(role: 'USER' | 'ADMIN', userId: string): 'admin' | 'general_dept' | 'engineering' {
-  if (role === 'ADMIN') return 'admin'
-  const engineeringUsers = new Set(['user-engineer-a', 'user-supervisor-e', 'user-section-manager-e'])
-  return engineeringUsers.has(userId) ? 'engineering' : 'general_dept'
-}
-
 export function buildBusinessSeedPlan(
   fixture: BusinessWorkflowFixture,
   options: { passwordHash: string },
@@ -145,7 +139,7 @@ export function buildBusinessSeedPlan(
         email: `${actor.id}@business.test`,
         name: actor.name,
         passwordHash: options.passwordHash,
-        role: roleForActor(actor.role, actor.id),
+        role: actor.role === 'ADMIN' ? 'admin' : 'general_dept',
         isActive: actor.isActive,
         forcePasswordChange: false,
       },

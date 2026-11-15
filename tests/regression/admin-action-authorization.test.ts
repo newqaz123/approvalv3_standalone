@@ -31,7 +31,7 @@ const denialPersonas: Persona[] = [
     dbUser: { role: 'general_dept', isActive: true },
   },
   {
-    name: 'authenticated non-admin (engineering)',
+    name: 'authenticated non-admin (legacy engineering-role row)',
     sessionUserId: 'session-user-1',
     dbUser: { role: 'engineering', isActive: true },
   },
@@ -121,7 +121,7 @@ function loadUsersActions(persona: Persona): UsersFixture {
       id: 'other-user',
       name: 'Other User',
       email: 'other@example.com',
-      role: 'engineering',
+      role: 'general_dept',
       isActive: true,
       passwordHash: 'old-hash',
       forcePasswordChange: false,

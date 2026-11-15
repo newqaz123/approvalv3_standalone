@@ -56,9 +56,9 @@ describe('isActorSolutionWorker (unit-flag eligibility)', () => {
     flaggedGeneral: { isActive: true, role: 'general_dept', unitIds: ['engineering'] },
     descendant: { isActive: true, role: 'general_dept', unitIds: ['eng-team'] },
     roleOnly: { isActive: true, role: 'engineering', unitIds: ['ops'] },
-    inactive: { isActive: false, role: 'engineering', unitIds: ['engineering'] },
-    retired: { isActive: true, role: 'engineering', unitIds: ['retired-eng'] },
-    unassigned: { isActive: true, role: 'engineering', unitIds: [] },
+    inactive: { isActive: false, role: 'general_dept', unitIds: ['engineering'] },
+    retired: { isActive: true, role: 'general_dept', unitIds: ['retired-eng'] },
+    unassigned: { isActive: true, role: 'general_dept', unitIds: [] },
   })
 
   it('grants a non-engineering-role user assigned to a flagged unit', async () => {
@@ -67,7 +67,7 @@ describe('isActorSolutionWorker (unit-flag eligibility)', () => {
   it('grants a user in a descendant of a flagged unit', async () => {
     assert.equal(await isActorSolutionWorker(db, 'descendant'), true)
   })
-  it('denies an engineering-ROLE user whose unit is not flagged', async () => {
+  it('denies a legacy engineering-role row whose unit is not flagged', async () => {
     assert.equal(await isActorSolutionWorker(db, 'roleOnly'), false)
   })
   it('denies inactive users, inactive flagged units, unassigned and unknown users', async () => {

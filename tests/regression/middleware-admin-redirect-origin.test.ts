@@ -108,7 +108,7 @@ describe('middleware admin-route denial keeps the session on-origin', () => {
     ['unexpected-role', '/requests/my-actions'],
   ]) {
     for (const path of ['/', '/sign-in', '/sign-up']) {
-      it(`getRoleDashboard sends ${role} from ${path} to ${destination}`, async () => {
+      it(`getRoleDashboard sends ${role === 'engineering' ? 'legacy engineering-role row' : role} from ${path} to ${destination}`, async () => {
         const cookie = await mintSessionCookie(role)
         const response = await middleware(new NextRequest(`${BROWSER_ORIGIN}${path}`, {
           headers: {
@@ -124,7 +124,7 @@ describe('middleware admin-route denial keeps the session on-origin', () => {
   }
 
   for (const role of ['engineering', 'general_dept', 'unexpected-role']) {
-    it(`/dashboard does not redirect non-admin ${role} to /engineering`, async () => {
+    it(`/dashboard does not redirect non-admin ${role === 'engineering' ? 'legacy engineering-role row' : role} to /engineering`, async () => {
       const cookie = await mintSessionCookie(role)
       const response = await middleware(new NextRequest(`${BROWSER_ORIGIN}/dashboard`, {
         headers: { cookie, 'x-forwarded-proto': 'http' },
@@ -229,7 +229,7 @@ describe('middleware admin-route denial keeps the session on-origin', () => {
     )
   })
 
-  it('engineering-role session passes through middleware without a redirect — denial belongs to the admin layout', async () => {
+  it('legacy engineering-role row session passes through middleware without a redirect — denial belongs to the admin layout', async () => {
     const cookie = await mintSessionCookie('engineering')
     const request = adminOrganizationRequest(cookie, {
       host: SYNTHESIZED_HOST,

@@ -102,6 +102,6 @@ describe('engineering decisions consume inherited unit eligibility', () => {
   it('denies both abilities when the only flagged unit is inactive', () => {
     const isSolutionWorker = canWorkOnSolutions([u('company', null, { isActive: false, canWorkOnSolutions: true }), u('leaf', 'company')], 'leaf')
     assert.equal(canUserAssignEngineers({ isActive: true, isSolutionWorker }), false)
-    assert.equal(canManageEngineeringSubTasks({ role: 'engineering', isSolutionWorker }), false)
+    assert.equal(canManageEngineeringSubTasks({ role: 'general_dept', isSolutionWorker }), false)
   })
 })

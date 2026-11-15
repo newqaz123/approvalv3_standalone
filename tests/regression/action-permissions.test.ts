@@ -37,7 +37,7 @@ function engineeringViewerContext(
   return {
     actor: {
       id: 'engineering-1',
-      role: 'engineering',
+      role: 'general_dept',
       isActive: true,
       assignmentUnitId: 'web',
     },
@@ -54,9 +54,9 @@ function engineeringViewerContext(
 }
 
 describe('action permissions are independent from visibility', () => {
-  it('does not grant operations merely because Engineering/Admin can read', () => {
+  it('does not grant operations merely because a solution worker can read', () => {
     const context = {
-      actor: { id: 'engineering-1', role: 'engineering', isActive: true, assignmentUnitId: 'web' },
+      actor: { id: 'engineering-1', role: 'general_dept', isActive: true, assignmentUnitId: 'web' },
       request: { requesterId: 'requester-1', organizationUnitId: 'sales', status: 'SentToEngineer' },
       canView: true,
       approval: { canApprove: false },
@@ -137,7 +137,7 @@ describe('extracted existing action guards feed existingActionDecisions', () => 
     assert.equal(evaluateRequestAction('APPROVE_REQUEST', context).allowed, false)
   })
 
-  it('assign and sub-task decisions preserve eligibility and status denial reasons', () => {
+  it('assign and sub-task decisions preserve eligibility and status denials, including a legacy engineering-role row', () => {
     for (const isSolutionWorker of [true, false]) {
       for (const status of ['SentToEngineer', 'ImprovementRequest']) {
         const expected = !isSolutionWorker
@@ -380,7 +380,7 @@ describe('evaluateRequestAction composes active/read/current-step checks', () =>
       }),
       actor: {
         id: 'engineering-1',
-        role: 'engineering',
+        role: 'general_dept',
         isActive: false,
         assignmentUnitId: 'web',
       },
