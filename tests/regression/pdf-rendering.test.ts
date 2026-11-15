@@ -310,7 +310,7 @@ describe('slate editorial report body', () => {
     assert.match(html, /Attachment Index/)
     assert.match(html, /Approval Chain/)
     assert.match(html, /Activity Log/)
-    assert.match(html, /Level/)
+    assert.match(html, /Position/)
     assert.doesNotMatch(html, /<th>Role<\/th>/)
     assert.doesNotMatch(html, /<th>Type<\/th>/)
     assert.doesNotMatch(html, /Decision Summary|Approval Steps|<span>Evidence<\/span>/)
@@ -400,3 +400,54 @@ describe('flowing packet pagination', () => {
     assert.match(html, /\.sec tr\s*\{[^}]*page-break-inside:\s*avoid/)
   })
 })
+
+for (const phaseName of ['Phase 1: Initial Review', 'Phase 2: Engineering Solution', 'Phase 3: Final Approval']) {
+  it(`renders truthful columns and separated attempts in ${phaseName}`, async () => {
+    const base = sampleData.approvalPhases[0].approvals[0]
+    const data: RequestPDFData = { ...sampleData, includeApprovalHistory: true, approvalPhases: [{ phaseName, phaseOrder: 1, approvals: [
+      { ...base, instanceId: 'new', attempt: 2, supersededAt: null, order: 2, requiredLevel: 999,
+        approverName: 'Current second', positionName: 'Manager <script>x</script>', approverDepartment: 'Production <b>1</b>' },
+      { ...base, instanceId: 'old', attempt: 1, supersededAt: new Date(), order: 2, approverName: 'Old second', status: 'rejected', comments: 'Rejected <b>reason</b>' },
+      { ...base, instanceId: 'new', attempt: 2, supersededAt: null, order: 1, approverName: 'Current first' },
+      { ...base, instanceId: 'old', attempt: 1, supersededAt: new Date(), order: 1, approverName: 'Old first' },
+      { ...base, approverName: 'Legacy person', approverRole: 'general_dept', approverDepartment: undefined, approvedAt: undefined },
+    ] }] }
+    const html = await renderRequestEvidenceHTML(data)
+    const section = html.slice(html.indexOf('Approval Chain'), html.indexOf('Activity Log'))
+    assert.match(section, /<th>Step<\/th><th>Approver<\/th><th>Position<\/th><th>Department<\/th><th>Status<\/th><th>Decision date<\/th><th>Comments<\/th>/)
+    assert.match(section, /Attempt 1 — Superseded/)
+    assert.match(section, /Attempt 2 — Current/)
+    assert.match(section, /Legacy history/)
+    assert.ok(section.indexOf('Old first') < section.indexOf('Old second'))
+    assert.ok(section.indexOf('Old second') < section.indexOf('Current first'))
+    assert.ok(section.indexOf('Current first') < section.indexOf('Current second'))
+    assert.match(section, /Step 2/)
+    assert.match(section, /Manager &lt;script&gt;x&lt;\/script&gt;/)
+    assert.match(section, /Production &lt;b&gt;1&lt;\/b&gt;/)
+    assert.match(section, /Rejected &lt;b&gt;reason&lt;\/b&gt;/)
+    assert.doesNotMatch(section, /general_dept|999|<script>|<b>/)
+    const oldSecond = section.slice(section.indexOf('Old second'), section.indexOf('</tr>', section.indexOf('Old second')))
+    assert.match(oldSecond, /rejected/)
+    assert.match(oldSecond, /May 2, 2026/)
+    const legacy = section.slice(section.indexOf('Legacy person'))
+    assert.ok((legacy.match(/>—<\/td>/g) ?? []).length >= 3)
+  })
+}
+
+for (const history of [undefined, false]) {
+  it(`renders ordinary evidence without attempt headings (history=${history})`, async () => {
+    const base = sampleData.approvalPhases[0].approvals[0]
+    const html = await renderRequestEvidenceHTML({ ...sampleData, includeApprovalHistory: history,
+      approvalPhases: [{ ...sampleData.approvalPhases[0], approvals: [
+        { ...base, order: 2, approverName: 'Second', instanceId: 'current', attempt: 2, supersededAt: null },
+        { ...base, order: 1, approverName: 'First' },
+      ] }],
+    })
+    const chain = html.slice(html.indexOf('Approval Chain'), html.indexOf('Activity Log'))
+    assert.doesNotMatch(chain, /Attempt|Legacy history|Superseded/)
+    assert.match(chain, /<th>Step<\/th><th>Approver<\/th><th>Position<\/th><th>Department<\/th><th>Status<\/th><th>Decision date<\/th><th>Comments<\/th>/)
+    assert.ok(chain.indexOf('First') < chain.indexOf('Second'))
+    assert.equal((chain.match(/<table>/g) ?? []).length, 1)
+    assert.match(html.slice(html.indexOf('Activity Log')), /Approved\./)
+  })
+}

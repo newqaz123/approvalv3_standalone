@@ -12,6 +12,7 @@ import type { PDFOptions } from "puppeteer";
 import { resolveInlineImagesForPdf } from "@/lib/inline-images/pdf";
 
 export interface RequestPDFData {
+  includeApprovalHistory?: boolean;
 	id: string;
 	referenceId?: string;
 	title: string;
@@ -56,6 +57,10 @@ export interface RequestPDFData {
 			approverName: string;
 			approverRole?: string;
 			approverDepartment?: string;
+            positionName?: string;
+            instanceId?: string;
+            attempt?: number;
+            supersededAt?: Date | string | null;
 			requiredLevel: number;
 			status: "approved" | "rejected" | "pending";
 			comments?: string;
@@ -72,6 +77,29 @@ export interface RequestPDFData {
 		comments?: string;
 	}>;
 	generatedBy: string;
+}
+
+type PDFApproval = RequestPDFData['approvalPhases'][number]['approvals'][number];
+
+function groupApprovalAttempts(approvals: PDFApproval[]) {
+  const groups = new Map<string, { label: string; attempt?: number; approvals: PDFApproval[] }>();
+  for (const approval of approvals) {
+    const key = approval.instanceId || 'legacy';
+    if (!groups.has(key)) {
+      const attemptLabel = approval.attempt == null ? 'Attempt' : `Attempt ${approval.attempt}`;
+      const stateLabel = approval.supersededAt ? 'Superseded'
+        : approval.supersededAt === null ? 'Current' : 'Details unavailable';
+      groups.set(key, {
+        label: approval.instanceId ? `${attemptLabel} — ${stateLabel}` : 'Legacy history',
+        attempt: approval.instanceId ? approval.attempt : undefined,
+        approvals: [],
+      });
+    }
+    groups.get(key)!.approvals.push(approval);
+  }
+  return [...groups.values()]
+    .sort((a, b) => (a.attempt ?? Infinity) - (b.attempt ?? Infinity))
+    .map((group) => ({ ...group, approvals: group.approvals.sort((a, b) => a.order - b.order) }));
 }
 
 export interface PdfRenderOptions {
@@ -553,27 +581,32 @@ export async function renderRequestEvidenceHTML(
 				(phase) => `
     <div class="phase">
       <div class="subhead">${escapeHtml(phase.phaseName)}</div>
+      ${(data.includeApprovalHistory
+        ? groupApprovalAttempts(phase.approvals)
+        : [{ label: '', approvals: [...phase.approvals].sort((a, b) => a.order - b.order) }]
+      ).map((group) => `
+      ${group.label ? `<div class="subhead">${escapeHtml(group.label)}</div>` : ''}
       <table>
         <thead>
-          <tr><th>Stage</th><th>Approver</th><th>Level</th><th>Department</th><th>Status</th><th>Approved</th><th>Comments</th></tr>
+          <tr><th>Step</th><th>Approver</th><th>Position</th><th>Department</th><th>Status</th><th>Decision date</th><th>Comments</th></tr>
         </thead>
         <tbody>
-          ${phase.approvals
+          ${group.approvals
 						.map(
 							(approval) => `
           <tr>
-            <td>${escapeHtml(approval.stage)}</td>
+            <td>${escapeHtml(`Step ${approval.order}`)}</td>
             <td>${escapeHtml(approval.approverName)}</td>
-            <td>${approval.requiredLevel}</td>
-            <td>${escapeHtml(approval.approverDepartment || approval.approverRole || "-")}</td>
+            <td>${escapeHtml(approval.positionName || "—")}</td>
+            <td>${escapeHtml(approval.approverDepartment || "—")}</td>
             <td><span class="pill ${statusClass(approval.status)}">${escapeHtml(approval.status)}</span></td>
-            <td class="nowrap">${approval.approvedAt ? formatDate(approval.approvedAt) : "-"}</td>
+            <td class="nowrap">${approval.approvedAt ? formatDate(approval.approvedAt) : "—"}</td>
             <td>${escapeHtml(approval.comments || "-")}</td>
           </tr>`,
 						)
 						.join("")}
         </tbody>
-      </table>
+      </table>`).join("")}
     </div>`,
 			)
 			.join("")}

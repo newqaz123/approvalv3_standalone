@@ -12,6 +12,7 @@ import {
 } from '@/lib/pdf-package'
 import { canUserViewRequest } from '@/lib/request-visibility/scope'
 import { requireAdmin } from '@/lib/auth'
+import { isCurrentInstanceApproval } from '@/lib/approval-engine/current-instance'
 
 /**
  * In-memory rate limiting for PDF exports
@@ -80,6 +81,18 @@ function formatDateAsYYYYMMDD(date: Date): string {
   return `${year}-${month}-${day}`
 }
 
+const exportApproverSelect = {
+  id: true, name: true, email: true,
+  organizationAssignments: {
+    where: { isActive: true },
+    select: {
+      unit: { select: { name: true } },
+      position: { select: { name: true } },
+    },
+    take: 1,
+  },
+} as const
+
 async function getExportableRequest(requestId: string) {
   return prisma.requests.findFirst({
     where: { id: requestId },
@@ -96,8 +109,10 @@ async function getExportableRequest(requestId: string) {
       },
       approvals: {
         include: {
-          approver: { select: { id: true, name: true, email: true, role: true, } },
-          requiredApprover: { select: { id: true, name: true, email: true, role: true, } },
+          instance: { select: { attempt: true, supersededAt: true } },
+          requiredPositionRef: { select: { name: true } },
+          approver: { select: exportApproverSelect },
+          requiredApprover: { select: exportApproverSelect },
         },
         orderBy: [{ order: 'asc' }],
       },
@@ -110,8 +125,10 @@ async function getExportableRequest(requestId: string) {
           },
           approvals: {
             include: {
-              approver: { select: { id: true, name: true, email: true, role: true, } },
-              requiredApprover: { select: { id: true, name: true, email: true, role: true, } },
+              instance: { select: { attempt: true, supersededAt: true } },
+          requiredPositionRef: { select: { name: true } },
+              approver: { select: exportApproverSelect },
+              requiredApprover: { select: exportApproverSelect },
             },
             orderBy: [{ order: 'asc' }],
           },
@@ -136,67 +153,50 @@ async function getCurrentExportUser(userId: string) {
   })
 }
 
-function buildApprovalPhases(request: ExportableRequest): RequestPDFData['approvalPhases'] {
+function buildApprovalPhases(
+  request: ExportableRequest,
+  includeHistory = false
+): RequestPDFData['approvalPhases'] {
   const phases: RequestPDFData['approvalPhases'] = []
-
-  const initialApprovals = request.approvals
-    .filter((approval) => !approval.isFinalApproval && approval.routingMode !== 'CUSTOM_PERSON')
-    .map((approval, index) => ({
-      approverName: approval.approver?.name || approval.requiredApprover?.name || request.requester.name || 'Unknown',
-      approverRole: approval.approver?.role || approval.requiredApprover?.role,
-      approverDepartment: '',
+  type Approval = ExportableRequest['approvals'][number] | ExportableRequest['solutions'][number]['approvals'][number]
+  const mapApproval = (approval: Approval, isSolutionApproval: boolean) => {
+    const person = approval.approver ?? approval.requiredApprover
+    return {
+      approverName: person?.name || 'Not recorded',
+      approverDepartment: person?.organizationAssignments?.[0]?.unit.name || undefined,
+      // Custom-person chains have no required route position. Use the same
+      // person's active assignment as the department fallback.
+      positionName: approval.requiredPositionRef?.name || person?.organizationAssignments?.[0]?.position?.name || undefined,
+      instanceId: approval.instanceId || undefined,
+      attempt: approval.instance?.attempt,
+      supersededAt: approval.instance?.supersededAt,
       requiredLevel: approval.order,
       status: approval.status as 'approved' | 'rejected' | 'pending',
       comments: approval.comments || undefined,
       approvedAt: approval.approvedAt || undefined,
       order: approval.order,
-      stage: index === 0 ? 'Initial Request' : `Department Review ${index}`,
-      isSolutionApproval: false,
-    }))
-
-  if (initialApprovals.length > 0) {
-    phases.push({ phaseName: 'Phase 1: Initial Review', phaseOrder: 1, approvals: initialApprovals })
+      stage: `Step ${approval.order}`,
+      isSolutionApproval,
+    }
   }
-
+  const currentRows = <T extends Approval>(rows: T[]) =>
+    includeHistory ? rows : rows.filter(isCurrentInstanceApproval)
+  const initial = currentRows(request.approvals).filter((approval) => !approval.isFinalApproval && approval.routingMode !== 'CUSTOM_PERSON')
+  if (initial.length) {
+    phases.push({ phaseName: 'Phase 1: Initial Review', phaseOrder: 1,
+      approvals: initial.map((row) => mapApproval(row, false)) })
+  }
   const solution = request.solutions[0]
-  if (solution?.approvals.length) {
-    phases.push({
-      phaseName: 'Phase 2: Engineering Solution',
-      phaseOrder: 2,
-      approvals: solution.approvals.map((approval, index) => ({
-        approverName: approval.approver?.name || approval.requiredApprover?.name || 'Engineering',
-        approverRole: approval.approver?.role || approval.requiredApprover?.role || 'Engineering',
-        approverDepartment: 'Engineering',
-        requiredLevel: approval.order,
-        status: approval.status as 'approved' | 'rejected' | 'pending',
-        comments: approval.comments || undefined,
-        approvedAt: approval.approvedAt || undefined,
-        order: approval.order,
-        stage: index === 0 ? 'Solution Review' : `Solution Approval ${index}`,
-        isSolutionApproval: true,
-      })),
-    })
+  const solutionApprovals = currentRows(solution?.approvals ?? [])
+  if (solutionApprovals.length) {
+    phases.push({ phaseName: 'Phase 2: Engineering Solution', phaseOrder: 2,
+      approvals: solutionApprovals.map((row) => mapApproval(row, true)) })
   }
-
-  const finalApprovals = request.approvals
-    .filter((approval) => approval.isFinalApproval)
-    .map((approval, index) => ({
-      approverName: approval.approver?.name || approval.requiredApprover?.name || 'Pending',
-      approverRole: approval.approver?.role || approval.requiredApprover?.role,
-      approverDepartment: '',
-      requiredLevel: approval.order,
-      status: approval.status as 'approved' | 'rejected' | 'pending',
-      comments: approval.comments || undefined,
-      approvedAt: approval.approvedAt || undefined,
-      order: approval.order,
-      stage: `Final Approval ${index + 1}`,
-      isSolutionApproval: false,
-    }))
-
-  if (finalApprovals.length > 0) {
-    phases.push({ phaseName: 'Phase 3: Final Approval', phaseOrder: 3, approvals: finalApprovals })
+  const final = currentRows(request.approvals).filter((approval) => approval.isFinalApproval)
+  if (final.length) {
+    phases.push({ phaseName: 'Phase 3: Final Approval', phaseOrder: 3,
+      approvals: final.map((row) => mapApproval(row, false)) })
   }
-
   return phases
 }
 
@@ -232,11 +232,13 @@ async function buildRequestPDFData(
       throw new Error(`PDF export is only available after the request is completed. Current status: ${request.status}`)
     }
 
-    if (request.approvals.some((approval) => approval.status !== 'approved')) {
+    // Keep superseded attempts in the report, but never let historical
+    // rejections or unfinished steps veto a completed current attempt.
+    if (request.approvals.some((approval) => isCurrentInstanceApproval(approval) && approval.status !== 'approved')) {
       throw new Error('PDF export is only available after all approvals are completed. Please wait for all approvals to be processed.')
     }
 
-    if (request.solutions[0]?.approvals.some((approval) => approval.status !== 'approved')) {
+    if (request.solutions[0]?.approvals.some((approval) => isCurrentInstanceApproval(approval) && approval.status !== 'approved')) {
       throw new Error('PDF export is only available after all solution approvals are completed. Please wait for all approvals to be processed.')
     }
   }
@@ -268,7 +270,8 @@ async function buildRequestPDFData(
       createdAt: file.createdAt,
       uploadedBy: file.uploadedBy.name,
     })),
-    approvalPhases: buildApprovalPhases(request),
+    includeApprovalHistory: options?.allowIncomplete === true,
+    approvalPhases: buildApprovalPhases(request, options?.allowIncomplete === true),
     activities: request.activities.map((activity) => ({
       action: activity.action,
       userName: activity.user.name,
