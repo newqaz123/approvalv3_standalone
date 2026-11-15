@@ -6,6 +6,7 @@ import { getCurrentUser } from "@/lib/cache/user-cache";
 import { getMyRequests } from "@/server-actions/requests";
 import { buildFollowUpDashboard } from "@/lib/follow-up-dashboard";
 import { CURRENT_INSTANCE_ROW_FILTER, snapshotGroupActionWhere } from "@/lib/approval-engine/current-instance";
+import { isAwaitingReworkAfterRejection } from "@/lib/request-rejection-state";
 import { buildRequestVisibilityWhere, createRequestVisibilityDb } from "@/lib/request-visibility/scope";
 import type { Prisma } from "@prisma/client";
 export type {
@@ -413,6 +414,8 @@ export async function getMyCreatedRequests(): Promise<RequestListRow[]> {
 						select: {
 							id: true,
 							status: true,
+							instanceId: true,
+							instance: { select: { supersededAt: true } },
 							approver: {
 								select: { name: true },
 							},
@@ -450,6 +453,8 @@ export async function getMyCreatedRequests(): Promise<RequestListRow[]> {
 				select: {
 					id: true,
 					status: true,
+					instanceId: true,
+					instance: { select: { supersededAt: true } },
 										order: true,
 					approvedAt: true,
 					isFinalApproval: true,
@@ -516,13 +521,13 @@ export async function getMyCreatedRequests(): Promise<RequestListRow[]> {
 				department: req.organizationUnit,
 				requester: req.requester,
 				_count: req._count,
-				hasRejection:
-					req.solutions.some(
-						(s) =>
-							s.approvals &&
-							Array.isArray(s.approvals) &&
-							s.approvals.some((a: any) => a.status === "rejected"),
-					) || req.approvals.some((a: any) => a.status === "rejected"),
+				// Red only while a rejection of the current attempt is waiting
+				// for rework; superseded attempts and earlier stages do not count.
+				hasRejection: isAwaitingReworkAfterRejection({
+					status: req.status,
+					requestApprovals: req.approvals,
+					solutionApprovals: req.solutions[0]?.approvals ?? [],
+				}),
 				engineerAssignments: req.engineerAssignments,
 				approvals,
 			};
@@ -590,6 +595,8 @@ export async function getAllRequests(): Promise<RequestListRow[]> {
 						select: {
 							id: true,
 							status: true,
+							instanceId: true,
+							instance: { select: { supersededAt: true } },
 							approver: {
 								select: { name: true },
 							},
@@ -627,6 +634,8 @@ export async function getAllRequests(): Promise<RequestListRow[]> {
 				select: {
 					id: true,
 					status: true,
+					instanceId: true,
+					instance: { select: { supersededAt: true } },
 										order: true,
 					approvedAt: true,
 					isFinalApproval: true,
@@ -690,13 +699,13 @@ export async function getAllRequests(): Promise<RequestListRow[]> {
 				department: req.organizationUnit,
 				requester: req.requester,
 				_count: req._count,
-				hasRejection:
-					req.solutions.some(
-						(s) =>
-							s.approvals &&
-							Array.isArray(s.approvals) &&
-							s.approvals.some((a: any) => a.status === "rejected"),
-					) || req.approvals.some((a: any) => a.status === "rejected"),
+				// Red only while a rejection of the current attempt is waiting
+				// for rework; superseded attempts and earlier stages do not count.
+				hasRejection: isAwaitingReworkAfterRejection({
+					status: req.status,
+					requestApprovals: req.approvals,
+					solutionApprovals: req.solutions[0]?.approvals ?? [],
+				}),
 				engineerAssignments: req.engineerAssignments,
 				approvals: approvals.map((row) => ({ ...row, requiredLevel: row.order })),
 			};

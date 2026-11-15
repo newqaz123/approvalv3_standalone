@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import prisma from "@/lib/prisma";
 import { createSolutionWorkActorDb, isActorSolutionWorker } from "@/lib/solution-work-actor";
 import { buildRequestVisibilityWhere, createRequestVisibilityDb } from "@/lib/request-visibility/scope";
+import { isAwaitingReworkAfterRejection } from "@/lib/request-rejection-state";
 import {
 	getRequestsNeedingEngineeringAction,
 	getEngineeringUsers,
@@ -72,17 +73,28 @@ export default async function EngineeringDashboardPage() {
 					name: true,
 				},
 			},
+			// Latest solution and the request/final approvals, with their attempt,
+			// so the rejected flag follows the same rule as the request table.
 			solutions: {
 				select: {
 					approvals: {
-						where: { status: "rejected" },
-						take: 1,
+						select: {
+							status: true,
+							instanceId: true,
+							instance: { select: { supersededAt: true } },
+						},
 					},
 				},
-			},
-			activities: {
-				where: { action: "solution_rejected" },
+				orderBy: { createdAt: "desc" },
 				take: 1,
+			},
+			approvals: {
+				select: {
+					status: true,
+					isFinalApproval: true,
+					instanceId: true,
+					instance: { select: { supersededAt: true } },
+				},
 			},
 			engineerAssignments: {
 				include: {
@@ -133,9 +145,13 @@ export default async function EngineeringDashboardPage() {
 		workRequisitionReceived: request.workRequisitionReceived,
 		department: request.organizationUnit,
 		requester: request.requester,
-		hasRejection:
-			request.solutions.some((s) => s.approvals.length > 0) ||
-			request.activities.length > 0,
+		// Red only while a rejection of the current attempt is waiting for
+		// rework; superseded attempts and earlier stages do not count.
+		hasRejection: isAwaitingReworkAfterRejection({
+			status: request.status,
+			requestApprovals: request.approvals,
+			solutionApprovals: request.solutions[0]?.approvals ?? [],
+		}),
 		assignedEngineers: request.engineerAssignments.map(
 			(assignment) => assignment.engineer,
 		),

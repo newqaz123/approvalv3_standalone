@@ -50,6 +50,7 @@ import { CURRENT_INSTANCE_ROW_FILTER, isCurrentInstanceApproval, snapshotGroupAc
 import { ApprovalRouteConfigurationError } from '@/lib/approval-routes/definition'
 import { buildRequestVisibilityWhere, canUserViewRequest, createRequestVisibilityDb } from '@/lib/request-visibility/scope'
 import { mapEventRecipients } from '@/lib/notification-recipients'
+import { isAwaitingReworkAfterRejection } from '@/lib/request-rejection-state'
 import { descendantUnitIds } from '@/lib/organization/hierarchy'
 import type { OrganizationUnitNode } from '@/lib/organization/model'
 import {
@@ -454,10 +455,6 @@ export async function getMyRequests(filters?: GetRequestsFilters) {
         },
         take: 1,
       },
-      activities: {
-        where: { action: 'solution_rejected' },
-        take: 1,
-      },
       engineerAssignments: {
         select: {
           engineer: {
@@ -567,9 +564,13 @@ export async function getMyRequests(filters?: GetRequestsFilters) {
       department: req.organizationUnit,
       requester: req.requester,
       _count: req._count,
-      hasRejection: req.solutions.some(s =>
-        s.approvals && Array.isArray(s.approvals) && s.approvals.some((a: any) => a.status === 'rejected')
-      ) || req.approvals.some((a: any) => a.status === 'rejected') || req.activities.length > 0,
+      // Red only while a rejection of the current attempt is waiting for
+      // rework; superseded attempts and earlier stages do not count.
+      hasRejection: isAwaitingReworkAfterRejection({
+        status: req.status,
+        requestApprovals: req.approvals,
+        solutionApprovals: req.solutions[0]?.approvals ?? [],
+      }),
       engineerAssignments: req.engineerAssignments,
       approvals,
     }
@@ -1826,25 +1827,38 @@ export async function getRequestsNeedingEngineeringAction(): Promise<NeedsAction
           },
         },
       },
+      // Latest solution and the request/final approvals, with their attempt,
+      // so the rejected flag follows the same rule as the request table.
+      solutions: {
+        select: {
+          approvals: {
+            select: {
+              status: true,
+              instanceId: true,
+              instance: { select: { supersededAt: true } },
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 1,
+      },
+      approvals: {
+        select: {
+          status: true,
+          isFinalApproval: true,
+          instanceId: true,
+          instance: { select: { supersededAt: true } },
+        },
+      },
     },
     orderBy: {
       createdAt: 'asc',
     },
   })
 
-  // Check which requests have solutions (for rejection detection)
-  // A request in SentToEngineer with a solution means the solution was rejected
-  const requestIdsWithSolution = (
-    await prisma.solutions.findMany({
-      where: {
-        requestId: { in: needsSolution.map(r => r.id) },
-      },
-      select: { requestId: true },
-    })
-  ).map(s => s.requestId)
-
-  // Include ALL SentToEngineer requests (both fresh and rejected)
-  // Requests with solutions are the rejected ones needing resubmission
+  // Include ALL SentToEngineer requests (both fresh and rejected). A request
+  // is marked rejected only while the current solution or final attempt is
+  // rejected and waiting for a resubmission.
   const needsSolutionFiltered = needsSolution
     .map(request => ({
       request: {
@@ -1854,7 +1868,11 @@ export async function getRequestsNeedingEngineeringAction(): Promise<NeedsAction
         createdAt: request.createdAt,
         department: request.organizationUnit,
         requester: request.requester,
-        hasRejection: requestIdsWithSolution.includes(request.id),
+        hasRejection: isAwaitingReworkAfterRejection({
+          status: request.status,
+          requestApprovals: request.approvals,
+          solutionApprovals: request.solutions[0]?.approvals ?? [],
+        }),
       },
       assignedEngineers: request.engineerAssignments.map(ea => ea.engineer),
     }))

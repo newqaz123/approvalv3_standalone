@@ -105,7 +105,8 @@ describe('request list approval badge after a resubmit', () => {
     // Both the request and the solution approval selects load the instance.
     assert.equal((fn[0].match(/instance: \{ select: \{ supersededAt: true \} \}/g) ?? []).length, 2)
     assert.match(fn[0], /rawApprovals\.filter\(isCurrentInstanceApproval\)/)
-    // "Has ever been rejected" still looks at every attempt.
-    assert.match(fn[0], /req\.approvals\.some\(\(a: any\) => a\.status === 'rejected'\)/)
+    // The red "rejected" flag follows the current attempt too
+    // (tests/regression/request-rejection-state.test.ts).
+    assert.match(fn[0], /hasRejection: isAwaitingReworkAfterRejection\(/)
   })
 })
