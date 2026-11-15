@@ -48,7 +48,7 @@ interface ApprovalStep {
 	id: string;
 	name: string;
 	role: string;
-	status: "submitted" | "approved" | "pending" | "rejected";
+	status: "submitted" | "approved" | "pending" | "rejected" | "not_reached";
 	comment: string;
 	timestamp: string;
 	avatar?: string;
@@ -172,6 +172,12 @@ const stepStatusConfig = {
 	rejected: {
 		label: "REJECTED",
 		className: "bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400",
+	},
+	// Closed by an earlier rejection; this person never acted on it.
+	not_reached: {
+		label: "NOT REACHED",
+		className:
+			"bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400",
 	},
 };
 
@@ -731,7 +737,7 @@ export function StatusModal({
 													key={step.id}
 													className={cn(
 														"flex gap-3 items-start bg-white dark:bg-slate-900/60 p-3 rounded-lg border shadow-sm",
-														isPending
+														isPending || step.status === "not_reached"
 															? "border-slate-100 dark:border-slate-800/80 opacity-60"
 															: isRejected
 																? "border-red-100 dark:border-red-800/30"

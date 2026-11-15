@@ -18,7 +18,7 @@ export interface ModalApprovalStep {
   id: string
   name: string
   role: string
-  status: 'submitted' | 'approved' | 'pending' | 'rejected'
+  status: 'submitted' | 'approved' | 'pending' | 'rejected' | 'not_reached'
   comment: string
   timestamp: string
   avatar?: string
@@ -71,6 +71,61 @@ type ApprovalDisplaySource = {
   potentialApprovers?: Array<{
     name: string | null
   }>
+}
+
+type ApprovalStepSource = ApprovalDisplaySource & {
+  id: string
+  order: number
+  status: string
+  isCustomChain: boolean
+  comments?: string | null
+  approvedAt?: Date | null
+  createdAt: Date
+}
+
+/**
+ * When one approver rejects, the engine closes the remaining pending steps as
+ * "rejected" without an approver. Nobody acted on those, so they are shown as
+ * not reached instead of putting "Rejected" under that person's name.
+ */
+function isStepClosedByEarlierRejection(approval: ApprovalStepSource): boolean {
+  return approval.status === 'rejected' && !approval.approver && !approval.approvedAt
+}
+
+/**
+ * The current attempt's rejection: the step someone actually rejected, not a
+ * later step the engine closed. Falls back to any rejected row so rows with
+ * no recorded approver still produce a banner.
+ */
+function findCurrentRejection<T extends {
+  status: string
+  approver?: { name: string | null } | null
+  approvedAt?: Date | null
+  instanceId?: string | null
+  instance?: { supersededAt: Date | string | null } | null
+}>(approvals: readonly T[]): T | undefined {
+  const rejected = approvals.filter(a => a.status === 'rejected' && isCurrentInstanceApproval(a))
+  return rejected.find(a => a.approver || a.approvedAt) ?? rejected[0]
+}
+
+function toModalApprovalStep(approval: ApprovalStepSource): ModalApprovalStep {
+  const base = {
+    id: approval.id,
+    name: getApprovalDisplayName(approval),
+    role: getApprovalDisplayRole(approval),
+  }
+  if (isStepClosedByEarlierRejection(approval)) {
+    return { ...base, status: 'not_reached', comment: 'Rejected at an earlier step', timestamp: '-' }
+  }
+  return {
+    ...base,
+    status: approval.status as ModalApprovalStep['status'],
+    comment: approval.comments ||
+            (approval.status === 'pending' ? 'Awaiting review' : 'No comment'),
+    timestamp: approval.approvedAt
+      ? approval.approvedAt.toISOString()
+      : approval.createdAt.toISOString(),
+  }
 }
 
 function getApprovalDisplayName(approval: ApprovalDisplaySource): string {
@@ -189,21 +244,7 @@ export function transformApprovalsToStages(
     .map(([level, levelApprovals], index) => {
       const steps: ModalApprovalStep[] = levelApprovals
         .sort((a, b) => a.order - b.order)
-        .map(approval => {
-          const approverName = getApprovalDisplayName(approval)
-          
-          return {
-            id: approval.id,
-            name: approverName,
-            role: getApprovalDisplayRole(approval),
-            status: approval.status as 'submitted' | 'approved' | 'pending' | 'rejected',
-            comment: approval.comments || 
-                    (approval.status === 'pending' ? 'Awaiting review' : 'No comment'),
-            timestamp: approval.approvedAt 
-              ? approval.approvedAt.toISOString() 
-              : approval.createdAt.toISOString(),
-          }
-        })
+        .map(toModalApprovalStep)
 
       return {
         stageNumber: index + 1,
@@ -413,7 +454,7 @@ export function transformRequestToModalData(request: {
   if (request.status === 'ImprovementRequest' || request.status === 'RequestRejected') {
     // Show request rejection from the CURRENT attempt only. A superseded
     // rejection is history; hiding Approve/Reject behind it blocks resubmit.
-    const rejectedRequestApproval = requestApprovals.find(a => a.status === 'rejected' && isCurrentInstanceApproval(a))
+    const rejectedRequestApproval = findCurrentRejection(requestApprovals)
     if (rejectedRequestApproval) {
       rejectionInfo = {
         reason: rejectedRequestApproval.comments || 'No reason provided',
@@ -423,9 +464,9 @@ export function transformRequestToModalData(request: {
     }
   } else if (request.status === 'SentToEngineer' || request.status === 'DesignCostEstimationApproval') {
     // Show solution rejection only if solution approvals are rejected
-    const rejectedSolutionApproval = solutionApprovals.find(a => a.status === 'rejected' && isCurrentInstanceApproval(a))
+    const rejectedSolutionApproval = findCurrentRejection(solutionApprovals)
     // Also check for final approval rejection that sent it back to engineering
-    const rejectedFinalApproval = finalApprovals.find(a => a.status === 'rejected' && isCurrentInstanceApproval(a))
+    const rejectedFinalApproval = findCurrentRejection(finalApprovals)
     const rejection = rejectedSolutionApproval || rejectedFinalApproval
     if (rejection) {
       rejectionInfo = {
@@ -436,7 +477,7 @@ export function transformRequestToModalData(request: {
     }
   } else if (request.status === 'FinalApproval' || request.status === 'FinalRejected') {
     // Show final approval rejection
-    const rejectedFinalApproval = finalApprovals.find(a => a.status === 'rejected' && isCurrentInstanceApproval(a))
+    const rejectedFinalApproval = findCurrentRejection(finalApprovals)
     if (rejectedFinalApproval) {
       rejectionInfo = {
         reason: rejectedFinalApproval.comments || 'No reason provided',
@@ -473,21 +514,7 @@ export function transformRequestToModalData(request: {
   if (requestApprovals.length > 0) {
     const steps: ModalApprovalStep[] = requestApprovals
       .sort((a, b) => a.requiredLevel - b.requiredLevel || a.order - b.order)
-      .map(approval => {
-        const approverName = getApprovalDisplayName(approval)
-        
-        return {
-          id: approval.id,
-          name: approverName,
-          role: getApprovalDisplayRole(approval),
-          status: approval.status as 'submitted' | 'approved' | 'pending' | 'rejected',
-          comment: approval.comments || 
-                  (approval.status === 'pending' ? 'Awaiting review' : 'No comment'),
-          timestamp: approval.approvedAt 
-            ? approval.approvedAt.toISOString() 
-            : approval.createdAt.toISOString(),
-        }
-      })
+      .map(toModalApprovalStep)
     
     stages.push({
       stageNumber: stageCounter++,
@@ -502,21 +529,7 @@ export function transformRequestToModalData(request: {
   if (solutionApprovals.length > 0) {
     const steps: ModalApprovalStep[] = solutionApprovals
       .sort((a, b) => a.requiredLevel - b.requiredLevel || a.order - b.order)
-      .map(approval => {
-        const approverName = getApprovalDisplayName(approval)
-        
-        return {
-          id: approval.id,
-          name: approverName,
-          role: getApprovalDisplayRole(approval),
-          status: approval.status as 'submitted' | 'approved' | 'pending' | 'rejected',
-          comment: approval.comments || 
-                  (approval.status === 'pending' ? 'Awaiting review' : 'No comment'),
-          timestamp: approval.approvedAt 
-            ? approval.approvedAt.toISOString() 
-            : approval.createdAt.toISOString(),
-        }
-      })
+      .map(toModalApprovalStep)
     
     stages.push({
       stageNumber: stageCounter++,
@@ -531,21 +544,7 @@ export function transformRequestToModalData(request: {
   if (finalApprovals.length > 0) {
     const steps: ModalApprovalStep[] = finalApprovals
       .sort((a, b) => a.requiredLevel - b.requiredLevel || a.order - b.order)
-      .map(approval => {
-        const approverName = getApprovalDisplayName(approval)
-        
-        return {
-          id: approval.id,
-          name: approverName,
-          role: getApprovalDisplayRole(approval),
-          status: approval.status as 'submitted' | 'approved' | 'pending' | 'rejected',
-          comment: approval.comments || 
-                  (approval.status === 'pending' ? 'Awaiting review' : 'No comment'),
-          timestamp: approval.approvedAt 
-            ? approval.approvedAt.toISOString() 
-            : approval.createdAt.toISOString(),
-        }
-      })
+      .map(toModalApprovalStep)
     
     // Find who initiated final approval from activities
     const finalApprovalActivity = request.activities.find(a => a.action === 'final_approval_initiated')
