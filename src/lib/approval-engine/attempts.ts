@@ -7,7 +7,8 @@
 //
 // Origins (spec): REQUEST = stored requests.requesterId; SOLUTION = stored
 // solutions.submittedById never an authorized reviser (mismatched trusted
-// input rejected); FINAL = original requester (never the trigger actor).
+// input rejected); FINAL = original requester (never the trigger actor),
+// with steps at or below the trigger actor's position not required.
 // Custom chains skip route resolution, write CUSTOM_PERSON ordered
 // requiredApproverId rows, and never auto-approve.
 // Ledger R5: ApprovalPhase from definition.ts. R-A6-2: reporting path is
@@ -143,7 +144,7 @@ export async function resolvePhaseOrigin(db: PhaseOriginRepository, query: Phase
 
   if (query.phase === 'FINAL') {
     if (!query.originUserId) originError('Final phase origin requires the authenticated initiator')
-    await requirePath(db, query.originUserId)
+    const initiatorPath = await requirePath(db, query.originUserId)
     const requesterPath = await requirePath(db, request.requesterId)
     return {
       phase: 'FINAL',
@@ -152,6 +153,9 @@ export async function resolvePhaseOrigin(db: PhaseOriginRepository, query: Phase
       path: requesterPath,
       requestId: query.requestId,
       source: 'FINAL_INITIATOR',
+      // The requester's route and branch are kept; steps at or below the
+      // initiator's position are skipped by the plan builder.
+      initiatorPositionId: initiatorPath.positionId,
     }
   }
 

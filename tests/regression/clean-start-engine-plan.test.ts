@@ -271,42 +271,80 @@ describe('clean-start engine plan — builder + persist', () => {
     assert.deepEqual([...plan.steps[0].candidateUserIds], ['u-webmgr', 'u-engmgr'])
   })
 
-  it('2b. FINAL initiator rank does not skip the requester chain or auto-approve', async () => {
-    const finalRoute: ResolvedApprovalRoute = {
-      ...publishedRoute,
+  // Owner decision after the business flow test (a Supervisor started Final
+  // approval for a Staff request and was then asked to approve it himself):
+  // the route and branch stay the requester's, but every step at or below
+  // the initiator's position is dropped.
+  const finalRoute: ResolvedApprovalRoute = {
+    ...publishedRoute,
+    phase: 'FINAL',
+    steps: [
+      { order: 1, positionId: 'p-lead' },
+      { order: 2, positionId: 'p-mgr' },
+      { order: 3, positionId: 'p-dir' },
+    ],
+  }
+  const finalPath: ReportingPath = {
+    ...teamPath,
+    steps: [
+      ...teamPath.steps,
+      { kind: 'UNIT_MANAGER', unitId: 'company', assignmentId: 'a-dir', userId: 'u-dir', positionId: 'p-dir' },
+    ],
+  }
+  const finalDb = (initiatorPositionId?: string) => createFakeDb({
+    path: finalPath,
+    route: finalRoute,
+    accounts: [...allActiveAccounts, { id: 'u-dir', isActive: true }],
+    origin: {
       phase: 'FINAL',
-      steps: [
-        { order: 1, positionId: 'p-mgr' },
-        { order: 2, positionId: 'p-dir' },
-      ],
-    }
-    const path: ReportingPath = {
-      ...teamPath,
-      steps: [
-        ...teamPath.steps,
-        { kind: 'UNIT_MANAGER', unitId: 'company', assignmentId: 'a-dir', userId: 'u-dir', positionId: 'p-dir' },
-      ],
-    }
-    const db = createFakeDb({
-      path,
-      route: finalRoute,
-      accounts: [...allActiveAccounts, { id: 'u-dir', isActive: true }],
-      origin: {
-        phase: 'FINAL',
-        originUserId: path.originUserId,
-        originUnitId: path.unitId,
-        path,
-        requestId: 'req-1',
-        source: 'FINAL_INITIATOR',
-      },
-    })
-    const plan = await buildNormalApprovalInstance(db, {
+      originUserId: finalPath.originUserId,
+      originUnitId: finalPath.unitId,
+      path: finalPath,
       requestId: 'req-1',
-      phase: 'FINAL',
-      originUserId: 'u-dir',
-    })
+      source: 'FINAL_INITIATOR',
+      ...(initiatorPositionId ? { initiatorPositionId } : {}),
+    },
+  })
+  const finalInput = { requestId: 'req-1', phase: 'FINAL' as const, originUserId: 'u-lead' }
+
+  it('2b. FINAL without an initiator position keeps the full requester chain', async () => {
+    const plan = await buildNormalApprovalInstance(finalDb(), finalInput)
+    assert.equal(plan.state, 'PENDING')
+    assert.deepEqual(plan.steps.map((step) => step.requiredPositionId), ['p-lead', 'p-mgr', 'p-dir'])
+  })
+
+  it('2c. FINAL skips every step at or below the initiator position, on the requester route', async () => {
+    const plan = await buildNormalApprovalInstance(finalDb('p-lead'), finalInput)
     assert.equal(plan.state, 'PENDING')
     assert.deepEqual(plan.steps.map((step) => step.requiredPositionId), ['p-mgr', 'p-dir'])
+    // Not required is different from vacant: nothing is recorded as skipped.
+    assert.deepEqual(plan.skipped, [])
+    // The route still belongs to the requester.
+    assert.equal(plan.originUserId, 'u-origin')
+    assert.equal(plan.originContext.positionId, 'p-staff')
+    assert.equal(plan.routeVersionId, 'rv-1')
+
+    const byManager = await buildNormalApprovalInstance(finalDb('p-mgr'), finalInput)
+    assert.deepEqual(byManager.steps.map((step) => step.requiredPositionId), ['p-dir'])
+  })
+
+  it('2d. FINAL started by the requester (or someone below) changes nothing', async () => {
+    const plan = await buildNormalApprovalInstance(finalDb('p-staff'), finalInput)
+    assert.deepEqual(plan.steps.map((step) => step.requiredPositionId), ['p-lead', 'p-mgr', 'p-dir'])
+  })
+
+  it('2e. FINAL started at or above the top step completes with no approval and no self-approved row', async () => {
+    const plan = await buildNormalApprovalInstance(finalDb('p-dir'), finalInput)
+    assert.equal(plan.state, 'COMPLETED_NO_ELIGIBLE_STEPS')
+    assert.equal(plan.completionReason, 'NO_ELIGIBLE_APPROVAL_STEPS')
+    assert.deepEqual(plan.steps, [])
+    assert.deepEqual(plan.skipped, [])
+  })
+
+  it('2f. the initiator position never affects REQUEST or SOLUTION plans', async () => {
+    const db = createFakeDb({ origin: { ...originFor(teamPath), initiatorPositionId: 'p-dir' } })
+    const plan = await buildNormalApprovalInstance(db, buildInput)
+    assert.deepEqual(plan.steps.map((step) => step.requiredPositionId), ['p-lead', 'p-mgr'])
   })
 
   it('3. vacant required step is recorded VACANT_POSITION (not-required vs vacant distinction)', async () => {

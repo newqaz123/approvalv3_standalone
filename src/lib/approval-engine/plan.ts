@@ -6,7 +6,7 @@
 // Flow: resolvePhaseOrigin → resolvePublishedRoute → originRank >= limitRank
 // → frozen AUTO_APPROVED empty steps/skipped (normal routes only) → else
 // per published step in order: exclude stepRank <= originRank (not required,
-// NOT vacant) and defensively omit stepRank > limitRank; compose B3
+// NOT vacant; for FINAL also stepRank <= the initiator's rank) and defensively omit stepRank > limitRank; compose B3
 // selectStepCandidates with loadOwnTeamActiveAssignments(path.teamId) or []
 // if ungrouped — never pass sibling teams; then filter isActive via
 // findStepCandidates (do not reimplement option A). Empty active set →
@@ -62,6 +62,12 @@ export interface PhaseOrigin {
   path: ReportingPath
   requestId: string
   source: 'REQUESTER' | 'SOLUTION_SUBMITTER' | 'FINAL_INITIATOR'
+  /**
+   * FINAL only: position of the person who started Final approval. The route
+   * and branch stay the requester's, but steps at or below this position are
+   * not required, so the initiator never approves what they started.
+   */
+  initiatorPositionId?: string
 }
 
 export interface BuildApprovalInstanceInput {
@@ -303,6 +309,11 @@ export async function buildNormalApprovalInstance(
   )
   const originRank = rankOf(positionMap, path.positionId, 'origin')
   const limitRank = rankOf(positionMap, resolved.approvalLimitPositionId, 'limit')
+  // Steps at or below this rank are not required. For FINAL it is the higher
+  // of the requester's and the initiator's rank; otherwise the origin's rank.
+  const skipRank = input.phase === 'FINAL' && origin.initiatorPositionId
+    ? Math.max(originRank, rankOf(positionMap, origin.initiatorPositionId, 'initiator'))
+    : originRank
   const originContext = deepFreeze({
     positionId: path.positionId,
     assignmentId: path.assignmentId,
@@ -332,7 +343,7 @@ export async function buildNormalApprovalInstance(
   const skipped: ApprovalSkipPlan[] = []
   for (const step of resolved.steps) {
     const stepRank = rankOf(positionMap, step.positionId, 'step')
-    if (stepRank <= originRank) continue
+    if (stepRank <= skipRank) continue
     if (stepRank > limitRank) continue
     const selected = selectStepCandidates({
       path,

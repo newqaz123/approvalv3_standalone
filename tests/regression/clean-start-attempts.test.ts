@@ -288,6 +288,20 @@ describe('resolvePhaseOrigin', () => {
     assert.equal(origin.path.originUserId, 'u-requester')
   })
 
+  it('FINAL origin carries the initiator position so steps up to their rank can be skipped', async () => {
+    const origin = await resolvePhaseOrigin(
+      originRepo({
+        paths: {
+          'u-requester': requesterPath,
+          'u-initiator': pathFor('u-initiator', 'ops', 'a-initiator', 'p-lead'),
+        },
+      }),
+      { phase: 'FINAL', requestId: 'r1', originUserId: 'u-initiator' },
+    )
+    assert.equal(origin.originUserId, 'u-requester')
+    assert.equal(origin.initiatorPositionId, 'p-lead')
+  })
+
   it('FINAL origin rejects missing initiator input', async () => {
     await assert.rejects(
       () => resolvePhaseOrigin(originRepo({}), { phase: 'FINAL', requestId: 'r1' }),
