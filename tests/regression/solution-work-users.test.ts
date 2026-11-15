@@ -5,6 +5,8 @@ import { runInNewContext } from 'node:vm'
 import ts from 'typescript'
 import { listSolutionWorkUsers, filterSolutionWorkUserIds } from '@/lib/solution-work-users'
 import type { OrganizationUnitNode } from '@/lib/organization/model'
+import { evaluateRequestAction, existingAssignEngineersDecision } from '@/lib/action-permissions'
+import { isActorSolutionWorker, type SolutionWorkActorDb } from '@/lib/solution-work-actor'
 
 const u = (id: string, parentId: string | null, over: Partial<OrganizationUnitNode> = {}): OrganizationUnitNode =>
   ({ id, name: id, parentId, isActive: true, shareRequests: false, canWorkOnSolutions: false, managerUserId: null, ...over })
@@ -83,6 +85,60 @@ describe('requests use solution-work users, not engineering roles', () => {
     assert.doesNotMatch(source, /role:\s*'engineering'|role\s*!==\s*'engineering'/)
     assert.match(source, /return listSolutionWorkUsers\(prisma\)/)
     assert.match(source, /await filterSolutionWorkUserIds\(prisma, engineerIds\)/)
+  })
+
+  it('assignEngineers denies an eligible caller who cannot view a deleted request without loading it or writing', async () => {
+    const user = { id: 'worker', role: 'general_dept', isActive: true }
+    const actorDb: SolutionWorkActorDb = {
+      async findUser() { return user },
+      async findActiveAssignmentUnitIds() { return ['solutions'] },
+      async findUnits() { return units },
+    }
+    assert.equal(await isActorSolutionWorker(actorDb, user.id), true)
+
+    const file = ts.createSourceFile('requests.ts', source, ts.ScriptTarget.Latest, true)
+    const action = file.statements.find((node): node is ts.FunctionDeclaration =>
+      ts.isFunctionDeclaration(node) && node.name?.text === 'assignEngineers')
+    assert.ok(action)
+    const compiled = ts.transpileModule(action.getText(file), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    }).outputText
+    const calls: string[] = []
+    const storedAssignments = ['existing-engineer']
+    const actions = {} as { assignEngineers(requestId: string, engineerIds: string[]): Promise<unknown> }
+    runInNewContext(compiled, {
+      exports: actions,
+      getCurrentUser: async () => user,
+      createSolutionWorkActorDb: () => actorDb,
+      isActorSolutionWorker,
+      evaluateRequestAction,
+      existingAssignEngineersDecision,
+      canUserViewRequest: async (userId: string, requestId: string) => {
+        assert.equal(userId, user.id)
+        assert.equal(requestId, 'deleted-request')
+        calls.push('visibility-denied')
+        return false
+      },
+      filterSolutionWorkUserIds: async () => [],
+      revalidateRequestViews: () => calls.push('revalidate'),
+      prisma: {
+        requests: {
+          async findUnique() {
+            calls.push('request-load')
+            return { status: 'SentToEngineer', isDeleted: true, title: 'Deleted request', requesterId: 'requester', organizationUnitId: 'sales' }
+          },
+        },
+        request_engineer_assignments: {
+          async deleteMany() { calls.push('assignments-delete'); storedAssignments.length = 0 },
+          async createMany() { calls.push('assignments-create') },
+        },
+        request_activities: { async create() { calls.push('activity-create') } },
+      },
+    })
+
+    await assert.rejects(actions.assignEngineers('deleted-request', []), { message: 'Request not found' })
+    assert.deepEqual(calls, ['visibility-denied'])
+    assert.deepEqual(storedAssignments, ['existing-engineer'])
   })
 
   it('keeps stored engineer assignments in the modal request loader even after unit eligibility is removed', async () => {

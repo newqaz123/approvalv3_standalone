@@ -1961,6 +1961,10 @@ export async function assignEngineers(requestId: string, engineerIds: string[]) 
     throw new Error('Only engineering users can assign engineers')
   }
 
+  if (!(await canUserViewRequest(user.id, requestId))) {
+    throw new Error('Request not found')
+  }
+
   // Validate request exists and is in correct status
   const request = await prisma.requests.findUnique({
     where: { id: requestId },
