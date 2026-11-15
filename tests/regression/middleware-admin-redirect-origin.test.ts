@@ -1,6 +1,6 @@
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { NextRequest } from 'next/server'
 import { encode } from '@auth/core/jwt'
 
@@ -24,11 +24,10 @@ import { encode } from '@auth/core/jwt'
  * redirect(), which emits an origin-relative Location), and the
  * middleware must simply not redirect signed-in users cross-origin.
  *
- * Landing correction (2026-09-19): the layout denial is role-aware — an
- * authenticated Engineering-ROLE user (UserRole.engineering, NOT merely a
- * member of an engineering organization unit) lands on /engineering; every
- * other non-admin keeps the prior /requests destination. The middleware
- * stays role-blind for /admin so no host-flipping redirect is ever issued.
+ * Admin-checkbox cleanup: the layout sends every non-admin to /requests.
+ * The middleware stays role-blind for /admin so no host-flipping redirect
+ * is ever issued. Default landings are /admin for admins and
+ * /requests/my-actions for everyone else, including legacy engineering roles.
  */
 
 const SECRET = 'regression-middleware-origin-secret'
@@ -100,6 +99,52 @@ describe('middleware admin-route denial keeps the session on-origin', () => {
       if (value === undefined) delete process.env[key]
       else process.env[key] = value
     }
+  })
+
+  for (const [role, destination] of [
+    ['admin', '/admin'],
+    ['engineering', '/requests/my-actions'],
+    ['general_dept', '/requests/my-actions'],
+    ['unexpected-role', '/requests/my-actions'],
+  ]) {
+    for (const path of ['/', '/sign-in', '/sign-up']) {
+      it(`getRoleDashboard sends ${role} from ${path} to ${destination}`, async () => {
+        const cookie = await mintSessionCookie(role)
+        const response = await middleware(new NextRequest(`${BROWSER_ORIGIN}${path}`, {
+          headers: {
+            cookie,
+            host: '127.0.0.1:9999',
+            'x-forwarded-proto': 'http',
+          },
+        }))
+        assert.equal(response.status, 307)
+        assert.equal(response.headers.get('location'), `${BROWSER_ORIGIN}${destination}`)
+      })
+    }
+  }
+
+  for (const role of ['engineering', 'general_dept', 'unexpected-role']) {
+    it(`/dashboard does not redirect non-admin ${role} to /engineering`, async () => {
+      const cookie = await mintSessionCookie(role)
+      const response = await middleware(new NextRequest(`${BROWSER_ORIGIN}/dashboard`, {
+        headers: { cookie, 'x-forwarded-proto': 'http' },
+      }))
+      assert.equal(response.status, 200)
+      assert.equal(response.headers.get('location'), null)
+    })
+  }
+
+  it('/dashboard still redirects an admin to /admin', async () => {
+    const cookie = await mintSessionCookie('admin')
+    const response = await middleware(new NextRequest(`${BROWSER_ORIGIN}/dashboard`, {
+      headers: {
+        cookie,
+        host: '127.0.0.1:9999',
+        'x-forwarded-proto': 'http',
+      },
+    }))
+    assert.equal(response.status, 307)
+    assert.equal(response.headers.get('location'), `${BROWSER_ORIGIN}/admin`)
   })
 
   it('non-admin /admin passes through middleware without a redirect under a dev-synthesized localhost host header', async () => {
@@ -203,49 +248,32 @@ describe('middleware admin-route denial keeps the session on-origin', () => {
     )
     assert.match(
       layout,
-      /redirect\(user\?\.role === ['"]engineering['"] \? ['"]\/engineering['"] : ['"]\/requests['"]\)/,
-      'admin layout must send Engineering-role denials to /engineering and every other non-admin to /requests',
+      /if \(!user \|\| user\.role !== ['"]admin['"]\) \{\s*(?:\/\/[^\n]*\n\s*)*redirect\(['"]\/requests['"]\)\s*\}/,
+      'admin layout must send every DB-backed non-admin denial, including a missing user, to /requests',
     )
-    assert.match(
-      layout,
-      /if \(!user \|\| user\.role !== ['"]admin['"]\) \{/,
-      'admin layout denial must stay keyed on the DB-backed role check',
-    )
+    assert.doesNotMatch(layout, /engineering/, 'admin layout must not distinguish legacy engineering roles')
   })
 
-  it('both admin layouts keep an identical role-aware denial so the duplicated guard cannot drift', () => {
-    const authoritative = readFileSync('src/app/admin/layout.tsx', 'utf8')
-    const routeGroup = readFileSync('src/app/(admin)/layout.tsx', 'utf8')
-    const denialPattern =
-      /if \(!user \|\| user\.role !== ['"]admin['"]\) \{[\s\S]*?redirect\(user\?\.role === ['"]engineering['"] \? ['"]\/engineering['"] : ['"]\/requests['"]\)\s*\}/
-    assert.match(
-      authoritative,
-      denialPattern,
-      'authoritative admin layout must carry the role-aware denial',
-    )
-    assert.match(
-      routeGroup,
-      denialPattern,
-      '(admin) route-group layout must match the authoritative denial',
-    )
+  it('removes the unused copied admin layout and its empty route-group folder', () => {
+    assert.equal(existsSync('src/app/(admin)/layout.tsx'), false)
+    assert.equal(existsSync('src/app/(admin)'), false)
   })
 
   it('denial destinations are origin-relative bare paths — no host or protocol in any admin-layout redirect', () => {
-    for (const path of ['src/app/admin/layout.tsx', 'src/app/(admin)/layout.tsx']) {
-      const layout = readFileSync(path, 'utf8')
-      const redirectCalls = layout.match(/redirect\([^)]*\)/g) ?? []
-      assert.ok(redirectCalls.length > 0, `${path} must contain redirect calls`)
-      for (const call of redirectCalls) {
-        assert.doesNotMatch(
-          call,
-          /https?:\/\//,
-          `${path} redirect must stay origin-relative, got ${call}`,
-        )
-        assert.ok(
-          /^redirect\((['"`])\//.test(call) || /^redirect\(user\?\.role/.test(call),
-          `${path} redirect must resolve to a root-relative path, got ${call}`,
-        )
-      }
+    const path = 'src/app/admin/layout.tsx'
+    const layout = readFileSync(path, 'utf8')
+    const redirectCalls = layout.match(/redirect\([^)]*\)/g) ?? []
+    assert.ok(redirectCalls.length > 0, `${path} must contain redirect calls`)
+    for (const call of redirectCalls) {
+      assert.doesNotMatch(
+        call,
+        /https?:\/\//,
+        `${path} redirect must stay origin-relative, got ${call}`,
+      )
+      assert.ok(
+        /^redirect\((['"`])\/(?!\/)/.test(call),
+        `${path} redirect must resolve to a root-relative path, got ${call}`,
+      )
     }
   })
 })

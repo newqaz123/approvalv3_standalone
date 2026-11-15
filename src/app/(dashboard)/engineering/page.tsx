@@ -27,7 +27,7 @@ export default async function EngineeringDashboardPage() {
 
 	// Solution-work eligibility is the unit "Can work on solutions" flag
 	// (inherited by descendants), never the user role. Ineligible users land
-	// on /requests: /dashboard may bounce engineering-role users back here.
+	// on /requests.
 	if (!(await isActorSolutionWorker(createSolutionWorkActorDb(prisma), userId))) {
 		redirect("/requests");
 	}

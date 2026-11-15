@@ -5,14 +5,15 @@ import { readFileSync } from "node:fs";
 const read = (path: string) => readFileSync(path, "utf8");
 
 describe("follow-up dashboard redirects", () => {
-	it("sends general users to My Actions after sign-in and from /", () => {
+	it("sends admins to Admin and every other role to My Actions after sign-in and from /", () => {
 		const middleware = read("src/middleware.ts");
 		const home = read("src/app/page.tsx");
 		const signIn = read("src/app/(auth)/sign-in/[[...sign-in]]/page.tsx");
 
-		assert.match(
-			middleware,
-			/case ["']engineering["']:[\s\S]*return ["']\/engineering["']/,
+		assert.deepEqual(
+			Array.from(middleware.matchAll(/case ["']([^"']+)["']:/g), ([, role]) => role),
+			["admin"],
+			"only admin has a special landing; legacy engineering and every other role use the My Actions default",
 		);
 		assert.match(
 			middleware,
