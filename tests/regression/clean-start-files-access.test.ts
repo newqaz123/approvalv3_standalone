@@ -8,6 +8,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import type { Prisma } from '@prisma/client'
 import { sharingScopeUnitIds } from '@/lib/organization/sharing'
+import { canWorkOnSolutions } from '@/lib/solution-eligibility'
 import type { OrganizationUnitNode } from '@/lib/organization/model'
 import {
   canViewRequestByPredicate,
@@ -26,6 +27,7 @@ const specUnits = [
   u('section-a', 'operations', { shareRequests: true }),
   u('section-a-child', 'section-a'),
   u('section-b', 'operations', { shareRequests: true }),
+  u('solutions', 'company', { shareRequests: true, canWorkOnSolutions: true }),
 ]
 
 type VisibilityApproval = {
@@ -38,6 +40,7 @@ type VisibilityApproval = {
 
 type VisibilityRequest = {
   id: string
+  status: string
   isDeleted: boolean
   isArchived: boolean
   requesterId: string
@@ -90,6 +93,7 @@ function actor(
     assignmentUnitId,
     sharingScopeUnitIds: sharing,
     managedUnitIds: [],
+    canWorkOnSolutions: canWorkOnSolutions(specUnits, assignmentUnitId),
     ...over,
   }
 }
@@ -99,12 +103,13 @@ function fakeScopeDb(): RequestVisibilityDb {
     pat: actor('pat', 'operations'),
     alice: actor('alice', 'section-a'),
     bob: actor('bob', 'section-b'),
-    'eng-outsider': actor('eng-outsider', null, { role: 'engineering' }),
+    'eng-outsider': actor('eng-outsider', 'solutions'),
     admin: actor('admin', 'operations', { role: 'admin' }),
   }
   const requests: VisibilityRequest[] = [
     {
       id: 'req-a',
+      status: 'ImprovementRequest',
       isDeleted: false,
       isArchived: false,
       requesterId: 'alice',
@@ -114,6 +119,7 @@ function fakeScopeDb(): RequestVisibilityDb {
     },
     {
       id: 'req-b',
+      status: 'ImprovementRequest',
       isDeleted: false,
       isArchived: false,
       requesterId: 'bob',
@@ -134,8 +140,11 @@ function fakeScopeDb(): RequestVisibilityDb {
 }
 
 describe('attachment download follows the B8 visibility matrix', () => {
-  it('allows download exactly when the parent request is visible', async () => {
+  it('allows download exactly when the parent request is visible, not from solution-work eligibility alone', async () => {
     const db = fakeScopeDb()
+    const worker = await db.findActor('eng-outsider')
+    assert.equal(worker?.role, 'general_dept')
+    assert.equal(worker?.canWorkOnSolutions, true)
     assert.equal(await canViewRequestByPredicate(db, 'pat', 'req-a'), true)
     assert.equal(await canViewRequestByPredicate(db, 'pat', 'req-b'), true)
     assert.equal(await canViewRequestByPredicate(db, 'alice', 'req-a'), true)

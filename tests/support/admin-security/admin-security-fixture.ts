@@ -6,8 +6,8 @@
  * with real HTTP traffic against an owned app/database:
  *   1. direct unauthorized Server Action POSTs + admin API calls denied
  *      without mutation; authorized equivalents still work;
- *   2. role-aware denial destinations (Engineering ROLE vs engineering
- *      MEMBERSHIP vs everyone else);
+ *   2. uniform non-admin denial destinations, including a legacy
+ *      engineering-role row and an engineering unit member;
  *   3. same-origin/session preservation on 127.0.0.1 without login bounce;
  *   4. anonymous denial + authorized-admin page access.
  *
@@ -18,12 +18,13 @@
  *   "session issued while active, denied once inactive" admin. requireAdmin
  *   re-checks the database role/isActive on every request, so replaying
  *   guarded actions from this context must deny.
- * - user-engineering (engineering ROLE, engineering unit assignment):
- *   /admin/* denial must land on /engineering.
+ * - user-engineering (legacy engineering-role row, unflagged engineering
+ *   unit assignment): /admin/* denial must land on /requests, like any
+ *   other non-admin. Retained deliberately to cover stored legacy rows.
  * - user-general (general_dept ROLE, non-engineering unit): lands on /requests.
  * - user-eng-member-general (general_dept ROLE, ENGINEERING unit assignment):
- *   engineering MEMBERSHIP without the engineering role must still land on
- *   /requests — role, not membership, decides.
+ *   engineering MEMBERSHIP must also land on /requests — neither unit
+ *   membership nor a legacy role grants administrator access.
  * - user-target: disposable target of the authorized user controls
  *   (deactivate → activate → reset password).
  * - templates: template-anchor (seeded default, never control-touched),
@@ -176,7 +177,7 @@ export function createAdminSecurityFixture(): AdminSecurityFixture {
   const users: AdminFixtureUser[] = [
     user('user-admin', 'Primary Admin', 'admin'),
     user('user-admin-standby', 'Standby Admin', 'admin'),
-    user('user-engineering', 'Engineering Role User', 'engineering', true, {
+    user('user-engineering', 'Legacy Engineering-role Row', 'engineering', true, {
       id: 'assignment-admin-security-engineering',
       unitId: ADMIN_SECURITY_UNITS.engineering,
       positionId: staff,

@@ -5,13 +5,14 @@ import prisma from '@/lib/prisma'
 import { requireAdmin } from '@/lib/auth'
 import { revalidatePath } from 'next/cache'
 import { auth } from '@/lib/auth-config'
+import { adminChangeBlockedReason, isAdminRole, roleForAdminFlag, type UserRole } from '@/lib/user-role'
 
-export type UserRole = 'admin' | 'general_dept' | 'engineering'
+export type { UserRole } from '@/lib/user-role'
 
 export interface CreateUserInput {
   name: string
   email: string
-  role: UserRole
+  isAdmin: boolean
   password?: string
 }
 
@@ -19,7 +20,7 @@ export interface UpdateUserInput {
   id: string
   name: string
   email: string
-  role?: UserRole
+  isAdmin?: boolean
 }
 
 export type UserWithDepartment = {
@@ -146,7 +147,7 @@ export async function createUser(input: CreateUserInput) {
     throw new Error('A user with this email already exists')
   }
 
-  const finalRole: UserRole = input.role
+  const finalRole = roleForAdminFlag(input.isAdmin)
 
   const password = input.password || 'changeme'
   const passwordHash = await hash(password, 12)
@@ -178,66 +179,82 @@ export async function updateUser(input: UpdateUserInput) {
     throw new Error('Admin authentication failed')
   }
 
-  const existingUser = await prisma.user.findUnique({
-    where: { id: input.id },
-  })
-
-  if (!existingUser) {
-    throw new Error('User not found')
-  }
-
-  const finalRole: UserRole = input.role || existingUser.role
-
-  const originalName = existingUser.name
-  const originalEmail = existingUser.email
-  const originalRole = existingUser.role
-
-  // Check if email is being changed to one that already exists
-  if (input.email !== originalEmail) {
-    const emailExists = await prisma.user.findUnique({
-      where: { email: input.email },
+  const user = await prisma.$transaction(async (tx) => {
+    const existingUser = await tx.user.findUnique({
+      where: { id: input.id },
     })
-    if (emailExists) {
-      throw new Error('A user with this email already exists')
+
+    if (!existingUser) {
+      throw new Error('User not found')
     }
-  }
 
-  const changes: string[] = []
-  if (input.name !== originalName) changes.push(`name: "${originalName}" → "${input.name}"`)
-  if (input.email !== originalEmail) changes.push(`email: "${originalEmail}" → "${input.email}"`)
-  if (finalRole !== originalRole) changes.push(`role: "${originalRole}" → "${finalRole}"`)
+    const finalRole = input.isAdmin === undefined
+      ? existingUser.role
+      : roleForAdminFlag(input.isAdmin)
+    const otherActiveAdminCount = await tx.user.count({
+      where: { role: 'admin', isActive: true, id: { not: input.id } },
+    })
+    const blockedReason = adminChangeBlockedReason({
+      actorId: adminUserId,
+      targetId: input.id,
+      targetIsActiveAdmin: existingUser.isActive && isAdminRole(existingUser.role),
+      nextIsActiveAdmin: existingUser.isActive && isAdminRole(finalRole),
+      otherActiveAdminCount,
+    })
+    if (blockedReason) throw new Error(blockedReason)
 
-  const user = await prisma.user.update({
-    where: { id: input.id },
-    data: {
-      name: input.name,
-      email: input.email,
-      role: finalRole,
-      updatedAt: new Date(),
-    },
-  })
+    const originalName = existingUser.name
+    const originalEmail = existingUser.email
+    const originalRole = existingUser.role
 
-  if (changes.length > 0) {
-    await prisma.request_activities.create({
+    // Check if email is being changed to one that already exists
+    if (input.email !== originalEmail) {
+      const emailExists = await tx.user.findUnique({
+        where: { email: input.email },
+      })
+      if (emailExists) {
+        throw new Error('A user with this email already exists')
+      }
+    }
+
+    const changes: string[] = []
+    if (input.name !== originalName) changes.push(`name: "${originalName}" → "${input.name}"`)
+    if (input.email !== originalEmail) changes.push(`email: "${originalEmail}" → "${input.email}"`)
+    if (finalRole !== originalRole) changes.push(`role: "${originalRole}" → "${finalRole}"`)
+
+    const updatedUser = await tx.user.update({
+      where: { id: input.id },
       data: {
-        action: 'user_admin_changed',
-        comments: `Updated user ${input.id}: ${changes.join(', ')}`,
-        userId: adminUserId,
-        createdAt: new Date(),
+        name: input.name,
+        email: input.email,
+        role: finalRole,
+        updatedAt: new Date(),
       },
     })
-  }
+
+    if (changes.length > 0) {
+      await tx.request_activities.create({
+        data: {
+          action: 'user_admin_changed',
+          comments: `Updated user ${input.id}: ${changes.join(', ')}`,
+          userId: adminUserId,
+          createdAt: new Date(),
+        },
+      })
+    }
+
+    // Return warning if role changed
+    if (finalRole !== originalRole) {
+      return {
+        ...updatedUser,
+        _warning: 'User must re-login for role change to take effect.',
+      } as any
+    }
+
+    return updatedUser
+  }, { isolationLevel: 'Serializable' })
 
   revalidatePath('/admin/users')
-
-  // Return warning if role changed
-  if (finalRole !== originalRole) {
-    return {
-      ...user,
-      _warning: 'User must re-login for role change to take effect.',
-    } as any
-  }
-
   return user
 }
 
@@ -245,12 +262,31 @@ export async function updateUser(input: UpdateUserInput) {
  * Deactivate a user (soft delete — Prisma only)
  */
 export async function deactivateUser(userId: string) {
-  await requireAdminUser()
+  const adminUserId = await requireAdminUser()
 
-  await prisma.user.update({
-    where: { id: userId },
-    data: { isActive: false, updatedAt: new Date() },
-  })
+  await prisma.$transaction(async (tx) => {
+    const existingUser = await tx.user.findUnique({
+      where: { id: userId },
+    })
+    if (!existingUser) throw new Error('User not found')
+
+    const otherActiveAdminCount = await tx.user.count({
+      where: { role: 'admin', isActive: true, id: { not: userId } },
+    })
+    const blockedReason = adminChangeBlockedReason({
+      actorId: adminUserId,
+      targetId: userId,
+      targetIsActiveAdmin: existingUser.isActive && isAdminRole(existingUser.role),
+      nextIsActiveAdmin: false,
+      otherActiveAdminCount,
+    })
+    if (blockedReason) throw new Error(blockedReason)
+
+    await tx.user.update({
+      where: { id: userId },
+      data: { isActive: false, updatedAt: new Date() },
+    })
+  }, { isolationLevel: 'Serializable' })
 
   revalidatePath('/admin/users')
   return { success: true }

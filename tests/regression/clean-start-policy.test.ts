@@ -27,6 +27,7 @@ import {
   shouldShowActionButton,
   type ActionPermissionContext,
 } from '@/lib/action-permissions'
+import { buildRequestVisibilityWhere, createRequestVisibilityDb, type RequestVisibilityPrisma } from '@/lib/request-visibility/scope'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
@@ -81,8 +82,7 @@ describe('canSubmitSolutionWork — A5 unit flag inherited; not role, not admin'
 
   it('does not grant eligibility from the engineering ROLE or admin ROLE', () => {
     assert.equal(canSubmitSolutionWork({ isActive: true, assignmentUnitId: 'sales', units }), false)
-    assert.equal(canUserAssignEngineers('engineering'), true)
-    assert.equal(canUserAssignEngineers('admin'), false)
+    assert.equal(canUserAssignEngineers({ isActive: true, isSolutionWorker: false }), false)
   })
 })
 
@@ -235,10 +235,10 @@ describe('extracted action guards use assignment inputs, not departmentType/role
     assert.equal(allowed.allowed, true)
   })
 
-  it('ASSIGN_ENGINEERS stays on the engineering ROLE', () => {
-    assert.equal(existingAssignEngineersDecision({ userRole: 'engineering', status: 'SentToEngineer' }).allowed, true)
-    assert.equal(existingAssignEngineersDecision({ userRole: 'admin', status: 'SentToEngineer' }).allowed, false)
-    assert.equal(existingAssignEngineersDecision({ userRole: 'general_dept', status: 'SentToEngineer' }).reason, 'WRONG_ROLE')
+  it('ASSIGN_ENGINEERS follows active solution-work eligibility', () => {
+    assert.equal(existingAssignEngineersDecision({ isActive: true, isSolutionWorker: true, status: 'SentToEngineer' }).allowed, true)
+    assert.equal(existingAssignEngineersDecision({ isActive: true, isSolutionWorker: false, status: 'SentToEngineer' }).reason, 'WRONG_ROLE')
+    assert.equal(existingAssignEngineersDecision({ isActive: false, isSolutionWorker: true, status: 'SentToEngineer' }).reason, 'WRONG_ROLE')
   })
 })
 
@@ -257,7 +257,7 @@ describe('evaluateRequestAction gating is unchanged (active / visible / current-
   it('denies inactive and not-visible actors even when an existing guard allows the action', () => {
     const inactive = policyContext(
       { ASSIGN_ENGINEERS: { allowed: true, reason: 'ALLOWED' } },
-      { actor: { id: 'worker-1', role: 'engineering', isActive: false, assignmentUnitId: 'web' } },
+      { actor: { id: 'worker-1', role: 'general_dept', isActive: false, assignmentUnitId: 'web' } },
     )
     assert.equal(evaluateRequestAction('ASSIGN_ENGINEERS', inactive).reason, 'INACTIVE')
 
@@ -309,7 +309,7 @@ describe('getModalTypeForStatus still consumes capability booleans', () => {
   })
 })
 
-describe('B10 source contract — department-typed helpers gone; engineering ROLE is assignment/sub-task only', () => {
+describe('B10 source contract — department-typed and engineering-role helpers gone', () => {
   it('removes canUserApproveAtLevel and department-typed submit helpers', () => {
     const source = read('src/lib/permission-checks.ts')
     assert.match(source, /export function canSubmitSolutionWork/)
@@ -321,7 +321,8 @@ describe('B10 source contract — department-typed helpers gone; engineering ROL
     assert.doesNotMatch(source, /canInitiateFinalApprovalByOrigin/)
     assert.doesNotMatch(source, /userDepartmentType === ['"]ENGINEERING['"]/)
     assert.match(source, /export function canUserAssignEngineers/)
-    assert.match(source, /userRole === ['"]engineering['"]/)
+    assert.match(source, /input\.isActive && input\.isSolutionWorker/)
+    assert.doesNotMatch(source, /'engineering'/)
     const solutionWork = source.slice(source.indexOf('export function canSubmitSolutionWork'), source.indexOf('export function canInitiateFinalApproval'))
     assert.doesNotMatch(solutionWork, /userRole === ['"]engineering['"]/)
     const initiate = source.slice(source.indexOf('export function canInitiateFinalApproval'), source.indexOf('export function canUserAssignEngineers'))
@@ -498,5 +499,23 @@ describe('attachment write guards are assignment-based, not engineering ROLE', (
       status: 'SentToEngineer',
     })
     assert.equal(viewer.allowed, false)
+  })
+})
+
+describe('legacy non-admin roles do not alter request visibility', () => {
+  it('normalizes a legacy role to general_dept with identical where output when its unit is unflagged', async () => {
+    const client = (role: string): RequestVisibilityPrisma => ({
+      user: { async findUnique() { return { id: 'worker', role, isActive: true } } },
+      organization_assignments: { async findFirst() { return { unitId: 'sales' } } },
+      organization_units: { async findMany() { return units } },
+      requests: { async findFirst() { return null } },
+    })
+    const legacy = createRequestVisibilityDb(client('engineering'))
+    const general = createRequestVisibilityDb(client('general_dept'))
+    const actor = await legacy.findActor('worker')
+    assert.equal(actor?.role, 'general_dept')
+    assert.equal(actor?.canWorkOnSolutions, false)
+    const options = { userId: 'worker', includeArchived: false }
+    assert.deepEqual(await buildRequestVisibilityWhere(legacy, options), await buildRequestVisibilityWhere(general, options))
   })
 })

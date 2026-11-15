@@ -10,6 +10,7 @@ import { readFileSync } from 'node:fs'
 import type { Prisma } from '@prisma/client'
 import { sharingScopeUnitIds, visibleRequestOriginUnitIds } from '@/lib/organization/sharing'
 import { descendantUnitIds } from '@/lib/organization/hierarchy'
+import { canWorkOnSolutions } from '@/lib/solution-eligibility'
 import type { OrganizationUnitNode } from '@/lib/organization/model'
 import {
   buildRequestVisibilityWhere,
@@ -30,6 +31,7 @@ const specUnits = [
   u('section-a', 'operations', { shareRequests: true }),
   u('section-a-child', 'section-a'),
   u('section-b', 'operations', { shareRequests: true }),
+  u('solutions', 'company', { canWorkOnSolutions: true }),
 ]
 
 type VisibilityApproval = {
@@ -42,6 +44,7 @@ type VisibilityApproval = {
 
 type VisibilityRequest = {
   id: string
+  status: string
   isDeleted: boolean
   isArchived: boolean
   requesterId: string
@@ -116,6 +119,7 @@ function approval(over: Partial<VisibilityApproval> = {}): VisibilityApproval {
 
 function request(over: Partial<VisibilityRequest> & Pick<VisibilityRequest, 'id'>): VisibilityRequest {
   return {
+    status: 'ImprovementRequest',
     isDeleted: false,
     isArchived: false,
     requesterId: 'other',
@@ -151,8 +155,9 @@ function fakeScopeDb(): RequestVisibilityDb {
     }),
     'eng-outsider': actor({
       id: 'eng-outsider',
-      role: 'engineering',
-      assignmentUnitId: null,
+      assignmentUnitId: 'solutions',
+      sharingScopeUnitIds: visibleRequestOriginUnitIds(specUnits, 'solutions'),
+      canWorkOnSolutions: canWorkOnSolutions(specUnits, 'solutions'),
     }),
     admin: actor({ id: 'admin', role: 'admin' }),
     'inactive-admin': actor({ id: 'inactive-admin', role: 'admin', isActive: false }),
@@ -260,9 +265,12 @@ describe('unit manager descendant visibility outside sharing scope', () => {
   })
 })
 
-describe('engineering role is not blanket visibility', () => {
-  it('without overlap sees nothing beyond relationships', async () => {
+describe('solution-work eligibility is not blanket visibility', () => {
+  it('a general user in a flagged unit without overlap sees only relationships outside solution-work statuses', async () => {
     const db = fakeScopeDb()
+    const worker = await db.findActor('eng-outsider')
+    assert.equal(worker?.role, 'general_dept')
+    assert.equal(worker?.canWorkOnSolutions, true)
     assert.equal(await canViewRequestByPredicate(db, 'eng-outsider', 'req-a'), false)
     assert.equal(await canViewRequestByPredicate(db, 'eng-outsider', 'req-b'), false)
     assert.equal(await canViewRequestByPredicate(db, 'eng-outsider', 'req-a-child'), false)
@@ -274,7 +282,7 @@ describe('engineering role is not blanket visibility', () => {
     assert.equal(await canViewRequestByPredicate(db, 'eng-outsider', 'req-eng-superseded'), false)
   })
 
-  it('admin sees non-deleted requests; engineering where is not the admin base', async () => {
+  it('admin sees non-deleted requests; solution-worker where is not the admin base', async () => {
     const db = fakeScopeDb()
     const adminWhere = await buildRequestVisibilityWhere(db, { userId: 'admin', includeArchived: true })
     const engWhere = await buildRequestVisibilityWhere(db, { userId: 'eng-outsider', includeArchived: true })

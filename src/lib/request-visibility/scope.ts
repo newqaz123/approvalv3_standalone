@@ -11,7 +11,7 @@ import { visibleRequestOriginUnitIds } from '@/lib/organization/sharing'
 
 export interface RequestVisibilityActor {
   id: string
-  role: 'admin' | 'general_dept' | 'engineering'
+  role: 'admin' | 'general_dept'
   isActive: boolean
   assignmentUnitId: string | null
   sharingScopeUnitIds: readonly string[]
@@ -111,7 +111,7 @@ export type RequestVisibilityPrisma = {
 }
 
 function asActorRole(role: string): RequestVisibilityActor['role'] {
-  if (role === 'admin' || role === 'engineering') return role
+  if (role === 'admin') return role
   return 'general_dept'
 }
 

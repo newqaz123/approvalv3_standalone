@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Check, Users, Loader2 } from "lucide-react";
+import { Check, Users, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
 	Popover,
@@ -29,24 +29,32 @@ interface EngineerUser {
 interface EngineerPicPickerProps {
 	requestId: string;
 	engineeringUsers: EngineerUser[];
-	initialAssignedIds: string[];
+	initialAssignedUsers: Array<{ id: string; name: string }>;
 	currentUserId: string;
 }
 
 export function EngineerPicPicker({
 	requestId,
 	engineeringUsers,
-	initialAssignedIds,
+	initialAssignedUsers,
 	currentUserId,
 }: EngineerPicPickerProps) {
 	const [open, setOpen] = useState(false);
 	const [searchValue, setSearchValue] = useState("");
-	const [selectedIds, setSelectedIds] = useState<string[]>(initialAssignedIds);
+	const [selectedIds, setSelectedIds] = useState<string[]>(
+		initialAssignedUsers.map((user) => user.id),
+	);
 	const [isPending, startTransition] = useTransition();
 
 	const selectedUsers = selectedIds
-		.map((id) => engineeringUsers.find((user) => user.id === id))
-		.filter((user): user is EngineerUser => user !== undefined);
+		.map((id) =>
+			engineeringUsers.find((user) => user.id === id) ??
+			initialAssignedUsers.find((user) => user.id === id),
+		)
+		.filter((user): user is { id: string; name: string } => user !== undefined);
+	const retainedUsers = selectedUsers.filter(
+		(user) => !engineeringUsers.some((candidate) => candidate.id === user.id),
+	);
 
 	const handleToggleUser = (userId: string) => {
 		setSelectedIds((prev) =>
@@ -125,6 +133,26 @@ export function EngineerPicPicker({
 				</Button>
 			</PopoverTrigger>
 			<PopoverContent className="w-[320px] p-0" align="start" side="bottom">
+				{retainedUsers.length > 0 && (
+					<div className="border-b p-3 space-y-2">
+						<p className="text-xs text-muted-foreground">Existing PICs (remove only)</p>
+						{retainedUsers.map((user) => (
+							<div key={user.id} className="flex items-center justify-between gap-2">
+								<span className="text-sm">{user.name}</span>
+								<Button
+									type="button"
+									variant="ghost"
+									size="sm"
+									aria-label={`Remove ${user.name}`}
+									onClick={() => handleToggleUser(user.id)}
+									disabled={isPending}
+								>
+									<X className="h-4 w-4" />
+								</Button>
+							</div>
+						))}
+					</div>
+				)}
 				<Command>
 					<CommandInput
 						placeholder="Search engineers..."

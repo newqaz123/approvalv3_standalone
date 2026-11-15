@@ -8,25 +8,20 @@ import { Button } from '@/components/ui/button'
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import { Checkbox } from '@/components/ui/checkbox'
 import { createUser, updateUser } from '@/server-actions/users'
 
 const userFormSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters'),
   email: z.string().email('Invalid email address'),
-  role: z.enum(['admin', 'general_dept', 'engineering'] as const).optional(),
+  isAdmin: z.boolean(),
   password: z.union([z.string().min(8, 'Password must be at least 8 characters'), z.literal('')]).optional(),
 })
 
@@ -47,10 +42,11 @@ export function UserForm({ initialData, onSuccess, onCancel }: UserFormProps) {
     defaultValues: initialData || {
       name: '',
       email: '',
-      role: 'general_dept',
+      isAdmin: false,
       password: '',
     },
   })
+  const { dirtyFields } = form.formState
 
   async function onSubmit(data: UserFormValues) {
     setIsSubmitting(true)
@@ -60,17 +56,18 @@ export function UserForm({ initialData, onSuccess, onCancel }: UserFormProps) {
       const submitData = {
         name: data.name,
         email: data.email,
-        role: data.role || 'general_dept',
       }
 
       if (initialData?.id) {
         await updateUser({
           ...submitData,
           id: initialData.id,
+          ...(dirtyFields.isAdmin ? { isAdmin: data.isAdmin } : {}),
         })
       } else {
         await createUser({
           ...submitData,
+          isAdmin: data.isAdmin,
           password: data.password || undefined,
         })
       }
@@ -121,23 +118,23 @@ export function UserForm({ initialData, onSuccess, onCancel }: UserFormProps) {
 
         <FormField
           control={form.control}
-          name="role"
+          name="isAdmin"
           render={({ field }) => (
-            <FormItem>
-              <FormLabel>Role</FormLabel>
-              <Select onValueChange={field.onChange} defaultValue={field.value}>
-                <FormControl>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select role" />
-                  </SelectTrigger>
-                </FormControl>
-                <SelectContent>
-                  <SelectItem value="admin">Admin</SelectItem>
-                  <SelectItem value="general_dept">General Department User</SelectItem>
-                  <SelectItem value="engineering">Engineering User</SelectItem>
-                </SelectContent>
-              </Select>
-              <FormMessage />
+            <FormItem className="flex flex-row items-start space-x-3 space-y-0">
+              <FormControl>
+                <Checkbox
+                  name={field.name}
+                  ref={field.ref}
+                  onBlur={field.onBlur}
+                  checked={field.value}
+                  onCheckedChange={(checked) => field.onChange(checked === true)}
+                />
+              </FormControl>
+              <div className="space-y-1 leading-none">
+                <FormLabel>Administrator</FormLabel>
+                <FormDescription>Can open the Admin area.</FormDescription>
+                <FormMessage />
+              </div>
             </FormItem>
           )}
         />

@@ -68,11 +68,8 @@ export default auth((req) => {
 			return redirectToSignIn();
 		}
 
-		// Role-based redirects from /dashboard
+		// Redirect admins from /dashboard
 		if (pathname === "/dashboard") {
-			if (user.role === "engineering") {
-				return redirectTo("/engineering");
-			}
 			if (user.role === "admin") {
 				return redirectTo("/admin");
 			}
@@ -97,8 +94,6 @@ export default auth((req) => {
 
 function getRoleDashboard(role: string): string {
 	switch (role) {
-		case "engineering":
-			return "/engineering";
 		case "admin":
 			return "/admin";
 		default:

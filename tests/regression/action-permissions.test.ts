@@ -8,6 +8,7 @@ import {
   existingCancelRequestDecision,
   existingDeleteAttachmentDecision,
   existingInitiateFinalApprovalDecision,
+  existingManageSubTasksDecision,
   existingResubmitFinalApprovalDecision,
   existingResubmitRequestDecision,
   existingResubmitSolutionDecision,
@@ -36,7 +37,7 @@ function engineeringViewerContext(
   return {
     actor: {
       id: 'engineering-1',
-      role: 'engineering',
+      role: 'general_dept',
       isActive: true,
       assignmentUnitId: 'web',
     },
@@ -53,9 +54,9 @@ function engineeringViewerContext(
 }
 
 describe('action permissions are independent from visibility', () => {
-  it('does not grant operations merely because Engineering/Admin can read', () => {
+  it('does not grant operations merely because a solution worker can read', () => {
     const context = {
-      actor: { id: 'engineering-1', role: 'engineering', isActive: true, assignmentUnitId: 'web' },
+      actor: { id: 'engineering-1', role: 'general_dept', isActive: true, assignmentUnitId: 'web' },
       request: { requesterId: 'requester-1', organizationUnitId: 'sales', status: 'SentToEngineer' },
       canView: true,
       approval: { canApprove: false },
@@ -105,24 +106,26 @@ describe('action permissions are independent from visibility', () => {
 })
 
 describe('extracted existing action guards feed existingActionDecisions', () => {
-  it('ASSIGN_ENGINEERS exercises the extracted existing engineering guard', () => {
-    assert.equal(canUserAssignEngineers('engineering'), true)
-    assert.equal(canUserAssignEngineers('admin'), false)
-    assert.equal(canUserAssignEngineers('general_dept'), false)
+  it('ASSIGN_ENGINEERS requires an active solution worker', () => {
+    assert.equal(canUserAssignEngineers({ isActive: true, isSolutionWorker: true }), true)
+    assert.equal(canUserAssignEngineers({ isActive: true, isSolutionWorker: false }), false)
+    assert.equal(canUserAssignEngineers({ isActive: false, isSolutionWorker: true }), false)
 
     const assign = existingAssignEngineersDecision({
-      userRole: 'engineering',
+      isActive: true,
+      isSolutionWorker: true,
       status: 'SentToEngineer',
     })
     assert.equal(assign.allowed, true)
     assert.equal(assign.reason, 'ALLOWED')
 
-    const deniedAdmin = existingAssignEngineersDecision({
-      userRole: 'admin',
+    const deniedNonWorker = existingAssignEngineersDecision({
+      isActive: true,
+      isSolutionWorker: false,
       status: 'SentToEngineer',
     })
-    assert.equal(deniedAdmin.allowed, false)
-    assert.equal(deniedAdmin.reason, 'WRONG_ROLE')
+    assert.equal(deniedNonWorker.allowed, false)
+    assert.equal(deniedNonWorker.reason, 'WRONG_ROLE')
 
     const context = engineeringViewerContext({
       ASSIGN_ENGINEERS: assign,
@@ -132,6 +135,32 @@ describe('extracted existing action guards feed existingActionDecisions', () => 
     assert.equal(evaluateRequestAction('ASSIGN_ENGINEERS', context).allowed, true)
     assert.equal(evaluateRequestAction('RESUBMIT_REQUEST', context).allowed, false)
     assert.equal(evaluateRequestAction('APPROVE_REQUEST', context).allowed, false)
+  })
+
+  it('assign and sub-task decisions preserve eligibility and status denials, including a legacy engineering-role row', () => {
+    for (const isSolutionWorker of [true, false]) {
+      for (const status of ['SentToEngineer', 'ImprovementRequest']) {
+        const expected = !isSolutionWorker
+          ? { allowed: false, reason: 'WRONG_ROLE' }
+          : status === 'SentToEngineer'
+            ? { allowed: true, reason: 'ALLOWED' }
+            : { allowed: false, reason: 'WRONG_STATUS' }
+        assert.deepEqual(existingAssignEngineersDecision({ isActive: true, isSolutionWorker, status }), expected)
+        assert.deepEqual(existingManageSubTasksDecision({ userRole: 'general_dept', isActive: true, isSolutionWorker, status }), expected)
+      }
+    }
+    assert.deepEqual(existingAssignEngineersDecision({ isActive: false, isSolutionWorker: true, status: 'SentToEngineer' }), {
+      allowed: false, reason: 'WRONG_ROLE',
+    })
+    assert.deepEqual(existingManageSubTasksDecision({ userRole: 'engineering', isSolutionWorker: false, status: 'SentToEngineer' }), {
+      allowed: false, reason: 'WRONG_ROLE',
+    })
+    assert.deepEqual(existingManageSubTasksDecision({ userRole: 'admin', isSolutionWorker: false, status: 'SentToEngineer' }), {
+      allowed: true, reason: 'ALLOWED',
+    })
+    assert.deepEqual(existingManageSubTasksDecision({ userRole: 'admin', isActive: false, isSolutionWorker: true, status: 'SentToEngineer' }), {
+      allowed: false, reason: 'WRONG_ROLE',
+    })
   })
 
   it('denies a parent-unit manager initiating final approval for a descendant origin (origin unit only)', () => {
@@ -351,7 +380,7 @@ describe('evaluateRequestAction composes active/read/current-step checks', () =>
       }),
       actor: {
         id: 'engineering-1',
-        role: 'engineering',
+        role: 'general_dept',
         isActive: false,
         assignmentUnitId: 'web',
       },

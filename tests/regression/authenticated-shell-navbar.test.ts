@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 const read = (path: string) => readFileSync(path, "utf8");
 
 const dashboardLayout = "src/app/(dashboard)/layout.tsx";
-const adminLayouts = ["src/app/(admin)/layout.tsx", "src/app/admin/layout.tsx"];
+const adminLayout = "src/app/admin/layout.tsx";
 
 describe("authenticated shell and navigation", () => {
 	it("defines one 1720px shell with the approved gutters", () => {
@@ -33,7 +33,7 @@ describe("authenticated shell and navigation", () => {
 	});
 
 	it("uses the shared shell in every authenticated layout", () => {
-		for (const path of [dashboardLayout, ...adminLayouts]) {
+		for (const path of [dashboardLayout, adminLayout]) {
 			const source = read(path);
 			assert.match(source, /AUTHENTICATED_SHELL_CLASS/);
 			assert.doesNotMatch(source, /md:max-w-7xl/);
@@ -43,13 +43,13 @@ describe("authenticated shell and navigation", () => {
 	});
 
 	it("marks every authenticated main with the shared shell contract", () => {
-		for (const path of [dashboardLayout, ...adminLayouts]) {
+		for (const path of [dashboardLayout, adminLayout]) {
 			assert.match(read(path), /<main[^>]*data-auth-shell/);
 		}
 	});
 
 	it("hands navigation from mobile to desktop at lg without a gap", () => {
-		for (const path of [dashboardLayout, ...adminLayouts]) {
+		for (const path of [dashboardLayout, adminLayout]) {
 			assert.match(read(path), /hidden lg:block/);
 		}
 

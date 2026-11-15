@@ -2,6 +2,7 @@
 
 import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
+import { createSolutionWorkActorDb, isActorSolutionWorker } from '@/lib/solution-work-actor'
 import { canUserViewRequest } from '@/lib/request-visibility/scope'
 import { CURRENT_INSTANCE_ROW_FILTER } from '@/lib/approval-engine/current-instance'
 import {
@@ -123,6 +124,7 @@ export async function getRequestActionCapabilities(requestId: string): Promise<R
   const assignmentUnitId = assignment?.unitId ?? null
   const units = await loadOrganizationUnitNodes()
   const requestOriginUnitId = request.organizationUnitId ?? ''
+  const isSolutionWorker = await isActorSolutionWorker(createSolutionWorkActorDb(prisma), userId)
 
   const hasRequestRejection = request.approvals.some(
     (approval) => approval.status === 'rejected' && !approval.isFinalApproval,
@@ -246,12 +248,14 @@ export async function getRequestActionCapabilities(requestId: string): Promise<R
       hasPendingSolutionApprovals: pendingSolutionApprovals > 0,
     }),
     ASSIGN_ENGINEERS: existingAssignEngineersDecision({
-      userRole: user.role,
+      isActive: user.isActive,
+      isSolutionWorker,
       status: request.status,
     }),
     MANAGE_SUB_TASKS: existingManageSubTasksDecision({
       userRole: user.role,
       isActive: user.isActive,
+      isSolutionWorker,
       status: request.status,
     }),
     EXPORT_PDF: existingExportPdfDecision({ status: request.status }),

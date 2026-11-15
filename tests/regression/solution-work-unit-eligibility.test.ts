@@ -56,9 +56,9 @@ describe('isActorSolutionWorker (unit-flag eligibility)', () => {
     flaggedGeneral: { isActive: true, role: 'general_dept', unitIds: ['engineering'] },
     descendant: { isActive: true, role: 'general_dept', unitIds: ['eng-team'] },
     roleOnly: { isActive: true, role: 'engineering', unitIds: ['ops'] },
-    inactive: { isActive: false, role: 'engineering', unitIds: ['engineering'] },
-    retired: { isActive: true, role: 'engineering', unitIds: ['retired-eng'] },
-    unassigned: { isActive: true, role: 'engineering', unitIds: [] },
+    inactive: { isActive: false, role: 'general_dept', unitIds: ['engineering'] },
+    retired: { isActive: true, role: 'general_dept', unitIds: ['retired-eng'] },
+    unassigned: { isActive: true, role: 'general_dept', unitIds: [] },
   })
 
   it('grants a non-engineering-role user assigned to a flagged unit', async () => {
@@ -67,7 +67,7 @@ describe('isActorSolutionWorker (unit-flag eligibility)', () => {
   it('grants a user in a descendant of a flagged unit', async () => {
     assert.equal(await isActorSolutionWorker(db, 'descendant'), true)
   })
-  it('denies an engineering-ROLE user whose unit is not flagged', async () => {
+  it('denies a legacy engineering-role row whose unit is not flagged', async () => {
     assert.equal(await isActorSolutionWorker(db, 'roleOnly'), false)
   })
   it('denies inactive users, inactive flagged units, unassigned and unknown users', async () => {
@@ -112,5 +112,28 @@ describe('solution-work surfaces are unit-flag gated, not role gated', () => {
       assert.match(source, /\/api\/user\/department/, path)
       assert.match(source, /canWorkOnSolutions/, path)
     }
+  })
+})
+
+describe('engineer assignment and request capabilities resolve solution-work eligibility', () => {
+  it('assignEngineers resolves eligibility once and passes it to its decision', () => {
+    const body = bodyOf('src/server-actions/requests.ts', 'export async function assignEngineers')
+    assert.equal((body.match(/await isActorSolutionWorker\(/g) ?? []).length, 1)
+    assert.match(body, /if \(!user \|\| !isSolutionWorker\)/)
+    assert.match(body, /existingAssignEngineersDecision\(\{\s*isActive: user\.isActive,\s*isSolutionWorker,/)
+  })
+
+  it('getRequestsForEngineering keeps its existing error text and uses unit eligibility', () => {
+    const body = bodyOf('src/server-actions/requests.ts', 'export async function getRequestsForEngineering')
+    assert.match(body, /isActorSolutionWorker\(createSolutionWorkActorDb\(prisma\), user\.id\)/)
+    assert.doesNotMatch(body, /role\s*!==\s*'engineering'/)
+    assert.match(body, /Only engineering users can access engineering requests/)
+  })
+
+  it('capabilities resolve eligibility once and pass it to both engineering decisions', () => {
+    const source = read('src/server-actions/request-action-capabilities.ts')
+    assert.equal((source.match(/await isActorSolutionWorker\(/g) ?? []).length, 1)
+    assert.match(source, /existingAssignEngineersDecision\(\{\s*isActive: user\.isActive,\s*isSolutionWorker,/)
+    assert.match(source, /existingManageSubTasksDecision\(\{\s*userRole: user\.role,\s*isActive: user\.isActive,\s*isSolutionWorker,/)
   })
 })

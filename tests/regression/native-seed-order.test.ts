@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { canSubmitSolutionWork } from '@/lib/permission-checks'
 import {
   buildBusinessSeedPlan,
   type BusinessSeedStep,
@@ -218,15 +219,35 @@ describe('native seed plan: confirmed business mapping preserved', () => {
       assert.ok(user, `user row for ${actor.id} must exist`)
       assert.equal(user.email, `${actor.id}@business.test`)
       assert.equal(user.isActive, actor.isActive)
+      assert.equal(user.role, actor.role === 'ADMIN' ? 'admin' : 'general_dept')
       assert.equal(user.forcePasswordChange, false)
       assert.equal(user.passwordHash, 'synthetic-hash-not-a-real-credential')
     }
     assert.equal(byId.get('user-admin')?.role, 'admin')
-    assert.equal(byId.get('user-engineer-a')?.role, 'engineering')
-    assert.equal(byId.get('user-supervisor-e')?.role, 'engineering')
-    assert.equal(byId.get('user-section-manager-e')?.role, 'engineering')
+    assert.equal(byId.get('user-engineer-a')?.role, 'general_dept')
+    assert.equal(byId.get('user-supervisor-e')?.role, 'general_dept')
+    assert.equal(byId.get('user-section-manager-e')?.role, 'general_dept')
     assert.equal(byId.get('user-requester-a')?.role, 'general_dept')
     assert.equal(byId.get('user-inactive')?.isActive, false)
+  })
+
+  it('engineering personas are general users eligible through active solution-work unit assignments', () => {
+    const units = plan.steps
+      .filter((step) => step.table === 'organization_units')
+      .map((step) => step.data)
+    for (const userId of ['user-engineer-a', 'user-supervisor-e', 'user-section-manager-e']) {
+      const user = plan.steps.find((step) => step.table === 'users' && step.data.id === userId)
+      const assignment = plan.steps.find((step) => step.table === 'organization_assignments' && step.data.userId === userId)
+      assert.ok(user?.table === 'users')
+      assert.ok(assignment?.table === 'organization_assignments')
+      assert.equal(user.data.role, 'general_dept')
+      assert.equal(assignment.data.isActive, true)
+      assert.equal(canSubmitSolutionWork({
+        isActive: user.data.isActive,
+        assignmentUnitId: assignment.data.unitId,
+        units,
+      }), true, `${userId} must remain a solution worker without a legacy role`)
+    }
   })
 
   it('assignments preserve fixture rows exactly (id/user/unit/position/active), with deactivatedAt for inactive ones', () => {

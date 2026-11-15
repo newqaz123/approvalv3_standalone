@@ -111,10 +111,11 @@ export function shouldShowActionButton(_action: RequestAction, decision: ActionD
 }
 
 export function existingAssignEngineersDecision(input: {
-  userRole: string | null | undefined
+  isActive: boolean
+  isSolutionWorker: boolean
   status: string
 }): ActionDecision {
-  if (!canUserAssignEngineers(input.userRole)) {
+  if (!canUserAssignEngineers(input)) {
     return { allowed: false, reason: 'WRONG_ROLE' }
   }
   if (input.status !== 'SentToEngineer') {
@@ -246,9 +247,10 @@ export function existingDeleteAttachmentDecision(input: {
 export function existingManageSubTasksDecision(input: {
   userRole: string | null | undefined
   isActive?: boolean | null
+  isSolutionWorker: boolean
   status: string
 }): ActionDecision {
-  if (!canManageEngineeringSubTasks({ role: input.userRole, isActive: input.isActive })) {
+  if (!canManageEngineeringSubTasks({ role: input.userRole, isActive: input.isActive, isSolutionWorker: input.isSolutionWorker })) {
     return { allowed: false, reason: 'WRONG_ROLE' }
   }
   if (!isSubTaskVisibleForRequestStatus(input.status)) {

@@ -27,10 +27,7 @@ import {
 	initiateFinalApproval,
 } from "@/server-actions/solutions";
 import { transformRequestToModalData } from "@/lib/modal-data-adapters";
-import {
-	canManageEngineeringSubTasks,
-	isSubTaskVisibleForRequestStatus,
-} from "@/lib/engineering-sub-tasks";
+import { isSubTaskVisibleForRequestStatus } from "@/lib/engineering-sub-tasks";
 import {
 	getModalTypeForStatus,
 } from "@/lib/permission-checks";
@@ -313,8 +310,7 @@ function RequestModalRouterContent({
 		}).canCancel;
 	const allowActions = !viewOnly;
 
-	const canManageSubTasks =
-		canAct("MANAGE_SUB_TASKS") && canManageEngineeringSubTasks(user);
+	const canManageSubTasks = canAct("MANAGE_SUB_TASKS");
 	const subTasksElement =
 		isSubTaskVisibleForRequestStatus(requestData.status) && subTaskOptions ? (
 			<SubTasksSection

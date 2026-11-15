@@ -39,9 +39,8 @@ import { ADMIN_RETENTION_API_EXPECTATIONS } from '../support/admin-security/admi
  *
  *  A1 direct unauthorized Server Action POSTs + admin API calls are denied
  *     without mutation; authorized equivalents still work.
- *  A2 role-aware denial destinations: engineering ROLE → /engineering;
- *     engineering MEMBERSHIP without the role → /requests; other non-admins
- *     → /requests.
+ *  A2 uniform non-admin denial destination: legacy engineering-role row,
+ *     engineering unit member, and other non-admins → /requests.
  *  A3 same-origin/session preservation on 127.0.0.1 without a login bounce.
  *  A4 anonymous denial + authorized-admin page access.
  *
@@ -68,7 +67,7 @@ import { ADMIN_RETENTION_API_EXPECTATIONS } from '../support/admin-security/admi
  * Denial replay contract (Astra admin-harness review, findings 4 and 5):
  *  - ALL TEN registered actions are replayed anonymously (middleware
  *    redirect, no leak) and by EVERY authenticated unauthorized persona
- *    (three ordinary roles + the inactive admin).
+ *    (three non-admin personas, including a legacy row, + the inactive admin).
  *  - Every authenticated denial must carry the EXPECTED authorization-error
  *    signature — HTTP 500 flight response whose dev body contains the module
  *    guard message — not merely any >= 400 status. A mutation followed by an
@@ -406,19 +405,19 @@ test.afterAll(async ({}, testInfo) => {
 })
 
 // ---------------------------------------------------------------------------
-// A2/A3 role-aware denial destinations with same-origin/session preservation
+// A2/A3 non-admin denial destinations with same-origin/session preservation
 // (no action ids needed — pure page-level behavior)
 // ---------------------------------------------------------------------------
 
-test('engineering ROLE user: /admin denial lands on /engineering on the same origin, session preserved', async ({ browser }) => {
+test('legacy engineering-role row: /admin denial lands on /requests on the same origin, session preserved', async ({ browser }) => {
   await withPersonaContext(browser, EMAILS['user-engineering'], async (_context, page) => {
     await page.goto('/admin/users')
-    await expect(page).toHaveURL(new RegExp(`^${originPattern}/engineering`))
+    await expect(page).toHaveURL(new RegExp(`^${originPattern}/requests(?:\\?|$)`))
     await expectStillSignedIn(page)
   })
 })
 
-test('engineering MEMBERSHIP without engineering role still lands on /requests', async ({ browser }) => {
+test('engineering unit member without administrator access lands on /requests', async ({ browser }) => {
   await withPersonaContext(browser, EMAILS['user-eng-member-general'], async (_context, page) => {
     await page.goto('/admin/users')
     await expect(page).toHaveURL(new RegExp(`^${originPattern}/requests`))
@@ -669,7 +668,7 @@ test('anonymous: admin pages redirect to sign-in, ALL TEN action wires redirect 
 
 const denialPersonas: Array<{ key: AdminDenialPersonaKey; label: string; email: string }> = [
   { key: 'general-dept', label: 'general_dept', email: EMAILS['user-general'] },
-  { key: 'engineering-role', label: 'engineering-role', email: EMAILS['user-engineering'] },
+  { key: 'engineering-role', label: 'legacy engineering-role row', email: EMAILS['user-engineering'] },
   { key: 'engineering-member', label: 'engineering-member-general-role', email: EMAILS['user-eng-member-general'] },
 ]
 

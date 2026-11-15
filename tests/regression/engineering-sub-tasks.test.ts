@@ -81,11 +81,13 @@ describe("engineering sub-task helpers", () => {
 		);
 	});
 
-	it("allows only engineering and admin users to manage sub-tasks", () => {
-		assert.equal(canManageEngineeringSubTasks({ role: "engineering" }), true);
+	it("allows only active solution workers and admins, not a legacy engineering-role row, to manage sub-tasks", () => {
+		assert.equal(canManageEngineeringSubTasks({ role: "engineering" }), false);
 		assert.equal(canManageEngineeringSubTasks({ role: "admin" }), true);
+		assert.equal(canManageEngineeringSubTasks({ role: "admin", isActive: false }), false);
+		assert.equal(canManageEngineeringSubTasks({ role: "general_dept", isSolutionWorker: true }), true);
 		assert.equal(
-			canManageEngineeringSubTasks({ role: "engineering", isActive: false }),
+			canManageEngineeringSubTasks({ isSolutionWorker: true, isActive: false }),
 			false,
 		);
 		assert.equal(canManageEngineeringSubTasks({ role: "general_dept" }), false);
@@ -275,7 +277,10 @@ describe("engineering sub-task server action wiring", () => {
 			"utf8",
 		);
 
-		assert.match(source, /canManageEngineeringSubTasks\(user\)/);
+		assert.match(source, /await isActorSolutionWorker\(createSolutionWorkActorDb\(prisma\), user\.id\)/);
+		assert.match(source, /canManageEngineeringSubTasks\(\{ \.\.\.user, isSolutionWorker \}\)/);
+		assert.match(source, /isSolutionWorker: user\.isSolutionWorker/);
+		assert.doesNotMatch(source, /canManageEngineeringSubTasks\(user\)/);
 		assert.match(
 			source,
 			/select:\s*\{\s*id:\s*true,\s*status:\s*true,\s*isDeleted:\s*true\s*\}/,
@@ -520,7 +525,8 @@ describe("engineering sub-task request modal panel wiring", () => {
 
 		assert.match(source, /SubTasksSection/);
 		assert.match(source, /getEngineeringSubTaskOptions/);
-		assert.match(source, /canManageEngineeringSubTasks/);
+		assert.doesNotMatch(source, /canManageEngineeringSubTasks/);
+		assert.match(source, /const canManageSubTasks =\s*canAct\("MANAGE_SUB_TASKS"\)/);
 		assert.match(source, /isSubTaskVisibleForRequestStatus/);
 		assert.match(source, /setSubTaskOptions/);
 		assert.match(source, /subTasksElement/);
@@ -767,7 +773,7 @@ describe("engineering stale sub-task filters", () => {
 		assert.match(tabs, /EngineerPicPicker/);
 		assert.match(tabs, /currentUserId/);
 		assert.match(tabs, /requestId=\{request\.id\}/);
-		assert.match(tabs, /initialAssignedIds=\{request\.assignedEngineers\.map/);
+		assert.match(tabs, /initialAssignedUsers=\{request\.assignedEngineers\}/);
 		assert.doesNotMatch(tabs, /PIC: \{request\.assignedEngineers/);
 		assert.match(tabs, /request\.status === ["']SentToEngineer["']/);
 		assert.match(tabs, /Submit solution/);
