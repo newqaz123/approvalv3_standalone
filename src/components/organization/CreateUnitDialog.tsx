@@ -14,13 +14,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import { UnitTreeSelect } from '@/components/organization/UnitTreeSelect'
 import type { OrganizationUnitNode } from '@/lib/organization/model'
 import { createOrganizationUnit } from '@/server-actions/organization'
 
@@ -56,7 +50,6 @@ export function CreateUnitDialogView({
   onSave?: () => void
   onCancel?: () => void
 }): React.JSX.Element {
-  const options = createUnitParentOptions(units)
   const ready = name.trim().length > 0 && parentId.length > 0
   return (
     <div data-testid="create-unit-dialog" className="space-y-4">
@@ -71,16 +64,15 @@ export function CreateUnitDialogView({
       </div>
       <div className="space-y-2">
         <Label htmlFor="create-unit-parent-select">Parent unit</Label>
-        <Select value={parentId || undefined} onValueChange={onParentChange}>
-          <SelectTrigger id="create-unit-parent-select" data-testid="create-unit-parent-select" className="w-64">
-            <SelectValue placeholder="Select parent unit" />
-          </SelectTrigger>
-          <SelectContent>
-            {options.map((option) => (
-              <SelectItem key={option.id} value={option.id}>{option.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <UnitTreeSelect
+          units={units}
+          value={parentId || null}
+          onChange={(unitId) => onParentChange?.(unitId)}
+          triggerId="create-unit-parent-select"
+          triggerTestId="create-unit-parent-select"
+          searchTestId="create-unit-parent-search"
+          placeholder="Select parent unit"
+        />
       </div>
       {error ? (
         <p role="alert" data-testid="create-unit-error" className="text-sm text-destructive">

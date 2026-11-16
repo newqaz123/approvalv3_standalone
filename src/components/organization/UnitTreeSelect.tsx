@@ -35,12 +35,16 @@ export function UnitTreeSelect({
   value,
   onChange,
   triggerId,
+  triggerTestId = 'assignment-unit-select',
+  searchTestId = 'assignment-unit-search',
   placeholder = 'Select unit',
 }: {
   units: ReadonlyArray<OrganizationUnitNode>
   value: string | null
   onChange: (unitId: string) => void
   triggerId?: string
+  triggerTestId?: string
+  searchTestId?: string
   placeholder?: string
 }) {
   const [open, setOpen] = useState(false)
@@ -59,7 +63,7 @@ export function UnitTreeSelect({
           role="combobox"
           aria-expanded={open}
           id={triggerId}
-          data-testid="assignment-unit-select"
+          data-testid={triggerTestId}
           className="h-9 min-h-11 w-full justify-between px-3 py-2 text-left font-normal"
         >
           <span className="min-w-0 truncate">
@@ -71,7 +75,7 @@ export function UnitTreeSelect({
       <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
         <Command shouldFilter={false}>
           <CommandInput
-            data-testid="assignment-unit-search"
+            data-testid={searchTestId}
             placeholder="Search units…"
             value={search}
             onValueChange={setSearch}

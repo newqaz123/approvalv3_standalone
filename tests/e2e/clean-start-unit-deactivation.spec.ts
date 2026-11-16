@@ -112,7 +112,7 @@ test.describe("clean-start unit deactivation", () => {
 			await page.getByTestId("create-unit-name-input").fill(UNIT_NAME);
 			await page.getByTestId("create-unit-parent-select").click();
 			const parentOption = page.getByRole("option").first();
-			const parentName = (await parentOption.textContent())?.trim() ?? "";
+			const parentName = (await parentOption.getAttribute("aria-label"))?.trim() ?? "";
 			expect(parentName.length).toBeGreaterThan(0);
 			await parentOption.click();
 			await page.getByTestId("create-unit-save").click();
