@@ -58,7 +58,8 @@ before(async () => {
             export async function renameTeam() {}
             export async function createOrganizationUnit(input) {
               window.__created = [...(window.__created || []), input]
-              await new Promise((resolve) => setTimeout(resolve, 150))
+              await new Promise((resolve) => setTimeout(resolve, input.name === 'Slow' ? 1000 : 150))
+              if (input.name === 'Slow') throw new Error('Late failure')
               if (input.name === 'Dup') throw new Error('Name must be unique among sibling units')
               return { id: 'created' }
             }
@@ -218,8 +219,6 @@ describe('organization tree + Add unit (browser)', () => {
       const form = page.getByTestId('add-child-unit-form')
       await input.fill('Dup')
       await input.press('Enter')
-      // Escape during the save must not dismiss the popover and lose the error.
-      await page.keyboard.press('Escape')
       await expect(page.getByTestId('add-child-unit-error')).toHaveText('Name must be unique among sibling units')
       await expect(page.getByTestId('add-child-unit-error')).toHaveAttribute('role', 'alert')
       await expect(input).toHaveValue('Dup')
@@ -235,6 +234,76 @@ describe('organization tree + Add unit (browser)', () => {
 
       await page.getByTestId('add-child-unit-cancel').click()
       await expect(form).toBeHidden()
+      await expect(page.getByTestId('opens')).toHaveText('0')
+    })
+  })
+
+  it('Escape dismisses the popover while a save is still running, and its late error never reaches the next popover', async () => {
+    await withTree(async (page) => {
+      const form = page.getByTestId('add-child-unit-form')
+      const save = page.getByTestId('add-child-unit-save')
+      const input = await openFromHover(page, 'qc')
+      await input.fill('Slow')
+      await input.press('Enter')
+      await expect(save).toBeDisabled()
+      await page.keyboard.press('Escape')
+      await expect(form).toBeHidden({ timeout: 600 })
+
+      // The abandoned request neither blocks nor pollutes a new attempt.
+      const reopened = await openFromHover(page, 'qc')
+      await expect(reopened).toHaveValue('')
+      await reopened.fill('Line 5')
+      await expect(save).toBeEnabled()
+      await page.waitForTimeout(1300)
+      await expect(page.getByTestId('add-child-unit-error')).toHaveCount(0)
+      await expect(reopened).toHaveValue('Line 5')
+      await expect(save).toBeEnabled()
+      await reopened.press('Enter')
+      await expect(form).toBeHidden()
+      assert.deepEqual(await created(page), [{ name: 'Slow', parentId: 'qc' }, { name: 'Line 5', parentId: 'qc' }])
+    })
+  })
+
+  it('returns keyboard focus to the + Add unit button when the popover closes', async () => {
+    await withTree(async (page) => {
+      const addQc = page.getByTestId('unit-add-child-qc')
+      const form = page.getByTestId('add-child-unit-form')
+      const input = page.getByTestId('add-child-unit-name-input')
+      await page.mouse.move(0, 0)
+      await page.getByTestId('unit-header-qc').focus()
+      await addQc.focus()
+
+      // Escape
+      await page.keyboard.press('Enter')
+      await expect(input).toBeFocused()
+      await page.keyboard.press('Escape')
+      await expect(form).toBeHidden()
+      await expect(addQc).toBeFocused()
+
+      // Cancel
+      await page.keyboard.press('Enter')
+      await expect(input).toBeFocused()
+      await page.getByTestId('add-child-unit-cancel').click()
+      await expect(form).toBeHidden()
+      await expect(addQc).toBeFocused()
+
+      // Successful create: ready to add the next sibling.
+      await page.keyboard.press('Enter')
+      await input.fill('Line 6')
+      await input.press('Enter')
+      await expect(form).toBeHidden()
+      await expect(addQc).toBeFocused()
+
+      // Clicking elsewhere closes it without yanking focus back.
+      await page.keyboard.press('Enter')
+      await expect(input).toBeFocused()
+      // Radix arms its outside-press listener one tick after the popover
+      // mounts, so a click that races it is retried.
+      await expect(async () => {
+        await page.mouse.click(1100, 800)
+        await expect(form).toBeHidden({ timeout: 500 })
+      }).toPass()
+      await expect(addQc).not.toBeFocused()
       await expect(page.getByTestId('opens')).toHaveText('0')
     })
   })
@@ -270,6 +339,7 @@ describe('organization tree + Add unit (browser)', () => {
       await expect(input).toBeVisible()
       await expect(addQc).toBeHidden()
       // With the button gone, the popover still hangs off the card's bottom.
+      const touchHeader = page.getByTestId('unit-header-qc')
       const card = await box(page, 'unit-card-qc')
       const formBox = await box(page, 'add-child-unit-form')
       assert.ok(formBox.y >= card.y + card.height - 1, 'popover opens below the card')
@@ -279,6 +349,8 @@ describe('organization tree + Add unit (browser)', () => {
       await input.press('Enter')
       await expect(input).toBeHidden()
       assert.deepEqual(await created(page), [{ name: 'Line 4', parentId: 'qc' }])
+      // No hover button to return to: focus lands on the card, not the page body.
+      await expect(touchHeader).toBeFocused()
       await expect(page.getByTestId('opens')).toHaveText('0')
     }, { viewport: { width: 390, height: 800 }, hasTouch: true, isMobile: true })
   })

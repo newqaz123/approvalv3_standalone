@@ -336,6 +336,7 @@ export function TreeNodeRow({
   onSelectTeam?: (teamId: string) => void
 }) {
   const nameRef = useRef<HTMLSpanElement>(null)
+  const headerRef = useRef<HTMLDivElement>(null)
   // Default expanded preserves the pre-existing behavior: every active row
   // renders until the reader collapses a branch.
   const [expanded, setExpanded] = useState(true)
@@ -374,6 +375,7 @@ export function TreeNodeRow({
         className="organization-unit-card w-full rounded-xl border border-slate-200 bg-white shadow-sm"
       >
         <div
+          ref={headerRef}
           data-testid={`unit-header-${unit.id}`}
           className="organization-unit-header group flex cursor-pointer items-center gap-2 rounded-t-xl bg-muted/60 px-3 py-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
           tabIndex={0}
@@ -571,6 +573,7 @@ export function TreeNodeRow({
           open={addOpen}
           onOpenChange={setAddOpen}
           onCreated={() => setExpanded(true)}
+          restoreFocusRef={headerRef}
         />
       </article>
 

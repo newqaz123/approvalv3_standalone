@@ -84,11 +84,14 @@ export function AddChildUnitPopover({
   open,
   onOpenChange,
   onCreated,
+  restoreFocusRef,
 }: {
   unit: { id: string; name: string }
   open: boolean
   onOpenChange: (open: boolean) => void
   onCreated?: () => void
+  /** A visible, focusable element on the unit card (its header). */
+  restoreFocusRef?: React.RefObject<HTMLElement | null>
 }): React.JSX.Element {
   const [name, setName] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -96,11 +99,20 @@ export function AddChildUnitPopover({
   // Synchronous guard: a second Enter can land before the saving state
   // re-renders the disabled button.
   const savingRef = useRef(false)
+  // One editing session per open popover. Dismissing never waits on the
+  // server: closing starts a new session, and a request from an abandoned
+  // session may no longer touch the form.
+  const sessionRef = useRef(0)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const interactedOutsideRef = useRef(false)
 
   function handleOpenChange(next: boolean) {
-    // A save in flight owns the popover: closing now would drop its error.
-    if (!next && savingRef.current) return
-    if (!next) {
+    if (next) {
+      interactedOutsideRef.current = false
+    } else {
+      sessionRef.current += 1
+      savingRef.current = false
+      setSaving(false)
       setName('')
       setError(null)
     }
@@ -110,21 +122,23 @@ export function AddChildUnitPopover({
   async function handleSave() {
     const trimmed = name.trim()
     if (trimmed.length === 0 || savingRef.current) return
+    const session = sessionRef.current
     savingRef.current = true
     setSaving(true)
     setError(null)
     try {
       await createOrganizationUnit({ name: trimmed, parentId: unit.id })
-      savingRef.current = false
-      handleOpenChange(false)
-      onCreated?.()
     } catch (err) {
+      if (session !== sessionRef.current) return
       // Failure keeps the typed name so the admin can correct it.
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
       savingRef.current = false
       setSaving(false)
+      setError(err instanceof Error ? err.message : String(err))
+      return
     }
+    // The unit exists even if the admin dismissed the popover meanwhile.
+    onCreated?.()
+    if (session === sessionRef.current) handleOpenChange(false)
   }
 
   return (
@@ -141,6 +155,7 @@ export function AddChildUnitPopover({
             type="button"
             variant="outline"
             size="sm"
+            ref={triggerRef}
             data-testid={`unit-add-child-${unit.id}`}
             className="h-6 min-h-6 rounded-full bg-background px-2.5 text-xs"
           >
@@ -158,7 +173,24 @@ export function AddChildUnitPopover({
           className="organization-unit-add-child-anchor"
         />
       </PopoverAnchor>
-      <PopoverContent side="bottom" align="center" className="w-72">
+      <PopoverContent
+        side="bottom"
+        align="center"
+        className="w-72"
+        onInteractOutside={() => {
+          interactedOutsideRef.current = true
+        }}
+        onCloseAutoFocus={(event) => {
+          // Radix would refocus the trigger, but by now the button is hidden
+          // again (pointer away, or a touch device) and focus would fall to
+          // the page body. Focusing the card first re-reveals the button via
+          // :focus-within; where it stays hidden, focus rests on the card.
+          event.preventDefault()
+          if (interactedOutsideRef.current) return
+          restoreFocusRef?.current?.focus()
+          triggerRef.current?.focus()
+        }}
+      >
         <AddChildUnitFormView
           parentName={unit.name}
           name={name}
