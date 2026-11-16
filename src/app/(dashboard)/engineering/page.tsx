@@ -41,9 +41,12 @@ export default async function EngineeringDashboardPage() {
 
 	const subTaskOptions = await getEngineeringSubTaskOptions();
 
+	// Work queues and workload counts use the pre-existing scope: requests that
+	// are only visible through the read-only tracking grant are not Engineering work.
 	const visibilityWhere = await buildRequestVisibilityWhere(createRequestVisibilityDb(prisma), {
 		userId,
 		includeArchived: false,
+		includeEngineeringViewAll: false,
 	});
 
 	// Fetch engineering requests for the Follow up work tab

@@ -319,3 +319,122 @@ describe('read-only grant at server-action boundaries', () => {
     }
   })
 })
+
+// Second fixture: budget actions and the Engineering dashboard page, again
+// running the real module bodies with only session/DB boundaries replaced.
+function moduleFixture(request: Record<string, unknown> = {}) {
+  const data = fixture({ request: { budgetCodeId: 'code-1', workRequisitionReceived: false, subTasks: [], ...request } })
+  const effects = { requestWrites: 0, codeWrites: 0, codeCreates: 0 }
+  const wheres: { findMany: unknown[]; count: unknown[] } = { findMany: [], count: [] }
+  const code = { id: 'code-1', code: 'BC1', createdById: 'someone-else' }
+  const prisma = {
+    requests: {
+      async findFirst({ where }: { where: unknown }) { return matches(data.request, where) ? { id: data.request.id } : null },
+      async findMany({ where }: { where: unknown }) { wheres.findMany.push(where); return [] },
+      async count({ where }: { where: unknown }) { wheres.count.push(where); return 0 },
+      async update() { effects.requestWrites++ },
+    },
+    budget_codes: {
+      async findUniqueOrThrow() { return code },
+      async findUnique() { return code },
+      async findFirst({ where }: { where: { createdById: string } }) { return where.createdById === code.createdById ? code : null },
+      async update() { effects.codeWrites++ },
+      async create() { effects.codeCreates++; return code },
+      async findMany() { return [] },
+    },
+    organization_units: { async findMany() { return [] } },
+  }
+  const stub: any = new Proxy(function () { return null }, { get: (_t, key) => (key === '__esModule' ? false : stub) })
+  const dependencies: Record<string, unknown> = {
+    '@/lib/prisma': { __esModule: true, default: prisma },
+    '@/lib/cache/user-cache': { async getCurrentUser() { return data.user } },
+    '@/lib/auth-config': { async auth() { return { user: data.user } } },
+    'next/cache': { revalidatePath() {} },
+    'next/navigation': { redirect(to: string) { throw new Error(`redirect ${to}`) } },
+    '@/lib/solution-work-actor': { createSolutionWorkActorDb() {}, async isActorSolutionWorker() { return true } },
+    '@/lib/request-visibility/scope': { createRequestVisibilityDb() { return data.db }, buildRequestVisibilityWhere },
+    '@/server-actions/requests': {
+      async getRequestsNeedingEngineeringAction() { return { needsApproval: [] } },
+      async getEngineeringUsers() { return [] },
+    },
+    '@/server-actions/engineering-sub-tasks': { async getEngineeringSubTaskOptions() { return { stages: [], subcontractors: [] } } },
+  }
+  function load(path: string) {
+    const compiled = ts.transpileModule(readFileSync(path, 'utf8'), {
+      compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, esModuleInterop: true, jsx: ts.JsxEmit.ReactJSX },
+    }).outputText
+    const module = { exports: {} }
+    runInNewContext(compiled, {
+      exports: module.exports, module, console, Date, Promise,
+      // Real libraries (zod, xlsx, pure helpers) run for real; UI modules are inert.
+      require(name: string) {
+        if (name in dependencies) return dependencies[name]
+        if (/^@\/components\/|^lucide-react$|^@\/lib\/utils$/.test(name)) return stub
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        return require(name.startsWith('@/') ? `${process.cwd()}/src/${name.slice(2)}` : name)
+      },
+    }, { filename: path })
+    return module.exports as Record<string, (...args: any[]) => Promise<any>>
+  }
+  return { ...data, effects, wheres, load }
+}
+
+describe('read-only grant does not unlock budget changes', () => {
+  const budget = 'src/server-actions/budget-control.ts'
+
+  it('rejects request budget edits on a tracking-only request', async () => {
+    const { db, effects, load } = moduleFixture()
+    assert.equal(await canViewRequestByPredicate(db, 'engineer', 'foreign-request'), true)
+    const actions = load(budget)
+    await assert.rejects(() => actions.updateRequestProjectEstimate({ requestId: 'foreign-request', projectEstimateCost: 5 }), /not visible/)
+    await assert.rejects(() => actions.unassignRequestBudgetCode('foreign-request'), /not visible/)
+    await assert.rejects(() => actions.assignRequestToBudgetCode({ requestId: 'foreign-request', budgetCodeId: 'code-1' }), /not visible/)
+    await assert.rejects(() => actions.assignRequestToBudgetCode({ requestId: 'foreign-request', budgetCode: 'NEW' }), /not visible/)
+    assert.deepEqual(effects, { requestWrites: 0, codeWrites: 0, codeCreates: 0 })
+  })
+
+  it('rejects budget code edits reachable only through a tracking-only request', async () => {
+    const { effects, load } = moduleFixture()
+    const actions = load(budget)
+    await assert.rejects(() => actions.updateBudgetCodeAmount({ budgetCodeId: 'code-1', name: 'Changed', budgetAmount: 1 }), /not visible/)
+    assert.deepEqual({ ...(await actions.pasteBudgetCodes({ rows: [{ code: 'BC1', name: 'Changed', budgetAmount: 1 }] })) }, { created: 0, updated: 0, skipped: 1 })
+    assert.deepEqual(effects, { requestWrites: 0, codeWrites: 0, codeCreates: 0 })
+  })
+
+  it('keeps budget edits for requests the user could already see', async () => {
+    const { effects, load } = moduleFixture({ requesterId: 'engineer' })
+    const actions = load(budget)
+    assert.equal((await actions.updateRequestProjectEstimate({ requestId: 'foreign-request', projectEstimateCost: 5 })).success, true)
+    assert.equal((await actions.updateBudgetCodeAmount({ budgetCodeId: 'code-1', name: 'Changed', budgetAmount: 1 })).success, true)
+    assert.deepEqual({ ...(await actions.pasteBudgetCodes({ rows: [{ code: 'BC1', name: 'Changed', budgetAmount: 1 }] })) }, { created: 0, updated: 1, skipped: 0 })
+    assert.deepEqual(effects, { requestWrites: 1, codeWrites: 2, codeCreates: 0 })
+  })
+
+  it('still lists tracking-only requests in the budget monitor', async () => {
+    const { request, wheres, load } = moduleFixture()
+    await load(budget).getBudgetMonitorData().catch(() => undefined)
+    const where = wheres.findMany[0] as { AND: unknown[] }
+    assert.equal(matches(request, { AND: where.AND }), true)
+  })
+})
+
+describe('Engineering dashboard work queue ignores the tracking grant', () => {
+  const page = 'src/app/(dashboard)/engineering/page.tsx'
+
+  for (const status of ['FinalApproval', 'SendBackToRequester']) {
+    it(`keeps a tracking-only ${status} request out of Follow up work and the pipeline count`, async () => {
+      const { db, request, wheres, load } = moduleFixture({ status })
+      assert.equal(await canViewRequestByPredicate(db, 'engineer', 'foreign-request'), true)
+      await load(page).default()
+      assert.equal(matches(request, wheres.findMany[0]), false)
+      assert.equal(matches(request, wheres.count[0]), false)
+    })
+  }
+
+  it('keeps an already-visible request in Follow up work and the pipeline count', async () => {
+    const { request, wheres, load } = moduleFixture({ status: 'FinalApproval', requesterId: 'engineer' })
+    await load(page).default()
+    assert.equal(matches(request, wheres.findMany[0]), true)
+    assert.equal(matches(request, wheres.count[0]), true)
+  })
+})

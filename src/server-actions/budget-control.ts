@@ -96,10 +96,16 @@ const pasteBudgetCodesSchema = z.object({
   })).min(1),
 })
 
-async function buildVisibleRequestWhere(user: NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>): Promise<Prisma.requestsWhereInput> {
+// `forMutation` excludes the read-only Engineering tracking grant: seeing a
+// request in the monitor must not allow changing its budget data.
+async function buildVisibleRequestWhere(
+  user: NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>,
+  options: { forMutation?: boolean } = {},
+): Promise<Prisma.requestsWhereInput> {
   return buildRequestVisibilityWhere(createRequestVisibilityDb(prisma), {
     userId: user.id,
     includeArchived: false,
+    includeEngineeringViewAll: !options.forMutation,
   })
 }
 
@@ -191,7 +197,7 @@ async function requireVisibleRequest(requestId: string) {
 
   const request = await prisma.requests.findFirst({
     where: {
-      AND: [{ id: requestId }, await buildVisibleRequestWhere(user)],
+      AND: [{ id: requestId }, await buildVisibleRequestWhere(user, { forMutation: true })],
     },
     select: { id: true },
   })
@@ -370,7 +376,7 @@ export async function updateBudgetCodeAmount(input: z.infer<typeof budgetAmountS
 
   const visibleUsage = await prisma.requests.findFirst({
     where: {
-      AND: [await buildVisibleRequestWhere(user), { budgetCodeId: data.budgetCodeId }],
+      AND: [await buildVisibleRequestWhere(user, { forMutation: true }), { budgetCodeId: data.budgetCodeId }],
     },
     select: { id: true },
   })
@@ -447,7 +453,7 @@ export async function pasteBudgetCodes(input: z.infer<typeof pasteBudgetCodesSch
 
     const visibleUsage = await prisma.requests.findFirst({
       where: {
-        AND: [await buildVisibleRequestWhere(user), { budgetCodeId: existing.id }],
+        AND: [await buildVisibleRequestWhere(user, { forMutation: true }), { budgetCodeId: existing.id }],
       },
       select: { id: true },
     })
