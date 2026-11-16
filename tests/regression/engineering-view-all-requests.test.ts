@@ -445,25 +445,35 @@ function moduleFixture(request: Record<string, unknown> = {}) {
   return { ...data, effects, wheres, load }
 }
 
-describe('read-only grant does not unlock budget changes', () => {
+describe('view-all grant covers budget monitor edits', () => {
   const budget = 'src/server-actions/budget-control.ts'
 
-  it('rejects request budget edits on a tracking-only request', async () => {
+  it('allows request budget edits on a request visible through the grant', async () => {
     const { db, effects, load } = moduleFixture()
-    assert.equal(await canViewRequestByPredicate(db, 'engineer', 'foreign-request'), true)
+    assert.equal(await canViewRequestByPredicate(db, 'engineer', 'foreign-request', { includeEngineeringViewAll: false }), false)
     const actions = load(budget)
-    await assert.rejects(() => actions.updateRequestProjectEstimate({ requestId: 'foreign-request', projectEstimateCost: 5 }), /not visible/)
-    await assert.rejects(() => actions.unassignRequestBudgetCode('foreign-request'), /not visible/)
-    await assert.rejects(() => actions.assignRequestToBudgetCode({ requestId: 'foreign-request', budgetCodeId: 'code-1' }), /not visible/)
-    await assert.rejects(() => actions.assignRequestToBudgetCode({ requestId: 'foreign-request', budgetCode: 'NEW' }), /not visible/)
-    assert.deepEqual(effects, { requestWrites: 0, codeWrites: 0, codeCreates: 0 })
+    assert.equal((await actions.updateRequestProjectEstimate({ requestId: 'foreign-request', projectEstimateCost: 5 })).success, true)
+    await actions.unassignRequestBudgetCode('foreign-request')
+    await actions.assignRequestToBudgetCode({ requestId: 'foreign-request', budgetCodeId: 'code-1' })
+    assert.deepEqual(effects, { requestWrites: 3, codeWrites: 0, codeCreates: 0 })
   })
 
-  it('rejects budget code edits reachable only through a tracking-only request', async () => {
+  it('allows budget code edits reachable through a request visible through the grant', async () => {
     const { effects, load } = moduleFixture()
     const actions = load(budget)
+    assert.equal((await actions.updateBudgetCodeAmount({ budgetCodeId: 'code-1', name: 'Changed', budgetAmount: 1 })).success, true)
+    assert.deepEqual({ ...(await actions.pasteBudgetCodes({ rows: [{ code: 'BC1', name: 'Changed', budgetAmount: 1 }] })) }, { created: 0, updated: 1, skipped: 0 })
+    assert.deepEqual(effects, { requestWrites: 0, codeWrites: 2, codeCreates: 0 })
+  })
+
+  it('still rejects budget edits on a request the user cannot see at all', async () => {
+    const { db, units, effects, load } = moduleFixture()
+    units[1].engineeringCanViewAllRequests = false
+    assert.equal(await canViewRequestByPredicate(db, 'engineer', 'foreign-request'), false)
+    const actions = load(budget)
+    await assert.rejects(() => actions.updateRequestProjectEstimate({ requestId: 'foreign-request', projectEstimateCost: 5 }), /not visible/)
+    await assert.rejects(() => actions.assignRequestToBudgetCode({ requestId: 'foreign-request', budgetCodeId: 'code-1' }), /not visible/)
     await assert.rejects(() => actions.updateBudgetCodeAmount({ budgetCodeId: 'code-1', name: 'Changed', budgetAmount: 1 }), /not visible/)
-    assert.deepEqual({ ...(await actions.pasteBudgetCodes({ rows: [{ code: 'BC1', name: 'Changed', budgetAmount: 1 }] })) }, { created: 0, updated: 0, skipped: 1 })
     assert.deepEqual(effects, { requestWrites: 0, codeWrites: 0, codeCreates: 0 })
   })
 
