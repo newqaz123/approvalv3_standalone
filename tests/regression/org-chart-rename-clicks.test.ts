@@ -38,7 +38,8 @@ it('org-chart rename controls do not activate the Manage header', async () => {
         // needed to test client click routing. Keep all UI components real.
         builder.onResolve({ filter: /server-actions\/organization$/ }, () => ({ path: 'actions', namespace: 'test' }))
         builder.onLoad({ filter: /.*/, namespace: 'test' }, () => ({ contents:
-          'export async function renameOrganizationUnit() {} export async function renameTeam() {}' }))
+          'export async function renameOrganizationUnit() {} export async function renameTeam() {}'
+          + ' export async function createOrganizationUnit() { return { id: "unused" } }' }))
       },
     }],
   })

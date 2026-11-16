@@ -10,6 +10,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { AddChildUnitPopover } from '@/components/organization/AddChildUnitPopover'
 import { ExceptionBranchBadges } from '@/components/organization/ExceptionBranchBadges'
 import { InlineNameEdit } from '@/components/organization/InlineNameEdit'
 import type { AssignmentNode, OrganizationUnitNode, PositionNode, TeamNode } from '@/lib/organization/model'
@@ -338,6 +339,10 @@ export function TreeNodeRow({
   // Default expanded preserves the pre-existing behavior: every active row
   // renders until the reader collapses a branch.
   const [expanded, setExpanded] = useState(true)
+  // Owned here (not by the popover) so the overflow menu — the only entry on
+  // touch devices, where the hover button is hidden — opens the same popover.
+  const [addOpen, setAddOpen] = useState(false)
+  const addOpenedFromMenuRef = useRef(false)
   const usersById = indexById(snapshot.users)
   const positionsById = indexById(snapshot.positions)
   const people = assignmentsByUserId(snapshot.assignments, unit.id)
@@ -475,9 +480,27 @@ export function TreeNodeRow({
                   <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
+              <DropdownMenuContent
+                align="end"
+                onCloseAutoFocus={(event) => {
+                  // The closing menu hands focus back to the "…" trigger. The
+                  // add popover reads that as focus leaving and dismisses
+                  // itself, so keep focus in the popover's name field.
+                  if (!addOpenedFromMenuRef.current) return
+                  addOpenedFromMenuRef.current = false
+                  event.preventDefault()
+                }}
+              >
                 <DropdownMenuItem onSelect={startRename}>Rename</DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => onSelectUnit?.(unit.id)}>Manage</DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => {
+                    addOpenedFromMenuRef.current = true
+                    setAddOpen(true)
+                  }}
+                >
+                  Add unit
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -540,6 +563,15 @@ export function TreeNodeRow({
           ) : null}
           </div>
         ) : null}
+        {/* Last in the card so it is last in the card's tab order. Out of
+            flow below the card's bottom edge; a new child expands a collapsed
+            branch so the admin sees what they just added. */}
+        <AddChildUnitPopover
+          unit={unit}
+          open={addOpen}
+          onOpenChange={setAddOpen}
+          onCreated={() => setExpanded(true)}
+        />
       </article>
 
       {/* Collapsed branch content stays MOUNTED behind the hidden attribute:

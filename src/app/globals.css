@@ -796,12 +796,51 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
   min-width: 0;
 }
 .organization-unit-card {
+  /* Positioned and raised one level so the "+ Add unit" button hanging off
+     the bottom edge paints above the child connector stem. */
+  position: relative;
+  z-index: 1;
   width: 30rem;
   max-width: 30rem;
   min-width: 0;
   overflow: visible;
   container-type: inline-size;
   container-name: organization-unit-card;
+}
+/* "+ Add unit": out of flow below the card, so revealing it never shifts
+   cards or connectors. display:none at rest keeps it out of the flowchart's
+   scrollable overflow; the 0.25rem overlap with the card bridges the hover
+   and keeps the 1.5rem button inside the flowchart's 1.5rem bottom padding.
+   It is a descendant of the card, so hovering the button keeps the card
+   hovered, and hovering a child card never reveals the parent's button. */
+.organization-unit-add-child {
+  position: absolute;
+  top: calc(100% - 0.25rem);
+  left: 50%;
+  z-index: 1;
+  display: none;
+  transform: translateX(-50%);
+}
+.organization-unit-card:hover > .organization-unit-add-child,
+.organization-unit-card:focus-within > .organization-unit-add-child,
+.organization-unit-add-child[data-open="true"] {
+  display: flex;
+}
+/* Touch has no hover: the overflow menu's "Add unit" opens the same popover. */
+@media (pointer: coarse) {
+  .organization-unit-add-child {
+    display: none !important;
+  }
+}
+/* Popover anchor: the point just under where the button ends. Always laid
+   out (zero-size), so the popover still positions when the button is hidden. */
+.organization-unit-add-child-anchor {
+  position: absolute;
+  top: calc(100% + 1.25rem);
+  left: 50%;
+  width: 0;
+  height: 0;
+  pointer-events: none;
 }
 .organization-unit-header {
   display: flex;

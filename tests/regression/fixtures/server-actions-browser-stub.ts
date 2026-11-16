@@ -11,6 +11,10 @@ export async function renameTeam(): Promise<{ ok: true }> {
   throw new Error('renameTeam is not available in the browser organization harness')
 }
 
+export async function createOrganizationUnit(): Promise<{ id: string }> {
+  throw new Error('createOrganizationUnit is not available in the browser organization harness')
+}
+
 export async function updateUnitSettings(): Promise<{ ok: true }> {
   throw new Error('updateUnitSettings is not available in the browser organization harness')
 }
