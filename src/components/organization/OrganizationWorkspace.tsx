@@ -13,7 +13,7 @@ import { ZoomableFlowchart } from '@/components/organization/ZoomableFlowchart'
 import type { AssignmentNode, OrganizationUnitNode, TeamNode } from '@/lib/organization/model'
 import type { WorkspaceSnapshot } from '@/server-actions/organization'
 
-type UnitPatch = Partial<Pick<OrganizationUnitNode, 'shareRequests' | 'canWorkOnSolutions' | 'managerUserId' | 'isActive'>>
+type UnitPatch = Partial<Pick<OrganizationUnitNode, 'shareRequests' | 'canWorkOnSolutions' | 'engineeringCanViewAllRequests' | 'managerUserId' | 'isActive'>>
 
 export function OrganizationWorkspace({ snapshot }: { snapshot: WorkspaceSnapshot }) {
   const [selectedUnitId, setSelectedUnitId] = useState<string | null>(null)

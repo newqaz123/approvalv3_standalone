@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Info, Share2, Wrench } from 'lucide-react'
+import { Eye, Info, Share2, Wrench } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import {
@@ -349,7 +349,7 @@ export function UnitSidePanel({
 }: {
   unit: OrganizationUnitNode
   snapshot: WorkspaceSnapshot
-  onSettingsSaved?: (patch: { shareRequests: boolean; canWorkOnSolutions: boolean }) => void
+  onSettingsSaved?: (patch: { shareRequests: boolean; canWorkOnSolutions: boolean; engineeringCanViewAllRequests: boolean }) => void
   onManagerSaved?: (managerUserId: string | null) => void
   onCreateTeam?: (unitId: string) => void
   onDeactivated?: (unitId: string) => void
@@ -360,6 +360,7 @@ export function UnitSidePanel({
 }) {
   const [shareRequests, setShareRequests] = useState(unit.shareRequests)
   const [canWorkOnSolutions, setCanWorkOnSolutions] = useState(unit.canWorkOnSolutions)
+  const [engineeringCanViewAllRequests, setEngineeringCanViewAllRequests] = useState(unit.engineeringCanViewAllRequests ?? false)
   const [managerUserId, setManagerUserId] = useState(unit.managerUserId)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -370,11 +371,12 @@ export function UnitSidePanel({
   useEffect(() => {
     setShareRequests(unit.shareRequests)
     setCanWorkOnSolutions(unit.canWorkOnSolutions)
+    setEngineeringCanViewAllRequests(unit.engineeringCanViewAllRequests ?? false)
     setManagerUserId(unit.managerUserId)
     setError(null)
     setConfirmingDeactivate(false)
     setDeactivateError(null)
-  }, [unit.id, unit.shareRequests, unit.canWorkOnSolutions, unit.managerUserId])
+  }, [unit.id, unit.shareRequests, unit.canWorkOnSolutions, unit.engineeringCanViewAllRequests, unit.managerUserId])
 
   const candidates = directManagerCandidates(snapshot, unit.id)
 
@@ -386,8 +388,9 @@ export function UnitSidePanel({
         id: unit.id,
         shareRequests,
         canWorkOnSolutions,
+        engineeringCanViewAllRequests,
       })
-      onSettingsSaved?.({ shareRequests, canWorkOnSolutions })
+      onSettingsSaved?.({ shareRequests, canWorkOnSolutions, engineeringCanViewAllRequests })
     } catch (err) {
       setError(err instanceof Error ? formatOrganizationErrorForUser(err.message, snapshot) : formatOrganizationErrorForUser(String(err), snapshot))
     } finally {
@@ -494,6 +497,34 @@ export function UnitSidePanel({
                 data-testid="unit-can-work-on-solutions"
                 checked={canWorkOnSolutions}
                 onCheckedChange={setCanWorkOnSolutions}
+              />
+            </div>
+
+            <div className="flex items-start justify-between gap-4 rounded-md border px-3 py-2">
+              <div className="flex min-w-0 flex-1 items-start gap-2">
+                <span
+                  aria-hidden="true"
+                  className={`mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border ${engineeringCanViewAllRequests ? SOLUTIONS_FLAG_ON_CLASSES : FLAG_OFF_CLASSES}`}
+                >
+                  <Eye className="h-3.5 w-3.5" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <Label htmlFor="unit-engineering-view-all-requests" className="text-sm font-medium leading-snug">
+                    Engineering can view all requests
+                  </Label>
+                  <p id="unit-engineering-view-all-requests-help" className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    Read-only across all departments and stages. Applies to this unit and sub-units with solution-work access; no editing or approval rights. An enabled parent setting still applies when this switch is off.
+                  </p>
+                </div>
+              </div>
+              <Switch
+                id="unit-engineering-view-all-requests"
+                data-testid="unit-engineering-view-all-requests"
+                aria-describedby="unit-engineering-view-all-requests-help"
+                checked={engineeringCanViewAllRequests}
+                onCheckedChange={setEngineeringCanViewAllRequests}
+                disabled={saving}
+                className="shrink-0"
               />
             </div>
           </section>

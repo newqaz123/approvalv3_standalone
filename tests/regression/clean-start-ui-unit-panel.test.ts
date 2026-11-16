@@ -531,3 +531,26 @@ describe('C5 source contracts', () => {
     assert.equal(_renameDb, undefined)
   })
 })
+
+describe('Engineering view-all unit setting', () => {
+  for (const flag of [false, undefined, true]) {
+    it(`renders a labeled switch with persisted value ${String(flag)}`, () => {
+      const selected = unit('engineering', 'Engineering', 'company', {
+        canWorkOnSolutions: true, engineeringCanViewAllRequests: flag,
+      })
+      const html = renderToStaticMarkup(createElement(UnitSidePanel, {
+        unit: selected, snapshot: makeSnapshot({ units: [unit('company', 'Company', null), selected] }),
+      }))
+      const control = html.match(/<button\b[^>]*id="unit-engineering-view-all-requests"[^>]*>/)?.[0]
+      assert.ok(control, 'admin can find the view-all switch')
+      assert.match(control, /role="switch"/)
+      assert.match(control, new RegExp(`aria-checked="${flag === true}"`))
+      assert.match(html, /<label[^>]*for="unit-engineering-view-all-requests"[^>]*>Engineering can view all requests<\/label>/)
+      assert.match(control, /aria-describedby="unit-engineering-view-all-requests-help"/)
+      assert.match(html, /id="unit-engineering-view-all-requests-help"/)
+      assert.match(html, /all departments and stages/)
+      assert.match(html, /sub-units with solution-work access/)
+      assert.match(html, /no editing or approval rights/)
+    })
+  }
+})
