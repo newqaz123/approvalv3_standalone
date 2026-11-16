@@ -88,6 +88,18 @@ describe("Requests desktop data flow and header", () => {
 		assert.match(listWithFilters, /approvalapp:request-data-changed/);
 	});
 
+	it("keeps the request table mounted while the list refreshes, so an open request modal survives sub-task saves", () => {
+		const listWithFilters = read(
+			"src/components/requests/requests-list-with-filters.tsx",
+		);
+
+		// The table owns the open modal; swapping it for a loading placeholder
+		// closes the modal on every refresh event.
+		assert.doesNotMatch(listWithFilters, /isLoading \? \(/);
+		assert.match(listWithFilters, /aria-busy=\{isLoading\}/);
+		assert.match(listWithFilters, /<RequestTable initialData=\{requests\}/);
+	});
+
 	it("retains the Requests heading, supporting copy, actions, and mobile stack", () => {
 		const listClient = read("src/components/requests/requests-list-client.tsx");
 

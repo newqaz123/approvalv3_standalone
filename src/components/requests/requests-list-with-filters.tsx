@@ -113,13 +113,14 @@ export function RequestsListWithFilters({
         onFilterChange={handleFilterChange}
       />
 
-      {isLoading ? (
-        <div className="text-center py-8 text-muted-foreground">
-          Loading...
-        </div>
-      ) : (
+      {/* Keep the table mounted while loading: it owns the open request modal,
+          and unmounting it would close the modal on every refresh. */}
+      <div
+        aria-busy={isLoading}
+        className={isLoading ? 'opacity-60 transition-opacity' : 'transition-opacity'}
+      >
         <RequestTable initialData={requests} onDataRefresh={refreshData} />
-      )}
+      </div>
     </div>
   )
 }
