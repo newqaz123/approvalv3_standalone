@@ -38,12 +38,12 @@ const upgradeSql = () => readFileSync(`prisma/migrations/${UPGRADE}/migration.sq
 const withoutComments = (sql: string) => sql.replace(/--.*$/gm, '')
 
 describe('organization upgrade migration', () => {
-  it("keeps main's 18 migrations and appends exactly one upgrade migration", () => {
+  it("preserves the 18 historical migrations and upgrade before later migrations", () => {
     const dirs = readdirSync('prisma/migrations', { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name)
       .sort()
-    assert.deepEqual(dirs, [...MAIN_MIGRATIONS, UPGRADE])
+    assert.deepEqual(dirs.filter((name) => name <= UPGRADE), [...MAIN_MIGRATIONS, UPGRADE])
     for (const name of MAIN_MIGRATIONS) {
       assert.ok(existsSync(`prisma/migrations/${name}/migration.sql`), `${name}/migration.sql`)
     }
