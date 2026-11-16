@@ -554,3 +554,47 @@ describe('Engineering view-all unit setting', () => {
     })
   }
 })
+
+describe('Engineering view-all switch availability', () => {
+  const renderSwitch = (selected: OrganizationUnitNode, others: OrganizationUnitNode[]) => {
+    const html = renderToStaticMarkup(createElement(UnitSidePanel, {
+      unit: selected, snapshot: makeSnapshot({ units: [...others, selected] }),
+    }))
+    const control = html.match(/<button\b[^>]*id="unit-engineering-view-all-requests"[^>]*>/)?.[0]
+    assert.ok(control, 'view-all switch is rendered')
+    return { html, control }
+  }
+  const company = unit('company', 'Company', null)
+
+  it('is disabled with an explanation for a unit without solution-work access', () => {
+    const { html, control } = renderSwitch(unit('ops', 'Operations', 'company'), [company])
+    assert.match(control, /\sdisabled=""/)
+    assert.match(control, /aria-checked="false"/)
+    assert.match(html, /Turn on “Can work on solutions” for this unit or a parent unit to use this setting\./)
+  })
+
+  it('is enabled for a unit with its own solution-work access', () => {
+    const { html, control } = renderSwitch(unit('eng', 'Engineering', 'company', { canWorkOnSolutions: true }), [company])
+    assert.doesNotMatch(control, /\sdisabled=""/)
+    assert.doesNotMatch(html, /Turn on “Can work on solutions”/)
+  })
+
+  it('is enabled for a sub-unit that inherits solution-work access', () => {
+    const parent = unit('eng', 'Engineering', 'company', { canWorkOnSolutions: true })
+    const { control } = renderSwitch(unit('eng-child', 'Design', 'eng'), [company, parent])
+    assert.doesNotMatch(control, /\sdisabled=""/)
+  })
+
+  it('is disabled when the only solution-work ancestor is inactive', () => {
+    const parent = unit('eng', 'Engineering', 'company', { canWorkOnSolutions: true, isActive: false })
+    const { control } = renderSwitch(unit('eng-child', 'Design', 'eng'), [company, parent])
+    assert.match(control, /\sdisabled=""/)
+  })
+
+  it('stays usable so a stored grant can be switched off after access was removed', () => {
+    const { html, control } = renderSwitch(unit('ops', 'Operations', 'company', { engineeringCanViewAllRequests: true }), [company])
+    assert.doesNotMatch(control, /\sdisabled=""/)
+    assert.match(control, /aria-checked="true"/)
+    assert.match(html, /Turn on “Can work on solutions”/)
+  })
+})

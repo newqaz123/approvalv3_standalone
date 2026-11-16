@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/tooltip'
 import type { OrganizationUnitNode } from '@/lib/organization/model'
 import { personShortName } from '@/lib/organization/person-name'
+import { canWorkOnSolutions as hasSolutionWorkAccess } from '@/lib/solution-eligibility'
 import { ExceptionBranchBadges } from '@/components/organization/ExceptionBranchBadges'
 import {
   FLAG_OFF_CLASSES,
@@ -380,6 +381,20 @@ export function UnitSidePanel({
 
   const candidates = directManagerCandidates(snapshot, unit.id)
 
+  // The view-all grant only works with solution-work access (own or inherited),
+  // so the switch is offered only then. The unsaved toggle above counts, and a
+  // stored grant stays switchable so it can still be turned off.
+  let solutionWorkAccess = false
+  try {
+    solutionWorkAccess = hasSolutionWorkAccess(
+      snapshot.units.map((row) => (row.id === unit.id ? { ...row, canWorkOnSolutions } : row)),
+      unit.id,
+    )
+  } catch {
+    solutionWorkAccess = false
+  }
+  const viewAllUnavailable = !solutionWorkAccess && !engineeringCanViewAllRequests
+
   async function handleSaveSettings() {
     setError(null)
     setSaving(true)
@@ -514,6 +529,11 @@ export function UnitSidePanel({
                   </Label>
                   <p id="unit-engineering-view-all-requests-help" className="mt-1 text-xs leading-relaxed text-muted-foreground">
                     Read-only across all departments and stages. Applies to this unit and sub-units with solution-work access; no editing or approval rights. An enabled parent setting still applies when this switch is off.
+                    {solutionWorkAccess ? null : (
+                      <span className="mt-1 block font-medium text-foreground">
+                        Turn on “Can work on solutions” for this unit or a parent unit to use this setting.
+                      </span>
+                    )}
                   </p>
                 </div>
               </div>
@@ -523,7 +543,7 @@ export function UnitSidePanel({
                 aria-describedby="unit-engineering-view-all-requests-help"
                 checked={engineeringCanViewAllRequests}
                 onCheckedChange={setEngineeringCanViewAllRequests}
-                disabled={saving}
+                disabled={saving || viewAllUnavailable}
                 className="shrink-0"
               />
             </div>
