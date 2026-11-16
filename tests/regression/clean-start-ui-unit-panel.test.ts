@@ -39,6 +39,7 @@ function unit(
     isActive: true,
     shareRequests: false,
     canWorkOnSolutions: false,
+    engineeringCanViewAllRequests: false,
     managerUserId: null,
     ...extra,
   }
@@ -147,11 +148,12 @@ function makeMutationDb(over: {
       }))
       return { id }
     },
-    async updateUnitSettings(id, shareRequests, canWorkOnSolutions) {
+    async updateUnitSettings(id, shareRequests, canWorkOnSolutions, engineeringCanViewAllRequests) {
       const row = units.find((candidate) => candidate.id === id)
       if (!row) throw new Error(`missing unit ${id}`)
       row.shareRequests = shareRequests
       row.canWorkOnSolutions = canWorkOnSolutions
+      row.engineeringCanViewAllRequests = engineeringCanViewAllRequests
     },
     async updateUnitManager(unitId, managerUserId) {
       const row = units.find((candidate) => candidate.id === unitId)
@@ -396,6 +398,51 @@ describe('createOrganizationUnit / updateUnitSettings / setUnitManager fake db',
     assert.equal(db.audits.length, 1)
     assert.match(db.audits[0].action, /organization_unit_settings_updated/)
     assert.deepEqual(db.revalidated, ['/admin/organization'])
+  })
+
+  it('persists the view-all grant and records its value in the audit', async () => {
+    const db = makeMutationDb()
+    await updateUnitSettings({
+      id: 'ops', shareRequests: false, canWorkOnSolutions: true,
+      engineeringCanViewAllRequests: true,
+    }, db)
+    assert.equal((await db.loadUnits()).find((row) => row.id === 'ops')?.engineeringCanViewAllRequests, true)
+    assert.match(db.audits[0].comments, /engineeringCanViewAllRequests=true/)
+    assert.deepEqual(db.revalidated, ['/admin/organization'])
+
+    await updateUnitSettings({
+      id: 'ops', shareRequests: false, canWorkOnSolutions: true,
+      engineeringCanViewAllRequests: false,
+    }, db)
+    assert.equal((await db.loadUnits()).find((row) => row.id === 'ops')?.engineeringCanViewAllRequests, false)
+    assert.match(db.audits[1].comments, /engineeringCanViewAllRequests=false/)
+  })
+
+  it('preserves an existing view-all grant when older settings callers omit it', async () => {
+    const db = makeMutationDb()
+    db.units.find((row) => row.id === 'ops')!.engineeringCanViewAllRequests = true
+    await updateUnitSettings({ id: 'ops', shareRequests: false, canWorkOnSolutions: true }, db)
+    assert.equal(db.units.find((row) => row.id === 'ops')?.engineeringCanViewAllRequests, true)
+  })
+
+  it('defaults missing view-all data to false when saving older unit projections', async () => {
+    const db = makeMutationDb()
+    delete db.units.find((row) => row.id === 'ops')!.engineeringCanViewAllRequests
+    await updateUnitSettings({ id: 'ops', shareRequests: false, canWorkOnSolutions: true }, db)
+    assert.equal(db.units.find((row) => row.id === 'ops')?.engineeringCanViewAllRequests, false)
+  })
+
+  it('rejects non-Boolean view-all settings without a write or audit', async () => {
+    for (const invalid of ['true', 1, null, {}]) {
+      const db = makeMutationDb()
+      await assert.rejects(() => updateUnitSettings({
+        id: 'ops', shareRequests: false, canWorkOnSolutions: true,
+        engineeringCanViewAllRequests: invalid as boolean,
+      }, db), /boolean/i)
+      assert.equal(db.units.find((row) => row.id === 'ops')?.engineeringCanViewAllRequests, false)
+      assert.equal(db.audits.length, 0)
+      assert.deepEqual(db.revalidated, [])
+    }
   })
 
   it('sets a direct manager after validateOrganization and writes', async () => {

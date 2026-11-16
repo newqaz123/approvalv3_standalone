@@ -10,6 +10,8 @@ export interface OrganizationUnitNode {
   isActive: boolean
   shareRequests: boolean
   canWorkOnSolutions: boolean
+  /** Read-only cross-department tracking grant; omitted projections default off. */
+  engineeringCanViewAllRequests?: boolean
   managerUserId: string | null
 }
 

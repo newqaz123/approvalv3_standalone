@@ -86,6 +86,7 @@ type WorkspacePrisma = {
       isActive: boolean
       shareRequests: boolean
       canWorkOnSolutions: boolean
+      engineeringCanViewAllRequests?: boolean
       managerUserId: string | null
     }>>
   }
@@ -268,6 +269,7 @@ function createPrismaOrganizationWorkspaceDb(prisma: WorkspacePrisma): Organizat
         isActive: row.isActive,
         shareRequests: row.shareRequests,
         canWorkOnSolutions: row.canWorkOnSolutions,
+        engineeringCanViewAllRequests: row.engineeringCanViewAllRequests ?? false,
         managerUserId: row.managerUserId,
       }))
     },
@@ -423,7 +425,7 @@ export interface OrganizationUnitMutationDb extends OrganizationMutationDb {
   loadPositions(): Promise<PositionNode[]>
   loadUsers(): Promise<WorkspaceUser[]>
   createUnit(input: { name: string; parentId: string }): Promise<{ id: string }>
-  updateUnitSettings(id: string, shareRequests: boolean, canWorkOnSolutions: boolean): Promise<void>
+  updateUnitSettings(id: string, shareRequests: boolean, canWorkOnSolutions: boolean, engineeringCanViewAllRequests: boolean): Promise<void>
   updateUnitManager(unitId: string, managerUserId: string | null): Promise<void>
 }
 
@@ -502,6 +504,7 @@ type MutationPrisma = {
       isActive: boolean
       shareRequests: boolean
       canWorkOnSolutions: boolean
+      engineeringCanViewAllRequests?: boolean
       managerUserId: string | null
     }>>
     update: (args: {
@@ -510,6 +513,7 @@ type MutationPrisma = {
         name?: string
         shareRequests?: boolean
         canWorkOnSolutions?: boolean
+        engineeringCanViewAllRequests?: boolean
         managerUserId?: string | null
         isActive?: boolean
       }
@@ -520,6 +524,7 @@ type MutationPrisma = {
         parentId: string
         shareRequests: boolean
         canWorkOnSolutions: boolean
+        engineeringCanViewAllRequests: boolean
         isActive: boolean
       }
     }) => Promise<{ id: string }>
@@ -671,6 +676,7 @@ function createMutationStore(
         isActive: row.isActive,
         shareRequests: row.shareRequests,
         canWorkOnSolutions: row.canWorkOnSolutions,
+        engineeringCanViewAllRequests: row.engineeringCanViewAllRequests ?? false,
         managerUserId: row.managerUserId,
       }))
     },
@@ -728,15 +734,16 @@ function createMutationStore(
           // New units default to request sharing OFF (owner decision H5).
           shareRequests: false,
           canWorkOnSolutions: false,
+          engineeringCanViewAllRequests: false,
           isActive: true,
         },
       })
       return { id: row.id }
     },
-    async updateUnitSettings(id, shareRequests, canWorkOnSolutions) {
+    async updateUnitSettings(id, shareRequests, canWorkOnSolutions, engineeringCanViewAllRequests) {
       await client.organization_units.update({
         where: { id },
-        data: { shareRequests, canWorkOnSolutions },
+        data: { shareRequests, canWorkOnSolutions, engineeringCanViewAllRequests },
       })
     },
     async updateUnitManager(unitId, managerUserId) {
@@ -1167,10 +1174,10 @@ export async function createOrganizationUnit(
 }
 
 /**
- * Persist unit sharing and solution-work flags. Audit + revalidate.
+ * Persist unit sharing, solution-work, and read-only tracking flags. Audit + revalidate.
  */
 export async function updateUnitSettings(
-  input: { id: string; shareRequests: boolean; canWorkOnSolutions: boolean },
+  input: { id: string; shareRequests: boolean; canWorkOnSolutions: boolean; engineeringCanViewAllRequests?: boolean },
   db?: OrganizationUnitMutationDb,
 ): Promise<{ success: true }> {
   const store = db ?? await createProductionMutationDb()
@@ -1181,10 +1188,17 @@ export async function updateUnitSettings(
     if (current === undefined) {
       throw new OrganizationValidationError(`organization unit "${input.id}" was not found`)
     }
-    await writer.updateUnitSettings(current.id, input.shareRequests, input.canWorkOnSolutions)
+    if (input.engineeringCanViewAllRequests !== undefined && typeof input.engineeringCanViewAllRequests !== 'boolean') {
+      throw new OrganizationValidationError('Engineering view-all permission must be a boolean')
+    }
+    // Older callers editing unrelated flags must not revoke an existing grant.
+    const engineeringCanViewAllRequests = input.engineeringCanViewAllRequests
+      ?? current.engineeringCanViewAllRequests
+      ?? false
+    await writer.updateUnitSettings(current.id, input.shareRequests, input.canWorkOnSolutions, engineeringCanViewAllRequests)
     await writer.writeAudit({
       action: 'organization_unit_settings_updated',
-      comments: `Updated unit ${current.id} shareRequests=${input.shareRequests} canWorkOnSolutions=${input.canWorkOnSolutions}`,
+      comments: `Updated unit ${current.id} shareRequests=${input.shareRequests} canWorkOnSolutions=${input.canWorkOnSolutions} engineeringCanViewAllRequests=${engineeringCanViewAllRequests}`,
     })
     return { success: true as const }
   })
