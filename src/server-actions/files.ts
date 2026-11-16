@@ -90,7 +90,7 @@ export async function deleteFileAttachment({ fileId }: { fileId: string }) {
     throw new Error('Associated request not found')
   }
 
-  if (!(await canUserViewRequest(userId, requestId))) {
+  if (!(await canUserViewRequest(userId, requestId, { includeEngineeringViewAll: false }))) {
     throw new Error('Unauthorized to delete this file')
   }
 
@@ -205,7 +205,7 @@ export async function uploadFileAction(
     return { success: false, error: 'Request not found' }
   }
 
-  if (!(await canUserViewRequest(userId, requestId))) {
+  if (!(await canUserViewRequest(userId, requestId, { includeEngineeringViewAll: false }))) {
     return { success: false, error: 'Not authorized to upload to this request' }
   }
 

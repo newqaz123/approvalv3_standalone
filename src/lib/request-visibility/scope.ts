@@ -2,11 +2,14 @@
 // sisters; OFF = origin + ancestor bosses) plus approval participation,
 // explicit managedUnitIds, and Engineering work access for SentToEngineer /
 // DesignCostEstimationApproval. Visibility grants no mutation rights. The
-// engineering ROLE still grants no blanket visibility.
+// engineering ROLE still grants no blanket visibility. An explicit inherited
+// engineeringCanViewAllRequests flag broadens reads only; mutation callers
+// exclude that grant and retain the pre-existing visibility relationships.
 import type { Prisma } from '@prisma/client'
 import { CURRENT_INSTANCE_ROW_FILTER } from '@/lib/approval-engine/current-instance'
 import { ancestorUnitIds, descendantUnitIds, NoSharingScopeError } from '@/lib/organization/hierarchy'
 import type { OrganizationUnitNode } from '@/lib/organization/model'
+import { canWorkOnSolutions as hasSolutionWorkEligibility } from '@/lib/solution-eligibility'
 import { visibleRequestOriginUnitIds } from '@/lib/organization/sharing'
 
 export interface RequestVisibilityActor {
@@ -18,6 +21,8 @@ export interface RequestVisibilityActor {
   managedUnitIds: readonly string[]
   /** True when the assignment unit or an ancestor can work on solutions. */
   canWorkOnSolutions?: boolean
+  /** Effective inherited read-only grant, requiring active solution-work eligibility. */
+  engineeringCanViewAllRequests?: boolean
 }
 
 export interface RequestVisibilityDb {
@@ -25,9 +30,14 @@ export interface RequestVisibilityDb {
   findRequest(where: Prisma.requestsWhereInput): Promise<{ id: string } | null>
 }
 
+export interface RequestVisibilityOptions {
+  /** Mutation checks must exclude the read-only Engineering grant. Defaults to true. */
+  includeEngineeringViewAll?: boolean
+}
+
 export async function buildRequestVisibilityWhere(
   db: RequestVisibilityDb,
-  options: { userId: string; includeArchived: boolean },
+  options: { userId: string; includeArchived: boolean } & RequestVisibilityOptions,
 ): Promise<Prisma.requestsWhereInput> {
   const actor = await db.findActor(options.userId)
   if (!actor || !actor.isActive) return { id: { in: [] } }
@@ -36,6 +46,9 @@ export async function buildRequestVisibilityWhere(
     ...(options.includeArchived ? {} : { isArchived: false }),
   }
   if (actor.role === 'admin') return base
+  if (options.includeEngineeringViewAll !== false && actor.canWorkOnSolutions === true && actor.engineeringCanViewAllRequests === true) {
+    return base
+  }
   const unitIds = [...new Set([...actor.sharingScopeUnitIds, ...actor.managedUnitIds])]
   const current = { OR: [...CURRENT_INSTANCE_ROW_FILTER] }
   const relationships: Prisma.requestsWhereInput[] = [
@@ -60,8 +73,9 @@ export async function canViewRequestByPredicate(
   db: RequestVisibilityDb,
   userId: string,
   requestId: string,
+  options: RequestVisibilityOptions = {},
 ): Promise<boolean> {
-  const where = await buildRequestVisibilityWhere(db, { userId, includeArchived: true })
+  const where = await buildRequestVisibilityWhere(db, { ...options, userId, includeArchived: true })
   const found = await db.findRequest({ AND: [{ id: requestId }, where] })
   return found !== null
 }
@@ -73,6 +87,7 @@ type VisibilityUnitRow = {
   isActive: boolean
   shareRequests: boolean
   canWorkOnSolutions: boolean
+  engineeringCanViewAllRequests?: boolean
   managerUserId: string | null
 }
 
@@ -98,6 +113,7 @@ export type RequestVisibilityPrisma = {
         isActive: true
         shareRequests: true
         canWorkOnSolutions: true
+        engineeringCanViewAllRequests: true
         managerUserId: true
       }
     }): Promise<VisibilityUnitRow[]>
@@ -123,6 +139,7 @@ function toUnitNode(unit: VisibilityUnitRow): OrganizationUnitNode {
     isActive: unit.isActive,
     shareRequests: unit.shareRequests,
     canWorkOnSolutions: unit.canWorkOnSolutions,
+    engineeringCanViewAllRequests: unit.engineeringCanViewAllRequests ?? false,
     managerUserId: unit.managerUserId,
   }
 }
@@ -149,6 +166,7 @@ export function createRequestVisibilityDb(client: RequestVisibilityPrisma): Requ
           isActive: true,
           shareRequests: true,
           canWorkOnSolutions: true,
+          engineeringCanViewAllRequests: true,
           managerUserId: true,
         },
       })
@@ -156,6 +174,7 @@ export function createRequestVisibilityDb(client: RequestVisibilityPrisma): Requ
 
       let sharing: readonly string[] = []
       let canWorkOnSolutions = false
+      let engineeringCanViewAllRequests = false
       if (assignment) {
         try {
           sharing = visibleRequestOriginUnitIds(nodes, assignment.unitId)
@@ -163,12 +182,19 @@ export function createRequestVisibilityDb(client: RequestVisibilityPrisma): Requ
           if (!(error instanceof NoSharingScopeError)) throw error
         }
         try {
-          canWorkOnSolutions = ancestorUnitIds(nodes, assignment.unitId).some((id) => {
+          const ancestors = ancestorUnitIds(nodes, assignment.unitId)
+          canWorkOnSolutions = ancestors.some((id) => {
             const unit = nodes.find((row) => row.id === id)
             return unit?.canWorkOnSolutions === true
           })
+          engineeringCanViewAllRequests = hasSolutionWorkEligibility(nodes, assignment.unitId)
+            && ancestors.some((id) => {
+              const unit = nodes.find((row) => row.id === id)
+              return unit?.isActive === true && unit.engineeringCanViewAllRequests === true
+            })
         } catch {
           canWorkOnSolutions = false
+          engineeringCanViewAllRequests = false
         }
       }
 
@@ -186,6 +212,7 @@ export function createRequestVisibilityDb(client: RequestVisibilityPrisma): Requ
         sharingScopeUnitIds: sharing,
         managedUnitIds: [...managed],
         canWorkOnSolutions,
+        engineeringCanViewAllRequests,
       }
     },
     async findRequest(where) {
@@ -197,7 +224,11 @@ export function createRequestVisibilityDb(client: RequestVisibilityPrisma): Requ
   }
 }
 
-export async function canUserViewRequest(userId: string, requestId: string): Promise<boolean> {
+export async function canUserViewRequest(
+  userId: string,
+  requestId: string,
+  options: RequestVisibilityOptions = {},
+): Promise<boolean> {
   const { default: prisma } = await import('@/lib/prisma')
-  return canViewRequestByPredicate(createRequestVisibilityDb(prisma), userId, requestId)
+  return canViewRequestByPredicate(createRequestVisibilityDb(prisma), userId, requestId, options)
 }

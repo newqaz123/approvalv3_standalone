@@ -1990,7 +1990,7 @@ export async function assignEngineers(requestId: string, engineerIds: string[]) 
     throw new Error('Only engineering users can assign engineers')
   }
 
-  if (!(await canUserViewRequest(user.id, requestId))) {
+  if (!(await canUserViewRequest(user.id, requestId, { includeEngineeringViewAll: false }))) {
     throw new Error('Request not found')
   }
 

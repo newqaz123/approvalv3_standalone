@@ -33,7 +33,8 @@ async function requireSubTaskManager() {
 
 async function requireVisibleStageRequest(requestId: string) {
   const user = await getCurrentUser()
-  if (!user || !(await canUserViewRequest(user.id, requestId))) {
+  // The all-request tracking option is read-only, not sub-task/WR access.
+  if (!user || !(await canUserViewRequest(user.id, requestId, { includeEngineeringViewAll: false }))) {
     throw new Error('Request not found')
   }
 

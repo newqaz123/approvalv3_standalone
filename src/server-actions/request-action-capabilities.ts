@@ -112,7 +112,10 @@ export async function getRequestActionCapabilities(requestId: string): Promise<R
     },
   })
 
-  const canView = await canUserViewRequest(userId, requestId)
+  const [canView, canMutate] = await Promise.all([
+    canUserViewRequest(userId, requestId),
+    canUserViewRequest(userId, requestId, { includeEngineeringViewAll: false }),
+  ])
   if (!request || request.isDeleted) {
     return allDecisions({ allowed: false, reason: 'NOT_VISIBLE' })
   }
@@ -281,7 +284,11 @@ export async function getRequestActionCapabilities(requestId: string): Promise<R
 
   const result = {} as Record<RequestAction, ActionDecision>
   for (const action of REQUEST_ACTIONS) {
-    result[action] = evaluateRequestAction(action, context)
+    // Export is a read; tracking-only access must not advertise write controls.
+    result[action] = evaluateRequestAction(action, {
+      ...context,
+      canView: action === 'EXPORT_PDF' ? canView : canMutate,
+    })
   }
   return result
 }
