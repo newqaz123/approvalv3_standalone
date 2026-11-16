@@ -112,9 +112,10 @@ export async function getRequestActionCapabilities(requestId: string): Promise<R
     },
   })
 
-  const [canView, canMutate] = await Promise.all([
+  const [canView, canMutate, canReachSubTasks] = await Promise.all([
     canUserViewRequest(userId, requestId),
     canUserViewRequest(userId, requestId, { includeEngineeringViewAll: false }),
+    canUserViewRequest(userId, requestId, { includeEngineeringViewAll: false, includeSubTaskWork: true }),
   ])
   if (!request || request.isDeleted) {
     return allDecisions({ allowed: false, reason: 'NOT_VISIBLE' })
@@ -287,7 +288,8 @@ export async function getRequestActionCapabilities(requestId: string): Promise<R
     // Export is a read; tracking-only access must not advertise write controls.
     result[action] = evaluateRequestAction(action, {
       ...context,
-      canView: action === 'EXPORT_PDF' ? canView : canMutate,
+      // Sub-task/WR work follows solution-work eligibility across its stages.
+      canView: action === 'EXPORT_PDF' ? canView : action === 'MANAGE_SUB_TASKS' ? canReachSubTasks : canMutate,
     })
   }
   return result

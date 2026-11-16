@@ -5,12 +5,18 @@
 // engineering ROLE still grants no blanket visibility. An explicit inherited
 // engineeringCanViewAllRequests flag broadens reads only; mutation callers
 // exclude that grant and retain the pre-existing visibility relationships.
+// Sub-task/WR work is the one exception: solution workers reach every request
+// in a sub-task stage (includeSubTaskWork), because that work continues after
+// the solution is approved.
 import type { Prisma } from '@prisma/client'
 import { CURRENT_INSTANCE_ROW_FILTER } from '@/lib/approval-engine/current-instance'
 import { ancestorUnitIds, descendantUnitIds, NoSharingScopeError } from '@/lib/organization/hierarchy'
 import type { OrganizationUnitNode } from '@/lib/organization/model'
 import { canWorkOnSolutions as hasSolutionWorkEligibility } from '@/lib/solution-eligibility'
 import { visibleRequestOriginUnitIds } from '@/lib/organization/sharing'
+import { ENGINEERING_SUB_TASK_VISIBLE_STATUSES } from '@/lib/engineering-sub-tasks'
+
+const SOLUTION_WORK_STATUSES = ['SentToEngineer', 'DesignCostEstimationApproval'] as const
 
 export interface RequestVisibilityActor {
   id: string
@@ -33,6 +39,12 @@ export interface RequestVisibilityDb {
 export interface RequestVisibilityOptions {
   /** Mutation checks must exclude the read-only Engineering grant. Defaults to true. */
   includeEngineeringViewAll?: boolean
+  /**
+   * Adds every request in a sub-task stage for solution workers. Lists and
+   * mutations default to false; single-request reads default to true unless
+   * the caller is a mutation check (includeEngineeringViewAll: false).
+   */
+  includeSubTaskWork?: boolean
 }
 
 export async function buildRequestVisibilityWhere(
@@ -63,7 +75,11 @@ export async function buildRequestVisibilityWhere(
   ]
   if (actor.canWorkOnSolutions) {
     relationships.push({
-      status: { in: ['SentToEngineer', 'DesignCostEstimationApproval'] },
+      status: {
+        in: options.includeSubTaskWork === true
+          ? [...new Set([...SOLUTION_WORK_STATUSES, ...ENGINEERING_SUB_TASK_VISIBLE_STATUSES])]
+          : [...SOLUTION_WORK_STATUSES],
+      },
     })
   }
   return { AND: [base, { OR: relationships }] }
@@ -75,7 +91,10 @@ export async function canViewRequestByPredicate(
   requestId: string,
   options: RequestVisibilityOptions = {},
 ): Promise<boolean> {
-  const where = await buildRequestVisibilityWhere(db, { ...options, userId, includeArchived: true })
+  // A solution worker must be able to open the request whose sub-tasks they
+  // manage. Mutation checks stay fail-closed and opt in explicitly.
+  const includeSubTaskWork = options.includeSubTaskWork ?? options.includeEngineeringViewAll !== false
+  const where = await buildRequestVisibilityWhere(db, { ...options, includeSubTaskWork, userId, includeArchived: true })
   const found = await db.findRequest({ AND: [{ id: requestId }, where] })
   return found !== null
 }

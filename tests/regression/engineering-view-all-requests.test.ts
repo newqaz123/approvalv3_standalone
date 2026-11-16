@@ -209,15 +209,58 @@ describe('Engineering viewing does not extend mutation scope', () => {
   }
 })
 
+describe('solution workers reach sub-task stages without the tracking grant', () => {
+  // other-engineering can work on solutions but has no view-all grant.
+  const worker = { assignmentUnitId: 'other-engineering' } as const
+  const subTaskWork = { includeEngineeringViewAll: false, includeSubTaskWork: true }
+
+  for (const status of ['SentToEngineer', 'SendBackToRequester', 'FinalApproval', 'Completed']) {
+    it(`opens and manages sub-tasks on a foreign ${status} request`, async () => {
+      const { db } = fixture({ ...worker, status })
+      assert.equal(await canViewRequestByPredicate(db, 'engineer', 'foreign-request'), true)
+      assert.equal(await canViewRequestByPredicate(db, 'engineer', 'foreign-request', subTaskWork), true)
+    })
+  }
+
+  for (const status of ['ImprovementRequest', 'Cancelled']) {
+    it(`keeps a foreign ${status} request out of reach`, async () => {
+      const { db } = fixture({ ...worker, status })
+      assert.equal(await canViewRequestByPredicate(db, 'engineer', 'foreign-request'), false)
+      assert.equal(await canViewRequestByPredicate(db, 'engineer', 'foreign-request', subTaskWork), false)
+    })
+  }
+
+  for (const status of ['SendBackToRequester', 'FinalApproval', 'Completed']) {
+    it(`does not widen other mutations or request lists for ${status}`, async () => {
+      const { db, request } = fixture({ ...worker, status })
+      assert.equal(await canViewRequestByPredicate(db, 'engineer', 'foreign-request', { includeEngineeringViewAll: false }), false)
+      assert.equal(matches(request, await buildRequestVisibilityWhere(db, { userId: 'engineer', includeArchived: false })), false)
+    })
+
+    it(`gives a user outside solution work no sub-task access to ${status}`, async () => {
+      const { db } = fixture({ assignmentUnitId: 'operations', status, request: { organizationUnitId: 'other-engineering' } })
+      assert.equal(await canViewRequestByPredicate(db, 'engineer', 'foreign-request'), false)
+      assert.equal(await canViewRequestByPredicate(db, 'engineer', 'foreign-request', subTaskWork), false)
+    })
+  }
+})
+
 // Run real server-action bodies, replacing only session/DB/storage boundaries.
 // No real database, filesystem attachment mutation, or environment is used.
-function actionFixture(status: string, owned = false) {
-  const data = fixture({ status, request: owned ? { requesterId: 'engineer' } : {} })
+function actionFixture(status: string, owned = false, assignmentUnitId = 'engineering') {
+  const data = fixture({
+    status, assignmentUnitId,
+    request: {
+      // An operations actor must not reach the request through its own unit.
+      ...(assignmentUnitId === 'operations' ? { organizationUnitId: 'other-engineering' } : {}),
+      ...(owned ? { requesterId: 'engineer' } : {}),
+    },
+  })
   const effects = { requestWrites: 0, deletedFiles: 0, deletedBytes: 0 }
   const prisma = {
     user: { async findUnique() { return data.user } },
     organization_units: { async findMany() { return data.units } },
-    organization_assignments: { async findFirst() { return { unitId: 'engineering' } } },
+    organization_assignments: { async findFirst() { return { unitId: assignmentUnitId } } },
     requests: {
       async findUnique() { return data.request },
       async update() { effects.requestWrites++; return data.request },
@@ -272,9 +315,18 @@ function actionFixture(status: string, owned = false) {
 
 describe('read-only grant at server-action boundaries', () => {
   for (const status of ['SendBackToRequester', 'FinalApproval']) {
-    it(`blocks WR edits on a newly visible ${status} request`, async () => {
-      const { db, effects, loadActionModule } = actionFixture(status)
-      assert.equal(await canViewRequestByPredicate(db, 'engineer', 'foreign-request'), true)
+    for (const unitId of ['engineering', 'other-engineering']) {
+      it(`lets a ${unitId} solution worker edit WR on a foreign ${status} request`, async () => {
+        const { effects, loadActionModule } = actionFixture(status, false, unitId)
+        const actions = loadActionModule('src/server-actions/engineering-sub-tasks.ts')
+        const result = await actions.toggleWorkRequisitionReceived('foreign-request', true)
+        assert.deepEqual({ ...result }, { success: true })
+        assert.equal(effects.requestWrites, 1)
+      })
+    }
+
+    it(`blocks WR edits on a foreign ${status} request outside solution-work units`, async () => {
+      const { effects, loadActionModule } = actionFixture(status, false, 'operations')
       const actions = loadActionModule('src/server-actions/engineering-sub-tasks.ts')
       const result = await actions.toggleWorkRequisitionReceived('foreign-request', true)
       assert.equal(result.success, false)
@@ -288,11 +340,13 @@ describe('read-only grant at server-action boundaries', () => {
       assert.deepEqual(effects, { requestWrites: 0, deletedFiles: 0, deletedBytes: 0 })
     })
 
-    it(`does not advertise write capabilities on a newly visible ${status} request`, async () => {
+    it(`advertises only sub-task management on a newly visible ${status} request`, async () => {
       const { loadActionModule } = actionFixture(status)
       const actions = loadActionModule('src/server-actions/request-action-capabilities.ts')
       const decisions = await actions.getRequestActionCapabilities('foreign-request')
-      for (const action of actionPolicy.REQUEST_ACTIONS) assert.equal(decisions[action].allowed, false, action)
+      for (const action of actionPolicy.REQUEST_ACTIONS) {
+        assert.equal(decisions[action].allowed, action === 'MANAGE_SUB_TASKS', action)
+      }
     })
   }
 
@@ -309,12 +363,24 @@ describe('read-only grant at server-action boundaries', () => {
     assert.equal(decisions.DELETE_ATTACHMENT.allowed, true)
   })
 
-  it('keeps PDF export available for newly visible completed requests without write capabilities', async () => {
+  it('blocks WR edits on a tracking-only request outside the sub-task stages', async () => {
+    const { db, effects, loadActionModule } = actionFixture('ImprovementRequest')
+    assert.equal(await canViewRequestByPredicate(db, 'engineer', 'foreign-request'), true)
+    const actions = loadActionModule('src/server-actions/engineering-sub-tasks.ts')
+    assert.equal((await actions.toggleWorkRequisitionReceived('foreign-request', true)).success, false)
+    assert.equal(effects.requestWrites, 0)
+    const capabilities = loadActionModule('src/server-actions/request-action-capabilities.ts')
+    const decisions = await capabilities.getRequestActionCapabilities('foreign-request')
+    for (const action of actionPolicy.REQUEST_ACTIONS) assert.equal(decisions[action].allowed, false, action)
+  })
+
+  it('keeps PDF export and sub-task management as the only actions on newly visible completed requests', async () => {
     const { loadActionModule } = actionFixture('Completed')
     const actions = loadActionModule('src/server-actions/request-action-capabilities.ts')
     const decisions = await actions.getRequestActionCapabilities('foreign-request')
     assert.equal(decisions.EXPORT_PDF.allowed, true)
-    for (const action of actionPolicy.REQUEST_ACTIONS.filter((name) => name !== 'EXPORT_PDF')) {
+    assert.equal(decisions.MANAGE_SUB_TASKS.allowed, true)
+    for (const action of actionPolicy.REQUEST_ACTIONS.filter((name) => name !== 'EXPORT_PDF' && name !== 'MANAGE_SUB_TASKS')) {
       assert.equal(decisions[action].allowed, false, action)
     }
   })
@@ -418,18 +484,25 @@ describe('read-only grant does not unlock budget changes', () => {
   })
 })
 
-describe('Engineering dashboard work queue ignores the tracking grant', () => {
+describe('Engineering dashboard work queue covers the sub-task stages', () => {
   const page = 'src/app/(dashboard)/engineering/page.tsx'
 
   for (const status of ['FinalApproval', 'SendBackToRequester']) {
-    it(`keeps a tracking-only ${status} request out of Follow up work and the pipeline count`, async () => {
-      const { db, request, wheres, load } = moduleFixture({ status })
-      assert.equal(await canViewRequestByPredicate(db, 'engineer', 'foreign-request'), true)
+    it(`lists a foreign ${status} request in Follow up work and the pipeline count`, async () => {
+      const { request, wheres, load } = moduleFixture({ status })
       await load(page).default()
-      assert.equal(matches(request, wheres.findMany[0]), false)
-      assert.equal(matches(request, wheres.count[0]), false)
+      assert.equal(matches(request, wheres.findMany[0]), true)
+      assert.equal(matches(request, wheres.count[0]), true)
     })
   }
+
+  it('keeps a tracking-only request outside the work stages out of the pipeline count', async () => {
+    const { db, request, wheres, load } = moduleFixture({ status: 'Completed' })
+    assert.equal(await canViewRequestByPredicate(db, 'engineer', 'foreign-request'), true)
+    await load(page).default()
+    assert.equal(matches(request, wheres.findMany[0]), false)
+    assert.equal(matches(request, wheres.count[0]), false)
+  })
 
   it('keeps an already-visible request in Follow up work and the pipeline count', async () => {
     const { request, wheres, load } = moduleFixture({ status: 'FinalApproval', requesterId: 'engineer' })

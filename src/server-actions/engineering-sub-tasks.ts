@@ -34,7 +34,8 @@ async function requireSubTaskManager() {
 async function requireVisibleStageRequest(requestId: string) {
   const user = await getCurrentUser()
   // The all-request tracking option is read-only, not sub-task/WR access.
-  if (!user || !(await canUserViewRequest(user.id, requestId, { includeEngineeringViewAll: false }))) {
+  // Solution workers keep sub-task/WR access through every sub-task stage.
+  if (!user || !(await canUserViewRequest(user.id, requestId, { includeEngineeringViewAll: false, includeSubTaskWork: true }))) {
     throw new Error('Request not found')
   }
 
@@ -335,6 +336,7 @@ export async function getStaleSubTaskRequests(input: { olderThanDays?: number; s
   const visibilityWhere = await buildRequestVisibilityWhere(createRequestVisibilityDb(prisma), {
     userId: user.id,
     includeArchived: false,
+    includeSubTaskWork: true,
   })
 
   return prisma.requests.findMany({
