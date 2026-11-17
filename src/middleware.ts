@@ -67,13 +67,8 @@ export default auth((req) => {
 		if (!user) {
 			return redirectToSignIn();
 		}
-
-		// Redirect admins from /dashboard
-		if (pathname === "/dashboard") {
-			if (user.role === "admin") {
-				return redirectTo("/admin");
-			}
-		}
+		// No role redirect on /dashboard: admin is a flag on a user who still
+		// belongs to a unit, so the unit follow-up board is theirs as well.
 	}
 
 	// Redirect authenticated users from sign-in to appropriate dashboard

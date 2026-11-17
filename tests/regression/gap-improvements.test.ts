@@ -84,6 +84,28 @@ describe("Gapforimprove regressions", () => {
 		assert.match(mobileNav, /href: '\/engineering'/);
 	});
 
+	it("admins keep their unit navigation and get Admin Panel in both shells", () => {
+		const navbar = read("src/components/navigation/navbar.tsx");
+		const mobileNav = read("src/components/mobile/mobile-nav.tsx");
+
+		// Admin Panel is additive: it never replaces Dashboard/Engineering.
+		assert.match(navbar, /{isAdmin && \(\s*<Link\s+href="\/admin"/);
+		assert.doesNotMatch(navbar, /!isAdmin/);
+		assert.match(mobileNav, /href: '\/admin'/);
+		assert.match(mobileNav, /isAdmin \? \[\.\.\.unitTabs, adminTab\] : unitTabs/);
+		assert.doesNotMatch(mobileNav, /!isAdmin/);
+	});
+
+	it("mobile navigation links stay named and announce the current page", () => {
+		const mobileNav = read("src/components/mobile/mobile-nav.tsx");
+
+		// Icon-only below sm: the label must stay in the accessibility tree
+		// (sr-only), not display:none, or the links have no name.
+		assert.match(mobileNav, /'text-sm font-medium sr-only', labelVisibleClass\)}>\{tab\.name\}/);
+		assert.doesNotMatch(mobileNav, /hidden sm:inline/);
+		assert.match(mobileNav, /aria-current=\{isActive \? 'page' : undefined\}/);
+	});
+
 	it("desktop My Actions navigation shows the pending action count badge", () => {
 		const navbar = read("src/components/navigation/navbar.tsx");
 

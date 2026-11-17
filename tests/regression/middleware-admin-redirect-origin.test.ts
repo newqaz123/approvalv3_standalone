@@ -134,7 +134,9 @@ describe('middleware admin-route denial keeps the session on-origin', () => {
     })
   }
 
-  it('/dashboard still redirects an admin to /admin', async () => {
+  // Admin is a flag on a user who still belongs to a unit (general or
+  // engineering), so the unit follow-up board at /dashboard is theirs too.
+  it('/dashboard is reachable by an admin and is not redirected to /admin', async () => {
     const cookie = await mintSessionCookie('admin')
     const response = await middleware(new NextRequest(`${BROWSER_ORIGIN}/dashboard`, {
       headers: {
@@ -143,8 +145,8 @@ describe('middleware admin-route denial keeps the session on-origin', () => {
         'x-forwarded-proto': 'http',
       },
     }))
-    assert.equal(response.status, 307)
-    assert.equal(response.headers.get('location'), `${BROWSER_ORIGIN}/admin`)
+    assert.equal(response.status, 200)
+    assert.equal(response.headers.get('location'), null)
   })
 
   it('non-admin /admin passes through middleware without a redirect under a dev-synthesized localhost host header', async () => {
