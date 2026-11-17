@@ -3,7 +3,6 @@ import {
 } from '@/lib/inline-images/presentation'
 
 export type InlineImageResizeEdge = 'left' | 'right'
-export type InlineImageResizeKey = 'ArrowLeft' | 'ArrowRight' | 'Home'
 
 export type InlineImageResizeSession = {
   preview(pointerX: number): number

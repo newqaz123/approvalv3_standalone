@@ -269,8 +269,8 @@ describe('request filter options are organization units', () => {
     )
     assert.match(myRequests, /descendantUnitIds\(units, filters\.unitId\)/)
 
-    const dashboardTabs = read('src/components/dashboard/dashboard-tabs.tsx')
-    assert.match(dashboardTabs, /getRequestFilterOptions\(\)/)
+    const requestPage = read('src/app/(dashboard)/requests/page.tsx')
+    assert.match(requestPage, /getRequestFilterOptions\(\)/)
   })
 })
 
@@ -307,12 +307,12 @@ describe('budget unitId path uses organization units', () => {
 })
 
 describe('leftover Prisma department.id consumers rebase onto organizationUnit', () => {
-  it('maps dashboard pending/created/all-request rows from organizationUnit', () => {
-    const source = read('src/server-actions/dashboard.ts')
+  it('loads follow-up dashboard rows through the shared organization-unit request query', () => {
+    const dashboard = read('src/server-actions/dashboard.ts')
+    assert.match(dashboard, /getMyRequests\(\{ wrStatus: "all" \}\)/)
+    const source = sliceBetween('src/server-actions/requests.ts', 'export async function getMyRequests', 'export async function getRequest')
     assert.match(source, /organizationUnit:\s*\{\s*select:\s*\{\s*id:\s*true,\s*name:\s*true/)
     assert.doesNotMatch(source, /department:\s*\{\s*select:\s*\{\s*id:\s*true,\s*name:\s*true/)
-    assert.match(source, /department:\s*approval\.request\.organizationUnit/)
-    assert.match(source, /department:\s*request\.organizationUnit/)
     assert.match(source, /department:\s*req\.organizationUnit/)
   })
 
@@ -424,17 +424,12 @@ describe('name-only department.name joins rebase onto organizationUnit', () => {
     assert.doesNotMatch(speeds, /department:\s*\{\s*select:\s*\{\s*name:\s*true/)
   })
 
-  it('loads notification and stale-sub-task names from organizationUnit', () => {
+  it('loads notification names from organizationUnit', () => {
     const notifications = read('src/server-actions/notifications.ts')
     assert.match(notifications, /organizationUnit:\s*\{\s*select:\s*\{\s*name:\s*true/)
     assert.match(notifications, /request\.organizationUnit\?\.name/)
     assert.doesNotMatch(notifications, /department:\s*\{\s*select:\s*\{\s*name:\s*true/)
 
-    const stale = read('src/server-actions/engineering-sub-tasks.ts')
-    const staleStart = stale.indexOf('export async function getStaleSubTaskRequests')
-    assert.ok(staleStart >= 0)
-    const staleBody = stale.slice(staleStart)
-    assert.match(staleBody, /organizationUnit:\s*\{\s*select:\s*\{\s*name:\s*true/)
-    assert.doesNotMatch(staleBody, /department:\s*\{\s*select:\s*\{\s*name:\s*true/)
+
   })
 })

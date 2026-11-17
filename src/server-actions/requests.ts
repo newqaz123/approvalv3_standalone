@@ -2,18 +2,13 @@
 
 import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
-import { revalidatePath } from 'next/cache'
 import { revalidateRequestViews } from './request-view-invalidation'
 import { z } from 'zod'
 import { requireAdmin } from '@/lib/auth'
 import { createSolutionWorkActorDb, isActorSolutionWorker } from '@/lib/solution-work-actor'
 import { filterSolutionWorkUserIds, listSolutionWorkUsers } from '@/lib/solution-work-users'
 import { getCurrentUser } from '@/lib/cache/user-cache'
-import {
-  attachmentFileExists,
-  deleteAttachmentFile,
-  isRequestDraftReadyPath,
-} from '@/lib/attachments/storage'
+import { attachmentFileExists, isRequestDraftReadyPath } from '@/lib/attachments/storage'
 import { MAX_ATTACHMENTS_PER_FORM } from '@/lib/attachments/policy'
 import { descriptionSchema } from '@/lib/schemas/solution-schemas'
 import {
@@ -1159,7 +1154,7 @@ export async function cancelRequest(input: { requestId: string; reason: string }
       hasPendingSolutionApprovals: pendingSolutionApprovals > 0,
     })
     const cancelAction = evaluateRequestAction('CANCEL_REQUEST', {
-      actor: { id: userId, role: '', isActive: true, assignmentUnitId: null },
+      actor: { id: userId, isActive: true, assignmentUnitId: null },
       request: { requesterId: request.requesterId, organizationUnitId: null, status: request.status },
       canView: true,
       approval: null,
@@ -1226,114 +1221,6 @@ export async function cancelRequest(input: { requestId: string; reason: string }
   revalidateRequestViews()
 
   return { success: true }
-}
-
-const deleteRequestSchema = z.object({
-  requestId: z.string().min(1, 'Request ID is required'),
-  reason: z.string().min(10, 'Reason must be at least 10 characters').max(500, 'Reason too long'),
-})
-
-/**
- * Delete a request (ADMIN ONLY)
- * - Marks request as deleted (soft delete)
- * - Cleans up file attachments from disk
- * - Preserves audit trail in activities
- * - Logs deletion action
- */
-export async function deleteRequest(input: { requestId: string; reason: string }) {
-  // Verify user is admin
-  const adminUserId = await requireAdmin()
-  if (!adminUserId) {
-    return {
-      success: false,
-      error: 'Unauthorized - Admin access required',
-    }
-  }
-
-  // Validate input
-  const validatedFields = deleteRequestSchema.safeParse(input)
-  if (!validatedFields.success) {
-    return {
-      success: false,
-      errors: validatedFields.error.flatten().fieldErrors,
-    }
-  }
-
-  const { requestId, reason } = validatedFields.data
-
-  try {
-    // Get request with file attachments before soft delete
-    const request = await prisma.requests.findUnique({
-      where: { id: requestId },
-      include: {
-        fileAttachments: true,
-      },
-    })
-
-    if (!request) {
-      return {
-        success: false,
-        error: 'Request not found',
-      }
-    }
-
-    // Check if already deleted
-    if (request.isDeleted) {
-      return {
-        success: false,
-        error: 'Request is already deleted',
-      }
-    }
-
-    // Perform soft delete and log activity in transaction
-    await prisma.$transaction([
-      // Soft delete the request
-      prisma.requests.update({
-        where: { id: requestId },
-        data: {
-          isDeleted: true,
-          deletedAt: new Date(),
-          deletedBy: adminUserId,
-        },
-      }),
-      // Log deletion in audit trail
-      prisma.request_activities.create({
-        data: {
-          requestId,
-          action: 'deleted',
-          fromStatus: request.status,
-          toStatus: request.status,
-          comments: `Request deleted by admin. Reason: ${reason}`,
-          userId: adminUserId,
-        },
-      }),
-    ])
-
-    // Clean up files from disk (after transaction succeeds) via the private
-    // storage layer so legacy public/ path joins are not reconstructed here.
-    for (const attachment of request.fileAttachments) {
-      try {
-        await deleteAttachmentFile(attachment.filePath)
-      } catch (error) {
-        // Log warning but don't fail the operation
-        console.warn(`Failed to delete attachment ${attachment.filePath}:`, error)
-      }
-    }
-
-    revalidateRequestViews()
-    revalidatePath('/admin')
-
-    return {
-      success: true,
-      message: 'Request deleted successfully',
-    }
-  } catch (error) {
-    console.error('Error deleting request:', error)
-    return {
-      success: false,
-      error: 'Failed to delete request',
-    }
-  }
 }
 
 /**
@@ -2013,7 +1900,6 @@ export async function assignEngineers(requestId: string, engineerIds: string[]) 
   const assignAction = evaluateRequestAction('ASSIGN_ENGINEERS', {
     actor: {
       id: user.id,
-      role: user.role,
       isActive: user.isActive !== false,
       assignmentUnitId: null,
     },
@@ -2119,121 +2005,6 @@ export async function getEngineeringUsers() {
   return listSolutionWorkUsers(prisma)
 }
 
-export interface GetRequestsForEngineeringFilters {
-  unitId?: string
-  assignedEngineerId?: string
-  status?: string
-  dateFrom?: string
-  dateTo?: string
-  search?: string
-}
-
-/**
- * Get requests for engineering view
- * Base query: status IN (SentToEngineer, DesignCostEstimationApproval)
- */
-export async function getRequestsForEngineering(filters?: GetRequestsForEngineeringFilters) {
-  const user = await getCurrentUser()
-
-  if (!user || !(await isActorSolutionWorker(createSolutionWorkActorDb(prisma), user.id))) {
-    throw new Error('Only engineering users can access engineering requests')
-  }
-
-  const visibilityWhere = await buildRequestVisibilityWhere(createRequestVisibilityDb(prisma), {
-    userId: user.id,
-    includeArchived: false,
-  })
-  const engineeringFilters: Prisma.requestsWhereInput = {
-    status: {
-      in: ['SentToEngineer', 'DesignCostEstimationApproval'],
-    },
-  }
-
-  if (filters) {
-    if (filters.unitId) {
-      const units = await loadOrganizationUnitNodes()
-      engineeringFilters.organizationUnitId = {
-        in: descendantUnitIds(units, filters.unitId),
-      }
-    }
-    if (filters.assignedEngineerId) {
-      engineeringFilters.engineerAssignments = {
-        some: {
-          engineerId: filters.assignedEngineerId,
-        },
-      }
-    }
-    if (filters.status) {
-      engineeringFilters.status = filters.status as never
-    }
-    if (filters.dateFrom || filters.dateTo) {
-      const createdAt: Prisma.DateTimeFilter = {}
-      if (filters.dateFrom) {
-        createdAt.gte = new Date(filters.dateFrom)
-      }
-      if (filters.dateTo) {
-        const endDate = new Date(filters.dateTo)
-        endDate.setHours(23, 59, 59, 999)
-        createdAt.lte = endDate
-      }
-      engineeringFilters.createdAt = createdAt
-    }
-    if (filters.search) {
-      engineeringFilters.OR = [
-        { title: { contains: filters.search, mode: 'insensitive' } },
-        { description: { contains: filters.search, mode: 'insensitive' } },
-        { id: { contains: filters.search, mode: 'insensitive' } },
-        { requester: { name: { contains: filters.search, mode: 'insensitive' } } },
-      ]
-    }
-  }
-
-  const requests = await prisma.requests.findMany({
-    where: { AND: [visibilityWhere, engineeringFilters] },
-    include: {
-      organizationUnit: {
-        select: {
-          name: true,
-        },
-      },
-      requester: {
-        select: {
-          id: true,
-          name: true,
-        },
-      },
-      engineerAssignments: {
-        include: {
-          engineer: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
-        },
-      },
-      solutions: {
-        take: 1,
-        orderBy: {
-          createdAt: 'desc',
-        },
-        select: {
-          id: true,
-          title: true,
-          costEstimate: true,
-          currency: true,
-          submittedAt: true,
-        },
-      },
-    },
-    orderBy: {
-      createdAt: 'desc',
-    },
-  })
-
-  return requests
-}
-
 /**
  * Resubmit a rejected request
  * - Validates that request has rejections and requester owns it
@@ -2293,7 +2064,7 @@ export async function resubmitRequest(input: {
   }
 
   const resubmitAction = evaluateRequestAction('RESUBMIT_REQUEST', {
-    actor: { id: userId, role: '', isActive: true, assignmentUnitId: null },
+    actor: { id: userId, isActive: true, assignmentUnitId: null },
     request: {
       requesterId: request.requesterId,
       organizationUnitId: request.organizationUnitId,
@@ -2547,48 +2318,6 @@ export async function unarchiveRequest(requestId: string) {
   } catch (error) {
     console.error('Error unarchiving request:', error)
     return { success: false, error: 'Failed to unarchive request' }
-  }
-}
-
-/**
- * Permanently hard-delete a single request (ADMIN ONLY)
- * Cannot be undone. Removes all associated data.
- */
-export async function permanentDeleteRequest(requestId: string) {
-  const adminUserId = await requireAdmin()
-  if (!adminUserId) {
-    return {
-      success: false,
-      error: 'Unauthorized - Admin access required',
-    }
-  }
-
-  try {
-    const request = await prisma.requests.findUnique({
-      where: { id: requestId },
-      select: { id: true },
-    })
-
-    if (!request) {
-      return { success: false, error: 'Request not found' }
-    }
-
-    // Soft delete — hard delete is blocked by the append-only audit trail trigger on request_activities
-    await prisma.requests.update({
-      where: { id: requestId },
-      data: {
-        isDeleted: true,
-        deletedAt: new Date(),
-        deletedBy: adminUserId,
-      },
-    })
-
-    revalidateRequestViews()
-
-    return { success: true }
-  } catch (error) {
-    console.error('Error permanently deleting request:', error)
-    return { success: false, error: 'Failed to delete request' }
   }
 }
 

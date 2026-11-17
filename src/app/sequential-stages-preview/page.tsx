@@ -707,7 +707,6 @@ export default function SequentialStagesPreview() {
         open={activeModal === 'request-completed'}
         onOpenChange={() => setActiveModal(null)}
         data={completedRequestData}
-        userDepartment={userDepartment}
         onSubmitSolution={() => {
           alert(`Submit Solution button clicked!\\nUser department: ${userDepartment}\\nThis would open the solution submission modal.`)
         }}
@@ -764,7 +763,6 @@ export default function SequentialStagesPreview() {
         open={activeModal === 'solution-completed'}
         onOpenChange={() => setActiveModal(null)}
         data={completedSolutionData}
-        userDepartment={userDepartment}
         onSubmitFinalApproval={() => {
           alert(`Submit Final Approval button clicked!\\nUser department: ${userDepartment}\\nThis would open the final approval submission modal.`)
         }}

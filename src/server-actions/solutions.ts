@@ -45,9 +45,7 @@ import {
   type CleanStartAttemptStore,
 } from '@/lib/approval-engine/attempts'
 import { canWorkOnSolutions } from '@/lib/solution-eligibility'
-import { createSolutionWorkActorDb, isActorSolutionWorker } from '@/lib/solution-work-actor'
 import type { OrganizationUnitNode } from '@/lib/organization/model'
-import { canUserViewRequest } from '@/lib/request-visibility/scope'
 import { CURRENT_INSTANCE_ROW_FILTER } from '@/lib/approval-engine/current-instance'
 import {
   evaluateRequestAction,
@@ -268,7 +266,7 @@ export async function submitSolution(input: SubmitSolutionActionInput) {
   // Get current user with role and level
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, role: true,  isActive: true },
+    select: { id: true,  isActive: true },
   })
 
   if (!user) {
@@ -303,7 +301,6 @@ export async function submitSolution(input: SubmitSolutionActionInput) {
   const submitAction = evaluateRequestAction('SUBMIT_SOLUTION', {
     actor: {
       id: user.id,
-      role: user.role,
       isActive: user.isActive !== false,
       assignmentUnitId: actorAssignment?.unitId ?? null,
     },
@@ -548,189 +545,6 @@ export async function submitSolution(input: SubmitSolutionActionInput) {
 }
 
 /**
- * Get solution by ID with related data. Authenticated callers must also pass
- * the shared request-visibility policy for the owning request before any
- * solution payload, request context, or attachment list is returned.
- */
-export async function getSolutionBySolutionId(solutionId: string) {
-  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
-  if (!userId) {
-    throw new Error('Unauthorized')
-  }
-
-  const solution = await prisma.solutions.findUnique({
-    where: { id: solutionId },
-    include: {
-      submittedBy: {
-        select: { id: true, name: true, email: true },
-      },
-      request: {
-        select: {
-          id: true,
-          title: true,
-          status: true,
-          requesterId: true,
-        },
-      },
-      fileAttachments: {
-        select: {
-          id: true,
-          fileName: true,
-          fileType: true,
-          fileSize: true,
-          filePath: true,
-          createdAt: true,
-        },
-      },
-    },
-  })
-
-  if (!solution) {
-    return null
-  }
-  if (!(await canUserViewRequest(userId, solution.request.id))) {
-    return null
-  }
-
-  // Convert Decimal to number for client component serialization
-  return {
-    ...solution,
-    costEstimate: Number(solution.costEstimate),
-  }
-}
-
-/**
- * Get solution by request ID
- * Returns the solution if one exists for the request. Visibility is the
- * shared request policy: a caller who cannot view the request learns
- * nothing about its solutions.
- */
-export async function getSolutionByRequestId(requestId: string) {
-  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
-  if (!userId) {
-    throw new Error('Unauthorized')
-  }
-
-  if (!(await canUserViewRequest(userId, requestId))) {
-    return null
-  }
-
-  const solution = await prisma.solutions.findFirst({
-    where: { requestId },
-    include: {
-      submittedBy: {
-        select: { id: true, name: true, email: true },
-      },
-      fileAttachments: {
-        select: {
-          id: true,
-          fileName: true,
-          fileType: true,
-          fileSize: true,
-          filePath: true,
-          createdAt: true,
-        },
-      },
-    },
-    orderBy: { createdAt: 'desc' },
-  })
-
-  // Convert Decimal to number for client component serialization
-  if (solution) {
-    return {
-      ...solution,
-      costEstimate: Number(solution.costEstimate),
-    }
-  }
-
-  return solution
-}
-
-/**
- * Get solution approvals with eligible approvers
- * For custom chains, returns the specific required approver
- * For hierarchy chains, returns all eligible users at each level
- * Authentication plus the owning request's shared visibility policy gate
- * every return path; approval metadata never leaks to invisible callers.
- */
-export async function getSolutionApprovals(solutionId: string) {
-  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
-  if (!userId) {
-    throw new Error('Unauthorized')
-  }
-
-  const owningRequest = await prisma.solutions.findUnique({
-    where: { id: solutionId },
-    select: { requestId: true },
-  })
-  if (!owningRequest) {
-    return []
-  }
-  if (!(await canUserViewRequest(userId, owningRequest.requestId))) {
-    return []
-  }
-
-  const solution = await prisma.solutions.findUnique({
-    where: { id: solutionId },
-    include: {
-      request: {
-        select: { id: true },
-      },
-    },
-  })
-
-  if (!solution) {
-    return []
-  }
-
-  const approvals = await prisma.solution_approvals.findMany({
-    where: { solutionId },
-    include: {
-      approver: {
-        select: {
-          id: true,
-          name: true,
-          email: true,
-
-        },
-      },
-      requiredApprover: {
-        select: {
-          id: true,
-          name: true,
-          email: true,
-
-        },
-      },
-    },
-    orderBy: { order: 'asc' },
-  })
-
-  // For hierarchy-based approvals, add eligible approvers at each level
-  const approvalsWithEligible = await Promise.all(
-    approvals.map(async (approval) => {
-      let eligibleApprovers: Array<{ id: string; name: string; level: number | null }> = []
-
-      if (approval.status === 'pending' && approval.candidateGroupId) {
-        const users = await prisma.approval_candidate_group_members.findMany({
-          where: { candidateGroupId: approval.candidateGroupId },
-          select: { userId: true, capturedDisplayName: true },
-          take: 10,
-        })
-        eligibleApprovers = users.map((row) => ({ id: row.userId, name: row.capturedDisplayName, level: null }))
-      }
-
-      return {
-        ...approval,
-        eligibleApprovers,
-      }
-    })
-  )
-
-  return approvalsWithEligible
-}
-
-/**
  * Check if current user can approve a specific solution
  * Returns the approval record if user can approve
  */
@@ -746,7 +560,7 @@ export async function canUserApproveSolution(solutionId: string): Promise<{
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, role: true },
+    select: { id: true },
   })
 
   if (!user) {
@@ -816,7 +630,7 @@ export async function approveSolution(solutionId: string, comments?: string, exp
 
   const { canApprove, approval, solution } = await canUserApproveSolution(solutionId)
   const approveSolutionAction = evaluateRequestAction('APPROVE_SOLUTION', {
-    actor: { id: userId, role: '', isActive: true, assignmentUnitId: null },
+    actor: { id: userId, isActive: true, assignmentUnitId: null },
     request: {
       requesterId: '',
       organizationUnitId: null,
@@ -911,7 +725,7 @@ export async function rejectSolution(solutionId: string, comments: string, expec
 
   const { canApprove, approval, solution } = await canUserApproveSolution(solutionId)
   const rejectSolutionAction = evaluateRequestAction('REJECT_SOLUTION', {
-    actor: { id: userId, role: '', isActive: true, assignmentUnitId: null },
+    actor: { id: userId, isActive: true, assignmentUnitId: null },
     request: {
       requesterId: '',
       organizationUnitId: null,
@@ -1056,132 +870,6 @@ export async function rejectSolution(solutionId: string, comments: string, expec
 }
 
 /**
- * Mark a request as completed (manual completion by engineering)
- * Allows engineering to track completion without formal final approval
- */
-export async function markRequestComplete(requestId: string, completionNote?: string) {
-  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
-  if (!userId) {
-    throw new Error('Unauthorized')
-  }
-
-  // Get current user with role
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { id: true, role: true, name: true },
-  })
-
-  if (!user) {
-    throw new Error('User not found')
-  }
-
-  // Unit "Can work on solutions" flag, not the user role (H9).
-  if (!(await isActorSolutionWorker(createSolutionWorkActorDb(prisma), user.id))) {
-    throw new Error('Your organization assignment is not eligible to mark requests complete')
-  }
-
-  // Validate request exists and is in correct status
-  const request = await prisma.requests.findUnique({
-    where: { id: requestId },
-    select: {
-      id: true,
-      title: true,
-      status: true,
-      requesterId: true,
-    },
-  })
-
-  if (!request) {
-    throw new Error('Request not found')
-  }
-
-  if (request.status !== RequestStatus.SendBackToRequester) {
-    throw new Error(`Request can only be marked complete when in SendBackToRequester status. Current status: ${request.status}`)
-  }
-
-  // Use transaction for atomicity
-  await prisma.$transaction(async (tx) => {
-    // Update request status to Completed via the shared expected-status guard:
-    // a requester cancellation that committed first makes this match zero
-    // rows and throw, so the completion is not written over the cancellation.
-    await updateRequestStatusExpecting(tx, {
-      requestId,
-      expectedStatuses: [RequestStatus.SendBackToRequester],
-      data: { status: RequestStatus.Completed },
-      actionLabel: 'mark the request complete',
-    })
-
-    // Log activity
-    await tx.request_activities.create({
-      data: {
-        requestId,
-        userId: user.id,
-        action: 'manually_completed',
-        fromStatus: RequestStatus.SendBackToRequester,
-        toStatus: RequestStatus.Completed,
-        comments: completionNote || 'Manually marked as completed by engineering',
-      },
-    })
-
-    // Create notification for requester
-    await tx.notifications.create({
-      data: {
-        userId: request.requesterId,
-        type: 'status_changed',
-        title: 'Request Completed',
-        message: `Your request "${request.title}" has been marked as completed`,
-        requestId,
-      },
-    })
-  })
-
-  revalidateRequestViews()
-
-  return { success: true }
-}
-
-/**
- * Check if current user can mark a request as complete
- */
-export async function canMarkComplete(requestId: string): Promise<{
-  canMark: boolean
-  reason?: string
-}> {
-  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
-  if (!userId) {
-    return { canMark: false, reason: 'Not authenticated' }
-  }
-
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { id: true, role: true },
-  })
-
-  if (!user) {
-    return { canMark: false, reason: 'User not found' }
-  }
-
-  if (!(await isActorSolutionWorker(createSolutionWorkActorDb(prisma), user.id))) {
-    return { canMark: false, reason: 'Your organization assignment is not eligible to mark requests complete' }
-  }
-
-  const request = await prisma.requests.findUnique({
-    where: { id: requestId },
-    select: { status: true },
-  })
-
-  if (!request) {
-    return { canMark: false, reason: 'Request not found' }
-  }
-
-  if (request.status !== RequestStatus.SendBackToRequester) {
-    return { canMark: false, reason: `Request must be in SendBackToRequester status. Current: ${request.status}` }
-  }
-
-  return { canMark: true }
-}
-
-/**
  * Resolve the next solution approver(s) using transaction reads and enqueue
  * immutable notification descriptions. Delivery is owned by the caller's
  * post-commit transaction wrapper.
@@ -1243,7 +931,7 @@ export async function initiateFinalApproval(
   // Get current user
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, role: true, isActive: true },
+    select: { id: true, isActive: true },
   })
 
   if (!user) {
@@ -1282,7 +970,6 @@ export async function initiateFinalApproval(
   const initiateAction = evaluateRequestAction('INITIATE_FINAL_APPROVAL', {
     actor: {
       id: user.id,
-      role: user.role,
       isActive: user.isActive,
       assignmentUnitId: actorAssignment?.unitId ?? null,
     },
@@ -1496,7 +1183,7 @@ export async function approveFinalApproval(requestId: string, comments?: string,
 
   const { canApprove, approval } = await canUserApproveFinalApproval(requestId)
   const approveFinalAction = evaluateRequestAction('APPROVE_FINAL', {
-    actor: { id: userId, role: '', isActive: true, assignmentUnitId: null },
+    actor: { id: userId, isActive: true, assignmentUnitId: null },
     request: { requesterId: '', organizationUnitId: null, status: 'FinalApproval' },
     canView: true,
     approval: { canApprove },
@@ -1578,7 +1265,7 @@ export async function rejectFinalApproval(requestId: string, comments: string, e
 
   const { canApprove, approval } = await canUserApproveFinalApproval(requestId)
   const rejectFinalAction = evaluateRequestAction('REJECT_FINAL', {
-    actor: { id: userId, role: '', isActive: true, assignmentUnitId: null },
+    actor: { id: userId, isActive: true, assignmentUnitId: null },
     request: { requesterId: '', organizationUnitId: null, status: 'FinalApproval' },
     canView: true,
     approval: { canApprove },
@@ -1778,7 +1465,7 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
   // Get current user with role and level
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, role: true,  isActive: true },
+    select: { id: true,  isActive: true },
   })
 
   if (!user) {
@@ -1845,7 +1532,6 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
   const resubmitSolutionAction = evaluateRequestAction('RESUBMIT_SOLUTION', {
     actor: {
       id: user.id,
-      role: user.role,
       isActive: user.isActive !== false,
       assignmentUnitId: actorAssignment?.unitId ?? null,
     },

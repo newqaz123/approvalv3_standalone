@@ -2,36 +2,8 @@
 
 import { formatFileSize } from "@/lib/format-file-size";
 import { format } from "date-fns";
-import {
-	Download,
-	Eye,
-	Info,
-	Paperclip,
-	TrendingUp,
-	Lock,
-	History,
-	FileImage,
-	FileSpreadsheet,
-	File,
-	FileText,
-	Check,
-	Activity,
-	ChevronDown,
-	ChevronUp,
-	CheckCircle2,
-	Send,
-	DollarSign,
-	UserCheck,
-	Package,
-	Clock3,
-	Shield,
-} from "lucide-react";
-import {
-	Dialog,
-	DialogContent,
-	DialogHeader,
-	DialogTitle,
-} from "@/components/ui/dialog";
+import { Download, Eye, Info, Paperclip, TrendingUp, History, FileImage, FileSpreadsheet, File, FileText, Check, Activity, ChevronDown, ChevronUp, CheckCircle2, Package, Clock3, Shield } from "lucide-react";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { RequestModalHeader } from "./request-modal-header";
 import { FormattedText } from "@/components/ui/formatted-text";
 import { Separator } from "@/components/ui/separator";
@@ -106,8 +78,6 @@ interface CompletedSolutionModalProps {
 		sentToRequesterAt: string;
 		requesterName?: string;
 	};
-	userDepartment?: string;
-	userId?: string;
 	isRequesterDepartment?: boolean;
 	onSubmitFinalApproval?: () => void;
 	showCancel?: boolean;
@@ -236,8 +206,6 @@ export function CompletedSolutionModal({
 	open,
 	onOpenChange,
 	data,
-	userDepartment,
-	userId,
 	isRequesterDepartment = false,
 	onSubmitFinalApproval,
 	showCancel,

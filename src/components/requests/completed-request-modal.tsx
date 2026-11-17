@@ -20,12 +20,7 @@ import {
 	CheckCircle2,
 	Send,
 } from "lucide-react";
-import {
-	Dialog,
-	DialogContent,
-	DialogHeader,
-	DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { RequestModalHeader } from "./request-modal-header";
 import { Separator } from "@/components/ui/separator";
 import { FormattedText } from "@/components/ui/formatted-text";
@@ -90,8 +85,6 @@ interface CompletedRequestModalProps {
 		sentToEngineerAt: string;
 		engineerAssigned?: string;
 	};
-	userDepartment?: string;
-	userRole?: string;
 	onSubmitSolution?: () => void;
 	showCancel?: boolean;
 	onCancelled?: () => void;

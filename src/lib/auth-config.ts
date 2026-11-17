@@ -165,4 +165,4 @@ const authConfig: NextAuthConfig = {
   trustHost: true,
 }
 
-export const { handlers, auth, signIn, signOut } = NextAuth(authConfig)
+export const { handlers, auth } = NextAuth(authConfig)

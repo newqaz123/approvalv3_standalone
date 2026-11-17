@@ -60,7 +60,7 @@ export interface ActionDecision {
 }
 
 export interface ActionPermissionContext {
-  actor: { id: string; role: string; isActive: boolean; assignmentUnitId: string | null }
+  actor: { id: string; isActive: boolean; assignmentUnitId: string | null }
   request: { requesterId: string; organizationUnitId: string | null; status: string }
   canView: boolean
   approval: { canApprove: boolean } | null

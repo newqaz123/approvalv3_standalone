@@ -145,10 +145,3 @@ export function ExceptionBranchBadges({
     </TooltipProvider>
   )
 }
-
-export function exceptionSourceLabel(
-  source: RouteSource,
-  units: readonly OrganizationSnapshotUnit[],
-): string {
-  return sourceLabel(source, new Map(units.map((unit) => [unit.id, unit])))
-}

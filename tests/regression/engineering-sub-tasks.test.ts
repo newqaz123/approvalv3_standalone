@@ -201,7 +201,7 @@ describe("engineering sub-task helpers", () => {
 });
 
 describe("engineering sub-task server action wiring", () => {
-	it("exposes CRUD, WR, stages, subcontractor, and stale filter actions", () => {
+	it("exposes the active CRUD, WR, stages, and subcontractor actions", () => {
 		const source = readFileSync(
 			"src/server-actions/engineering-sub-tasks.ts",
 			"utf8",
@@ -215,8 +215,6 @@ describe("engineering sub-task server action wiring", () => {
 			"deleteSubTask",
 			"toggleWorkRequisitionReceived",
 			"createSubContractor",
-			"deactivateSubContractor",
-			"getStaleSubTaskRequests",
 		]) {
 			assert.match(
 				source,
@@ -243,10 +241,8 @@ describe("engineering sub-task server action wiring", () => {
 		assert.deepEqual(exportedAsyncFunctions, [
 			"createSubContractor",
 			"createSubTask",
-			"deactivateSubContractor",
 			"deleteSubTask",
 			"getEngineeringSubTaskOptions",
-			"getStaleSubTaskRequests",
 			"setSubTaskCompleted",
 			"toggleWorkRequisitionReceived",
 			"updateSubTask",
@@ -314,9 +310,8 @@ describe("engineering sub-task request and filter wiring", () => {
 		const requests = readFileSync("src/server-actions/requests.ts", "utf8");
 		const dashboard = readFileSync("src/server-actions/dashboard.ts", "utf8");
 
-		for (const source of [requests, dashboard]) {
-			assert.match(source, /workRequisitionReceived: true/);
-		}
+		assert.match(requests, /workRequisitionReceived: true/);
+		assert.match(dashboard, /getMyRequests\(\{ wrStatus: "all" \}\)/);
 
 		assert.match(
 			requests,
@@ -335,7 +330,7 @@ describe("engineering sub-task request and filter wiring", () => {
 		);
 	});
 
-	it("wires WR filters into requests API, request filters, and dashboard filters", () => {
+	it("wires WR filters into the requests API and live request table", () => {
 		const api = readFileSync("src/app/api/requests/route.ts", "utf8");
 		const requestFilters = readFileSync(
 			"src/components/requests/request-filters.tsx",
@@ -343,18 +338,6 @@ describe("engineering sub-task request and filter wiring", () => {
 		);
 		const requestList = readFileSync(
 			"src/components/requests/requests-list-with-filters.tsx",
-			"utf8",
-		);
-		const dashboardFilters = readFileSync(
-			"src/components/dashboard/table-filters.tsx",
-			"utf8",
-		);
-		const dashboardTable = readFileSync(
-			"src/components/dashboard/dashboard-table.tsx",
-			"utf8",
-		);
-		const dashboardTabs = readFileSync(
-			"src/components/dashboard/dashboard-tabs.tsx",
 			"utf8",
 		);
 		const dashboardPage = readFileSync(
@@ -394,37 +377,6 @@ describe("engineering sub-task request and filter wiring", () => {
 		assert.match(requestTable, /workRequisitionReceived\?: boolean/);
 		assert.match(requestTable, /bg-sky-50/);
 		assert.doesNotMatch(requestTable, /bg-emerald-50/);
-		assert.match(
-			dashboardFilters,
-			/wrStatus\?: ['"]all['"] \| ['"]not-received['"] \| ['"]received['"]/,
-		);
-		assert.match(dashboardFilters, /DEFAULT_WR_FILTER = ["']all["']/);
-		assert.match(dashboardFilters, /Show only no WR/);
-		assert.match(dashboardFilters, /h-10 min-h-10/);
-		assert.match(
-			dashboardFilters,
-			/className=\{cn\(\s*["']h-10 min-h-10 w-full/,
-		);
-		assert.match(dashboardFilters, /translate-x-4/);
-		assert.match(dashboardFilters, /bg-emerald-500/);
-		assert.doesNotMatch(dashboardFilters, /border-dashed/);
-		assert.doesNotMatch(dashboardFilters, /bg-amber-50/);
-		assert.doesNotMatch(
-			dashboardFilters,
-			/<SelectItem value="received">WR Received<\/SelectItem>/,
-		);
-		assert.match(dashboardTable, /filterRowsByWorkRequisition/);
-		assert.match(dashboardTable, /data: tableData/);
-		assert.match(dashboardTable, /id: 'unitId'/);
-		assert.match(
-			dashboardTable,
-			/accessorFn: \(row\) => row\.department\?\.id/,
-		);
-		assert.match(dashboardTable, /bg-sky-50/);
-		assert.doesNotMatch(dashboardTable, /bg-emerald-50/);
-		assert.match(dashboardTable, /onVisibleRowCountChange/);
-		assert.doesNotMatch(dashboardTabs, /All Requests/);
-		assert.doesNotMatch(dashboardTabs, /getAllRequests/);
 		assert.doesNotMatch(dashboardPage, />Dashboard<\/h1>/);
 		assert.match(dashboardPage, /FollowUpDashboard/);
 		assert.match(dashboardPage, /getFollowUpDashboard/);
@@ -438,7 +390,6 @@ describe("engineering sub-task request modal panel wiring", () => {
 		"src/components/requests/solution-modal.tsx",
 		"src/components/requests/completed-request-modal.tsx",
 		"src/components/requests/completed-solution-modal.tsx",
-		"src/components/requests/final-approval-modal.tsx",
 		"src/components/requests/completed-final-modal.tsx",
 		"src/components/requests/submit-final-approval-modal.tsx",
 		"src/components/requests/final-approval-resubmit-modal.tsx",

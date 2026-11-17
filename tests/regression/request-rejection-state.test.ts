@@ -92,7 +92,8 @@ describe('a request is shown as rejected only while that rejection is waiting fo
     assert.match(getMyRequests, /hasRejection: isAwaitingReworkAfterRejection\(/)
 
     const dashboard = readFileSync('src/server-actions/dashboard.ts', 'utf8')
-    assert.equal((dashboard.match(/hasRejection: isAwaitingReworkAfterRejection\(/g) ?? []).length, 2)
+    assert.match(dashboard, /getMyRequests\(\{ wrStatus: "all" \}\)/)
+    assert.match(dashboard, /hasRejection: request\.hasRejection/)
   })
 
   // The Engineering page had its own rules ("a solution was ever rejected",

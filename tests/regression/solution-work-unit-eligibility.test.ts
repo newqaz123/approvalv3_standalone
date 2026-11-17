@@ -1,5 +1,5 @@
 // H9: solution-work surfaces (engineering dashboard, needs-action list,
-// manual completion, Engineering navigation) use the unit
+// Engineering navigation) use the unit
 // "Can work on solutions" flag, never the user role.
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
@@ -95,14 +95,6 @@ describe('solution-work surfaces are unit-flag gated, not role gated', () => {
     assert.doesNotMatch(body, /role\s*!==\s*'engineering'/)
   })
 
-  it('markRequestComplete and canMarkComplete use unit-flag eligibility', () => {
-    for (const marker of ['export async function markRequestComplete', 'export async function canMarkComplete']) {
-      const body = bodyOf('src/server-actions/solutions.ts', marker)
-      assert.match(body, /isActorSolutionWorker\(/, marker)
-      assert.doesNotMatch(body, /UserRole\.engineering/, marker)
-    }
-  })
-
   it('Engineering navigation follows the unit flag from /api/user/department', () => {
     const route = read('src/app/api/user/department/route.ts')
     assert.match(route, /canWorkOnSolutions:\s*await isActorSolutionWorker\(/)
@@ -121,13 +113,6 @@ describe('engineer assignment and request capabilities resolve solution-work eli
     assert.equal((body.match(/await isActorSolutionWorker\(/g) ?? []).length, 1)
     assert.match(body, /if \(!user \|\| !isSolutionWorker\)/)
     assert.match(body, /existingAssignEngineersDecision\(\{\s*isActive: user\.isActive,\s*isSolutionWorker,/)
-  })
-
-  it('getRequestsForEngineering keeps its existing error text and uses unit eligibility', () => {
-    const body = bodyOf('src/server-actions/requests.ts', 'export async function getRequestsForEngineering')
-    assert.match(body, /isActorSolutionWorker\(createSolutionWorkActorDb\(prisma\), user\.id\)/)
-    assert.doesNotMatch(body, /role\s*!==\s*'engineering'/)
-    assert.match(body, /Only engineering users can access engineering requests/)
   })
 
   it('capabilities resolve eligibility once and pass it to both engineering decisions', () => {

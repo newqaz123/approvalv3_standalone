@@ -44,10 +44,3 @@ export function useMediaQuery(query: string): boolean {
 
   return matches
 }
-
-/**
- * Predefined breakpoint hooks for common screen sizes
- */
-export const useIsMobile = () => useMediaQuery('(max-width: 768px)')
-export const useIsTablet = () => useMediaQuery('(min-width: 769px) and (max-width: 1024px)')
-export const useIsDesktop = () => useMediaQuery('(min-width: 1025px)')

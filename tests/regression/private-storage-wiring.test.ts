@@ -6,12 +6,13 @@ it('routes every attachment filesystem operation through private storage', () =>
   const filesAction = readFileSync('src/server-actions/files.ts', 'utf8')
   const requestsAction = readFileSync('src/server-actions/requests.ts', 'utf8')
   const pdfPackage = readFileSync('src/lib/pdf-package.ts', 'utf8')
-  for (const source of [filesAction, requestsAction, pdfPackage]) {
+  const retentionDelete = readFileSync('src/lib/retention-hard-delete.ts', 'utf8')
+  for (const source of [filesAction, requestsAction, pdfPackage, retentionDelete]) {
     assert.doesNotMatch(source, /join\(process\.cwd\(\), ['"]public/)
   }
   assert.match(filesAction, /writeAttachmentFile/)
   assert.match(filesAction, /deleteAttachmentFile/)
-  assert.match(requestsAction, /deleteAttachmentFile/)
+  assert.match(retentionDelete, /deleteAttachmentFile/)
   // Appended attachments are read through the private storage layer; the
   // package helper must not reconstruct the legacy public/ root itself.
   assert.match(pdfPackage, /readAttachmentFile/)
@@ -53,10 +54,13 @@ it('wires the canonical request detail modal through authorized ID-based downloa
   assert.match(modal, /getFileDownloadUrl\(file\.id\)/)
 })
 
-it('wires the solution detail component through authorized ID-based download URLs', () => {
-  const detail = readFileSync('src/components/solutions/solution-detail.tsx', 'utf8')
+it('wires live solution attachments through ID-based router callbacks', () => {
+  const detail = readFileSync('src/components/requests/solution-modal.tsx', 'utf8')
+  const router = readFileSync('src/components/requests/request-modal-router.tsx', 'utf8')
   assert.doesNotMatch(detail, PATH_HREF)
-  assert.match(detail, /getFileDownloadUrl\(file\.id\)/)
+  assert.match(detail, /onDownloadSolutionFile\(file\.id\)/)
+  assert.match(router, /onDownloadSolutionFile=\{handleDownloadSolutionFile\}/)
+  assert.match(router, /getFileDownloadUrl\(file\.id\)/)
 })
 
 it('removes the dead two-step upload actions from the files server actions', () => {

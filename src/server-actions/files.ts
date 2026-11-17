@@ -107,7 +107,6 @@ export async function deleteFileAttachment({ fileId }: { fileId: string }) {
   const deleteAction = evaluateRequestAction('DELETE_ATTACHMENT', {
     actor: {
       id: actor.id,
-      role: actor.role,
       isActive: actor.isActive,
       assignmentUnitId: actor.assignmentUnitId,
     },
@@ -220,7 +219,6 @@ export async function uploadFileAction(
   const uploadAction = evaluateRequestAction('UPLOAD_ATTACHMENT', {
     actor: {
       id: actor.id,
-      role: actor.role,
       isActive: actor.isActive,
       assignmentUnitId: actor.assignmentUnitId,
     },

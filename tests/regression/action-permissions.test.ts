@@ -37,7 +37,6 @@ function engineeringViewerContext(
   return {
     actor: {
       id: 'engineering-1',
-      role: 'general_dept',
       isActive: true,
       assignmentUnitId: 'web',
     },
@@ -177,7 +176,6 @@ describe('extracted existing action guards feed existingActionDecisions', () => 
     const context: ActionPermissionContext = {
       actor: {
         id: 'department-manager-1',
-        role: 'general_dept',
         isActive: true,
         assignmentUnitId: 'company',
       },
@@ -380,7 +378,6 @@ describe('evaluateRequestAction composes active/read/current-step checks', () =>
       }),
       actor: {
         id: 'engineering-1',
-        role: 'general_dept',
         isActive: false,
         assignmentUnitId: 'web',
       },

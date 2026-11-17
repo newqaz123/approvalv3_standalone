@@ -84,52 +84,6 @@ export async function getTemplates(options: GetTemplatesOptions = {}) {
 }
 
 /**
- * Get active templates for public use (no auth required)
- * Used in new request form to show available templates to users
- */
-export async function getActiveTemplates() {
-  const templates = await prisma.templates.findMany({
-    where: {
-      isActive: true,
-    },
-    select: {
-      id: true,
-      name: true,
-      title: true,
-      description: true,
-      isDefault: true,
-    },
-    orderBy: [
-      { isDefault: 'desc' }, // Default templates first
-      { name: 'asc' },
-    ],
-  })
-
-  return templates
-}
-
-/**
- * Get the default template for public use (no auth required)
- */
-export async function getDefaultTemplatePublic() {
-  const template = await prisma.templates.findFirst({
-    where: {
-      isDefault: true,
-      isActive: true,
-    },
-    select: {
-      id: true,
-      name: true,
-      title: true,
-      description: true,
-      isDefault: true,
-    },
-  })
-
-  return template
-}
-
-/**
  * Get a single template by ID
  */
 export async function getTemplate(id: string) {
@@ -137,20 +91,6 @@ export async function getTemplate(id: string) {
 
   const template = await prisma.templates.findUnique({
     where: { id },
-  })
-
-  return template
-}
-
-/**
- * Get the default template
- */
-export async function getDefaultTemplate() {
-  const template = await prisma.templates.findFirst({
-    where: {
-      isDefault: true,
-      isActive: true,
-    },
   })
 
   return template

@@ -6,14 +6,11 @@ const read = (path: string) => readFileSync(path, 'utf8')
 const displayFiles = [
   'src/components/requests/approver-modal.tsx',
   'src/components/requests/solution-modal.tsx',
-  'src/components/requests/status-modal.tsx',
-  'src/components/requests/final-approval-modal.tsx',
   'src/components/requests/final-approval-resubmit-modal.tsx',
   'src/components/requests/submit-final-approval-modal.tsx',
   'src/components/requests/completed-solution-modal.tsx',
   'src/components/requests/completed-final-modal.tsx',
   'src/components/requests/completed-request-modal.tsx',
-  'src/components/solutions/solution-detail.tsx',
 ]
 
 describe('formatted description rendering', () => {

@@ -92,10 +92,6 @@ function RequestModalRouterContent({
 		RequestAction,
 		ActionDecision
 	> | null>(null);
-	const [userDepartmentType, setUserDepartmentType] = useState<string | null>(
-		null,
-	);
-	const [userDepartmentId, setUserDepartmentId] = useState<string | null>(null);
 	const [isSubmitting, setIsSubmitting] = useState(false);
 	const [showSolutionModal, setShowSolutionModal] = useState(false);
 	const [showResubmitSolutionModal, setShowResubmitSolutionModal] =
@@ -172,16 +168,6 @@ function RequestModalRouterContent({
 
 			setCanApprove(approvalCheck.canApprove);
 			setActionCapabilities(await getRequestActionCapabilities(requestId));
-
-			// Get user department info
-			if (user?.id) {
-				const response = await fetch("/api/user/department");
-				if (response.ok) {
-					const deptData = await response.json();
-					setUserDepartmentType(deptData.type);
-					setUserDepartmentId(deptData.id);
-				}
-			}
 
 			// Fetch available users for custom approval hierarchy
 			const usersResponse = await fetch("/api/users?active=true");
@@ -775,19 +761,12 @@ function RequestModalRouterContent({
 								}
 							: undefined
 					}
-					onSubmitFinalApproval={
-						allowActions && canAct("INITIATE_FINAL_APPROVAL")
-							? () => setShowSubmitFinalApprovalModal(true)
-							: undefined
-					}
-					userDepartment={userDepartmentType || undefined}
 					showCancel={canCancel}
 					onCancelled={handleClose}
 					onDownloadFile={handleDownloadFile}
 					onDownloadSolutionFile={handleDownloadSolutionFile}
 					onPreviewFile={handlePreviewFile}
 					onPreviewSolutionFile={handlePreviewSolutionFile}
-					availableUsers={availableUsers}
 					subTasksElement={subTasksElement}
 				/>
 			);
@@ -866,8 +845,6 @@ function RequestModalRouterContent({
 						sentToEngineerAt: requestData.updatedAt.toISOString(),
 						engineerAssigned: "Engineering Team",
 					}}
-					userDepartment={userDepartmentType || undefined}
-					userRole={user?.role}
 					onSubmitSolution={
 						allowActions && canAct("SUBMIT_SOLUTION")
 							? () => setShowSolutionModal(true)
@@ -895,7 +872,6 @@ function RequestModalRouterContent({
 						sentToRequesterAt: requestData.updatedAt.toISOString(),
 						requesterName: requestData.requester.name,
 					}}
-					userDepartment={userDepartmentType || undefined}
 					isRequesterDepartment={canAct("INITIATE_FINAL_APPROVAL")}
 					onSubmitFinalApproval={
 						allowActions && canAct("INITIATE_FINAL_APPROVAL")

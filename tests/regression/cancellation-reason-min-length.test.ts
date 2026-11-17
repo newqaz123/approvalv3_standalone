@@ -59,15 +59,6 @@ describe('cancellation reason minimum length (5 characters)', () => {
     assert.match(dialog, /<FormDescription[^>]*>\s*Minimum 5 characters\./)
   })
 
-  it('leaves the admin delete-request reason policy untouched', () => {
-    const serverAction = read('src/server-actions/requests.ts')
-    assert.match(
-      serverAction,
-      /const deleteRequestSchema = z\.object\(\{\s*requestId: z\.string\(\)\.min\(1, 'Request ID is required'\),\s*reason: z\.string\(\)\.min\(10, 'Reason must be at least 10 characters'\)/,
-      'delete-request policy is out of scope and must stay at 10 characters',
-    )
-  })
-
   it('validates on change so 4 characters stay blocked and 5 enable submission', () => {
     const dialog = read('src/components/requests/cancel-request-dialog.tsx')
     // React Hook Form's default onSubmit mode only refreshes isValid after a

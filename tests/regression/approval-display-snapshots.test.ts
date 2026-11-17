@@ -107,7 +107,7 @@ test('a step closed by an earlier rejection is shown as not reached, not rejecte
 
 test('every request detail modal can draw a not-reached step', () => {
   const modals = [
-    'approver-modal', 'status-modal', 'solution-modal', 'final-approval-modal',
+    'approver-modal', 'solution-modal',
     'final-approval-resubmit-modal', 'submit-final-approval-modal',
     'completed-request-modal', 'completed-solution-modal', 'completed-final-modal',
   ]

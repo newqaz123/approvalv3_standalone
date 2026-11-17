@@ -597,6 +597,4 @@ export const InlineImageExtension = Image.extend<InlineImageExtensionOptions>({
   },
 })
 
-export const InlineImage = InlineImageExtension
-
 export default InlineImageExtension

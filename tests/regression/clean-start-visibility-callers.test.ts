@@ -18,19 +18,19 @@ import {
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
+// Direct read-policy consumers; dashboard delegates to getMyRequests and
+// solution detail reads now flow through getRequest, both covered behaviorally.
 const CALLERS = [
   'src/app/(dashboard)/engineering/page.tsx',
   'src/app/api/files/download/route.ts',
   'src/lib/inline-images/lifecycle.ts',
   'src/server-actions/analytics.ts',
   'src/server-actions/budget-control.ts',
-  'src/server-actions/dashboard.ts',
   'src/server-actions/engineering-sub-tasks.ts',
   'src/server-actions/files.ts',
   'src/server-actions/reports.ts',
   'src/server-actions/request-action-capabilities.ts',
   'src/server-actions/requests.ts',
-  'src/server-actions/solutions.ts',
 ] as const
 
 const u = (id: string, parentId: string | null, over: Partial<OrganizationUnitNode> = {}): OrganizationUnitNode =>
@@ -113,8 +113,7 @@ describe('visibility callers rewired to sharing-scope predicate', () => {
   it('guards direct detail, list, counts, exports, files, and inline images with the shared scope policy', () => {
     for (const path of [
       'src/server-actions/requests.ts',
-      'src/server-actions/dashboard.ts',
-      'src/app/(dashboard)/engineering/page.tsx',
+          'src/app/(dashboard)/engineering/page.tsx',
       'src/server-actions/analytics.ts',
       'src/server-actions/budget-control.ts',
       'src/server-actions/files.ts',
@@ -158,12 +157,9 @@ describe('visibility callers rewired to sharing-scope predicate', () => {
 
   it('keeps action counts on eligibility predicates rather than view permission', () => {
     const requests = read('src/server-actions/requests.ts')
-    const dashboard = read('src/server-actions/dashboard.ts')
     const pendingCount = read('src/app/api/actions/pending-count/route.ts')
     assert.match(requests, /snapshotGroupActionWhere/)
     assert.match(requests, /CURRENT_INSTANCE_ROW_FILTER/)
-    assert.match(dashboard, /snapshotGroupActionWhere/)
-    assert.match(dashboard, /CURRENT_INSTANCE_ROW_FILTER/)
     assert.match(pendingCount, /snapshotGroupActionWhere/)
     assert.match(pendingCount, /CURRENT_INSTANCE_ROW_FILTER/)
     assert.doesNotMatch(pendingCount, /buildRequestVisibilityWhere/)

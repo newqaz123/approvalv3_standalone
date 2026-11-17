@@ -1,4 +1,4 @@
-import { revalidatePath } from 'next/cache'
+
 import prisma from '@/lib/prisma'
 import {
   localDateKey,
@@ -87,8 +87,4 @@ export async function applyRetentionArchive(source: 'cron' | 'manual' | 'clock')
   }
 
   return { archived: result.count, skipped: false as const, policy, cutoffDate }
-}
-
-export function revalidateRetentionPage() {
-  revalidatePath('/admin/retention')
 }

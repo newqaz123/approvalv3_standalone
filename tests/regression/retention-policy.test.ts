@@ -219,17 +219,16 @@ describe('retention backup folders', () => {
     assert.match(engineeringAction, /includeArchived: false/)
     assert.equal((engineeringAction.match(/AND: \[visibilityWhere/g) ?? []).length, 2)
 
-    const engineeringList = bodyOf(requestsActions, 'export async function getRequestsForEngineering')
-    assert.match(engineeringList, /includeArchived: false/)
-    assert.match(engineeringList, /AND: \[visibilityWhere/)
-
     assert.equal((pendingCount.match(/isArchived: false/g) ?? []).length, 2, 'both pending-count queries')
 
     assert.match(engineering, /includeArchived: false/)
     assert.match(engineering, /AND: \[\s*visibilityWhere/)
 
-    const allRequests = bodyOf(dashboard, 'export async function getAllRequests')
-    assert.match(allRequests, /includeArchived: false/)
+    const followUp = bodyOf(dashboard, 'export async function getFollowUpDashboard')
+    assert.match(followUp, /getMyRequests\(\{ wrStatus: "all" \}\)/)
+    const visibleRequests = bodyOf(requestsActions, 'export async function getMyRequests')
+    assert.match(visibleRequests, /includeArchived: filters\?\.includeArchived === true/)
+    assert.match(visibleRequests, /AND: \[visibilityWhere, buildRequestFilters/)
   })
 
   it('bulk archive audits only rows it actually archived', () => {

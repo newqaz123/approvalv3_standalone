@@ -10,8 +10,6 @@ export const IN_FLIGHT_STEPS = [
   'FinalApproval',
 ] as const
 
-export type InFlightStep = (typeof IN_FLIGHT_STEPS)[number]
-
 const STEP_LABELS: Record<string, { short: string; full: string }> = {
   ImprovementRequest: { short: 'Request', full: 'Improvement Request' },
   SentToEngineer: { short: 'Engineer', full: 'Sent to Engineer' },

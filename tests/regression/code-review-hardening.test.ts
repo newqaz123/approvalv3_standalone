@@ -12,22 +12,21 @@ function exportedFunctionBody(source: string, name: string): string {
   return source.slice(start, next === -1 ? undefined : next)
 }
 
-describe('H4: getRequestApprovals is gated by session and request visibility', () => {
-  const source = read('src/server-actions/approvals.ts')
-  const body = exportedFunctionBody(source, 'getRequestApprovals')
+describe('H4: the active request detail reader is gated by session and visibility', () => {
+  const source = read('src/server-actions/requests.ts')
+  const body = exportedFunctionBody(source, 'getRequest')
 
-  it('requires an authenticated session before reading approvals', () => {
+  it('requires an authenticated session before reading request details', () => {
     const authAt = body.indexOf('await auth()')
     assert.ok(authAt > -1, 'must call auth()')
     assert.match(body, /throw new Error\('Unauthorized'\)/)
-    assert.ok(authAt < body.indexOf('request_approvals.findMany'))
+    assert.ok(authAt < body.indexOf('prisma.requests.findUnique'))
   })
 
-  it('checks canUserViewRequest and returns an empty list when denied', () => {
-    assert.match(source, /import \{ canUserViewRequest \} from '@\/lib\/request-visibility\/scope'/)
-    const gate = body.match(/if \(!\(await canUserViewRequest\(userId, requestId\)\)\) \{\s*return \[\]\s*\}/)
-    assert.ok(gate, 'denied callers must get []')
-    assert.ok(body.indexOf(gate[0]) < body.indexOf('request_approvals.findMany'))
+  it('checks canUserViewRequest and returns null before loading invisible details', () => {
+    const gate = body.match(/if \(!\(await canUserViewRequest\(userId, id\)\)\) \{\s*return null\s*\}/)
+    assert.ok(gate, 'denied callers must get null')
+    assert.ok(body.indexOf(gate[0]) < body.indexOf('prisma.requests.findUnique'))
   })
 })
 

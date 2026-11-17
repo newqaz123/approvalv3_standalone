@@ -45,8 +45,6 @@ export const ENGINEERING_LIFECYCLE_STATUSES = [
   'Cancelled',
 ] as const
 
-export type EngineeringLifecycleStatus = (typeof ENGINEERING_LIFECYCLE_STATUSES)[number]
-
 /** A recorded status-transition event (request_activities history). */
 export interface EngineeringTrendEvent {
   requestId: string

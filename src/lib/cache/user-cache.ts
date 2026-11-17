@@ -53,21 +53,3 @@ export const getCurrentUser = cache(async () => {
   })
   return withAssignmentDepartment(user)
 })
-
-/**
- * Get user by ID with caching
- * Uses primitive argument for proper cache hits (not inline objects)
- *
- * React.cache() uses shallow equality (Object.is) for cache hits.
- * Using primitive string argument ensures cache works correctly.
- *
- * @param userId - User ID (primitive string for proper cache hits)
- * @returns User with department aliased from the active organization assignment, or null if not found
- */
-export const getUserById = cache(async (userId: string) => {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    include: assignmentInclude,
-  })
-  return withAssignmentDepartment(user)
-})

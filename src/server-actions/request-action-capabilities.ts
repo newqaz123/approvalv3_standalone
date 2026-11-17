@@ -268,7 +268,6 @@ export async function getRequestActionCapabilities(requestId: string): Promise<R
   const context: ActionPermissionContext = {
     actor: {
       id: user.id,
-      role: user.role,
       isActive: user.isActive,
       assignmentUnitId,
     },

@@ -10,7 +10,7 @@ import {
   isSubTaskVisibleForRequestStatus,
   validateSubTaskInput,
 } from '@/lib/engineering-sub-tasks'
-import { buildRequestVisibilityWhere, canUserViewRequest, createRequestVisibilityDb } from '@/lib/request-visibility/scope'
+import { canUserViewRequest } from '@/lib/request-visibility/scope'
 import {
   evaluateRequestAction,
   existingManageSubTasksDecision,
@@ -59,7 +59,6 @@ function assertCanManageSubTasks(
   const manageAction = evaluateRequestAction('MANAGE_SUB_TASKS', {
     actor: {
       id: user.id,
-      role: user.role,
       isActive: user.isActive !== false,
       assignmentUnitId: null,
     },
@@ -306,77 +305,4 @@ export async function createSubContractor(name: string): Promise<ActionResult<{ 
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Failed to create subcontractor' }
   }
-}
-
-export async function deactivateSubContractor(id: string): Promise<ActionResult> {
-  try {
-    const user = await requireSubTaskManager()
-    await prisma.sub_contractors.update({
-      where: { id },
-      data: { isActive: false, updatedById: user.id },
-    })
-
-    revalidatePath('/engineering')
-    return { success: true }
-  } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : 'Failed to deactivate subcontractor' }
-  }
-}
-
-export async function getStaleSubTaskRequests(input: { olderThanDays?: number; stageId?: string }) {
-  const user = await getCurrentUser()
-  if (!user) return []
-  const isSolutionWorker = await isActorSolutionWorker(createSolutionWorkActorDb(prisma), user.id)
-  if (!canManageEngineeringSubTasks({ ...user, isSolutionWorker })) return []
-  if (!input.olderThanDays || input.olderThanDays <= 0) return []
-
-  const threshold = new Date()
-  threshold.setDate(threshold.getDate() - input.olderThanDays)
-
-  const visibilityWhere = await buildRequestVisibilityWhere(createRequestVisibilityDb(prisma), {
-    userId: user.id,
-    includeArchived: false,
-    includeSubTaskWork: true,
-  })
-
-  return prisma.requests.findMany({
-    where: {
-      AND: [
-        visibilityWhere,
-        {
-          status: { in: ['SentToEngineer', 'SendBackToRequester', 'FinalApproval', 'Completed'] as any },
-          subTasks: {
-            some: {
-              isCompleted: false,
-              updatedAt: { lte: threshold },
-              ...(input.stageId ? { stageId: input.stageId } : {}),
-            },
-          },
-        },
-      ],
-    },
-    select: {
-      id: true,
-      title: true,
-      status: true,
-      organizationUnit: { select: { name: true } },
-      requester: { select: { name: true } },
-      subTasks: {
-        where: {
-          isCompleted: false,
-          updatedAt: { lte: threshold },
-          ...(input.stageId ? { stageId: input.stageId } : {}),
-        },
-        select: {
-          id: true,
-          description: true,
-          updatedAt: true,
-          stage: { select: { id: true, name: true } },
-          subContractor: { select: { name: true } },
-        },
-        orderBy: { updatedAt: 'asc' },
-      },
-    },
-    orderBy: { updatedAt: 'desc' },
-  })
 }

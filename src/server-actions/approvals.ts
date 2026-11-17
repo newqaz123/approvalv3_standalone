@@ -25,7 +25,6 @@ import {
   existingApprovalDecision,
 } from '@/lib/action-permissions'
 import { requireAdmin } from '@/lib/auth'
-import { canUserViewRequest } from '@/lib/request-visibility/scope'
 import { APPROVAL_ENGINE_TRANSACTION_ISOLATION } from '@/lib/approval-engine/plan'
 import {
   createCleanStartPhaseAttemptTx,
@@ -107,7 +106,7 @@ export async function approveRequest(
 
   const { canApprove, approval } = await canUserApprove(requestId)
   const approveAction = evaluateRequestAction('APPROVE_REQUEST', {
-    actor: { id: userId, role: '', isActive: true, assignmentUnitId: null },
+    actor: { id: userId, isActive: true, assignmentUnitId: null },
     request: {
       requesterId: '',
       organizationUnitId: null,
@@ -188,7 +187,7 @@ export async function rejectRequest(
 
   const { canApprove, approval } = await canUserApprove(requestId)
   const rejectAction = evaluateRequestAction('REJECT_REQUEST', {
-    actor: { id: userId, role: '', isActive: true, assignmentUnitId: null },
+    actor: { id: userId, isActive: true, assignmentUnitId: null },
     request: {
       requesterId: '',
       organizationUnitId: null,
@@ -397,70 +396,6 @@ async function notifyNextApprover(requestId: string) {
       }),
     ),
   )
-}
-
-/**
- * Get approval status for a request with eligible approvers.
- * Authentication plus the request's shared visibility policy gate every
- * return path; approval metadata never leaks to invisible callers.
- */
-export async function getRequestApprovals(requestId: string) {
-  const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
-  if (!userId) {
-    throw new Error('Unauthorized')
-  }
-  if (!(await canUserViewRequest(userId, requestId))) {
-    return []
-  }
-
-  const request = await prisma.requests.findUnique({
-    where: { id: requestId },
-    select: { id: true },
-  })
-
-  if (!request) {
-    return []
-  }
-
-  const approvals = await prisma.request_approvals.findMany({
-    where: { requestId },
-    include: {
-      approver: {
-        select: {
-          id: true,
-          name: true,
-          email: true,
-        },
-      },
-      requiredApprover: {
-        select: {
-          id: true,
-          name: true,
-          email: true,
-        },
-      },
-      candidateGroup: {
-        select: {
-          members: {
-            select: { userId: true, capturedDisplayName: true },
-            take: 3,
-          },
-        },
-      },
-    },
-    orderBy: { order: 'asc' },
-  })
-
-  return approvals.map((approval) => ({
-    ...approval,
-    eligibleApprovers: approval.status === 'pending'
-      ? (approval.candidateGroup?.members ?? []).map((member) => ({
-          id: member.userId,
-          name: member.capturedDisplayName,
-          level: null,
-        }))
-      : [],
-  }))
 }
 
 function createProductionRestartPorts(

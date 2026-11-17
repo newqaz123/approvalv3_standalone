@@ -1,9 +1,4 @@
-/**
- * Data adapters to transform Prisma database models to new modal component props
- * These adapters bridge the gap between existing DB schema and the new UI mockup components
- */
 
-import { format } from 'date-fns'
 import { isCurrentInstanceApproval } from '@/lib/approval-engine/current-instance'
 
 // Types for the new modal components
@@ -196,66 +191,6 @@ export function transformFileAttachments(files: Array<{
     fileType: file.fileType,
     description: file.description || undefined,
   }))
-}
-
-/**
- * Transform Prisma approvals to modal stages format
- * Groups approvals by level/order into stages
- */
-export function transformApprovalsToStages(
-  approvals: Array<{
-    id: string
-    requiredLevel: number
-    requiredPositionName?: string | null
-    order: number
-    status: string
-    comments?: string | null
-    approvedAt?: Date | null
-    createdAt: Date
-    isCustomChain: boolean
-    approver?: {
-      name: string | null
-      email: string
-    } | null
-    requiredApprover?: {
-      name: string | null
-    } | null
-    potentialApprovers?: Array<{
-      name: string | null
-    }>
-  }>,
-  isFinalApproval: boolean = false
-): ModalApprovalStage[] {
-  if (approvals.length === 0) return []
-
-  // Group approvals by level
-  const groupedByLevel = approvals.reduce((acc, approval) => {
-    const level = approval.requiredLevel
-    if (!acc[level]) {
-      acc[level] = []
-    }
-    acc[level].push(approval)
-    return acc
-  }, {} as Record<number, typeof approvals>)
-
-  // Convert to stages
-  const stages: ModalApprovalStage[] = Object.entries(groupedByLevel)
-    .sort(([a], [b]) => Number(a) - Number(b))
-    .map(([level, levelApprovals], index) => {
-      const steps: ModalApprovalStep[] = levelApprovals
-        .sort((a, b) => a.order - b.order)
-        .map(toModalApprovalStep)
-
-      return {
-        stageNumber: index + 1,
-        stageName: isFinalApproval 
-          ? `Final Approval Level ${level}` 
-          : `Approval Level ${level}`,
-        steps,
-      }
-    })
-
-  return stages
 }
 
 /**

@@ -3,47 +3,10 @@
 import { formatFileSize } from "@/lib/format-file-size";
 import { useState } from "react";
 import { format } from "date-fns";
-import {
-	X,
-	Download,
-	Eye,
-	Info,
-	Paperclip,
-	TrendingUp,
-	Lock,
-	History,
-	FileImage,
-	FileSpreadsheet,
-	File,
-	FileText,
-	Check,
-	Clock,
-	Send,
-	Activity,
-	ChevronDown,
-	ChevronUp,
-	AlertTriangle,
-	RotateCcw,
-	ThumbsUp,
-	ThumbsDown,
-	Users,
-	Settings2,
-	Plus,
-	ArrowUp,
-	ArrowDown,
-	CheckCircle2,
-	Shield,
-	Loader2,
-} from "lucide-react";
-import {
-	Dialog,
-	DialogContent,
-	DialogHeader,
-	DialogTitle,
-} from "@/components/ui/dialog";
+import { X, Download, Eye, Info, Paperclip, TrendingUp, Lock, History, FileImage, FileSpreadsheet, File, FileText, Check, Clock, Activity, ChevronDown, ChevronUp, AlertTriangle, RotateCcw, ThumbsUp, ThumbsDown, Settings2, Plus, ArrowUp, ArrowDown, CheckCircle2, Loader2 } from "lucide-react";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { RequestModalHeader } from "./request-modal-header";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { FormattedText } from "@/components/ui/formatted-text";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
@@ -138,9 +101,6 @@ interface SolutionModalProps {
 	onApprove?: () => void | Promise<void>;
 	onReject?: (reason: string) => void | Promise<void>;
 	onResubmit?: () => void;
-	onSubmitFinalApproval?: () => void;
-	userDepartment?: string;
-	availableUsers?: User[];
 	showCancel?: boolean;
 	onCancelled?: () => void;
 	subTasksElement?: React.ReactNode;
@@ -655,9 +615,6 @@ export function SolutionModal({
 	onApprove,
 	onReject,
 	onResubmit,
-	onSubmitFinalApproval,
-	userDepartment,
-	availableUsers = [],
 	showCancel,
 	onCancelled,
 	subTasksElement,
@@ -1052,21 +1009,6 @@ export function SolutionModal({
 								requestTitle={data.title}
 								onCancelled={onCancelled}
 							/>
-						)}
-						{data.status === "solution" &&
-							!onApprove &&
-							onSubmitFinalApproval &&
-							(userDepartment === "Requester" ||
-								userDepartment === "Production 1" ||
-								userDepartment === "Production 2") && (
-							<Button
-								onClick={onSubmitFinalApproval}
-								disabled={isSubmitting}
-								className="flex items-center gap-2 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold rounded-lg transition-colors"
-							>
-								<Shield className="w-4 h-4" />
-								Send Final Approval
-							</Button>
 						)}
 					</div>
 				</div>

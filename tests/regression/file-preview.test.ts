@@ -60,7 +60,6 @@ describe('file preview type detection', () => {
       'src/components/requests/completed-solution-modal.tsx',
       'src/components/requests/submit-final-approval-modal.tsx',
       'src/components/requests/completed-final-modal.tsx',
-      'src/components/requests/final-approval-modal.tsx',
       'src/components/requests/approver-modal.tsx',
     ]
 

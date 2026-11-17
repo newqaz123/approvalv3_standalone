@@ -81,18 +81,8 @@ describe("completed approval export builder wiring", () => {
 		assert.match(reportsAction, /mergePdfBuffers/);
 	});
 
-	it("keeps completed-only export eligibility across legacy and server paths", () => {
-		const legacyButton = readFileSync(
-			"src/components/reports/export-pdf-button.tsx",
-			"utf8",
-		);
+	it("keeps completed-only export eligibility in the server path", () => {
 		const reportsAction = readFileSync("src/server-actions/reports.ts", "utf8");
-
-		assert.match(
-			legacyButton,
-			/requestStatus === 'Completed' && allApprovalsComplete/,
-		);
-		assert.doesNotMatch(legacyButton, /FinalApproval'\s*\|\|/);
 		assert.match(reportsAction, /request\.status !== 'Completed'/);
 		assert.doesNotMatch(reportsAction, /FinalApproval', 'Completed/);
 	});

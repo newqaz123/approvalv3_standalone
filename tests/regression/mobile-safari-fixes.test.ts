@@ -93,25 +93,16 @@ describe("mobile Safari dialog sheet", () => {
 		assert.match(dialog, /props\.onOpenChange\?\.\(false\)/);
 	});
 
-	it("uses Vaul's handle-only drag contract for the request drawer", () => {
-		const drawer = read("src/components/mobile/request-drawer.tsx");
-
-		// Vaul must receive the real Drawer.Handle. A decorative div leaves
-		// Content responsible for pointer-up velocity, where a fast iPhone tap
-		// can be misread as a downward dismissal.
-		assert.match(drawer, /<Drawer\.Root[^>]*handleOnly/);
-		assert.match(drawer, /<Drawer\.Handle[^>]*preventCycle/);
-		assert.match(drawer, /data-testid="request-drawer-handle"/);
-		assert.doesNotMatch(drawer, /mx-auto w-12 h-1\.5/);
+	it("uses Vaul's handle-only drag contract for the live follow-up drawer", () => {
+		const followUp = read("src/components/dashboard/follow-up-dashboard.tsx");
+		assert.match(followUp, /<Drawer\.Root\s+handleOnly/);
+		assert.match(followUp, /<Drawer\.Handle/);
 	});
 
 	it("keeps every mobile sheet at stable svh height so iOS toolbar changes never resize it", () => {
-		const requestDrawer = read("src/components/mobile/request-drawer.tsx");
 		const followUp = read("src/components/dashboard/follow-up-dashboard.tsx");
 
-		assert.match(requestDrawer, /max-h-\[96svh\]/);
 		assert.match(followUp, /h-\[88svh\]/);
-		assert.doesNotMatch(requestDrawer, /dvh/);
 		assert.doesNotMatch(followUp, /dvh/);
 
 		// Mounting is JS-gated on pointer type so the Vaul sheet and the desktop
@@ -146,10 +137,8 @@ describe("mobile modal content budgets", () => {
 		["src/components/requests/completed-request-modal.tsx", "260"],
 		["src/components/requests/completed-solution-modal.tsx", "140"],
 		["src/components/requests/completed-final-modal.tsx", "260"],
-		["src/components/requests/final-approval-modal.tsx", "140"],
 		["src/components/requests/final-approval-resubmit-modal.tsx", "180"],
 		["src/components/requests/solution-modal.tsx", "140"],
-		["src/components/requests/status-modal.tsx", "140"],
 		["src/components/requests/submit-final-approval-modal.tsx", "180"],
 	] as const;
 
@@ -191,7 +180,7 @@ describe("mobile modal content budgets", () => {
 		assert.match(source, /Submit Solution[\s\S]*?w-full sm:w-auto|w-full sm:w-auto[\s\S]*?Submit Solution/);
 		assert.match(source, /onSubmitSolution/);
 		assert.doesNotMatch(source, /canUserSubmitSolution/);
-		assert.match(router, /userRole=\{user\?\.role/);
+		assert.match(router, /allowActions && canAct\("SUBMIT_SOLUTION"\)/);
 	});
 });
 
@@ -211,7 +200,6 @@ describe("mobile Safari input zoom", () => {
 describe("mobile Safari date filters", () => {
 	const files = [
 		"src/components/requests/request-filters.tsx",
-		"src/components/dashboard/table-filters.tsx",
 	];
 
 	for (const file of files) {
