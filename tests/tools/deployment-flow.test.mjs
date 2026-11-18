@@ -58,6 +58,7 @@ test('offline package includes the unified deployment runtime', async () => {
 const checksumFixtureFiles = [
   'images/app.tar',
   'scripts/deploy.sh',
+  'scripts/backup.sh',
   'scripts/lib/deploy-common.sh',
   'tools/env-check.mjs',
   'tools/lib/env.mjs',
@@ -91,6 +92,82 @@ function assertManifestEntry(manifest, file) {
   const matches = manifest.split('\n').filter((line) => /^[0-9a-f]{64}  /.test(line) && line.slice(66) === file)
   assert.equal(matches.length, 1, `expected exactly one checksum entry for ${file}\n${manifest}`)
 }
+
+function runbookBashBlocks(markdown) {
+  return [...markdown.matchAll(/^```bash\n([\s\S]*?)^```$/gm)].map((match) => match[1])
+}
+
+test('legacy runbook blocks offline preparation unless the required files are present and verified', async (t) => {
+  const [preamble] = (await read('docs/upgrade-runbook.md')).split(/^## /m)
+  const prepare = (cwd) => runShell(runbookBashBlocks(preamble).join('\n'), {}, { cwd })
+
+  for (const { name, missing, omitted, aliased, changed, allowed = false } of [
+    { name: 'intact package', allowed: true },
+    { name: 'missing postcheck and its entry', missing: 'scripts/upgrade/postcheck.sql' },
+    { name: 'missing runbook entry', omitted: 'docs/upgrade-runbook.md' },
+    { name: 'aliased precheck entry', aliased: 'scripts/upgrade/precheck.sql' },
+    { name: 'missing backup script entry', omitted: 'scripts/backup.sh' },
+    { name: 'altered precheck', changed: 'scripts/upgrade/precheck.sql' },
+  ]) {
+    await t.test(name, async (subtest) => {
+      const fixture = await installChecksumFixture(subtest)
+      const files = checksumFixtureFiles.filter((file) => file !== missing && file !== omitted && file !== aliased)
+      if (aliased) files.push(`./${aliased}`)
+      await writeFile(join(fixture, 'SHA256SUMS'), portableChecksums(files, fixture))
+      if (missing) await rm(join(fixture, missing))
+      if (changed) await appendFile(join(fixture, changed), 'changed\n')
+      assert.equal(verifyManifest(fixture).status, changed ? 1 : 0, 'stock verifier checks only listed hashes')
+
+      const result = prepare(fixture)
+      assert.ifError(result.error)
+      assert.equal(result.status, allowed ? 0 : 1, `unexpected preparation result:\n${result.stdout}\n${result.stderr}`)
+    })
+  }
+})
+
+test('legacy runbook checks the freshly fetched online SHA before invoking the coordinator', async (t) => {
+  const section = (await read('docs/upgrade-runbook.md')).split(/^## /m).find((part) => part.startsWith('4. '))
+  // Also exercise the old inline command if the runbook has no executable guard.
+  const command = runbookBashBlocks(section)[0] ?? section.match(/`(bash scripts\/deploy\.sh --online)`/)?.[1]
+  assert.ok(command, 'no online deployment command in the runbook')
+  const fixture = await mkdtemp(join(tmpdir(), 'legacy-online-release-'))
+  t.after(() => rm(fixture, { recursive: true, force: true }))
+  const origin = join(fixture, 'origin')
+  const checkout = join(fixture, 'checkout')
+  const env = {
+    ...process.env,
+    GIT_ALLOW_PROTOCOL: 'file',
+    GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_CONFIG_NOSYSTEM: '1',
+  }
+  const git = (cwd, ...args) => execFileSync('git', [
+    '-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgSign=false',
+    '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', ...args,
+  ], { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+  git(fixture, 'init', '-b', 'fixture', origin)
+  await mkdir(join(origin, 'scripts'))
+  await writeFile(join(origin, 'scripts/deploy.sh'), 'printf "fixture coordinator called: %s\\n" "$*"\n')
+  git(origin, 'add', 'scripts/deploy.sh')
+  git(origin, 'commit', '-m', 'installed release')
+  git(origin, 'branch', 'main', 'HEAD')
+  git(fixture, 'clone', '--branch', 'main', origin, checkout)
+  git(origin, 'commit', '--allow-empty', '-m', 'approved release')
+  const approved = git(origin, 'rev-parse', 'HEAD')
+  git(origin, 'branch', '-f', 'main', approved)
+  const deploy = () => runShell(command, {}, { cwd: checkout, env: { ...env, APPROVED_SHA: approved } })
+
+  const matching = deploy()
+  assert.equal(matching.status, 0, `${matching.stdout}\n${matching.stderr}`)
+  assert.match(matching.stdout, /fixture coordinator called: --online/)
+
+  git(origin, 'commit', '--allow-empty', '-m', 'unrehearsed release')
+  git(origin, 'branch', '-f', 'main', 'HEAD')
+  assert.equal(git(checkout, 'rev-parse', 'origin/main'), approved, 'cached tracking ref must still be approved')
+  const moved = deploy()
+  assert.ifError(moved.error)
+  assert.equal(moved.status, 1, `advanced origin passed the online gate:\n${moved.stdout}\n${moved.stderr}`)
+  assert.doesNotMatch(moved.stdout, /fixture coordinator called/)
+})
 
 test('package checksum-only mode writes a portable verifiable manifest', async (t) => {
   const fixture = await installChecksumFixture(t)
@@ -539,6 +616,17 @@ exit 2
   assert.deepEqual((await readdir(join(bundled, 'scripts/upgrade'))).sort(), ['postcheck.sql', 'precheck.sql'])
   const verified = verifyManifest(bundled)
   assert.equal(verified.status, 0, `${verified.stdout}\n${verified.stderr}`)
+  const runbook = await read(join(bundled, 'docs/upgrade-runbook.md'))
+  const [preamble] = runbook.split(/^## /m)
+  const preparation = runShell(runbookBashBlocks(preamble).join('\n'), {}, { cwd: bundled })
+  assert.equal(preparation.status, 0, `${preparation.stdout}\n${preparation.stderr}`)
+  for (const [, link] of runbook.matchAll(/\]\((\.\.\/[^)]+)\)/g)) {
+    assert.ok(existsSync(resolve(bundled, 'docs', link)), `unresolved packaged runbook link: ${link}`)
+  }
+  for (const block of runbookBashBlocks(runbook)) {
+    const syntax = spawnSync('/bin/bash', ['-n'], { input: block, encoding: 'utf8' })
+    assert.equal(syntax.status, 0, syntax.stderr)
+  }
 
   await copyFile(join(bundled, '.env.production.example'), join(bundled, '.env.production'))
   const result = runDeployment(join(bundled, 'scripts/deploy.sh'), ['--offline', bundled], env, unpacked)

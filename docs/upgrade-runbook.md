@@ -12,12 +12,46 @@ the coordinator, with Git access and any required trust scoped to that exact
 checkout. If the legacy checkout does not have the unified coordinator, use the
 approved offline archive rather than copying scripts across releases.
 
-Run the preparation and checks from the trusted release checkout or extracted
-release archive so you have this release's SQL and backup script. For an archive,
-check `VERSION` against the approved release and verify `SHA256SUMS`
-(`sha256sum -c SHA256SUMS` or `shasum -a 256 -c SHA256SUMS`) before using its
-contents. The manifest detects corruption, not package provenance. Preserve the
-existing `.env.production`, PostgreSQL and uploads volumes, and `backups/`.
+Record the full commit SHA of the approved, rehearsed release. For online
+preparation, run the SQL and backup script from a clean, trusted release source
+checkout whose `git rev-parse HEAD` equals that SHA, not from an older production
+checkout. Confirm with the release owner that the `origin/main` hold in step 4
+can be enforced; otherwise prepare and deploy from the approved offline archive.
+Preserve the existing `.env.production`, PostgreSQL and uploads volumes, and
+`backups/`.
+
+**Offline preparation:** From the extracted package root, read `VERSION` as
+text and verify that it identifies the approved release. Run the block below
+before using any packaged SQL or scripts. Stop if it fails. The stock checksum
+verifier only checks listed paths; this block first requires the three upgrade
+artifacts and the backup script, each with its exact manifest path. Checksums
+detect corruption, not package provenance.
+
+```bash
+(
+  set -eu
+  for path in docs/upgrade-runbook.md scripts/upgrade/precheck.sql \
+              scripts/upgrade/postcheck.sql scripts/backup.sh; do
+    if [ ! -f "$path" ]; then
+      printf 'Stop: missing package file: %s\n' "$path" >&2
+      exit 1
+    fi
+    if ! LC_ALL=C awk -v path="$path" '
+      length($1) == 64 && $1 !~ /[^a-fA-F0-9]/ &&
+        substr($0, 65, 2) ~ /^ [ *]$/ && substr($0, 67) == path { found = 1; exit }
+      END { exit !found }
+    ' SHA256SUMS; then
+      printf 'Stop: no exact checksum entry for: %s\n' "$path" >&2
+      exit 1
+    fi
+  done
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum -c SHA256SUMS
+  else
+    shasum -a 256 -c SHA256SUMS
+  fi
+)
+```
 
 These production examples assume the Compose project `approval-app` with
 container `approval-db`. Set and export `POSTGRES_USER` and `POSTGRES_DB` in the
@@ -114,11 +148,46 @@ backup pair. Stop if it cannot be verified.
 
 ## 4. Deploy the approved release
 
-Use the [deployment coordinator](../scripts/deploy.sh). On an online server,
-run `bash scripts/deploy.sh --online` from the production checkout only when its
-fast-forward from `origin/main` will select the approved release. Offline, run
-`bash scripts/deploy.sh --offline .` from the extracted package with its own
-coordinator. Do not bypass it by starting Compose services manually.
+Use the [deployment coordinator](../scripts/deploy.sh). Do not bypass it by
+starting Compose services manually.
+
+**Online:** Have the release owner enforce a hold on all updates to
+`origin/main`, including automated updates, before the SHA check below. Keep
+it in place through the coordinator's source acquisition (keep the hold until
+it exits if you cannot observe acquisition). Keep other operators and jobs from
+changing the production checkout in that interval. The coordinator fetches and
+pulls again, so a matching preflight SHA alone is not a pin. If the hold cannot
+be guaranteed, use the approved offline archive instead.
+
+In the clean production `main` checkout, set and export `APPROVED_SHA` to the
+full SHA from the approved change record, not from Git's current output. While
+holding the release, run this block immediately before acquisition; it compares
+freshly fetched `main` (not a cached remote-tracking ref) and checks that the
+checkout can fast-forward to it before invoking the coordinator:
+
+```bash
+(
+  set -eu
+  : "${APPROVED_SHA:?Set APPROVED_SHA to the full approved release SHA}"
+  git fetch origin main
+  fetched_sha=$(git rev-parse --verify 'FETCH_HEAD^{commit}')
+  if [ "$fetched_sha" != "$APPROVED_SHA" ]; then
+    printf 'Stop: origin/main is %s; approved SHA is %s.\n' "$fetched_sha" "$APPROVED_SHA" >&2
+    exit 1
+  fi
+  if ! git merge-base --is-ancestor HEAD "$APPROVED_SHA"; then
+    printf 'Stop: production HEAD cannot fast-forward to the approved SHA.\n' >&2
+    exit 1
+  fi
+  DEPLOY_ROOT="$PWD" bash scripts/deploy.sh --online
+)
+```
+
+**Offline:** Run `bash scripts/deploy.sh --offline .` from the approved extracted
+package, using its own coordinator. If switching from online, first validate the
+archive as described above; keep the maintenance freeze and verify that the
+archive is for the same rehearsed release. Do not substitute an unapproved SHA
+or rerun the online command just because `main` moved.
 
 The coordinator starts only `db migrate app`. Prisma applies **all pending
 migrations in order**, including `20261019000000_organization_upgrade` and any
