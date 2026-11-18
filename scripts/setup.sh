@@ -24,7 +24,7 @@ if [ ! -f .env.production ]; then
     echo "Copying .env.production.example to .env.production"
     cp .env.production.example .env.production
     echo -e "${GREEN}✓ Created .env.production from template${NC}"
-    echo -e "${YELLOW}⚠ IMPORTANT: Edit .env.production with your actual values before running bash scripts/deploy.sh${NC}"
+    echo -e "${YELLOW}⚠ IMPORTANT: Edit .env.production before deploying.${NC}"
 else
     echo -e "${GREEN}✓ .env.production already exists${NC}"
 fi
@@ -49,7 +49,9 @@ echo -e "${GREEN}✓ Setup Complete!${NC}"
 echo "============================================"
 echo ""
 echo "Next steps:"
-echo "1. Edit .env.production with your actual values"
-echo "2. Run: bash scripts/deploy.sh"
-echo "3. Choose: Offline intranet package"
+echo "1. Confirm this package is from a trusted release source and configure .env.production."
+echo "2. For a legacy departments-to-organization upgrade, follow docs/upgrade-runbook.md first."
+echo "3. Offline intranet package: from this directory, run as an authorized administrator"
+echo "   with effective UID 0 and a trusted administrator PATH: bash scripts/deploy.sh --offline ."
+echo "Use this package's own coordinator. See DEPLOY.md for prerequisites."
 echo ""

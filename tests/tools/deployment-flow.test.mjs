@@ -1,13 +1,18 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync } from 'node:fs'
-import { chmod, mkdtemp, readFile, writeFile, mkdir, copyFile, readlink, rm, symlink } from 'node:fs/promises'
+import { appendFile, chmod, mkdtemp, readFile, writeFile, mkdir, copyFile, readdir, readlink, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { execFileSync, spawnSync } from 'node:child_process'
 
 const root = resolve('.')
 const read = (path) => readFile(path, 'utf8')
+const upgradeArtifacts = [
+  'docs/upgrade-runbook.md',
+  'scripts/upgrade/precheck.sql',
+  'scripts/upgrade/postcheck.sql',
+]
 
 test('production seed is first-install only', async () => {
   const compose = await read('docker-compose.prod.yml')
@@ -50,47 +55,66 @@ test('offline package includes the unified deployment runtime', async () => {
   assert.doesNotMatch(source, /Run: bash deploy-offline\.sh/)
 })
 
-test('package checksum-only mode writes a portable verifiable manifest', async () => {
+const checksumFixtureFiles = [
+  'images/app.tar',
+  'scripts/deploy.sh',
+  'scripts/lib/deploy-common.sh',
+  'tools/env-check.mjs',
+  'tools/lib/env.mjs',
+  'docker-compose.prod.yml',
+  'VERSION',
+  ...upgradeArtifacts,
+]
+
+async function installChecksumFixture(t) {
   const fixture = await mkdtemp(join(tmpdir(), 'package-checksums-'))
-  for (const directory of ['images', 'scripts/lib', 'tools/lib']) {
+  t.after(() => rm(fixture, { recursive: true, force: true }))
+  for (const directory of ['images', 'scripts/lib', 'scripts/upgrade', 'tools/lib', 'docs']) {
     await mkdir(join(fixture, directory), { recursive: true })
   }
-  for (const file of [
-    'images/app.tar',
-    'scripts/deploy.sh',
-    'scripts/lib/deploy-common.sh',
-    'tools/env-check.mjs',
-    'tools/lib/env.mjs',
-    'docker-compose.prod.yml',
-    'VERSION',
-  ]) {
-    await writeFile(join(fixture, file), `fixture:${file}\n`)
-  }
+  for (const file of checksumFixtureFiles) await writeFile(join(fixture, file), `fixture:${file}\n`)
+  return fixture
+}
 
-  const generated = spawnSync('/bin/bash', ['scripts/build-package.sh', '--checksums-only', fixture], {
-    cwd: root,
-    encoding: 'utf8',
-  })
+function generateChecksums(fixture) {
+  return runScript(join(root, 'scripts/build-package.sh'), ['--checksums-only', fixture], {}, root)
+}
+
+function verifyManifest(fixture) {
+  const verifier = spawnSync('sha256sum', ['--version'], { encoding: 'utf8' }).status === 0
+    ? ['sha256sum', '-c']
+    : ['shasum', '-a', '256', '-c']
+  return spawnSync(verifier[0], [...verifier.slice(1), 'SHA256SUMS'], { cwd: fixture, encoding: 'utf8' })
+}
+
+function assertManifestEntry(manifest, file) {
+  const matches = manifest.split('\n').filter((line) => /^[0-9a-f]{64}  /.test(line) && line.slice(66) === file)
+  assert.equal(matches.length, 1, `expected exactly one checksum entry for ${file}\n${manifest}`)
+}
+
+test('package checksum-only mode writes a portable verifiable manifest', async (t) => {
+  const fixture = await installChecksumFixture(t)
+  const generated = generateChecksums(fixture)
   assert.equal(generated.status, 0, generated.stderr)
 
-  const manifest = await readFile(join(fixture, 'SHA256SUMS'), 'utf8')
-  for (const file of [
-    'images/app.tar',
-    'scripts/deploy.sh',
-    'scripts/lib/deploy-common.sh',
-    'tools/env-check.mjs',
-    'tools/lib/env.mjs',
-    'docker-compose.prod.yml',
-    'VERSION',
-  ]) {
-    assert.match(manifest, new RegExp(`  ${file.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}$`, 'm'))
-  }
-
-  const verifier = spawnSync('sha256sum', ['--version'], { encoding: 'utf8' }).status === 0
-    ? ['sha256sum', ['-c', 'SHA256SUMS']]
-    : ['shasum', ['-a', '256', '-c', 'SHA256SUMS']]
-  const verified = spawnSync(verifier[0], verifier[1], { cwd: fixture, encoding: 'utf8' })
+  const manifest = await read(join(fixture, 'SHA256SUMS'))
+  for (const file of checksumFixtureFiles) assertManifestEntry(manifest, file)
+  const verified = verifyManifest(fixture)
   assert.equal(verified.status, 0, `${verified.stdout}\n${verified.stderr}`)
+})
+
+test('package checksum generation fails if a runtime directory cannot be enumerated', async (t) => {
+  const fixture = await installChecksumFixture(t)
+  await rm(join(fixture, 'images'), { recursive: true })
+  const result = generateChecksums(fixture)
+  assert.notEqual(result.status, 0, `checksum generation ignored find failure: ${result.stderr}`)
+})
+
+test('package checksum generation fails if the runbook cannot be hashed', async (t) => {
+  const fixture = await installChecksumFixture(t)
+  await rm(join(fixture, 'docs/upgrade-runbook.md'))
+  const result = generateChecksums(fixture)
+  assert.notEqual(result.status, 0, 'checksum generation accepted a missing runbook')
 })
 
 test('offline setup and Docker context preserve the production package contract', async () => {
@@ -445,9 +469,10 @@ function portableChecksums(files, cwd) {
     : execFileSync('shasum', ['-a', '256', ...files], { cwd, encoding: 'utf8' })
 }
 
-async function installOfflinePackage(rootDir, checksum = true) {
+async function installOfflinePackage(rootDir) {
   await installDeployRoot(rootDir)
-  await mkdir(join(rootDir, 'images'))
+  for (const dir of ['images', 'docs', 'scripts/upgrade']) await mkdir(join(rootDir, dir))
+  for (const file of upgradeArtifacts) await copyFile(join(root, file), join(rootDir, file))
   for (const image of ['approval-app.tar', 'approval-migrate.tar', 'postgres.tar']) await writeFile(join(rootDir, 'images', image), 'fake-image')
   await writeFile(join(rootDir, 'VERSION'), 'VERSION=1.0.0\n')
   const files = [
@@ -456,10 +481,70 @@ async function installOfflinePackage(rootDir, checksum = true) {
     'scripts/deploy.sh', 'scripts/deploy-offline.sh', 'scripts/backup.sh', 'scripts/restore.sh',
     'scripts/rollback.sh', 'scripts/health-check.sh', 'scripts/setup.sh',
     'scripts/lib/deploy-common.sh', 'tools/env-check.mjs', 'tools/lib/env.mjs',
+    ...upgradeArtifacts,
   ]
-  const sums = checksum ? portableChecksums(files, rootDir) : `${'0'.repeat(64)}  VERSION\n`
-  await writeFile(join(rootDir, 'SHA256SUMS'), sums)
+  await writeFile(join(rootDir, 'SHA256SUMS'), portableChecksums(files, rootDir))
 }
+
+test('built archive ships the legacy upgrade artifacts with valid checksums', async (t) => {
+  const fixture = await fakeBin()
+  t.after(() => rm(fixture.dir, { recursive: true, force: true }))
+  const source = join(fixture.dir, 'source')
+  await installDeployRoot(source)
+  // Keep packaging, tar and checksums real; replace only Docker's Buildx exports.
+  for (const dir of ['docs', 'scripts/upgrade/fixtures']) await mkdir(join(source, dir), { recursive: true })
+  for (const file of [
+    'DEPLOY.md', 'scripts/build-package.sh', 'scripts/backup.sh',
+    ...upgradeArtifacts, 'scripts/upgrade/verify-upgrade.sh',
+  ]) await copyFile(join(root, file), join(source, file))
+  await writeFile(join(source, 'scripts/upgrade/fixtures/rehearsal.sql'), '-- fixture, not a runtime artifact\n')
+  const docker = join(fixture.bin, 'docker')
+  const normalDocker = join(fixture.bin, 'docker-deploy')
+  await copyFile(docker, normalDocker)
+  await chmod(normalDocker, 0o755)
+  await writeFile(docker, `#!/bin/bash
+set -eu
+[ "$1" = buildx ] || exec docker-deploy "$@"
+case "$2" in
+  inspect|use) exit 0 ;;
+  build)
+    shift 2
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --output)
+          case "$2" in
+            type=docker,dest=*) printf 'fake image\n' >"\${2#type=docker,dest=}"; exit 0 ;;
+          esac
+          ;;
+      esac
+      shift
+    done ;;
+esac
+exit 2
+`)
+  const env = { PATH: `${fixture.bin}:${process.env.PATH}`, COMMAND_LOG: fixture.log, APP_CONTAINER_MISSING: '1' }
+  const built = runScript(join(source, 'scripts/build-package.sh'), ['task3-fixture'], env, source)
+  assert.equal(built.status, 0, `${built.stdout}\n${built.stderr}`)
+  const archive = (await readdir(join(source, 'deploy'))).filter((file) => file.endsWith('.tar.gz'))
+  assert.equal(archive.length, 1)
+  const unpacked = join(fixture.dir, 'unpacked')
+  await mkdir(unpacked)
+  execFileSync('tar', ['-xzf', join(source, 'deploy', archive[0]), '-C', unpacked])
+  const bundled = join(unpacked, archive[0].slice(0, -'.tar.gz'.length))
+  const manifest = await read(join(bundled, 'SHA256SUMS'))
+  for (const file of upgradeArtifacts) {
+    assert.ok(existsSync(join(bundled, file)), `missing archive file: ${file}`)
+    assertManifestEntry(manifest, file)
+  }
+  assert.deepEqual((await readdir(join(bundled, 'scripts/upgrade'))).sort(), ['postcheck.sql', 'precheck.sql'])
+  const verified = verifyManifest(bundled)
+  assert.equal(verified.status, 0, `${verified.stdout}\n${verified.stderr}`)
+
+  await copyFile(join(bundled, '.env.production.example'), join(bundled, '.env.production'))
+  const result = runDeployment(join(bundled, 'scripts/deploy.sh'), ['--offline', bundled], env, unpacked)
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
+  assert.match(result.stdout, /Deployment succeeded \(offline\)/)
+})
 
 function runDeployment(script, args, env, cwd, options = {}) {
   return spawnSync('/bin/bash', [script, ...args], {
@@ -790,7 +875,8 @@ test('main online update path proves rollback and backup precede build and prese
 test('main offline checksum failure identifies checksum and stops before any safety or acquisition command', async () => {
   const fixture = await fakeBin()
   const deployRoot = join(fixture.dir, 'offline-root')
-  await installOfflinePackage(deployRoot, false)
+  await installOfflinePackage(deployRoot)
+  await writeFile(join(deployRoot, 'VERSION'), 'VERSION=changed\n')
   const result = runDeployment(join(root, 'scripts/deploy.sh'), ['--offline', deployRoot], {
     PATH: `${fixture.bin}:${process.env.PATH}`, COMMAND_LOG: fixture.log, DEPLOY_ROOT: deployRoot, APP_CONTAINER_MISSING: '1',
   }, fixture.dir)
@@ -830,6 +916,62 @@ test('offline package validation requires backup and recovery scripts before mut
   assert.match(`${result.stdout}\n${result.stderr}`, /missing: scripts\/backup\.sh/)
   const log = await readFile(fixture.log, 'utf8')
   assert.doesNotMatch(log, /docker image tag|docker load|backup|MIGRATION_COMMAND_REACHED/)
+})
+
+test('offline preflight rejects incomplete or changed legacy upgrade artifacts before mutation', async (t) => {
+  async function removeManifestEntry(deployRoot, file) {
+    const path = join(deployRoot, 'SHA256SUMS')
+    const lines = (await read(path)).split('\n')
+    assert.equal(lines.filter((line) => line.slice(66) === file).length, 1)
+    await writeFile(path, lines.filter((line) => line.slice(66) !== file).join('\n'))
+  }
+
+  for (const scenario of [
+    {
+      name: 'missing file even when it is not listed in the manifest',
+      change: async (dir) => {
+        await rm(join(dir, 'docs/upgrade-runbook.md'))
+        await removeManifestEntry(dir, 'docs/upgrade-runbook.md')
+      },
+      error: /missing: docs\/upgrade-runbook\.md/,
+      remainingHashesValid: true,
+    },
+    {
+      name: 'missing exact manifest entry while all listed hashes match',
+      change: async (dir) => {
+        await removeManifestEntry(dir, 'scripts/upgrade/precheck.sql')
+        await appendFile(join(dir, 'SHA256SUMS'), portableChecksums(['./scripts/upgrade/precheck.sql'], dir))
+      },
+      error: /SHA256SUMS.*scripts\/upgrade\/precheck\.sql/,
+      remainingHashesValid: true,
+    },
+    {
+      name: 'changed SQL file',
+      change: (dir) => appendFile(join(dir, 'scripts/upgrade/postcheck.sql'), '\n-- changed after hashing\n'),
+      error: /Offline package checksum validation failed/,
+    },
+  ]) {
+    await t.test(scenario.name, async (t) => {
+      const fixture = await fakeBin()
+      t.after(() => rm(fixture.dir, { recursive: true, force: true }))
+      const deployRoot = join(fixture.dir, 'offline-root')
+      await installOfflinePackage(deployRoot)
+      await scenario.change(deployRoot)
+      if (scenario.remainingHashesValid) {
+        const verified = verifyManifest(deployRoot)
+        assert.equal(verified.status, 0, `${verified.stdout}\n${verified.stderr}`)
+      }
+      const result = runDeployment(join(deployRoot, 'scripts/deploy.sh'), ['--offline', deployRoot], {
+        PATH: `${fixture.bin}:${process.env.PATH}`, COMMAND_LOG: fixture.log,
+      }, fixture.dir)
+      const log = await read(fixture.log)
+      assert.notEqual(result.status, 0, `invalid package was accepted:\n${result.stdout}\n${log}`)
+      assert.match(result.stderr, scenario.error)
+      assert.match(result.stderr, /Deployment failed during: package-validation/)
+      assert.equal(log, 'docker compose version\n', 'only the host Compose version probe may run')
+      assert.equal(existsSync(join(deployRoot, 'backups')), false)
+    })
+  }
 })
 
 test('main migration failure stops health and success without automatic rollback', async () => {

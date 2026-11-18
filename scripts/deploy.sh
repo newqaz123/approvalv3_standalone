@@ -124,7 +124,8 @@ online_git_acquire() {
 
 validate_offline_package() {
 	local required
-	for required in VERSION SHA256SUMS docker-compose.prod.yml images/approval-app.tar images/approval-migrate.tar images/postgres.tar scripts/deploy.sh scripts/deploy-offline.sh scripts/backup.sh scripts/restore.sh scripts/rollback.sh scripts/health-check.sh scripts/setup.sh scripts/lib/deploy-common.sh tools/env-check.mjs tools/lib/env.mjs; do
+	local upgrade_artifacts=(docs/upgrade-runbook.md scripts/upgrade/precheck.sql scripts/upgrade/postcheck.sql)
+	for required in VERSION SHA256SUMS docker-compose.prod.yml images/approval-app.tar images/approval-migrate.tar images/postgres.tar scripts/deploy.sh scripts/deploy-offline.sh scripts/backup.sh scripts/restore.sh scripts/rollback.sh scripts/health-check.sh scripts/setup.sh scripts/lib/deploy-common.sh tools/env-check.mjs tools/lib/env.mjs "${upgrade_artifacts[@]}"; do
 		[ -f "$DEPLOY_ROOT/$required" ] || {
 			fail "Offline package is missing: $required"
 			return 1
@@ -138,6 +139,17 @@ validate_offline_package() {
 		fail 'Offline SHA256SUMS is empty'
 		return 1
 	}
+	# The checksum tools only verify listed paths; require these exact paths first.
+	for required in "${upgrade_artifacts[@]}"; do
+		if ! LC_ALL=C awk -v path="$required" '
+			length($1) == 64 && $1 !~ /[^a-fA-F0-9]/ &&
+				substr($0, 65, 2) ~ /^ [ *]$/ && substr($0, 67) == path { found = 1; exit }
+			END { exit !found }
+		' "$DEPLOY_ROOT/SHA256SUMS"; then
+			fail "Offline SHA256SUMS is missing an entry for: $required"
+			return 1
+		fi
+	done
 	if command -v sha256sum >/dev/null 2>&1; then
 		(cd "$DEPLOY_ROOT" && sha256sum -c SHA256SUMS)
 	elif command -v shasum >/dev/null 2>&1; then

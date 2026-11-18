@@ -1,6 +1,6 @@
 # Approval System — Production Operations
 
-The canonical beginner-safe deployment command is:
+From the trusted checkout or extracted package, run the deployment coordinator as an authorized administrator with effective UID 0 and a trusted administrator `PATH`:
 
 ```bash
 bash scripts/deploy.sh
@@ -8,7 +8,9 @@ bash scripts/deploy.sh
 
 The script supports an online Ubuntu VPS checkout and an extracted offline intranet package. It validates configuration, preserves persistent data, creates verified backups, handles migrations, checks health, and audits attachment integrity.
 
-Host prerequisites are Docker with Compose v2, Node.js 20 or newer for the environment gate, and `curl` for HTTP health checks. Online mode additionally requires Git; offline mode requires a SHA-256 utility (`sha256sum` or `shasum`).
+Host prerequisites are Docker with Compose v2, Node.js 20 or newer for the environment gate, and `curl` for HTTP health checks. Online mode additionally requires Git access under the root deployment account; see [checkout and privilege requirements](../DEPLOY.md#online-ubuntu-vps-update). Offline mode requires a SHA-256 utility (`sha256sum` or `shasum`).
+
+If the existing database still uses departments, follow the [legacy upgrade runbook](upgrade-runbook.md) before running the coordinator.
 
 ## Two explicit Compose environments
 
@@ -40,7 +42,7 @@ Use that command only after confirming a new empty installation.
 
 ## Production environment
 
-Create `.env.production` from `.env.example` in a repository checkout or `.env.production.example` in an offline package.
+Preserve an existing `.env.production`. For a new deployment, create it from `.env.example` in a repository checkout or `.env.production.example` in an offline package.
 
 The public URL values must share one exact HTTPS origin:
 
@@ -59,7 +61,7 @@ The environment checker fails before deployment if required values are missing, 
 
 1. Keep the server checkout on `main`.
 2. Ensure `.env.production` is configured.
-3. Run `bash scripts/deploy.sh`.
+3. Run `bash scripts/deploy.sh` from the trusted checkout in the authorized root session.
 4. Choose **Ubuntu VPS / GitHub update**.
 
 The update is fast-forward-only from `origin/main`. A dirty tracked tree aborts by default. If the operator explicitly requests preservation, deployment creates a uniquely named stash and prints recovery instructions. It never automatically applies or deletes the stash.
@@ -74,23 +76,23 @@ Build the package on an internet-connected development machine:
 bash scripts/build-package.sh <version>
 ```
 
-After transferring and extracting the archive on the intranet server:
+Transfer the archive from a trusted release source and extract it on the intranet server. Provision `.env.production` securely (use `.env.production.example` only for a new configuration), then run the package's own coordinator from its directory in the authorized root session:
 
 ```bash
-cp .env.production.example .env.production
-# Edit production values.
-bash scripts/deploy.sh
+bash scripts/deploy.sh --offline .
 ```
 
-Choose **Offline intranet package**. The coordinator verifies `SHA256SUMS` before any image load or safety mutation. Offline mode does not invoke Git or network commands.
+The coordinator requires the legacy runbook and SQL checks in `SHA256SUMS`, and verifies the manifest before any image load, backup, or service change. Checksums detect corruption, not package provenance. Offline mode requires no Git or external network access.
 
 ## Manager
+
+In a repository checkout, run the manager in the same authorized root session for a production update:
 
 ```bash
 npm run manage
 ```
 
-Option `2` delegates an existing-installation update exactly once to `bash scripts/deploy.sh`; select online or offline mode there. Backup, restore, health check, and rollback remain separate manager actions.
+Option `2` delegates an existing-installation update exactly once to `bash scripts/deploy.sh` in that checkout, without elevating privileges. Use the extracted package's own coordinator directly for offline updates. Backup, restore, health check, and rollback remain separate manager actions.
 
 ## Persistence guarantees
 

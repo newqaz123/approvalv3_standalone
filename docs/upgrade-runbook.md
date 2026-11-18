@@ -1,171 +1,195 @@
-# Upgrade runbook: departments → organization model (in place)
+# Legacy upgrade: departments → organization model
 
-Applies when you deploy the organization redesign onto an existing production
-database that runs main (departments + numeric levels). The release adds one
-migration, `20261019000000_organization_upgrade`, on top of main's 18. `prisma
-migrate deploy` only applies that one. Design and owner decisions:
-`docs/superpowers/specs/2026-10-19-upgrade-migration-design.md`.
+Use this procedure only for an existing departments database with
+`20261019000000_organization_upgrade` still pending. This is not a first
+installation or the routine procedure for a database already using organization
+units. Read the [production deployment guide](../DEPLOY.md) first.
 
-The examples assume the production compose project (`approval-db` container,
-`.env.production`). Replace `<user>` and `<db>` with `POSTGRES_USER` and
-`POSTGRES_DB` from `.env.production`.
+Run production commands as an authorized deployment administrator with
+effective UID 0 and a trusted administrator `PATH`. Use a trusted checkout or
+extracted package. For an online upgrade, use the production `main` checkout for
+the coordinator, with Git access and any required trust scoped to that exact
+checkout. If the legacy checkout does not have the unified coordinator, use the
+approved offline archive rather than copying scripts across releases.
 
-## 0. Rehearse (optional, recommended)
+Run the preparation and checks from the trusted release checkout or extracted
+release archive so you have this release's SQL and backup script. For an archive,
+check `VERSION` against the approved release and verify `SHA256SUMS`
+(`sha256sum -c SHA256SUMS` or `shasum -a 256 -c SHA256SUMS`) before using its
+contents. The manifest detects corruption, not package provenance. Preserve the
+existing `.env.production`, PostgreSQL and uploads volumes, and `backups/`.
 
-On a workstation with PostgreSQL 16 binaries, run the disposable verification
-(fresh install, upgrade with legacy data, and the guard):
+These production examples assume the Compose project `approval-app` with
+container `approval-db`. Set and export `POSTGRES_USER` and `POSTGRES_DB` in the
+operator shell to the values from the existing production configuration. Confirm
+you are checking the intended database. Do not print credentials or copy them
+into the change record.
 
-```bash
-bash scripts/upgrade/verify-upgrade.sh     # or: npm run upgrade:verify
-```
+## 1. Confirm migration state and rehearse
 
-For a closer rehearsal, restore last night's backup into a throwaway database
-and run steps 2–4 against it.
-
-## 1. Back up
-
-```bash
-./scripts/db-backup.sh            # or:
-docker exec approval-db pg_dump -U <user> -d <db> -Fc > backups/pre-org-upgrade-$(date +%Y%m%d-%H%M).dump
-```
-
-Keep this file until the admin has finished the follow-up in step 6.
-
-## 2. Pre-check (old schema, read-only)
+Compare the live schema and Prisma migration history to the approved release:
 
 ```bash
-docker exec -i approval-db psql -U <user> -d <db> -X < scripts/upgrade/precheck.sql
+docker exec -i -e 'PGOPTIONS=-c default_transaction_read_only=on' approval-db \
+  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -X -v ON_ERROR_STOP=1 <<'SQL'
+SELECT to_regclass('public.departments') AS departments,
+       to_regclass('public.organization_units') AS organization_units;
+SELECT migration_name, started_at, finished_at, rolled_back_at
+FROM public._prisma_migrations ORDER BY started_at;
+SQL
 ```
 
-- **Section 1 must be empty.** It lists open requests (any status other than
-  Completed/Cancelled) that still have a pending request or solution approval.
-  Finish each one (approve or reject until it reaches a terminal status) or
-  cancel it. If any remain, the migration aborts (see step 4).
-- Sections 2–5 are informational. They list users without a department, who
-  will be unassigned. They list users with a department but no level, who
-  get the lowest position. They list department approvers that cannot become
-  an assignment, because the new model allows one active assignment per
-  person. The last section shows the levels in use.
+- **Pending on the legacy schema:** `departments` exists, `organization_units`
+  does not, the legacy migration history matches the expected baseline, and
+  there is neither a successful organization-upgrade record nor an unresolved
+  failure. Continue below only when those facts agree.
+- **Already applied:** a finished, non-rolled-back organization-upgrade record
+  agrees with the organization schema. Use the routine production guide, not the
+  legacy precheck or export. A later failed migration still requires diagnosis.
+- **Failed or unclear:** an unfinished, non-rolled-back attempt, drift between
+  history and schema, or a missing or unreadable history requires investigation.
+  Stop; do not rerun or mark a migration resolved based on this runbook.
 
-Announce a short freeze so no new requests are submitted between the
-pre-check and the deploy.
+**Source-checkout rehearsal only:** With dependencies and PostgreSQL binaries
+installed, run `bash scripts/upgrade/verify-upgrade.sh` (or
+`npm run upgrade:verify`) in the release source checkout. It runs fresh, legacy,
+and blocked-upgrade scenarios on a disposable cluster; it is not shipped in the
+archive. Before production, rehearse the upgrade and restore plan against an
+isolated, protected copy in staging, including approval routing and attachments.
 
-## 3. Export `hierarchy_change_logs` (it is dropped by the upgrade)
+## 2. Freeze writes and run the legacy precheck
+
+Schedule a maintenance window. Finish or cancel blocking requests in the legacy
+app before the freeze. Then block user traffic and pause background jobs and other
+writers while leaving the existing app and database containers available to the
+coordinator. Keep the freeze in place through sign-off. After the freeze starts,
+reconfirm migration state and run the read-only [precheck SQL](../scripts/upgrade/precheck.sql):
 
 ```bash
-docker exec -i approval-db psql -U <user> -d <db> -X \
-  -c "\copy (SELECT h.*, d.name AS department_name, a.email AS admin_email, t.email AS target_email FROM hierarchy_change_logs h LEFT JOIN departments d ON d.id = h.\"departmentId\" LEFT JOIN users a ON a.id = h.\"adminUserId\" LEFT JOIN users t ON t.id = h.\"targetUserId\" ORDER BY h.\"createdAt\") TO STDOUT WITH (FORMAT csv, HEADER)" \
-  > backups/hierarchy_change_logs-$(date +%Y%m%d).csv
+docker exec -i -e 'PGOPTIONS=-c default_transaction_read_only=on' approval-db \
+  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -X -v ON_ERROR_STOP=1 \
+  < scripts/upgrade/precheck.sql
 ```
 
-With direct `psql` access to the database you can write the file locally:
+**Section 1 must return zero rows.** It lists open requests with pending request
+or solution approvals. If any remain, stop the upgrade; have the owners finish
+or cancel them on the legacy system in a controlled window, then reestablish the
+freeze and repeat the precheck. A SQL error is also a stop. Review sections 2–5
+for the expected assignment and position mapping, and record the hierarchy-log
+row count from section 6.
 
-```sql
-\copy (SELECT * FROM hierarchy_change_logs ORDER BY "createdAt") TO 'hierarchy_change_logs.csv' WITH (FORMAT csv, HEADER)
-```
+## 3. Back up and export hierarchy history
 
-## 4. Deploy
-
-Deploy the release the usual way (`scripts/deploy.sh` or
-`docker compose -p approval-app --env-file .env.production -f docker-compose.prod.yml up -d db migrate app`).
-The `migrate` service runs `npx prisma migrate deploy`, which applies only
-`20261019000000_organization_upgrade`. Do **not** run the first-install seed
-profile. It is not needed, although it is harmless: `prisma/seed.ts` only
-creates missing rows and never resets the admin.
-
-The migration is a single transaction. It runs in this order:
-
-1. Guard: abort if any approval is still pending on an open request.
-2. Create the new enums, tables and columns.
-3. Map the data:
-   - A root unit "Company" and `company_settings` are created.
-   - Each department becomes a unit under the root with the **same id**.
-     `canWorkOnSolutions` is set for ENGINEERING departments, and request
-     sharing is OFF.
-   - Positions `Level N` (rank N) are created, one for each level in use.
-   - Each active user with a department gets an assignment at their level. A
-     user with no level gets the lowest position.
-   - Department approvers without their own assignment get one in that unit.
-   - The unit manager is the single highest-ranked person, if exactly one
-     person holds that rank.
-   - `requests.organizationUnitId` and `budget_codes.unitId` are set to the
-     old department id.
-   - Historical approval rows keep their level as `requiredPositionId`.
-   - One PUBLISHED company-wide route is created per phase (REQUEST,
-     SOLUTION, FINAL). Its steps are every level above the lowest, up to the
-     highest.
-4. Add foreign keys, partial unique indexes and CHECK constraints.
-5. Drop `departments`, `department_approvers`, `hierarchy_change_logs` and the
-   old columns.
-
-The append-only audit trigger on `request_activities` is not touched.
-
-### If the migrate container fails
-
-The database is left unchanged, because the transaction is rolled back.
-Prisma records the migration as failed, and every later deploy refuses with
-P3009 until you resolve it. If the log shows `ORGANIZATION UPGRADE BLOCKED`:
-
-1. Bring the old app version back if needed, and finish or cancel the listed
-   requests (precheck section 1).
-2. Mark the failed attempt as rolled back, then deploy again:
+While frozen, use the [canonical backup script](../scripts/backup.sh) from the
+release checkout or package:
 
 ```bash
-docker compose -p approval-app --env-file .env.production -f docker-compose.prod.yml \
-  run --rm migrate npx prisma migrate resolve --rolled-back 20261019000000_organization_upgrade
-docker compose -p approval-app --env-file .env.production -f docker-compose.prod.yml up -d db migrate app
+umask 077
+bash scripts/backup.sh
 ```
 
-For any other error, resolve it the same way and keep the backup from step 1
-at hand.
+Require a nonzero-size PostgreSQL dump and uploads archive at the reported
+`DB_BACKUP_PATH` and `UPLOADS_BACKUP_PATH`. Recompute each SHA-256 digest and
+compare it to `DB_BACKUP_SHA256` and `UPLOADS_BACKUP_SHA256` respectively. Stop if
+either artifact is missing, empty, or mismatched. Record both paths and hashes,
+copy both to separate protected storage, and verify the copies. Keep this pair
+and the previous release available for recovery. The coordinator also makes and
+verifies its own backup before updating services.
 
-## 5. Post-check
+Export `hierarchy_change_logs` before deploying; the migration drops the table.
+Use a restricted destination because the export can include names and email
+addresses:
 
 ```bash
-docker exec -i approval-db psql -U <user> -d <db> -X < scripts/upgrade/postcheck.sql
+history_csv="backups/hierarchy_change_logs-$(date -u +%Y%m%dT%H%M%SZ).csv"
+docker exec -i -e 'PGOPTIONS=-c default_transaction_read_only=on' approval-db \
+  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -X -v ON_ERROR_STOP=1 \
+  -c '\copy (SELECT h.*, d.name AS department_name, a.email AS admin_email, t.email AS target_email FROM hierarchy_change_logs h LEFT JOIN departments d ON d.id = h."departmentId" LEFT JOIN users a ON a.id = h."adminUserId" LEFT JOIN users t ON t.id = h."targetUserId" ORDER BY h."createdAt") TO STDOUT WITH (FORMAT csv, HEADER)' \
+  > "$history_csv"
 ```
 
-Check the following:
+Require a successful export, a readable CSV with a header, and the expected
+number of data records from precheck section 6. Store it with the protected
+backup pair. Stop if it cannot be verified.
 
-- `root_units = 1` and `company_settings = 1`.
-- `requests_without_unit = 0`.
-- `published_routes = 3`.
-- Two audit triggers are listed.
-- `active_assignments` matches the expected number of people.
+## 4. Deploy the approved release
 
-Then log in as an admin and open **Organization & Approvals**. The readiness
-banner should not report blockers. Fewer than two positions does raise one: in
-that case, add a position.
+Use the [deployment coordinator](../scripts/deploy.sh). On an online server,
+run `bash scripts/deploy.sh --online` from the production checkout only when its
+fast-forward from `origin/main` will select the approved release. Offline, run
+`bash scripts/deploy.sh --offline .` from the extracted package with its own
+coordinator. Do not bypass it by starting Compose services manually.
 
-## 6. Admin follow-up (same day)
+The coordinator starts only `db migrate app`. Prisma applies **all pending
+migrations in order**, including `20261019000000_organization_upgrade` and any
+later migrations in the release. Do not run the first-install seed during an
+update. The organization migration maps departments to units (keeping IDs),
+levels to positions, and eligible users to active assignments. It preserves
+historical approval references, creates default routes when it has a creator
+and positions, and drops the old hierarchy tables.
 
-1. **Unit managers.** Approval candidates come from the reporting path: the
-   team reports-to person, the unit manager, then the ancestor-unit managers,
-   at the exact position each route step names. The upgrade sets a manager
-   only where one person clearly holds the top level. A step with nobody
-   eligible is **skipped as vacant**, and if all steps are vacant the phase
-   completes without an approver. This is the intended behaviour (owner
-   decision 2026-10-19: no higher-level approver → skip / auto-complete), so
-   set managers and teams promptly. For each unit, use postcheck
-   `units_without_manager` and the unit list to:
-   - pick the Unit manager, and
-   - create teams with a reports-to person where several levels must
-     approve inside one unit.
-2. **Unassigned people.** Assign every person listed under "Active users
-   WITHOUT an assignment", such as admins, accounts with no department, and
-   external approvers who were skipped. Unassigned users cannot submit
-   requests.
-3. **Positions and routes.** Rename `Level N` to real titles if wanted (main's
-   `departments.levelNames` held them). Review the company default routes and
-   add unit exceptions where departments had different ladders.
-4. **Solution work.** Only the former ENGINEERING departments have Can work
-   on solutions. Set the flag on any other unit that needs it. The
-   `users.role = engineering` value no longer grants solution work by itself.
-5. **Request sharing** is OFF for every migrated unit. Turn it on where
-   sister departments should see each other's requests.
+If the migration or any other deployment check fails, keep the freeze and go to
+[recovery and rollback](#recovery-and-rollback). Do not run the deploy again as
+an experiment.
 
-## Rollback
+## 5. Postcheck and sign off before reopening
 
-There is no down migration. To roll back, restore the step 1 backup (for
-example `scripts/restore.sh` or `pg_restore --clean`). Then redeploy the
-previous release images (`approval-app:rollback` / `approval-migrate:rollback`).
+Once the coordinator succeeds, confirm that the applied migration history
+matches the approved release. Run the read-only [postcheck SQL](../scripts/upgrade/postcheck.sql)
+from the release directory while normal traffic is still blocked:
+
+```bash
+docker exec -i -e 'PGOPTIONS=-c default_transaction_read_only=on' approval-db \
+  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -X -v ON_ERROR_STOP=1 \
+  < scripts/upgrade/postcheck.sql
+```
+
+Expect `root_units = 1`, `company_settings = 1`, `requests_without_unit = 0`,
+and two audit triggers. Compare units and `active_assignments` to the expected
+mapping. Expect a published company default for each of REQUEST, SOLUTION, and
+FINAL when the legacy data supports it; investigate missing or unexpected
+routes rather than opening the system without them.
+
+In **Organization & Approvals**, have the organization admin and workflow owner
+review and sign off:
+
+1. **Managers and teams:** the migration sets a unit manager only if exactly
+   one active assignee holds its highest rank. Review `units_without_manager`,
+   choose managers, and configure teams and their reports-to assignments.
+2. **Assignments:** reconcile active users who have no assignment and the legacy
+   approvers that could not be mapped. Confirm each expected requester and
+   approver has the correct active unit and position.
+3. **Routes:** verify REQUEST, SOLUTION, and FINAL routes and any unit exceptions.
+   Test representative requesters and approvers: candidates must hold the exact
+   required position on the reporting path or in the requester's team. A vacant
+   step can be skipped and an entirely vacant phase can complete automatically;
+   confirm any such outcome is intended. Resolve readiness blockers, including
+   missing positions or routes, before reopening.
+4. **Access and data:** confirm users can sign in, historical requests and sample
+   attachments still open with the intended permissions, and solution-work and
+   request-sharing settings match policy (migrated units start with sharing off).
+
+Keep traffic frozen until these checks and any controlled corrections are
+signed off. Record the release, backup pair and history export, and sign-off
+before reopening traffic and re-enabling jobs.
+
+## Recovery and rollback
+
+On failure keep the maintenance freeze. Preserve migration logs, recorded
+state, the pre-upgrade artifacts, and the previous images. Diagnose the actual
+migration history and schema before choosing a forward fix or a restore. The
+organization migration is transactional, but Prisma can record a failed
+attempt and any other pending migration may have run. Do not use a generic
+`migrate resolve` or retry; require a separately reviewed recovery plan for the
+specific failure and verify its assumptions in staging.
+
+There is no down migration. Do not use app-only rollback after an incompatible
+schema change, or while compatibility is uncertain. To return to the previous
+release after an incompatible upgrade, restore the verified pre-upgrade database
+**and** uploads pair to the existing volumes under the approved restore plan,
+and run the matching previous release. The [packaged restore script](../scripts/restore.sh)
+is destructive and can restart the app; rehearse the sequence with the previous
+images and keep all writers isolated. For disconnected recovery, stage and verify
+any required local images or approved restore tooling in advance (the uploads
+restore helper uses `alpine:latest`, which is not bundled). Confirm the restored
+migration history, data, attachments, and app health before reopening traffic.
