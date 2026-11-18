@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs'
 import { appendFile, chmod, mkdtemp, readFile, writeFile, mkdir, copyFile, readdir, readlink, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { execFileSync, spawnSync } from 'node:child_process'
+import { execFile, execFileSync, spawnSync } from 'node:child_process'
 
 const root = resolve('.')
 const read = (path) => readFile(path, 'utf8')
@@ -892,32 +892,51 @@ if [ "$1" = -- ]; then shift; fi
 [ "$1" = '${remoteTarget}' ] || exit 2
 shift
 if [ "$#" = 0 ]; then
+  wait_for_marker "$WAIT_BEFORE_EXTRACT"
   exec /bin/bash
 fi
 [ "$#" = 1 ] || exit 2
 case "$1" in
   'id -u') id -u; exit "$SSH_PROBE_EXIT" ;;
-  "mkdir -p $FIXTURE_REMOTE_PATH"|"mkdir -p '$FIXTURE_REMOTE_PATH'") exit 0 ;;
+  "mkdir -p '$FIXTURE_REMOTE_PATH'"*|"rm -f -- '$FIXTURE_REMOTE_PATH/.incoming."*) exec /bin/bash -c "$1" ;;
   *) exit 2 ;;
 esac
 `,
     scp: `
 printf 'scp %s\\n' "$*" >>"$COMMAND_LOG"
 if [ "$1" = -- ]; then shift; fi
-[ "$#" = 2 ] && [ "$1" = "$FIXTURE_PROJECT/deploy/${remoteRelease}.tar.gz" ] &&
-  [ "$2" = '${remoteTarget}:'"$FIXTURE_REMOTE_PATH/" ] || exit 2
-cp "$1" "$FIXTURE_REMOTE_PATH/"
+[ "$#" = 2 ] && [ "$1" = "$FIXTURE_PROJECT/deploy/${remoteRelease}.tar.gz" ] || exit 2
+dest=\${2#${remoteTarget}:}
+case "$dest" in
+  "$FIXTURE_REMOTE_PATH/"|"$FIXTURE_REMOTE_PATH/".incoming.*/) ;;
+  *) exit 2 ;;
+esac
+wait_for_marker "$WAIT_BEFORE_UPLOAD"
+cp "$1" "$dest"
+if [ -n "$UPLOAD_MARKER" ]; then : >"$UPLOAD_MARKER"; fi
+exit "$SCP_EXIT"
 `,
   })) {
     const path = join(fixture.bin, name)
-    await writeFile(path, `#!/bin/bash\nset -e\n${body}`)
+    await writeFile(path, `#!/bin/bash
+set -e
+wait_for_marker() {
+  [ -n "$1" ] || return 0
+  for ((attempt = 0; attempt < 500; attempt++)); do
+    [ ! -f "$1" ] || return 0
+    sleep 0.02
+  done
+  printf 'Timed out waiting for fixture marker %s\\n' "$1" >&2
+  return 2
+}
+${body}`)
     await chmod(path, 0o755)
   }
   return { ...fixture, project, server, script, current, calls: join(server, remoteRelease, 'deploy-calls.log') }
 }
 
-function runRemoteDeployment(fixture, { path = fixture.server, tag = remoteTag, uid = '0', childExit = '0', probeExit = '0' } = {}) {
-  return runDeployment(fixture.script, [remoteTarget, path, tag], {
+function remoteDeployEnv(fixture, { uid = '0', childExit = '0', probeExit = '0', scpExit = '0' } = {}) {
+  return {
     PATH: `${fixture.bin}:${process.env.PATH}`,
     COMMAND_LOG: fixture.log,
     FIXTURE_PROJECT: fixture.project,
@@ -926,7 +945,15 @@ function runRemoteDeployment(fixture, { path = fixture.server, tag = remoteTag, 
     FAKE_UID: uid,
     CHILD_EXIT: childExit,
     SSH_PROBE_EXIT: probeExit,
-  }, fixture.dir)
+    SCP_EXIT: scpExit,
+    WAIT_BEFORE_UPLOAD: '',
+    WAIT_BEFORE_EXTRACT: '',
+    UPLOAD_MARKER: '',
+  }
+}
+
+function runRemoteDeployment(fixture, { path = fixture.server, tag = remoteTag, ...options } = {}) {
+  return runDeployment(fixture.script, [remoteTarget, path, tag], remoteDeployEnv(fixture, options), fixture.dir)
 }
 
 test('deploy-remote invokes scripts/deploy-offline.sh once and promotes current only after success', async (t) => {
@@ -969,6 +996,48 @@ test('deploy-remote preserves active release contents on a same-version, same-da
   assert.equal(await read(fixture.calls), 'old-release\n')
   assert.match(retry.stderr, /already exists.*new version tag/i)
   assert.doesNotMatch(retry.stdout, /Remote Deploy Complete/)
+})
+
+test('overlapping same-tag remote deploys can only extract their own archive', async (t) => {
+  const first = await installRemoteDeployFixture(t)
+  const second = await installRemoteDeployFixture(t)
+  // Separate build clients share one destination. Allow A to extract only after B
+  // has uploaded, but reserve the release directory for A before B extracts.
+  const composePath = join('archive', remoteRelease, 'docker-compose.prod.yml')
+  await writeFile(join(first.dir, composePath), 'archive A\n')
+  await writeFile(join(second.dir, composePath), 'archive B\n')
+  const firstUpload = join(first.dir, 'first-uploaded')
+  const secondUpload = join(first.dir, 'second-uploaded')
+  const firstDone = join(first.dir, 'first-done')
+  const start = (client, options) => new Promise((resolve) => {
+    execFile('/bin/bash', [client.script, remoteTarget, first.server, remoteTag], {
+      cwd: client.dir,
+      env: { ...process.env, ...remoteDeployEnv(client), FIXTURE_REMOTE_PATH: first.server, ...options },
+      timeout: 15000,
+    }, (error, stdout, stderr) => resolve({ status: error ? error.code : 0, stdout, stderr }))
+  })
+  const a = start(first, { UPLOAD_MARKER: firstUpload, WAIT_BEFORE_EXTRACT: secondUpload })
+  const b = start(second, {
+    WAIT_BEFORE_UPLOAD: firstUpload, UPLOAD_MARKER: secondUpload, WAIT_BEFORE_EXTRACT: firstDone,
+  })
+  const winner = await a
+  await writeFile(firstDone, '')
+  const collision = await b
+  assert.equal(winner.status, 0, `${winner.stdout}\n${winner.stderr}`)
+  assert.equal(collision.status, 1, `${collision.stdout}\n${collision.stderr}`)
+  assert.match(collision.stderr, /already exists.*new version tag/i)
+  assert.equal(await readlink(first.current), remoteRelease)
+  assert.equal(await read(join(first.current, 'docker-compose.prod.yml')), 'archive A\n')
+  assert.equal(await read(first.calls), 'old-release\n')
+  assert.deepEqual((await readdir(first.server)).sort(), [remoteRelease, 'current', 'old-release'].sort())
+})
+
+test('deploy-remote removes its partial upload when transfer fails', async (t) => {
+  const fixture = await installRemoteDeployFixture(t)
+  const result = runRemoteDeployment(fixture, { scpExit: '29' })
+  assert.equal(result.status, 29, `${result.stdout}\n${result.stderr}`)
+  assert.equal(await readlink(fixture.current), 'old-release')
+  assert.deepEqual((await readdir(fixture.server)).sort(), ['current', 'old-release'])
 })
 
 test('deploy-remote keeps current when creating the new symlink fails', async (t) => {
@@ -1185,6 +1254,38 @@ test('main offline path never invokes Git or network commands', async () => {
   assert.equal(result.status, 0, result.stderr)
   const log = await readFile(fixture.log, 'utf8')
   assert.doesNotMatch(log, /\bgit\b|\bfetch\b|\bpull\b|alpine:latest|--pull=always/)
+})
+
+test('existing offline installation backs up the configured role and database before loading images', async (t) => {
+  const fixture = await fakeBin()
+  t.after(() => rm(fixture.dir, { recursive: true, force: true }))
+  const deployRoot = join(fixture.dir, 'offline-existing')
+  await installOfflinePackage(deployRoot)
+  await copyFile(join(root, 'scripts/backup.sh'), join(deployRoot, 'scripts/backup.sh'))
+  const envPath = join(deployRoot, '.env.production')
+  await writeFile(envPath, (await read(envPath))
+    .replace('deployuser:deploypassword123456@db/app_db', 'backup_fixture:deploypassword123456@db/fixture_data')
+    .replace('POSTGRES_USER=deployuser', 'POSTGRES_USER="backup_fixture"')
+    .replace('POSTGRES_DB=app_db', "POSTGRES_DB='fixture_data'") +
+    'BACKUP_SOURCE_PROBE=$(touch "$DEPLOY_ROOT/backup-sourced-env")\n')
+  const generated = generateChecksums(deployRoot)
+  assert.equal(generated.status, 0, generated.stderr)
+
+  const result = runShell('unset POSTGRES_USER POSTGRES_DB; bash scripts/deploy-offline.sh', {
+    PATH: `${fixture.bin}:${process.env.PATH}`, COMMAND_LOG: fixture.log, DEPLOY_ROOT: deployRoot,
+  }, { cwd: deployRoot })
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
+  assert.equal(existsSync(join(deployRoot, 'backup-sourced-env')), false, 'env file was evaluated as shell code')
+  const log = await read(fixture.log)
+  assertLogSequence(log, [
+    'docker exec approval-db pg_dump -U backup_fixture -d fixture_data\n',
+    'docker exec approval-db psql -U backup_fixture -d fixture_data -tAc select count(*) from users;\n',
+    'docker exec approval-app tar -czf - -C /app/uploads .\n',
+    'docker load ',
+    'up -d db migrate app\n',
+  ])
+  assert.match(result.stdout, /^DB_BACKUP_SHA256=[a-f0-9]{64}$/m)
+  assert.match(result.stdout, /^UPLOADS_BACKUP_SHA256=[a-f0-9]{64}$/m)
 })
 
 test('offline package validation requires backup and recovery scripts before mutation', async () => {

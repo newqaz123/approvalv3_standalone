@@ -77,8 +77,20 @@ echo ""
 
 # Step 2: Transfer to server
 echo -e "${BLUE}[2/3]${NC} Transferring to server..."
-ssh -- "$REMOTE" "mkdir -p '$REMOTE_PATH'"
-scp -- "$PROJECT_DIR/deploy/${PACKAGE_NAME}.tar.gz" "$REMOTE:$REMOTE_PATH/"
+# Isolate same-tag uploads before the atomic release-directory reservation.
+staging_name="$(ssh -- "$REMOTE" "mkdir -p '$REMOTE_PATH' && cd '$REMOTE_PATH' && mktemp -d .incoming.XXXXXXXX" </dev/null)"
+if [[ ! $staging_name =~ ^\.incoming\.[A-Za-z0-9]{8}$ ]]; then
+    printf 'ERROR: Unexpected remote staging directory name; deployment aborted.\n' >&2
+    exit 1
+fi
+staging_dir="${REMOTE_PATH%/}/$staging_name"
+cleanup_upload() {
+    if ! ssh -- "$REMOTE" "rm -f -- '$staging_dir/${PACKAGE_NAME}.tar.gz' && rmdir -- '$staging_dir'" </dev/null; then
+        printf 'WARNING: Could not remove remote upload directory: %s\n' "$staging_dir" >&2
+    fi
+}
+trap cleanup_upload EXIT
+scp -- "$PROJECT_DIR/deploy/${PACKAGE_NAME}.tar.gz" "$REMOTE:$staging_dir/"
 echo -e "${GREEN}✓ Package transferred${NC}"
 
 # Step 3: Extract and deploy remotely
@@ -93,7 +105,7 @@ if ! mkdir -- '${PACKAGE_NAME}'; then
     exit 1
 fi
 echo "Extracting ${PACKAGE_NAME}.tar.gz..."
-tar -xzf '${PACKAGE_NAME}.tar.gz' --strip-components=1 -C '${PACKAGE_NAME}'
+tar -xzf '$staging_dir/${PACKAGE_NAME}.tar.gz' --strip-components=1 -C '${PACKAGE_NAME}'
 
 # Copy .env.production if it exists from previous deploy
 if [ -f .env.production ] && [ ! -f '${PACKAGE_NAME}/.env.production' ]; then

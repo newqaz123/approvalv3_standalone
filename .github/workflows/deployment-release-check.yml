@@ -31,6 +31,11 @@ jobs:
           PUPPETEER_SKIP_DOWNLOAD: 'true'
         run: npm ci
 
+      - name: Install browsers for project checks
+        run: |
+          npx --no-install playwright install --with-deps chromium
+          npx --no-install puppeteer browsers install chrome --install-deps
+
       - name: Generate Prisma client
         env:
           DATABASE_URL: postgresql://dummy:dummy@127.0.0.1:1/prisma_generate_only
@@ -40,7 +45,9 @@ jobs:
         env:
           DOTENV_CONFIG_PATH: /dev/null
         run: |
-          unset DATABASE_URL DIRECT_URL SHADOW_DATABASE_URL CLEAN_START_CI_DATABASE_URL
+          unset DATABASE_URL DIRECT_URL SHADOW_DATABASE_URL CLEAN_START_CI_DATABASE_URL BUSINESS_DATABASE_URL POSTGRES_URL
+          unset POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB PGHOST PGHOSTADDR PGPORT PGUSER PGPASSWORD PGDATABASE
+          unset PGSERVICE PGSERVICEFILE PGPASSFILE PGOPTIONS
           npm run check
 
       - name: Rehearse migrations in a throwaway PostgreSQL 15 cluster
