@@ -59,7 +59,7 @@ NEXT_PUBLIC_APP_URL=https://approval.example.com
 AUTH_TRUST_HOST=true
 ```
 
-`DATABASE_URL` must use PostgreSQL and the internal `db` host. Its credentials and database name must match `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB`. Keep `UPLOAD_DIR=/app/uploads`.
+`DATABASE_URL` must use PostgreSQL and the internal `db` host. Its credentials and database name must match `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB`. Set `POSTGRES_DB` to a literal database name: it cannot contain `=` or begin with `postgresql://` or `postgres://`. Keep `UPLOAD_DIR=/app/uploads`.
 
 The deploy script runs the production environment gate before it mutates images or services. It reports field names only and never prints secret values.
 

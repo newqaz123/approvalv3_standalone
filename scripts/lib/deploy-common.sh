@@ -182,17 +182,23 @@ state_value() {
 }
 
 # Read KEY=VALUE from the production env file (tolerating quotes), so database
-# queries use the same credentials the compose file passes to the containers.
-env_file_value() {
-  local key="$1" line
-  [ -f "$ENV_FILE" ] || return 1
-  line="$(sed -n "s/^${key}=//p" "$ENV_FILE" | tail -n 1)" || return 1
-  [ -n "$line" ] || return 1
-  printf '%s\n' "$line" | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//"
+# queries use the same literal identity as the environment gate and backup.
+postgres_identity() {
+  if [ ! -f "$ENV_FILE" ]; then
+    printf 'postgres\napp_db\n'
+    return
+  fi
+  node --input-type=module - "$(dirname -- "${BASH_SOURCE[0]}")/../../tools/lib/env.mjs" "$ENV_FILE" <<'NODE'
+import { pathToFileURL } from 'node:url'
+const { readPostgresIdentity } = await import(pathToFileURL(process.argv[2]))
+try {
+  console.log(readPostgresIdentity(process.argv[3]).join('\n'))
+} catch (error) {
+  console.error(`ERROR: ${error.message}`)
+  process.exitCode = 1
 }
-
-postgres_user() { env_file_value POSTGRES_USER || printf 'postgres'; }
-postgres_db() { env_file_value POSTGRES_DB || printf 'app_db'; }
+NODE
+}
 
 stat_owner_uid() {
   local uid
@@ -211,8 +217,9 @@ ensure_root_owned() {
 }
 
 query_count() {
-  local container="$1" query="$2" value
-  if ! value="$(docker exec "$container" psql -U "$(postgres_user)" -d "$(postgres_db)" -Atqc "$query" 2>/dev/null)"; then
+  local container="$1" query="$2" value identity
+  identity="$(postgres_identity)" || return 1
+  if ! value="$(docker exec "$container" psql -U "${identity%%$'\n'*}" -d "${identity#*$'\n'}" -Atqc "$query" 2>/dev/null)"; then
     fail "Database count query failed for $container"
     return 1
   fi
@@ -316,11 +323,12 @@ normalize_attachment_path() {
 }
 
 audit_attachment_integrity() {
-  local output="$1" rows row attachment_id stored_path normalized
+  local output="$1" rows row attachment_id stored_path normalized identity
   [ -n "$output" ] || { fail 'Attachment audit output file is required'; return 1; }
+  identity="$(postgres_identity)" || return 1
   mkdir -p "$(dirname "$output")" || return 1
   : >"$output" || return 1
-  if ! rows="$(docker exec approval-db psql -U "$(postgres_user)" -d "$(postgres_db)" -Atc 'select id, "filePath" from file_attachments order by id;' 2>/dev/null)"; then
+  if ! rows="$(docker exec approval-db psql -U "${identity%%$'\n'*}" -d "${identity#*$'\n'}" -Atc 'select id, "filePath" from file_attachments order by id;' 2>/dev/null)"; then
     fail 'Attachment audit database query failed'
     return 1
   fi

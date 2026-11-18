@@ -1122,6 +1122,45 @@ test('canonical backup creates non-empty database and uploads artifacts without 
   assert.doesNotMatch(log, /docker run|alpine|--pull=always/)
 })
 
+test('canonical backup rejects connection-string-shaped database names before side effects', async (t) => {
+  for (const [label, databaseName] of [
+    ['equals sign', 'fixture=data'],
+    ['postgresql URI prefix', 'postgresql://'],
+    ['postgres URI prefix', 'postgres://'],
+    ['NUL byte', 'fixture\0data'],
+  ]) {
+    const sources = label === 'NUL byte' ? ['env file'] : ['env file', 'no-file fallback']
+    for (const source of sources) {
+      await t.test(`${source}: ${label}`, async (t) => {
+        const fixture = await fakeBin()
+        t.after(() => rm(fixture.dir, { recursive: true, force: true }))
+        const deployRoot = join(fixture.dir, 'backup-root')
+        const envPath = join(deployRoot, '.env.production')
+        const backupDir = join(deployRoot, 'backups')
+        if (source === 'env file') {
+          await installValidGate(deployRoot)
+          await writeFile(envPath, (await read(envPath))
+            .replace('@db/app_db', `@db/${databaseName}`)
+            .replace('POSTGRES_DB=app_db', `POSTGRES_DB='${databaseName}'`))
+        }
+        const result = runScript(join(root, 'scripts/backup.sh'), [], {
+          PATH: `${fixture.bin}:${process.env.PATH}`,
+          COMMAND_LOG: fixture.log,
+          DEPLOY_ROOT: deployRoot,
+          ENV_FILE: envPath,
+          BACKUP_DIR: backupDir,
+          POSTGRES_DB: source === 'no-file fallback' ? databaseName : 'ignored_fallback',
+        }, fixture.dir)
+        assert.equal(result.status, 1, result.stdout + result.stderr)
+        assert.match(result.stderr, /^ERROR: POSTGRES_DB must be a literal database name, not a connection string\n$/)
+        assert.doesNotMatch(result.stdout + result.stderr, /fixture=data|postgresql?:\/\//)
+        assert.equal(existsSync(fixture.log), false, 'Docker ran')
+        assert.equal(existsSync(backupDir), false, 'backup directory was created')
+      })
+    }
+  }
+})
+
 test('deployment preflight requires every documented host command', async () => {
   const source = await read('scripts/deploy.sh')
   for (const command of ['docker', 'node', 'curl']) {
@@ -1256,6 +1295,27 @@ test('main offline path never invokes Git or network commands', async () => {
   assert.doesNotMatch(log, /\bgit\b|\bfetch\b|\bpull\b|alpine:latest|--pull=always/)
 })
 
+test('coordinator rejects a matching nonliteral database name before existing-state probes', async (t) => {
+  const fixture = await fakeBin()
+  t.after(() => rm(fixture.dir, { recursive: true, force: true }))
+  const deployRoot = join(fixture.dir, 'offline-existing')
+  await installOfflinePackage(deployRoot)
+  const envPath = join(deployRoot, '.env.production')
+  await writeFile(envPath, (await read(envPath))
+    .replace('@db/app_db', '@db/fixture=data')
+    .replace('POSTGRES_DB=app_db', "POSTGRES_DB='fixture=data'"))
+
+  const result = runDeployment(join(root, 'scripts/deploy.sh'), ['--offline', deployRoot], {
+    PATH: `${fixture.bin}:${process.env.PATH}`, COMMAND_LOG: fixture.log, DEPLOY_ROOT: deployRoot,
+  }, fixture.dir)
+  assert.equal(result.status, 1, result.stdout + result.stderr)
+  assert.match(result.stderr, /^Environment error: POSTGRES_DB must be a literal database name, not a connection string$/m)
+  assert.match(result.stderr, /Deployment failed during: validation/)
+  assert.doesNotMatch(result.stdout + result.stderr, /fixture=data/)
+  assert.equal(await read(fixture.log), 'docker compose version\n')
+  assert.equal(existsSync(join(deployRoot, 'backups')), false)
+})
+
 test('existing offline installation backs up the configured role and database before loading images', async (t) => {
   const fixture = await fakeBin()
   t.after(() => rm(fixture.dir, { recursive: true, force: true }))
@@ -1265,8 +1325,8 @@ test('existing offline installation backs up the configured role and database be
   const envPath = join(deployRoot, '.env.production')
   await writeFile(envPath, (await read(envPath))
     .replace('deployuser:deploypassword123456@db/app_db', 'backup_fixture:deploypassword123456@db/fixture_data')
-    .replace('POSTGRES_USER=deployuser', 'POSTGRES_USER="backup_fixture"')
-    .replace('POSTGRES_DB=app_db', "POSTGRES_DB='fixture_data'") +
+    .replace('POSTGRES_USER=deployuser', 'POSTGRES_USER = "backup_fixture"')
+    .replace('POSTGRES_DB=app_db', "POSTGRES_DB = 'fixture_data'") +
     'BACKUP_SOURCE_PROBE=$(touch "$DEPLOY_ROOT/backup-sourced-env")\n')
   const generated = generateChecksums(deployRoot)
   assert.equal(generated.status, 0, generated.stderr)
@@ -1278,6 +1338,8 @@ test('existing offline installation backs up the configured role and database be
   assert.equal(existsSync(join(deployRoot, 'backup-sourced-env')), false, 'env file was evaluated as shell code')
   const log = await read(fixture.log)
   assertLogSequence(log, [
+    'docker exec approval-db psql -U backup_fixture -d fixture_data -Atqc select count(*) from users;\n',
+    'docker exec approval-db psql -U backup_fixture -d fixture_data -Atc select id, "filePath" from file_attachments order by id;\n',
     'docker exec approval-db pg_dump -U backup_fixture -d fixture_data\n',
     'docker exec approval-db psql -U backup_fixture -d fixture_data -tAc select count(*) from users;\n',
     'docker exec approval-app tar -czf - -C /app/uploads .\n',
@@ -1286,6 +1348,31 @@ test('existing offline installation backs up the configured role and database be
   ])
   assert.match(result.stdout, /^DB_BACKUP_SHA256=[a-f0-9]{64}$/m)
   assert.match(result.stdout, /^UPLOADS_BACKUP_SHA256=[a-f0-9]{64}$/m)
+})
+
+test('state probes refuse invalid database identity rather than reaching psql', async (t) => {
+  for (const [label, envLine, error] of [
+    ['nonliteral database name', 'POSTGRES_DB=fixture=data', /POSTGRES_DB must be a literal database name/],
+    ['missing database name', 'POSTGRES_DB=', /POSTGRES_USER and POSTGRES_DB/],
+    ['NUL byte in role', 'POSTGRES_DB=fixture_data\nPOSTGRES_USER=fixture\0user', /POSTGRES_USER must not contain a NUL byte/],
+  ]) {
+    for (const probe of ['query_count approval-db "select count(*) from users;"', 'audit_attachment_integrity "$OUTPUT"']) {
+      await t.test(`${probe.split(' ')[0]}: ${label}`, async (t) => {
+        const fixture = await fakeBin()
+        t.after(() => rm(fixture.dir, { recursive: true, force: true }))
+        const envPath = join(fixture.dir, '.env.production')
+        const output = join(fixture.dir, 'audit.txt')
+        await writeFile(envPath, `POSTGRES_USER=fixture_user\n${envLine}\n`)
+        const result = runShell(`source scripts/lib/deploy-common.sh; ${probe}`, {
+          PATH: `${fixture.bin}:${process.env.PATH}`, COMMAND_LOG: fixture.log, ENV_FILE: envPath, OUTPUT: output,
+        })
+        assert.equal(result.status, 1, result.stdout + result.stderr)
+        assert.match(result.stderr, error)
+        assert.equal(existsSync(fixture.log), false, 'Docker ran')
+        assert.equal(existsSync(output), false, 'audit output was created')
+      })
+    }
+  }
 })
 
 test('offline package validation requires backup and recovery scripts before mutation', async () => {

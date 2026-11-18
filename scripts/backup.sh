@@ -17,21 +17,29 @@ APP_CONTAINER="${APP_CONTAINER:-approval-app}"
 DB_USER="${POSTGRES_USER:-postgres}"
 DB_NAME="${POSTGRES_DB:-app_db}"
 if [ -f "$ENV_FILE" ]; then
-	# Use the same literal configuration values as the deployment environment gate.
 	if ! db_identity="$(node --input-type=module - "$SCRIPT_DIR/../tools/lib/env.mjs" "$ENV_FILE" <<'NODE'
-import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
-const { parseEnvText } = await import(pathToFileURL(process.argv[2]))
-const { POSTGRES_USER, POSTGRES_DB } = parseEnvText(readFileSync(process.argv[3], 'utf8'))
-if (!POSTGRES_USER || !POSTGRES_DB) process.exit(1)
-console.log(POSTGRES_USER + '\n' + POSTGRES_DB)
+const { readPostgresIdentity } = await import(pathToFileURL(process.argv[2]))
+try {
+  console.log(readPostgresIdentity(process.argv[3]).join('\n'))
+} catch (error) {
+  console.error(`ERROR: ${error.message}`)
+  process.exitCode = 1
+}
 NODE
 	)"; then
-		printf 'ERROR: Cannot read POSTGRES_USER and POSTGRES_DB from the production environment file\n' >&2
 		exit 1
 	fi
 	DB_USER="${db_identity%%$'\n'*}"
 	DB_NAME="${db_identity#*$'\n'}"
+else
+	# Match the environment gate without requiring Node for the legacy no-file fallback.
+	case "$DB_NAME" in
+		*=*|postgresql://*|postgres://*)
+			printf 'ERROR: POSTGRES_DB must be a literal database name, not a connection string\n' >&2
+			exit 1
+			;;
+	esac
 fi
 
 compose_prod() {
