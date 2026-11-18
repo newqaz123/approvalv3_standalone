@@ -8,6 +8,7 @@ import { execFileSync, spawnSync } from 'node:child_process'
 
 const root = resolve('.')
 const read = (path) => readFile(path, 'utf8')
+const offlineVerifier = join(root, 'scripts/ci/verify-offline-package.sh')
 const upgradeArtifacts = [
   'docs/upgrade-runbook.md',
   'scripts/upgrade/precheck.sql',
@@ -632,6 +633,67 @@ exit 2
   const result = runDeployment(join(bundled, 'scripts/deploy.sh'), ['--offline', bundled], env, unpacked)
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
   assert.match(result.stdout, /Deployment succeeded \(offline\)/)
+})
+
+test('offline CI verifier rejects unsafe runners before touching the archive or Docker', async (t) => {
+  const fixture = await mkdtemp(join(tmpdir(), 'offline-ci-guard-'))
+  t.after(() => rm(fixture, { recursive: true, force: true }))
+  const bin = join(fixture, 'bin')
+  await mkdir(bin)
+  for (const command of ['docker', 'tar', 'sha256sum']) {
+    await writeFile(join(bin, command), '#!/bin/sh\nprintf "%s\\n" "$0" >>"$COMMAND_LOG"\nexit 99\n', { mode: 0o755 })
+  }
+  await writeFile(join(bin, 'uname'), '#!/bin/sh\n[ "$*" = -m ] || exit 99\nprintf "%s\\n" "$FIXTURE_ARCH"\n', { mode: 0o755 })
+  const archive = join(fixture, 'release.tar.gz')
+  await writeFile(archive, '')
+
+  for (const [name, overrides, diagnostic] of [
+    ['outside GitHub Actions', { GITHUB_ACTIONS: '' }, /GITHUB_ACTIONS/],
+    ['self-hosted runner', { RUNNER_ENVIRONMENT: 'self-hosted' }, /github-hosted/],
+    ['ARM runner', { FIXTURE_ARCH: 'arm64' }, /x86_64/],
+    ['invalid run ID', { GITHUB_RUN_ID: 'local' }, /GITHUB_RUN_ID/],
+    ['invalid run attempt', { GITHUB_RUN_ATTEMPT: '' }, /GITHUB_RUN_ATTEMPT/],
+    ['unusable scratch directory', { RUNNER_TEMP: archive }, /RUNNER_TEMP/],
+  ]) {
+    await t.test(name, () => {
+      const log = join(fixture, `${name}.log`)
+      const result = runScript(offlineVerifier, [archive], {
+        PATH: `${bin}:${process.env.PATH}`,
+        COMMAND_LOG: log,
+        FIXTURE_ARCH: 'x86_64',
+        GITHUB_ACTIONS: 'true',
+        RUNNER_ENVIRONMENT: 'github-hosted',
+        GITHUB_RUN_ID: '1234',
+        GITHUB_RUN_ATTEMPT: '2',
+        GITHUB_SHA: 'a'.repeat(40),
+        RUNNER_TEMP: fixture,
+        ...overrides,
+      }, fixture)
+      assert.ifError(result.error)
+      assert.notEqual(result.status, 0)
+      assert.equal(existsSync(log), false, 'an archive or Docker command ran before the guard')
+      assert.match(result.stderr, diagnostic)
+    })
+  }
+})
+
+test('offline CI health assertion requires a connected database in a valid JSON response', async (t) => {
+  for (const [name, body, status] of [
+    ['connected', '{"status":"ok","database":"connected"}', 0],
+    ['database error despite ok status', '{"status":"ok","database":"error"}', 1],
+    ['unhealthy status despite connected database', '{"status":"degraded","database":"connected"}', 1],
+    ['malformed JSON', '{"status":"ok","database":"connected"', 1],
+  ]) {
+    await t.test(name, () => {
+      const result = spawnSync('/bin/bash', ['-c', 'source "$1" || exit 125; declare -F assert_connected_health >/dev/null || exit 125; assert_connected_health', 'bash', offlineVerifier], {
+        input: body,
+        env: { ...process.env, GITHUB_ACTIONS: '' },
+        encoding: 'utf8',
+      })
+      assert.ifError(result.error)
+      assert.equal(result.status, status, result.stderr)
+    })
+  }
 })
 
 function runDeployment(script, args, env, cwd, options = {}) {

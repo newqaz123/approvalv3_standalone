@@ -1,0 +1,90 @@
+name: deployment-release-check
+
+on:
+  pull_request:
+  # Select the intended release ref; both jobs verify its event SHA.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  migration-rehearsal:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    container: node:20-bookworm
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install PostgreSQL 15 and Python
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends postgresql-15 python3
+
+      - name: Install dependencies
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
+        run: npm ci
+
+      - name: Generate Prisma client
+        env:
+          DATABASE_URL: postgresql://dummy:dummy@127.0.0.1:1/prisma_generate_only
+        run: npx --no-install prisma generate
+
+      - name: Run project checks without a database URL
+        env:
+          DOTENV_CONFIG_PATH: /dev/null
+        run: |
+          unset DATABASE_URL DIRECT_URL SHADOW_DATABASE_URL CLEAN_START_CI_DATABASE_URL
+          npm run check
+
+      - name: Rehearse migrations in a throwaway PostgreSQL 15 cluster
+        run: |
+          chmod a+rx "$GITHUB_WORKSPACE"
+          runuser -u postgres -- env PG_BIN=/usr/lib/postgresql/15/bin DOTENV_CONFIG_PATH=/dev/null \
+            bash scripts/upgrade/verify-upgrade.sh
+
+  offline-release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build native amd64 offline archive
+        shell: bash
+        run: |
+          test "$(uname -m)" = x86_64
+          docker compose version
+          df -h "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
+          start=$SECONDS
+          build_metrics() {
+            printf 'Offline package build elapsed: %s seconds\n' "$((SECONDS - start))"
+            df -h "$GITHUB_WORKSPACE" "$RUNNER_TEMP" || true
+            if [[ -d deploy ]]; then du -sh deploy || true; fi
+            docker system df || true
+          }
+          trap build_metrics EXIT
+          bash scripts/build-package.sh "$GITHUB_SHA"
+
+      - name: Verify archive and connected app without pulling images
+        shell: bash
+        run: |
+          shopt -s nullglob
+          archives=(deploy/*.tar.gz)
+          if [[ ${#archives[@]} != 1 ]]; then
+            echo "Expected one release archive, found ${#archives[@]}" >&2
+            exit 1
+          fi
+          trap 'df -h "$GITHUB_WORKSPACE" "$RUNNER_TEMP" || true' EXIT
+          bash scripts/ci/verify-offline-package.sh "${archives[0]}"
