@@ -87,9 +87,13 @@ ssh -- "$REMOTE" <<REMOTE_DEPLOY
 set -e
 cd '$REMOTE_PATH'
 
-# Extract package
+# Reserve a fresh release directory before extracting; never overwrite a prior release.
+if ! mkdir -- '${PACKAGE_NAME}'; then
+    printf 'ERROR: Cannot create release directory %s. If it already exists, use a new version tag.\n' '${PACKAGE_NAME}' >&2
+    exit 1
+fi
 echo "Extracting ${PACKAGE_NAME}.tar.gz..."
-tar -xzf '${PACKAGE_NAME}.tar.gz'
+tar -xzf '${PACKAGE_NAME}.tar.gz' --strip-components=1 -C '${PACKAGE_NAME}'
 
 # Copy .env.production if it exists from previous deploy
 if [ -f .env.production ] && [ ! -f '${PACKAGE_NAME}/.env.production' ]; then
@@ -101,10 +105,12 @@ fi
 cd '${PACKAGE_NAME}'
 bash scripts/deploy-offline.sh
 
-# Update symlink for current
+# Atomically replace the symlink itself, without following it into the old release.
 cd '$REMOTE_PATH'
-rm -f current
-ln -s '${PACKAGE_NAME}' current
+promotion_dir=\$(mktemp -d ./.current.XXXXXXXX)
+trap 'rm -f -- "\$promotion_dir/current"; rmdir -- "\$promotion_dir"' EXIT
+ln -s '${PACKAGE_NAME}' "\$promotion_dir/current"
+node -e 'require("node:fs").renameSync(process.argv[1], "current")' "\$promotion_dir/current"
 echo "Symlink updated: current -> ${PACKAGE_NAME}"
 REMOTE_DEPLOY
 

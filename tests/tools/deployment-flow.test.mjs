@@ -582,6 +582,37 @@ test('deploy-remote propagates offline child failure and leaves current unchange
   assert.doesNotMatch(result.stdout, /Remote Deploy Complete/)
 })
 
+test('deploy-remote preserves active release contents on a same-version, same-day retry', async (t) => {
+  const fixture = await installRemoteDeployFixture(t)
+  const stagedCompose = join(fixture.dir, 'archive', remoteRelease, 'docker-compose.prod.yml')
+  const activeCompose = join(fixture.current, 'docker-compose.prod.yml')
+  await writeFile(stagedCompose, 'active release compose\n')
+  const first = runRemoteDeployment(fixture)
+  assert.equal(first.status, 0, `${first.stdout}\n${first.stderr}`)
+
+  await writeFile(stagedCompose, 'retry compose\n')
+  const retry = runRemoteDeployment(fixture, { childExit: '23' })
+  assert.notEqual(retry.status, 0)
+  assert.equal(await readlink(fixture.current), remoteRelease)
+  assert.equal(await read(activeCompose), 'active release compose\n')
+  assert.equal(await read(fixture.calls), 'old-release\n')
+  assert.match(retry.stderr, /already exists.*new version tag/i)
+  assert.doesNotMatch(retry.stdout, /Remote Deploy Complete/)
+})
+
+test('deploy-remote keeps current when creating the new symlink fails', async (t) => {
+  const fixture = await installRemoteDeployFixture(t)
+  const ln = join(fixture.bin, 'ln')
+  await writeFile(ln, '#!/bin/bash\nexit 24\n', { mode: 0o755 })
+
+  const result = runRemoteDeployment(fixture)
+  assert.equal(result.status, 24, `${result.stdout}\n${result.stderr}`)
+  assert.equal(await read(fixture.calls), 'old-release\n')
+  assert.ok(existsSync(fixture.current), 'current disappeared after symlink creation failed')
+  assert.equal(await readlink(fixture.current), 'old-release')
+  assert.doesNotMatch(result.stdout, /Remote Deploy Complete/)
+})
+
 test('deploy-remote refuses a non-root SSH session before building or transferring', async (t) => {
   const fixture = await installRemoteDeployFixture(t)
   const result = runRemoteDeployment(fixture, { uid: '1001' })
