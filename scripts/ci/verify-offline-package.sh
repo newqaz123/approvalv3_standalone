@@ -68,6 +68,8 @@ main() (
   local images=(approval-app:latest approval-migrate:latest postgres:15-alpine)
   local required
   for required in docs/upgrade-runbook.md scripts/upgrade/precheck.sql scripts/upgrade/postcheck.sql \
+    scripts/deploy.sh scripts/deploy-offline.sh scripts/backup.sh scripts/restore.sh scripts/rollback.sh \
+    scripts/health-check.sh scripts/setup.sh scripts/lib/deploy-common.sh \
     VERSION docker-compose.prod.yml tools/env-check.mjs tools/lib/env.mjs "${image_archives[@]}"; do
     [[ -f $required ]] || fail "package is missing $required"
     LC_ALL=C awk -v path="$required" '
@@ -108,11 +110,14 @@ CRON_SECRET=offline-ci-disposable-cron-secret
 UPLOAD_DIR=/app/uploads
 ENV
   node tools/env-check.mjs --env .env.production --template .env.production.example
+  # The Postgres entrypoint uses a socket-only server while initializing a fresh volume.
   cat > compose.ci.yml <<'YAML'
 services:
   db:
     container_name: !reset null
     ports: !reset []
+    healthcheck:
+      test: ["CMD-SHELL", 'pg_isready -h 127.0.0.1 -p 5432 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
   migrate:
     container_name: !reset null
   seed:
@@ -131,6 +136,23 @@ YAML
     for (const [name, service] of Object.entries(model.services)) {
       if (service.ports?.length || service.container_name || service.network_mode) {
         throw new Error(`${name} has a port binding, fixed container name, or network override`);
+      }
+    }
+    // Compose can start dependencies in addition to the services named on the command line.
+    const startupServices = new Set(["db", "migrate", "app"]);
+    for (const name of startupServices) {
+      const service = model.services[name];
+      if (!service) throw new Error(`Missing Compose service ${name}`);
+      const dependencies = [
+        ...Object.keys(service.depends_on ?? {}),
+        ...(service.links ?? []).map(link => link.split(":")[0]),
+        ...(service.volumes_from ?? []).filter(source => !source.startsWith("container:")).map(source => source.split(":")[0]),
+        ...[service.ipc, service.pid].filter(mode => mode?.startsWith("service:")).map(mode => mode.slice(8)),
+      ];
+      for (const dependency of dependencies) {
+        if (!startupServices.has(dependency)) {
+          throw new Error(`${name} has startup dependency outside db, migrate, app: ${dependency}`);
+        }
       }
     }
     for (const resources of [model.volumes, model.networks]) {

@@ -677,6 +677,142 @@ test('offline CI verifier rejects unsafe runners before touching the archive or 
   }
 })
 
+async function offlineVerifierFixture(t) {
+  const dir = await mkdtemp(join(tmpdir(), 'offline-ci-package-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const bin = join(dir, 'bin')
+  const runnerTemp = join(dir, 'runner')
+  const pkg = join(dir, 'package')
+  const archive = join(dir, 'release.tar.gz')
+  const log = join(dir, 'docker.log')
+  const override = join(dir, 'ci-override.yml')
+  const sha = 'a'.repeat(40)
+  await Promise.all([mkdir(bin), mkdir(runnerTemp), installOfflinePackage(pkg)])
+  await copyFile(join(root, '.env.example'), join(pkg, '.env.production.example'))
+  await copyFile(join(root, 'docker-compose.prod.yml'), join(pkg, 'docker-compose.prod.yml'))
+  await rm(join(pkg, '.env.production'))
+  await writeFile(join(pkg, 'VERSION'), `version=${sha}\ngit_commit=aaaaaaa\n`)
+  await writeFile(join(bin, 'uname'), '#!/bin/sh\n[ "$*" = -m ] || exit 99\necho x86_64\n', { mode: 0o755 })
+  if (process.platform === 'darwin') {
+    // Keep real strict checksum verification on macOS, whose sha256sum lacks --strict.
+    await writeFile(join(bin, 'sha256sum'), '#!/bin/sh\nexec shasum -a 256 "$@"\n', { mode: 0o755 })
+  }
+  await writeFile(join(bin, 'docker'), `#!/bin/sh
+set -eu
+printf '%s\n' "$*" >>"$COMMAND_LOG"
+case "$*" in
+  'load --input images/approval-app.tar') echo 'Loaded image: approval-app:latest' ;;
+  'load --input images/approval-migrate.tar') echo 'Loaded image: approval-migrate:latest' ;;
+  'load --input images/postgres.tar') echo 'Loaded image: postgres:15-alpine' ;;
+  'image inspect --format {{.Os}}/{{.Architecture}} '*) echo linux/amd64 ;;
+  'compose --project-name approval-release-1234-2 --env-file .env.production -f docker-compose.prod.yml -f compose.ci.yml '*)
+    shift 9
+    case "$*" in
+      '--profile * config --format json') cp compose.ci.yml "$CI_OVERRIDE"; printf '%s\n' "$COMPOSE_MODEL" ;;
+      'up -d --pull never --no-build db migrate app') exit 88 ;; # Stop at the real verifier's startup boundary.
+      'ps --all'|'logs --no-color --tail 100 db migrate app'|'down --volumes') ;;
+      *) exit 99 ;;
+    esac ;;
+  *) exit 99 ;;
+esac
+`, { mode: 0o755 })
+
+  const healthy = { condition: 'service_healthy', required: true }
+  const migrated = { condition: 'service_completed_successfully', required: true }
+  const model = {
+    name: 'approval-release-1234-2',
+    services: {
+      db: { image: 'postgres:15-alpine' },
+      migrate: { image: 'approval-migrate:latest', depends_on: { db: healthy } },
+      app: { image: 'approval-app:latest', depends_on: { db: healthy, migrate: migrated } },
+      seed: { image: 'approval-migrate:latest', profiles: ['first-install'], depends_on: { migrate: migrated } },
+    },
+  }
+  return {
+    pkg, log, override, model,
+    async run() {
+      execFileSync('tar', ['-czf', archive, '-C', dir, 'package'])
+      const result = runScript(offlineVerifier, [archive], {
+        PATH: `${bin}:${process.env.PATH}`,
+        COMMAND_LOG: log, CI_OVERRIDE: override, COMPOSE_MODEL: JSON.stringify(model),
+        GITHUB_ACTIONS: 'true', RUNNER_ENVIRONMENT: 'github-hosted',
+        GITHUB_RUN_ID: '1234', GITHUB_RUN_ATTEMPT: '2', GITHUB_SHA: sha, RUNNER_TEMP: runnerTemp,
+      }, dir)
+      assert.ifError(result.error)
+      assert.deepEqual(await readdir(runnerTemp), [], 'verifier left scratch files behind')
+      return result
+    },
+  }
+}
+
+test('offline CI rejects a manifest-valid archive that omits required deployment or recovery files', async (t) => {
+  for (const [file, removeFile] of [
+    ['scripts/deploy.sh', true],
+    ['scripts/lib/deploy-common.sh', true],
+    ['scripts/backup.sh', true],
+    ['scripts/restore.sh', true],
+    ['scripts/rollback.sh', true],
+    ['scripts/deploy.sh', false],
+  ]) {
+    await t.test(`${removeFile ? 'missing file and checksum' : 'no exact checksum path for'} ${file}`, async (subtest) => {
+      const fixture = await offlineVerifierFixture(subtest)
+      if (removeFile) await rm(join(fixture.pkg, file))
+      const generated = generateChecksums(fixture.pkg)
+      assert.equal(generated.status, 0, generated.stderr)
+      if (!removeFile) {
+        const manifestPath = join(fixture.pkg, 'SHA256SUMS')
+        const manifest = await read(manifestPath)
+        await writeFile(manifestPath, manifest.replace(`  ${file}\n`, `  ./${file}\n`))
+      }
+      assert.equal(verifyManifest(fixture.pkg).status, 0, 'checksums for listed paths should still pass')
+      const result = await fixture.run()
+      assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`)
+      assert.ok(result.stderr.includes(file), result.stderr)
+      assert.equal(existsSync(fixture.log), false, 'invalid archive reached Docker')
+    })
+  }
+})
+
+test('offline CI gives Compose a TCP readiness probe before starting the migrator', async (t) => {
+  const fixture = await offlineVerifierFixture(t)
+  const generated = generateChecksums(fixture.pkg)
+  assert.equal(generated.status, 0, generated.stderr)
+  const result = await fixture.run()
+  assert.equal(result.status, 88, `${result.stdout}\n${result.stderr}`)
+  assert.match(await read(fixture.log), / up -d --pull never --no-build db migrate app$/m)
+
+  // Parse the emitted override (not verifier source) using the YAML parser already in the dev lockfile.
+  const { DEFAULT_SCHEMA, Type, load } = (await import('js-yaml')).default
+  const schema = DEFAULT_SCHEMA.extend(['scalar', 'sequence'].map((kind) => new Type('!reset', { kind })))
+  const overrides = load(await read(fixture.override), { schema })
+  const [mode, probe] = overrides.services.db.healthcheck?.test ?? []
+  assert.equal(mode, 'CMD-SHELL', 'db healthcheck still inherits the socket-only probe')
+  assert.match(probe, /^pg_isready\b.*\s(?:-h\s+|--host[=\s]+)127\.0\.0\.1(?:\s|$)/)
+})
+
+test('offline CI rejects dependencies that could start a service outside db, migrate and app', async (t) => {
+  for (const [name, edge] of [
+    ['depends_on', { depends_on: { sidecar: { condition: 'service_started', required: true } } }],
+    ['links', { links: ['sidecar:alias'] }],
+    ['volumes_from', { volumes_from: ['sidecar:ro'] }],
+    ['ipc', { ipc: 'service:sidecar' }],
+    ['pid', { pid: 'service:sidecar' }],
+  ]) {
+    await t.test(name, async (subtest) => {
+      const fixture = await offlineVerifierFixture(subtest)
+      const generated = generateChecksums(fixture.pkg)
+      assert.equal(generated.status, 0, generated.stderr)
+      fixture.model.services.sidecar = { image: 'approval-app:latest' }
+      // Follow a transitive edge from app via migrate, not just app's own dependencies.
+      Object.assign(fixture.model.services.migrate, edge)
+      const result = await fixture.run()
+      assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`)
+      assert.match(result.stderr, /migrate.*sidecar/)
+      assert.doesNotMatch(await read(fixture.log), / (?:up -d|down --volumes)\b/)
+    })
+  }
+})
+
 test('offline CI health assertion requires a connected database in a valid JSON response', async (t) => {
   for (const [name, body, status] of [
     ['connected', '{"status":"ok","database":"connected"}', 0],
