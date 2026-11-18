@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync } from 'node:fs'
-import { chmod, mkdtemp, readFile, writeFile, mkdir, copyFile, rm } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, writeFile, mkdir, copyFile, readlink, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { execFileSync, spawnSync } from 'node:child_process'
@@ -173,7 +173,7 @@ async function fakeBin() {
   const dir = await mkdtemp(join(tmpdir(), 'deployment-flow-'))
   const bin = join(dir, 'bin')
   await mkdir(bin)
-  for (const [fixture, command] of [['fake-docker.sh', 'docker'], ['fake-git.sh', 'git'], ['fake-curl.sh', 'curl'], ['fake-chown.sh', 'chown'], ['fake-stat.sh', 'stat']]) {
+  for (const [fixture, command] of [['fake-docker.sh', 'docker'], ['fake-git.sh', 'git'], ['fake-curl.sh', 'curl'], ['fake-chown.sh', 'chown'], ['fake-stat.sh', 'stat'], ['fake-id.sh', 'id']]) {
     await copyFile(join(root, 'tests/tools/fixtures', fixture), join(bin, command))
     await chmod(join(bin, command), 0o755)
   }
@@ -479,6 +479,150 @@ function assertLogSequence(log, markers) {
   }
 }
 
+const remoteTarget = 'deploy@example.invalid'
+const remoteTag = 'v1.2.3_rc-1'
+const remoteRelease = 'approval-app-v1.2.3_rc-1-20261118'
+
+async function installRemoteDeployFixture(t) {
+  const fixture = await fakeBin()
+  t.after(() => rm(fixture.dir, { recursive: true, force: true }))
+  const project = join(fixture.dir, 'project')
+  const scripts = join(project, 'scripts')
+  const server = join(fixture.dir, 'Approval.App_v2-1')
+  const current = join(server, 'current')
+  const packageScripts = join(fixture.dir, 'archive', remoteRelease, 'scripts')
+  await mkdir(scripts, { recursive: true })
+  await mkdir(join(project, 'deploy'))
+  await mkdir(join(server, 'old-release'), { recursive: true })
+  await symlink('old-release', current)
+  await mkdir(packageScripts, { recursive: true })
+  const script = join(scripts, 'deploy-remote.sh')
+  await copyFile(join(root, 'scripts/deploy-remote.sh'), script)
+  await writeFile(join(packageScripts, 'deploy-offline.sh'), `#!/bin/bash
+set -e
+# Record the old current target from the extracted package root before exiting.
+readlink ../current >>deploy-calls.log
+exit "$CHILD_EXIT"
+`)
+  await writeFile(join(scripts, 'build-package.sh'), `#!/bin/bash
+set -e
+printf 'build %s\\n' "$*" >>"$COMMAND_LOG"
+[ "$#" = 1 ] && [ "$1" = '${remoteTag}' ] || exit 2
+tar -czf "$FIXTURE_PROJECT/deploy/${remoteRelease}.tar.gz" -C "$FIXTURE_ARCHIVE_DIR" '${remoteRelease}'
+`)
+  for (const [name, body] of Object.entries({
+    date: `
+[ "$*" = '+%Y%m%d' ] || exit 2
+printf '%s\\n' '20261118'
+`,
+    ssh: `
+printf 'ssh %s\\n' "$*" >>"$COMMAND_LOG"
+if [ "$1" = -- ]; then shift; fi
+[ "$1" = '${remoteTarget}' ] || exit 2
+shift
+if [ "$#" = 0 ]; then
+  exec /bin/bash
+fi
+[ "$#" = 1 ] || exit 2
+case "$1" in
+  'id -u') id -u; exit "$SSH_PROBE_EXIT" ;;
+  "mkdir -p $FIXTURE_REMOTE_PATH"|"mkdir -p '$FIXTURE_REMOTE_PATH'") exit 0 ;;
+  *) exit 2 ;;
+esac
+`,
+    scp: `
+printf 'scp %s\\n' "$*" >>"$COMMAND_LOG"
+if [ "$1" = -- ]; then shift; fi
+[ "$#" = 2 ] && [ "$1" = "$FIXTURE_PROJECT/deploy/${remoteRelease}.tar.gz" ] &&
+  [ "$2" = '${remoteTarget}:'"$FIXTURE_REMOTE_PATH/" ] || exit 2
+cp "$1" "$FIXTURE_REMOTE_PATH/"
+`,
+  })) {
+    const path = join(fixture.bin, name)
+    await writeFile(path, `#!/bin/bash\nset -e\n${body}`)
+    await chmod(path, 0o755)
+  }
+  return { ...fixture, project, server, script, current, calls: join(server, remoteRelease, 'deploy-calls.log') }
+}
+
+function runRemoteDeployment(fixture, { path = fixture.server, tag = remoteTag, uid = '0', childExit = '0', probeExit = '0' } = {}) {
+  return runDeployment(fixture.script, [remoteTarget, path, tag], {
+    PATH: `${fixture.bin}:${process.env.PATH}`,
+    COMMAND_LOG: fixture.log,
+    FIXTURE_PROJECT: fixture.project,
+    FIXTURE_ARCHIVE_DIR: join(fixture.dir, 'archive'),
+    FIXTURE_REMOTE_PATH: fixture.server,
+    FAKE_UID: uid,
+    CHILD_EXIT: childExit,
+    SSH_PROBE_EXIT: probeExit,
+  }, fixture.dir)
+}
+
+test('deploy-remote invokes scripts/deploy-offline.sh once and promotes current only after success', async (t) => {
+  const fixture = await installRemoteDeployFixture(t)
+  const result = runRemoteDeployment(fixture)
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
+  assert.equal(await read(fixture.calls), 'old-release\n')
+  assert.equal(await readlink(fixture.current), remoteRelease)
+  assertLogSequence(await read(fixture.log), [
+    `ssh -- ${remoteTarget} id -u\n`,
+    `build ${remoteTag}\n`,
+    `ssh -- ${remoteTarget} mkdir -p `,
+    'scp ',
+    `ssh -- ${remoteTarget}\n`,
+  ])
+})
+
+test('deploy-remote propagates offline child failure and leaves current unchanged', async (t) => {
+  const fixture = await installRemoteDeployFixture(t)
+  const result = runRemoteDeployment(fixture, { childExit: '23' })
+  assert.equal(result.status, 23, `${result.stdout}\n${result.stderr}`)
+  assert.equal(await read(fixture.calls), 'old-release\n')
+  assert.equal(await readlink(fixture.current), 'old-release')
+  assert.doesNotMatch(result.stdout, /Remote Deploy Complete/)
+})
+
+test('deploy-remote refuses a non-root SSH session before building or transferring', async (t) => {
+  const fixture = await installRemoteDeployFixture(t)
+  const result = runRemoteDeployment(fixture, { uid: '1001' })
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr, /must run as root/i)
+  assert.match(result.stderr, /transfer the package separately.*authorized deployment account/i)
+  assert.equal(await read(fixture.log), `ssh -- ${remoteTarget} id -u\n`)
+  assert.equal(await readlink(fixture.current), 'old-release')
+})
+
+test('deploy-remote stops on an SSH UID probe failure even if it prints 0', async (t) => {
+  const fixture = await installRemoteDeployFixture(t)
+  const result = runRemoteDeployment(fixture, { probeExit: '255' })
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr, /effective UID/i)
+  assert.equal(await read(fixture.log), `ssh -- ${remoteTarget} id -u\n`)
+  assert.equal(await readlink(fixture.current), 'old-release')
+})
+
+test('deploy-remote rejects unsupported paths before SSH', async (t) => {
+  const fixture = await installRemoteDeployFixture(t)
+  for (const path of ['/opt/Approval App', 'relative/path', '/', '//', '/opt/./app', '/opt/app/..', '/opt/Approvação']) {
+    const result = runRemoteDeployment(fixture, { path })
+    assert.notEqual(result.status, 0, path)
+    assert.equal(existsSync(fixture.log), false, `${path} triggered build or transport`)
+    assert.match(result.stderr, /remote path/i)
+  }
+  assert.equal(await readlink(fixture.current), 'old-release')
+})
+
+test('deploy-remote rejects invalid Docker tags before SSH', async (t) => {
+  const fixture = await installRemoteDeployFixture(t)
+  for (const tag of ['release/candidate', '-leading', '.leading', 'é', 'a'.repeat(129)]) {
+    const result = runRemoteDeployment(fixture, { tag })
+    assert.notEqual(result.status, 0, tag)
+    assert.equal(existsSync(fixture.log), false, `${tag} triggered build or transport`)
+    assert.match(result.stderr, /Docker tag/i)
+  }
+  assert.equal(await readlink(fixture.current), 'old-release')
+})
+
 test('backup archives uploads without an unpackaged helper image', async () => {
   const source = await read('scripts/backup.sh')
   assert.doesNotMatch(source, /alpine:(?:latest|[0-9.]+)/)
@@ -531,6 +675,41 @@ test('verified backup rejects forged checksum summaries', async () => {
   })
   assert.notEqual(result.status, 0)
   assert.match(`${result.stdout}\n${result.stderr}`, /checksum/i)
+})
+
+test('non-root deploy exits before host or repository commands', async (t) => {
+  for (const mode of ['online', 'offline']) {
+    await t.test(mode, async (t) => {
+      const fixture = await fakeBin()
+      t.after(() => rm(fixture.dir, { recursive: true, force: true }))
+      const deployRoot = join(fixture.dir, 'deploy-root')
+      const state = join(deployRoot, 'backups/last-deployment-state.env')
+      if (mode === 'offline') await installOfflinePackage(deployRoot)
+      else await installDeployRoot(deployRoot)
+      const args = mode === 'offline' ? ['--offline', deployRoot] : ['--online']
+      const result = runDeployment(join(root, 'scripts/deploy.sh'), args, {
+        PATH: `${fixture.bin}:${process.env.PATH}`, COMMAND_LOG: fixture.log, DEPLOY_ROOT: deployRoot,
+        DEPLOY_STATE_FILE: state, FAKE_UID: '1001',
+      }, fixture.dir)
+      assert.notEqual(result.status, 0, `${result.stdout}\n${result.stderr}`)
+      assert.match(result.stderr, /must run as root/i)
+      assert.match(result.stderr, /Deployment failed during: preflight/)
+      assert.doesNotMatch(result.stdout + result.stderr, /Deployment succeeded/)
+      assert.equal(existsSync(fixture.log), false, 'Docker, Git, or backup ran')
+      assert.equal(existsSync(state), false, 'deployment state file was written')
+    })
+  }
+})
+
+test('non-root deploy can show help', async (t) => {
+  const fixture = await fakeBin()
+  t.after(() => rm(fixture.dir, { recursive: true, force: true }))
+  const result = runDeployment(join(root, 'scripts/deploy.sh'), ['--help'], {
+    PATH: `${fixture.bin}:${process.env.PATH}`, COMMAND_LOG: fixture.log, FAKE_UID: '1001',
+  }, fixture.dir)
+  assert.equal(result.status, 0, result.stderr)
+  assert.match(result.stdout, /Usage:/)
+  assert.equal(existsSync(fixture.log), false)
 })
 
 test('online dirty-tree abort happens before rollback tags, state, or backup mutation', async () => {
@@ -859,12 +1038,13 @@ test('state capture psql probes authenticate explicitly instead of as the exec O
   assert.match(log, /docker exec approval-db psql -U \S+ -d \S+ -Atqc select count\(\*\) from users;/)
 })
 
-test('interactive cancel exits cleanly without running deployment commands', async () => {
+test('non-root interactive cancel exits cleanly without running deployment commands', async (t) => {
   const fixture = await fakeBin()
+  t.after(() => rm(fixture.dir, { recursive: true, force: true }))
   const deployRoot = join(fixture.dir, 'cancel-root')
   await installDeployRoot(deployRoot)
   const result = runDeployment(join(root, 'scripts/deploy.sh'), [], {
-    PATH: `${fixture.bin}:${process.env.PATH}`, COMMAND_LOG: fixture.log, DEPLOY_ROOT: deployRoot,
+    PATH: `${fixture.bin}:${process.env.PATH}`, COMMAND_LOG: fixture.log, DEPLOY_ROOT: deployRoot, FAKE_UID: '1001',
   }, fixture.dir, { input: '3\n' })
   assert.equal(result.status, 0, `stdout: ${result.stdout}\nstderr: ${result.stderr}`)
   assert.match(result.stdout + result.stderr, /[Cc]ancel+ed/)

@@ -35,6 +35,14 @@ select_mode() {
 }
 usage() { printf 'Usage: %s [--online|--offline <package-dir>]\n' "$0"; }
 
+require_deploy_root() {
+	local uid
+	if uid="$(id -u)" && [ "$uid" = 0 ]; then
+		return 0
+	fi
+	fail 'Production deployment must run as root; use an authorized deployment account (see DEPLOY.md).'
+}
+
 require_host_command() {
 	command -v "$1" >/dev/null 2>&1 || {
 		fail "Required host command is not installed: $1"
@@ -173,11 +181,12 @@ main() {
 		return 1
 		;;
 	esac
+	STAGE=preflight
+	require_deploy_root
 	# Source shared functions only after resolving the package root.
 	# shellcheck source=scripts/lib/deploy-common.sh
 	. "$REPO_ROOT/scripts/lib/deploy-common.sh"
 	export DEPLOY_ROOT ENV_FILE="${DEPLOY_ROOT}/.env.production" PROD_COMPOSE_FILE="${DEPLOY_ROOT}/docker-compose.prod.yml"
-	STAGE=preflight
 	require_host_command docker
 	require_host_command node
 	require_host_command curl
