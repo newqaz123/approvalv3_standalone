@@ -39,6 +39,11 @@ compose_prod() {
   fi
 }
 
+# Reuse the tagged rollback image without restarting the database or migrator.
+recreate_app_only() {
+  compose_prod up -d --no-deps --pull never --no-build --force-recreate app
+}
+
 run_env_gate() {
   [ -f "$ENV_FILE" ] || { fail "Production environment file not found: $ENV_FILE"; return 1; }
   [ -f "$ENV_TEMPLATE" ] || { fail "Environment template not found: $ENV_TEMPLATE"; return 1; }
@@ -436,17 +441,34 @@ wait_for_migration() {
   return 1
 }
 
+# /api/health is also a liveness endpoint: HTTP 200 alone does not prove
+# Prisma can query the database. Do not print the potentially sensitive body.
+api_reports_connected() (
+  set -o pipefail
+  curl -fsS --max-time 5 --write-out '\n%{http_code}' "$1" 2>/dev/null | node -e '
+    try {
+      const response = require("node:fs").readFileSync(0, "utf8");
+      const separator = response.lastIndexOf("\n");
+      if (separator < 0 || response.slice(separator + 1) !== "200") process.exit(1);
+      const health = JSON.parse(response.slice(0, separator));
+      process.exitCode = health?.status === "ok" && health.database === "connected" ? 0 : 1;
+    } catch {
+      process.exitCode = 1;
+    }
+  '
+)
+
 wait_for_health() {
-  local timeout="${HEALTH_TIMEOUT_SECONDS:-180}" elapsed=0 db_health app_health
-  while [ "$elapsed" -le "$timeout" ]; do
+  local timeout="${HEALTH_TIMEOUT_SECONDS:-180}" start="$SECONDS" db_health app_health
+  while :; do
     db_health="$(docker inspect -f '{{.State.Health.Status}}' approval-db 2>/dev/null || true)"
     app_health="$(docker inspect -f '{{.State.Health.Status}}' approval-app 2>/dev/null || true)"
-    if [ "$db_health" = "healthy" ] && [ "$app_health" = "healthy" ] && curl -fsS http://localhost:3000/api/health >/dev/null 2>&1; then
+    if [ "$db_health" = "healthy" ] && [ "$app_health" = "healthy" ] && api_reports_connected http://localhost:3000/api/health; then
       return 0
     fi
+    [ "$((SECONDS - start))" -lt "$timeout" ] || break
     sleep 1
-    elapsed=$((elapsed + 1))
   done
-  fail 'Production services did not become healthy within 180 seconds'
+  fail "Production services did not become healthy with a connected database within $timeout seconds"
   return 1
 }

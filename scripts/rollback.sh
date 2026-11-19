@@ -43,16 +43,14 @@ esac
 	exit 2
 }
 
-compose_prod() {
-	if docker compose version >/dev/null 2>&1; then
-		docker compose -p approval-app --env-file "$ENV_FILE" -f "$PROD_COMPOSE_FILE" "$@"
-	elif command -v docker-compose >/dev/null 2>&1; then
-		docker-compose -p approval-app --env-file "$ENV_FILE" -f "$PROD_COMPOSE_FILE" "$@"
-	else
-		echo 'Docker Compose is not installed' >&2
-		return 1
+DEPLOY_ROOT="$PROJECT_ROOT"
+. "$PROJECT_ROOT/scripts/lib/deploy-common.sh"
+for tool in docker curl node; do
+	if ! command -v "$tool" >/dev/null 2>&1; then
+		fail "Rollback requires $tool"
+		exit 1
 	fi
-}
+done
 
 migration_state() {
 	local count value
@@ -120,16 +118,15 @@ docker tag approval-app:latest approval-app:failed 2>/dev/null || true
 docker tag approval-app:rollback approval-app:latest
 echo -e "${GREEN}✓ Image restored${NC}"
 
-echo -e "${BLUE}[3/3]${NC} Restarting application..."
-compose_prod up -d --force-recreate app
+echo -e "${BLUE}[3/3]${NC} Restarting application only..."
+recreate_app_only
+wait_for_health
+compose_prod ps
 
-sleep "${ROLLBACK_WAIT_SECONDS:-10}"
 echo ""
 echo "============================================"
 echo -e "${GREEN}✓ Rollback Complete!${NC}"
 echo "============================================"
-echo ""
-compose_prod ps
 echo ""
 echo "The failed image is saved as approval-app:failed"
 echo "To retry the failed version: docker tag approval-app:failed approval-app:latest"

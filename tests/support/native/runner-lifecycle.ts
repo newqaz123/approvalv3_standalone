@@ -1,5 +1,5 @@
 import { spawn, execFile, type ChildProcess } from 'node:child_process'
-import { createWriteStream } from 'node:fs'
+import { createWriteStream, existsSync } from 'node:fs'
 import path from 'node:path'
 import { finalizeAppEnvironment, type OwnedRuntime } from './postgres-instance'
 
@@ -293,7 +293,11 @@ export function listenerOwnership(
 }
 
 export async function lsofListenerPids(port: number): Promise<number[]> {
-  const text = await execFileText('/usr/sbin/lsof', ['-nP', `-tiTCP:${port}`, '-sTCP:LISTEN'])
+  // macOS and Ubuntu package lsof in different system directories. Do not
+  // trust an arbitrary executable from PATH for an ownership check.
+  const lsof = ['/usr/sbin/lsof', '/usr/bin/lsof'].find((candidate) => existsSync(candidate))
+  if (!lsof) return []
+  const text = await execFileText(lsof, ['-nP', `-tiTCP:${port}`, '-sTCP:LISTEN'])
   return text
     .split('\n')
     .map((line) => Number(line.trim()))

@@ -9,10 +9,56 @@ permissions:
   contents: read
 
 jobs:
+  project-checks:
+    # Run permission and process-group tests as the unprivileged runner on
+    # the host. A root job container with tail as PID 1 cannot check these.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Linux listener tooling
+        run: |
+          test "$(id -u)" != 0
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends lsof
+
+      - name: Install dependencies
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
+        run: npm ci
+
+      - name: Install browsers for project checks
+        run: |
+          npx --no-install playwright install --with-deps chromium
+          npx --no-install puppeteer browsers install chrome
+
+      - name: Generate Prisma client
+        env:
+          DATABASE_URL: postgresql://dummy:dummy@127.0.0.1:1/prisma_generate_only
+        run: npx --no-install prisma generate
+
+      - name: Run project checks without a database URL
+        env:
+          DOTENV_CONFIG_PATH: /dev/null
+        run: |
+          unset DATABASE_URL DIRECT_URL SHADOW_DATABASE_URL CLEAN_START_CI_DATABASE_URL BUSINESS_DATABASE_URL POSTGRES_URL
+          unset POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB PGHOST PGHOSTADDR PGPORT PGUSER PGPASSWORD PGDATABASE
+          unset PGSERVICE PGSERVICEFILE PGPASSFILE PGOPTIONS
+          npm run check
+
   migration-rehearsal:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
-    container: node:20-bookworm
+    container:
+      image: node:20-bookworm
+      options: --init
     defaults:
       run:
         shell: bash
@@ -31,24 +77,10 @@ jobs:
           PUPPETEER_SKIP_DOWNLOAD: 'true'
         run: npm ci
 
-      - name: Install browsers for project checks
-        run: |
-          npx --no-install playwright install --with-deps chromium
-          npx --no-install puppeteer browsers install chrome --install-deps
-
       - name: Generate Prisma client
         env:
           DATABASE_URL: postgresql://dummy:dummy@127.0.0.1:1/prisma_generate_only
         run: npx --no-install prisma generate
-
-      - name: Run project checks without a database URL
-        env:
-          DOTENV_CONFIG_PATH: /dev/null
-        run: |
-          unset DATABASE_URL DIRECT_URL SHADOW_DATABASE_URL CLEAN_START_CI_DATABASE_URL BUSINESS_DATABASE_URL POSTGRES_URL
-          unset POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB PGHOST PGHOSTADDR PGPORT PGUSER PGPASSWORD PGDATABASE
-          unset PGSERVICE PGSERVICEFILE PGPASSFILE PGOPTIONS
-          npm run check
 
       - name: Rehearse migrations in a throwaway PostgreSQL 15 cluster
         run: |
@@ -84,7 +116,7 @@ jobs:
           trap build_metrics EXIT
           bash scripts/build-package.sh "$GITHUB_SHA"
 
-      - name: Verify archive and connected app without pulling images
+      - name: Verify archive, connected app, and app-only rollback
         shell: bash
         run: |
           shopt -s nullglob

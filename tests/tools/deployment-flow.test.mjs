@@ -21,15 +21,6 @@ test('production seed is first-install only', async () => {
   assert.match(seedBlock, /profiles:\s*\n\s*- first-install/)
 })
 
-test('rollback resolves the project root and explicit production compose contract', async () => {
-  const source = await read('scripts/rollback.sh')
-  assert.match(source, /PROJECT_ROOT=/)
-  assert.match(source, /ENV_FILE="\$PROJECT_ROOT\/\.env\.production"/)
-  assert.match(source, /PROD_COMPOSE_FILE="\$PROJECT_ROOT\/docker-compose\.prod\.yml"/)
-  assert.match(source, /-p approval-app --env-file "\$ENV_FILE" -f "\$PROD_COMPOSE_FILE"/)
-  assert.match(source, /--yes/)
-})
-
 test('offline package keeps the canonical backup script at scripts/backup.sh', async () => {
   const source = await read('scripts/build-package.sh')
   assert.match(source, /mkdir -p .*"\$PACKAGE_DIR\/scripts\/lib"/)
@@ -295,13 +286,14 @@ async function installRollbackFixture(packageRoot = false) {
   const fixture = await mkdtemp(join(tmpdir(), 'rollback-flow-'))
   const project = join(fixture, 'package')
   const scriptDir = packageRoot ? project : join(project, 'scripts')
-  await mkdir(join(project, 'scripts'), { recursive: true })
+  await mkdir(join(project, 'scripts', 'lib'), { recursive: true })
   await mkdir(join(project, 'backups'))
   await mkdir(join(fixture, 'elsewhere'))
   await writeFile(join(project, '.env.production'), 'DATABASE_URL=postgresql://test\n')
   await writeFile(join(project, 'docker-compose.prod.yml'), 'services: {}\n')
   await copyFile(join(root, 'scripts/rollback.sh'), join(scriptDir, 'rollback.sh'))
   await copyFile(join(root, 'scripts/restore.sh'), join(scriptDir, 'restore.sh'))
+  await copyFile(join(root, 'scripts/lib/deploy-common.sh'), join(project, 'scripts/lib/deploy-common.sh'))
   await writeFile(join(project, 'scripts', 'backup.sh'), '#!/bin/sh\nprintf \'backup\\n\' >>"$COMMAND_LOG"\nexit "${BACKUP_EXIT:-0}"\n')
   await chmod(join(project, 'scripts', 'backup.sh'), 0o755)
   const bin = join(fixture, 'bin')
@@ -324,6 +316,10 @@ case "$1" in
     esac
     exit 0
     ;;
+  inspect)
+    if [ "$3" = '{{.State.Health.Status}}' ]; then printf 'healthy\\n'; fi
+    exit 0
+    ;;
   tag|ps|restart|exec|run|volume)
     exit 0
     ;;
@@ -331,6 +327,8 @@ esac
 exit 0
 `)
   await chmod(join(bin, 'docker'), 0o755)
+  await copyFile(join(root, 'tests/tools/fixtures/fake-curl.sh'), join(bin, 'curl'))
+  await chmod(join(bin, 'curl'), 0o755)
   return { fixture, project, scriptDir, bin, log: join(fixture, 'commands.log') }
 }
 
@@ -349,7 +347,7 @@ test('rollback uses canonical backup before retagging and explicit production co
   const result = runScript(join(fixture.scriptDir, 'rollback.sh'), ['--yes'], {
     PATH: `${fixture.bin}:${process.env.PATH}`,
     COMMAND_LOG: fixture.log,
-    ROLLBACK_WAIT_SECONDS: '0',
+    HEALTH_TIMEOUT_SECONDS: '0',
   }, join(fixture.fixture, 'elsewhere'))
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
   const log = await readFile(fixture.log, 'utf8')
@@ -362,8 +360,24 @@ test('rollback uses canonical backup before retagging and explicit production co
   ])
   const recreate = log.split('\n').find((line) => line.includes(' up -d '))
   assert.ok(recreate, log)
-  assert.match(recreate, /-f .*docker-compose\.prod\.yml up -d --force-recreate app$/)
+  assert.match(recreate, /-f .*docker-compose\.prod\.yml up -d --no-deps --pull never --no-build --force-recreate app$/)
   assert.doesNotMatch(recreate, /\b(db|migrate|seed)\b/)
+  assertLogSequence(log, [recreate, 'curl -fsS '])
+})
+
+test('rollback does not report completion when the recreated app cannot query the database', async (t) => {
+  const fixture = await installRollbackFixture()
+  t.after(() => rm(fixture.fixture, { recursive: true, force: true }))
+  await writeFile(join(fixture.project, 'backups/last-deployment-state.env'), 'MIGRATIONS_APPLIED=none\n')
+  const result = runScript(join(fixture.scriptDir, 'rollback.sh'), ['--yes'], {
+    PATH: `${fixture.bin}:${process.env.PATH}`,
+    COMMAND_LOG: fixture.log,
+    HEALTH_TIMEOUT_SECONDS: '0',
+    CURL_BODY: '{"status":"ok","database":"error"}',
+  }, root)
+  assert.equal(result.status, 1, result.stdout)
+  assert.match(result.stderr, /connected database/)
+  assert.doesNotMatch(result.stdout, /Rollback Complete/)
 })
 
 test('rollback package-root invocation resolves compose and backup paths without changing cwd', async () => {
@@ -372,12 +386,12 @@ test('rollback package-root invocation resolves compose and backup paths without
   const result = runScript(join(fixture.scriptDir, 'rollback.sh'), ['--yes'], {
     PATH: `${fixture.bin}:${process.env.PATH}`,
     COMMAND_LOG: fixture.log,
-    ROLLBACK_WAIT_SECONDS: '0',
+    HEALTH_TIMEOUT_SECONDS: '0',
   }, root)
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
   const log = await readFile(fixture.log, 'utf8')
   assert.match(log, new RegExp(`--env-file ${fixture.project.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/\\.env\\.production`))
-  assert.match(log, /-f .*docker-compose\.prod\.yml up -d --force-recreate app/)
+  assert.match(log, /-f .*docker-compose\.prod\.yml up -d --no-deps --pull never --no-build --force-recreate app/)
 })
 
 test('rollback migration compatibility gate cannot be bypassed by --yes and treats malformed or duplicate state as unknown', async () => {
@@ -392,7 +406,7 @@ test('rollback migration compatibility gate cannot be bypassed by --yes and trea
     const env = {
       PATH: `${fixture.bin}:${process.env.PATH}`,
       COMMAND_LOG: fixture.log,
-      ROLLBACK_WAIT_SECONDS: '0',
+      HEALTH_TIMEOUT_SECONDS: '0',
     }
     const blocked = runScript(join(fixture.scriptDir, 'rollback.sh'), ['--yes'], env, root)
     assert.notEqual(blocked.status, 0, `state=${JSON.stringify(state)}`)
@@ -411,7 +425,7 @@ test('rollback preserves ordinary confirmation unless --yes is provided', async 
   const env = {
     PATH: `${fixture.bin}:${process.env.PATH}`,
     COMMAND_LOG: fixture.log,
-    ROLLBACK_WAIT_SECONDS: '0',
+    HEALTH_TIMEOUT_SECONDS: '0',
   }
   const cancelled = runScript(join(fixture.scriptDir, 'rollback.sh'), [], env, root, 'n\n')
   assert.equal(cancelled.status, 0, cancelled.stderr)
@@ -430,7 +444,7 @@ test('rollback aborts before retagging when canonical backup fails', async () =>
     PATH: `${fixture.bin}:${process.env.PATH}`,
     COMMAND_LOG: fixture.log,
     BACKUP_EXIT: '1',
-    ROLLBACK_WAIT_SECONDS: '0',
+    HEALTH_TIMEOUT_SECONDS: '0',
   }, root)
   assert.notEqual(result.status, 0)
   const log = await readFile(fixture.log, 'utf8')
@@ -811,6 +825,42 @@ test('offline CI rejects dependencies that could start a service outside db, mig
       assert.doesNotMatch(await read(fixture.log), / (?:up -d|down --volumes)\b/)
     })
   }
+})
+
+test('deployment readiness requires a successful HTTP response and a connected database', async (t) => {
+  const body = '{"status":"ok","database":"connected"}'
+  for (const [name, response, code, curlExit, expected] of [
+    ['connected', body, '200', '0', 0],
+    ['database query failed despite HTTP 200', '{"status":"ok","database":"error"}', '200', '0', 1],
+    ['missing database field', '{"status":"ok"}', '200', '0', 1],
+    ['malformed JSON', body.slice(0, -1), '200', '0', 1],
+    ['redirect with healthy-looking body', body, '302', '0', 1],
+    ['transport failure with healthy-looking body', body, '200', '28', 1],
+  ]) {
+    await t.test(name, async (subtest) => {
+      const fixture = await fakeBin()
+      subtest.after(() => rm(fixture.dir, { recursive: true, force: true }))
+      const result = runShell('source scripts/lib/deploy-common.sh; wait_for_health', {
+        PATH: `${fixture.bin}:${process.env.PATH}`, COMMAND_LOG: fixture.log, HEALTH_TIMEOUT_SECONDS: '0',
+        CURL_BODY: response, CURL_HTTP_CODE: code, CURL_EXIT_CODE: curlExit,
+      })
+      assert.equal(result.status, expected, result.stderr)
+      if (expected !== 0) assert.match(result.stderr, /connected database/)
+    })
+  }
+})
+
+test('operator health check does not report healthy when the application cannot query the database', async (t) => {
+  const fixture = await fakeBin()
+  t.after(() => rm(fixture.dir, { recursive: true, force: true }))
+  const env = { PATH: `${fixture.bin}:${process.env.PATH}`, COMMAND_LOG: fixture.log }
+  const script = join(root, 'scripts/health-check.sh')
+  const disconnected = runScript(script, [], { ...env, CURL_BODY: '{"status":"ok","database":"error"}' }, root)
+  assert.equal(disconnected.status, 1, disconnected.stdout)
+  assert.doesNotMatch(disconnected.stdout, /All systems healthy/)
+  const connected = runScript(script, [], env, root)
+  assert.equal(connected.status, 0, connected.stderr)
+  assert.match(connected.stdout, /All systems healthy/)
 })
 
 test('offline CI health assertion requires a connected database in a valid JSON response', async (t) => {
@@ -1259,7 +1309,7 @@ test('main online update path proves rollback and backup precede build and prese
     'up -d db migrate app\n',
     'MIGRATION_COMMAND_REACHED\n',
     'docker inspect -f {{.State.Health.Status}} approval-app\n',
-    'curl -fsS http://localhost:3000/api/health\n',
+    'curl -fsS --max-time 5 ',
     stateCaptureMarker,
   ])
   assert.match(result.stdout, /Deployment succeeded \(online\)\./)

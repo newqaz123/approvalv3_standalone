@@ -195,25 +195,68 @@ YAML
   [[ $users == 0 ]] || fail "expected no seed; found $users users"
   printf 'Verified migrate exit 0, all checkout migrations applied, and users count 0\n'
 
+  wait_for_connected_app() {
+    local deadline=$((SECONDS + 180)) remaining probe_timeout
+    while (( (remaining = deadline - SECONDS) > 0 )); do
+      probe_timeout=$((remaining < 5 ? remaining : 5))
+      if timeout "${probe_timeout}s" "${compose[@]}" exec -T app node -e '
+          (async () => {
+            const response = await fetch("http://127.0.0.1:3000/api/health", {
+              redirect: "error", signal: AbortSignal.timeout(4000)
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            process.stdout.write(await response.text());
+          })().catch(() => { process.exitCode = 1; });
+        ' 2>/dev/null | assert_connected_health; then
+        return 0
+      fi
+      remaining=$((deadline - SECONDS))
+      if (( remaining > 0 )); then sleep "$((remaining < 3 ? remaining : 3))"; fi
+    done
+    fail 'no successful /api/health response with a connected database within 180 seconds'
+  }
+
   phase='connected app health verification'
-  local deadline=$((SECONDS + 180)) remaining probe_timeout
-  while (( (remaining = deadline - SECONDS) > 0 )); do
-    probe_timeout=$((remaining < 5 ? remaining : 5))
-    if timeout "${probe_timeout}s" "${compose[@]}" exec -T app node -e '
-        (async () => {
-          const response = await fetch("http://127.0.0.1:3000/api/health", {
-            redirect: "error", signal: AbortSignal.timeout(4000)
-          });
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          process.stdout.write(await response.text());
-        })().catch(() => { process.exitCode = 1; });
-      ' 2>/dev/null | assert_connected_health; then
-      exit 0
-    fi
-    remaining=$((deadline - SECONDS))
-    if (( remaining > 0 )); then sleep "$((remaining < 3 ? remaining : 3))"; fi
-  done
-  fail 'no successful /api/health response with a connected database within 180 seconds'
+  wait_for_connected_app
+
+  phase='app-only rollback isolation'
+  container_id() {
+    local id
+    id=$("${compose[@]}" ps --all --quiet "$1")
+    [[ $id =~ ^[0-9a-f]{12,64}$ ]] || fail "expected exactly one $1 container"
+    printf '%s\n' "$id"
+  }
+  dependency_state() {
+    local id
+    id=$(container_id "$1") || return 1
+    docker inspect --format '{{.Id}} {{.State.StartedAt}} {{.State.Status}} {{.State.ExitCode}}' "$id"
+  }
+  migration_history() {
+    query_database 'SELECT row_to_json(m)::text FROM _prisma_migrations m ORDER BY id;'
+  }
+
+  local app_before app_after db_before db_after migrate_before migrate_after history_before history_after
+  app_before=$(container_id app)
+  db_before=$(dependency_state db)
+  migrate_before=$(dependency_state migrate)
+  history_before=$(migration_history)
+  (
+    # Exercise exactly the recreation command used by rollback.sh, but only
+    # via the validated disposable project. Do not retag any images here.
+    source scripts/lib/deploy-common.sh
+    compose_prod() { "${compose[@]}" "$@"; }
+    recreate_app_only
+  )
+  wait_for_connected_app
+  app_after=$(container_id app)
+  db_after=$(dependency_state db)
+  migrate_after=$(dependency_state migrate)
+  history_after=$(migration_history)
+  [[ $app_after != "$app_before" ]] || fail 'app-only rollback did not replace the app container'
+  [[ $db_after == "$db_before" ]] || fail 'app-only rollback changed or restarted the database container'
+  [[ $migrate_after == "$migrate_before" ]] || fail 'app-only rollback changed or restarted the migrator container'
+  [[ $history_after == "$history_before" ]] || fail 'app-only rollback changed migration history'
+  printf 'Verified app-only recreation without restarting db or migrate or changing migration history\n'
 )
 
 if [[ ${BASH_SOURCE[0]} == "$0" ]]; then

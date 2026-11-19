@@ -95,7 +95,7 @@ Before image mutation, the coordinator:
 4. creates non-empty PostgreSQL and uploads backups; and
 5. verifies backup paths and SHA-256 checksums.
 
-It then builds the new images, starts `db migrate app`, waits for the one-shot migration result, checks container and HTTP health, and verifies that users, volumes, upload files, and attachment integrity were preserved.
+It then builds the new images, starts `db migrate app`, waits for the one-shot migration result, verifies container health and a `database: connected` API response, and checks that users, volumes, upload files, and attachment integrity were preserved.
 
 ## Offline intranet update
 
@@ -175,7 +175,7 @@ Rollback requires a previously tagged rollback image:
 bash scripts/rollback.sh
 ```
 
-`--yes` may skip only the ordinary proceed prompt. It cannot bypass migration compatibility acknowledgement. Rollback first creates a fresh canonical database/uploads backup, retags the previous app image, and recreates only `app`.
+`--yes` may skip only the ordinary proceed prompt. It cannot bypass migration compatibility acknowledgement. Rollback first creates a fresh canonical database/uploads backup, retags the previous app image, and recreates only `app` with `--no-deps` and without pulling a new image. It does not report success until the app can query the database.
 
 Because database migrations are not reversed, inspect the migration state and schema compatibility first. For `applied`, missing, malformed, duplicate, or otherwise unknown state, type `ROLLBACK APP ONLY` only after confirming that the old app is compatible with the current schema. For an incompatible upgrade, use the coordinated recovery procedure in the [legacy upgrade runbook](docs/upgrade-runbook.md#recovery-and-rollback) instead.
 

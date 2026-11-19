@@ -122,13 +122,15 @@ Backup must produce non-empty database and uploads artifacts with checksums. Res
 bash scripts/rollback.sh
 ```
 
-Rollback always creates a fresh canonical backup before retagging and recreates only `app`. It does not reverse migrations.
+Rollback always creates a fresh canonical backup before retagging and recreates only `app` with `--no-deps` and without pulling a new image. It waits for connected database readiness and does not reverse migrations.
 
 When migration state is `applied` or `unknown`—including missing, malformed, or duplicate state—the operator must evaluate old-app/current-schema compatibility and type the exact phrase `ROLLBACK APP ONLY`. The `--yes` option skips only the ordinary confirmation and cannot bypass this gate.
 
 A migration failure is terminal. Do not automatically change app images after an applied or unknown migration.
 
 ## Health and diagnostics
+
+HTTP 200 and container health alone can indicate liveness even when Prisma cannot query the database. Deployment and `scripts/health-check.sh` also require the `/api/health` JSON to report `database: connected`.
 
 ```bash
 bash scripts/health-check.sh
