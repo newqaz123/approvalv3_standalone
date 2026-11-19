@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 export const REQUIRED_PRODUCTION_KEYS = [
 	"DATABASE_URL",
 	"AUTH_URL",
@@ -48,6 +50,33 @@ export function parseEnvText(text) {
 	return result;
 }
 
+function postgresIdentityIssues({ POSTGRES_USER, POSTGRES_DB }) {
+	const issues = [];
+	// libpq expands connection strings supplied as database arguments, even when quoted.
+	if (/[=\0]|^postgres(?:ql)?:\/\//.test(POSTGRES_DB ?? "")) {
+		issues.push("POSTGRES_DB must be a literal database name, not a connection string");
+	}
+	// Bash would silently drop NUL when capturing a file-derived identity.
+	if (POSTGRES_USER?.includes("\0")) {
+		issues.push("POSTGRES_USER must not contain a NUL byte");
+	}
+	return issues;
+}
+
+export function readPostgresIdentity(envFile) {
+	const missingIdentity = "Cannot read POSTGRES_USER and POSTGRES_DB from the production environment file";
+	let current;
+	try {
+		current = parseEnvText(readFileSync(envFile, "utf8"));
+	} catch {
+		throw new Error(missingIdentity);
+	}
+	const [issue] = postgresIdentityIssues(current);
+	if (issue) throw new Error(issue);
+	if (!current.POSTGRES_USER || !current.POSTGRES_DB) throw new Error(missingIdentity);
+	return [current.POSTGRES_USER, current.POSTGRES_DB];
+}
+
 export function normalizeOrigin(value) {
 	if (!value) return null;
 	try {
@@ -91,7 +120,7 @@ const SECRET_PLACEHOLDERS = new Set([
 ]);
 
 export function createRuntimeReport(current) {
-	const issues = [];
+	const issues = postgresIdentityIssues(current);
 	const warnings = [];
 
 	if (current.UPLOAD_DIR !== "/app/uploads") {

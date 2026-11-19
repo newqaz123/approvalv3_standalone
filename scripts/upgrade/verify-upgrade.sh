@@ -14,8 +14,8 @@
 #   A fresh:   empty DB -> prisma migrate deploy (all migrations) -> prisma/seed.ts
 #              twice (idempotent) -> audit trigger blocks UPDATE/DELETE ->
 #              schema diff (migrations vs schema.prisma, and live DB vs schema) clean.
-#   B upgrade: empty DB -> ONLY main's 18 migrations -> legacy fixture ->
-#              prisma migrate deploy (applies only the upgrade) -> mapping asserts.
+#   B upgrade: empty DB -> 18 pre-upgrade migrations -> legacy fixture ->
+#              prisma migrate deploy (upgrade and later migrations) -> mapping asserts.
 #   C guard:   as B plus one open request with a pending approval -> deploy
 #              fails with the guard message, schema/data unchanged; then cancel the
 #              request, `migrate resolve --rolled-back`, deploy succeeds.
@@ -28,6 +28,7 @@ cd "$ROOT"
 
 PG_BIN="${PG_BIN:-/opt/homebrew/opt/postgresql@16/bin}"
 UPGRADE_MIGRATION="20261019000000_organization_upgrade"
+ENGINEERING_MIGRATION="20261116000000_engineering_view_all_requests"
 FIXTURE="$ROOT/scripts/upgrade/fixtures/main-legacy-fixture.sql"
 
 for bin in initdb pg_ctl psql; do
@@ -73,16 +74,25 @@ check() { # check <label> <expected> <actual>
   if [ "$2" = "$3" ]; then echo "  ok   $1 = $3"; else echo "  FAIL $1: expected [$2] got [$3]"; FAILS=$((FAILS+1)); fi
 }
 
-# Temp prisma config + migrations dir holding ONLY main's 18 migrations.
+[ -f "prisma/migrations/$UPGRADE_MIGRATION/migration.sql" ] || { echo "missing prisma/migrations/$UPGRADE_MIGRATION/migration.sql"; exit 1; }
+EXPECTED_MIGRATIONS="$(
+  for file in prisma/migrations/*/migration.sql; do
+    [ -f "$file" ] || continue
+    dir="${file%/migration.sql}"
+    printf '%s\n' "${dir##*/}"
+  done | LC_ALL=C sort
+)"
+
+# The C-sorted list's prefix before the organization upgrade is the legacy baseline.
 LEGACY_DIR="$WORK/legacy-migrations"
 mkdir -p "$LEGACY_DIR"
 cp prisma/migrations/migration_lock.toml "$LEGACY_DIR/"
-for dir in prisma/migrations/*/; do
-  name="$(basename "$dir")"
-  [ "$name" = "$UPGRADE_MIGRATION" ] && continue
-  cp -R "$dir" "$LEGACY_DIR/$name"
-done
-LEGACY_COUNT="$(find "$LEGACY_DIR" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')"
+LEGACY_COUNT=0
+while IFS= read -r name; do
+  [ "$name" = "$UPGRADE_MIGRATION" ] && break
+  cp -R "prisma/migrations/$name" "$LEGACY_DIR/$name"
+  LEGACY_COUNT=$((LEGACY_COUNT+1))
+done <<< "$EXPECTED_MIGRATIONS"
 [ "$LEGACY_COUNT" = 18 ] || { echo "expected 18 legacy migrations, found $LEGACY_COUNT"; exit 1; }
 LEGACY_CONFIG="$WORK/prisma.legacy.config.mjs"
 cat > "$LEGACY_CONFIG" <<CFG
@@ -93,6 +103,13 @@ export default {
   datasource: { url: process.env.DATABASE_URL },
 }
 CFG
+
+check_release_state() {
+  local applied
+  applied="$(val "$1" 'SELECT migration_name FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL ORDER BY migration_name COLLATE "C"')"
+  check "$2 applied migration names" "$EXPECTED_MIGRATIONS" "$applied"
+  check "$2 units with Engineering visibility not false" 0 "$(val "$1" 'SELECT count(*) FROM organization_units WHERE "engineeringCanViewAllRequests" IS DISTINCT FROM false')"
+}
 
 audit_trigger_count() {
   val "$1" "SELECT count(*) FROM pg_trigger WHERE tgrelid = 'request_activities'::regclass AND tgname IN ('prevent_request_activities_update','prevent_request_activities_delete') AND NOT tgisinternal"
@@ -107,7 +124,6 @@ audit_update_blocked() { # prints blocked|ALLOWED
 echo; echo "=== A: fresh install (all migrations + prod seed twice)"
 createdb_ fresh; createdb_ shadow
 prisma "$(url fresh)" migrate deploy >"$WORK/a-deploy.log" 2>&1 || { cat "$WORK/a-deploy.log"; exit 1; }
-check "A applied migrations" 19 "$(val fresh "SELECT count(*) FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL")"
 check "A units before seed (no legacy data -> no mapping)" 0 "$(val fresh 'SELECT count(*) FROM organization_units')"
 check "A row-mode CHECKs validated on fresh" "true|true" "$(val fresh "SELECT string_agg(convalidated::text, '|' ORDER BY conname) FROM pg_constraint WHERE conname LIKE '%row_mode_integrity'")"
 for run in 1 2; do
@@ -126,6 +142,7 @@ psqlq fresh -c "UPDATE users SET \"passwordHash\" = 'changed-by-admin', \"forceP
 DATABASE_URL="$(url fresh)" npx --no-install tsx prisma/seed.ts >"$WORK/a-seed-3.log" 2>&1 || { cat "$WORK/a-seed-3.log"; exit 1; }
 check "A seed re-run keeps admin password" changed-by-admin "$(val fresh "SELECT \"passwordHash\" FROM users WHERE email = 'admin@example.com'")"
 check "A seed re-run keeps counts (units/positions/users/stages)" "1|6|1|7" "$(val fresh "SELECT (SELECT count(*) FROM organization_units)||'|'||(SELECT count(*) FROM positions)||'|'||(SELECT count(*) FROM users)||'|'||(SELECT count(*) FROM sub_task_stages)")"
+check_release_state fresh A
 check "A audit triggers present" 2 "$(audit_trigger_count fresh)"
 psqlq fresh -c "INSERT INTO request_activities (id, action, \"userId\") SELECT 'act-fresh', 'probe', id FROM users WHERE email = 'admin@example.com'"
 check "A UPDATE request_activities" blocked "$(audit_update_blocked fresh act-fresh)"
@@ -139,17 +156,18 @@ else check "A diff live fresh DB->schema.prisma" clean "$(grep -v -i warn "$WORK
 # ---------------------------------------------------------------- B upgrade
 deploy_legacy() {
   DATABASE_URL="$(url "$1")" npx --no-install prisma migrate deploy --config "$LEGACY_CONFIG" >"$WORK/$1-legacy.log" 2>&1 || { cat "$WORK/$1-legacy.log"; exit 1; }
-  check "$2 main-only migrations applied" 18 "$(val "$1" "SELECT count(*) FROM _prisma_migrations WHERE finished_at IS NOT NULL")"
   psqlq "$1" -f "$FIXTURE"
+  check "$2 legacy migrations applied" 18 "$(val "$1" 'SELECT count(*) FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL')"
+  check "$2 no organization_units before upgrade" t "$(val "$1" "SELECT to_regclass('public.organization_units') IS NULL")"
 }
 
-echo; echo "=== B: upgrade from main (18 migrations + legacy data)"
+echo; echo "=== B: upgrade from legacy (18 migrations + legacy data)"
 createdb_ upgrade
 deploy_legacy upgrade B
 check "B audit triggers present before upgrade" 2 "$(audit_trigger_count upgrade)"
 prisma "$(url upgrade)" migrate deploy >"$WORK/b-deploy.log" 2>&1 || { cat "$WORK/b-deploy.log"; exit 1; }
 grep -E "Applying migration" "$WORK/b-deploy.log" | sed 's/^/  /'
-check "B migrations applied in total" 19 "$(val upgrade "SELECT count(*) FROM _prisma_migrations WHERE finished_at IS NOT NULL")"
+check_release_state upgrade B
 check "B units (root + 3 departments)" 4 "$(val upgrade 'SELECT count(*) FROM organization_units')"
 check "B unit ids = department ids" "ENG|PD1|QC" "$(val upgrade "SELECT string_agg(id, '|' ORDER BY id) FROM organization_units WHERE \"parentId\" IS NOT NULL")"
 check "B unit names kept" "Engineering|Production 1|Quality Control" "$(val upgrade "SELECT string_agg(name, '|' ORDER BY id) FROM organization_units WHERE \"parentId\" IS NOT NULL")"
@@ -213,11 +231,13 @@ check "C schema unchanged (columns md5)" "$BEFORE" "$(val guard "SELECT md5(stri
 check "C no new tables/enums created" "0|0" "$(val guard "SELECT (SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('organization_units','positions','company_settings'))||'|'||(SELECT count(*) FROM pg_type WHERE typname = 'ApprovalPhase')")"
 check "C legacy data intact (departments/users with dept/pending row)" "3|10|pending" "$(val guard "SELECT (SELECT count(*) FROM departments)||'|'||(SELECT count(*) FROM users WHERE \"departmentId\" IS NOT NULL)||'|'||(SELECT status FROM request_approvals WHERE id = 'ra-open')")"
 check "C upgrade recorded as failed (not applied)" "1|0" "$(val guard "SELECT count(*) FILTER (WHERE finished_at IS NULL AND rolled_back_at IS NULL)||'|'||count(*) FILTER (WHERE finished_at IS NOT NULL) FROM _prisma_migrations WHERE migration_name = '$UPGRADE_MIGRATION'")"
+check "C no Engineering migration recorded on blocked deploy" 0 "$(val guard "SELECT count(*) FROM _prisma_migrations WHERE migration_name = '$ENGINEERING_MIGRATION'")"
 echo "  operator recovery: cancel the open request, resolve, redeploy"
 psqlq guard -c "UPDATE requests SET status = 'Cancelled' WHERE id = 'r-open'"
 prisma "$(url guard)" migrate resolve --rolled-back "$UPGRADE_MIGRATION" >"$WORK/c-resolve.log" 2>&1 || { cat "$WORK/c-resolve.log"; exit 1; }
 if prisma "$(url guard)" migrate deploy >"$WORK/c-deploy2.log" 2>&1; then
   check "C deploy after cancel + resolve" succeeded succeeded
+  check_release_state guard 'C retry'
 else check "C deploy after cancel + resolve" succeeded "$(tail -5 "$WORK/c-deploy2.log")"; fi
 check "C mapped after retry (units/assignments)" "4|10" "$(val guard "SELECT (SELECT count(*) FROM organization_units)||'|'||(SELECT count(*) FROM organization_assignments)")"
 

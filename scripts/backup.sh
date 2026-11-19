@@ -14,6 +14,34 @@ TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 DB_CONTAINER="${DB_CONTAINER:-approval-db}"
 APP_CONTAINER="${APP_CONTAINER:-approval-app}"
 
+DB_USER="${POSTGRES_USER:-postgres}"
+DB_NAME="${POSTGRES_DB:-app_db}"
+if [ -f "$ENV_FILE" ]; then
+	if ! db_identity="$(node --input-type=module - "$SCRIPT_DIR/../tools/lib/env.mjs" "$ENV_FILE" <<'NODE'
+import { pathToFileURL } from 'node:url'
+const { readPostgresIdentity } = await import(pathToFileURL(process.argv[2]))
+try {
+  console.log(readPostgresIdentity(process.argv[3]).join('\n'))
+} catch (error) {
+  console.error(`ERROR: ${error.message}`)
+  process.exitCode = 1
+}
+NODE
+	)"; then
+		exit 1
+	fi
+	DB_USER="${db_identity%%$'\n'*}"
+	DB_NAME="${db_identity#*$'\n'}"
+else
+	# Match the environment gate without requiring Node for the legacy no-file fallback.
+	case "$DB_NAME" in
+		*=*|postgresql://*|postgres://*)
+			printf 'ERROR: POSTGRES_DB must be a literal database name, not a connection string\n' >&2
+			exit 1
+			;;
+	esac
+fi
+
 compose_prod() {
 	if docker compose version >/dev/null 2>&1; then
 		docker compose -p "$COMPOSE_PROJECT_NAME" --env-file "$ENV_FILE" -f "$PROD_COMPOSE_FILE" "$@"
@@ -96,9 +124,9 @@ fi
 
 DB_BACKUP_FILE="$BACKUP_DIR/db_$TIMESTAMP.sql"
 if docker ps --format '{{.Names}}' | grep -qx "$DB_CONTAINER"; then
-	docker exec "$DB_CONTAINER" pg_dump -U "${POSTGRES_USER:-postgres}" "${POSTGRES_DB:-app_db}" >"$DB_BACKUP_FILE"
+	docker exec "$DB_CONTAINER" pg_dump -U "$DB_USER" -d "$DB_NAME" >"$DB_BACKUP_FILE"
 else
-	compose_prod exec -T db pg_dump -U "${POSTGRES_USER:-postgres}" "${POSTGRES_DB:-app_db}" >"$DB_BACKUP_FILE"
+	compose_prod exec -T db pg_dump -U "$DB_USER" -d "$DB_NAME" >"$DB_BACKUP_FILE"
 fi
 [ -s "$DB_BACKUP_FILE" ] || {
 	printf 'ERROR: database backup is empty\n' >&2
@@ -108,9 +136,9 @@ DB_SHA256="$(sha256_file "$DB_BACKUP_FILE")"
 [ -n "$DB_SHA256" ] || exit 1
 
 if docker ps --format '{{.Names}}' | grep -qx "$DB_CONTAINER"; then
-	USERS_COUNT="$(docker exec "$DB_CONTAINER" psql -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-app_db}" -tAc 'select count(*) from users;' 2>/dev/null || printf '%s' unknown)"
+	USERS_COUNT="$(docker exec "$DB_CONTAINER" psql -U "$DB_USER" -d "$DB_NAME" -tAc 'select count(*) from users;' 2>/dev/null || printf '%s' unknown)"
 else
-	USERS_COUNT="$(compose_prod exec -T db psql -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-app_db}" -tAc 'select count(*) from users;' 2>/dev/null || printf '%s' unknown)"
+	USERS_COUNT="$(compose_prod exec -T db psql -U "$DB_USER" -d "$DB_NAME" -tAc 'select count(*) from users;' 2>/dev/null || printf '%s' unknown)"
 fi
 printf 'Users in database: %s\n' "$USERS_COUNT"
 if [ "$USERS_COUNT" = "0" ]; then

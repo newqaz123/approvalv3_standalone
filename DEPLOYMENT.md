@@ -1,12 +1,14 @@
 # Approval App — VPS Deployment Entry Point
 
-This file is retained for operators who bookmarked the older VPS guide. Production is Docker Compose only and now uses the unified safe deployment workflow.
+This file is retained for operators who bookmarked the older VPS guide. Production is Docker Compose only and uses the unified safe deployment workflow. Run the coordinator from a trusted checkout or extracted package as an authorized deployment administrator (effective UID 0) with a trusted administrator `PATH`. See [DEPLOY.md](DEPLOY.md#online-ubuntu-vps-update) for Git access and checkout-trust requirements when elevating privileges.
+
+If the existing database still uses departments, follow the [legacy upgrade runbook](docs/upgrade-runbook.md) before deploying.
 
 ## Ubuntu VPS
 
-1. Install Docker with Compose v2 and Git.
-2. Clone the repository and keep the production checkout on `main`.
-3. Create `.env.production` from `.env.example`.
+1. Install Docker with Compose v2, Git, Node.js 20 or newer, and `curl`.
+2. Use a trusted checkout on `main` that the root deployment session can update from `origin`.
+3. Keep the existing `.env.production`, or create one from `.env.example` for a new deployment.
 4. Set strong secrets, PostgreSQL credentials, `UPLOAD_DIR=/app/uploads`, and one shared HTTPS origin for `AUTH_URL`, `NEXTAUTH_URL`, and `NEXT_PUBLIC_APP_URL`.
 5. Run:
 
@@ -18,13 +20,13 @@ Choose **Ubuntu VPS / GitHub update**. The update is fast-forward-only from `ori
 
 ## Offline intranet server
 
-Extract the approved package, copy `.env.production.example` to `.env.production`, set production values, then run:
+Extract the approved package and provision `.env.production` securely, preserving the existing production configuration for an update. From that package directory, use its own coordinator as the authorized root administrator:
 
 ```bash
-bash scripts/deploy.sh
+bash scripts/deploy.sh --offline .
 ```
 
-Choose **Offline intranet package**. Checksums are verified before image loading, and offline mode does not use Git or the network.
+Checksums are verified before image loading and detect corruption, not package provenance. Offline mode requires no Git or external network access.
 
 ## Explicit Compose files
 

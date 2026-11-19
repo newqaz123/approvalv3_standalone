@@ -41,16 +41,13 @@ docker compose -f docker-compose.dev.yml up -d
 
 ### Production deployment
 
-Production has one beginner-safe entry point for both an online Ubuntu VPS and an offline intranet package:
+Production has one deployment coordinator for both online Ubuntu VPS and offline intranet updates. Run it from a trusted checkout or extracted package as an authorized administrator with effective UID 0 and a trusted administrator `PATH`:
 
 ```bash
-cp .env.example .env.production
-# Set production credentials and one shared HTTPS origin for AUTH_URL,
-# NEXTAUTH_URL, and NEXT_PUBLIC_APP_URL.
 bash scripts/deploy.sh
 ```
 
-Choose **Ubuntu VPS / GitHub update** for a routine update from `main`, or **Offline intranet package** for an extracted package. The script validates the environment and checksums, tags the running images for rollback, records data state, backs up PostgreSQL and uploads, applies migrations, verifies health, and checks that data and attachments were preserved.
+Keep the existing `.env.production` for updates. Use **Ubuntu VPS / GitHub update** from `main`, or **Offline intranet package** from the extracted package using its own coordinator. The script validates the environment and offline checksums, tags the running images for rollback, records data state, backs up PostgreSQL and uploads, applies migrations, verifies health, and checks that data and attachments were preserved. For a legacy departments database, follow the [upgrade runbook](docs/upgrade-runbook.md) first.
 
 The production Compose contract is always explicit:
 
@@ -66,15 +63,17 @@ docker compose -p approval-app --env-file .env.production -f docker-compose.prod
 
 ## Interactive Deployment Manager
 
+For an update from a repository checkout, start the manager in the same authorized root deployment session:
+
 ```bash
 npm run manage
 ```
 
-Choose option `2` to update an existing installation; the manager delegates once to `bash scripts/deploy.sh`, where you choose online or offline mode. Backup, restore, health, and rollback remain separate manager options.
+Option `2` delegates an existing-installation update exactly once to `bash scripts/deploy.sh` in the checkout and does not elevate privileges. Use the archive's own coordinator directly for offline updates. Backup, restore, health, and rollback remain separate manager options.
 
 Online deployment requires the checked-out `main` branch and a fast-forward-only update. If tracked source changes are present, deployment aborts by default or offers an explicitly named stash. The stash is never automatically restored or deleted; recover it later with the exact name printed by the script.
 
-Offline deployment verifies `SHA256SUMS` before loading any image and performs no Git or network operation.
+Offline deployment verifies `SHA256SUMS` before loading any image and requires no Git or external network access. Checksums detect corruption, not package provenance.
 
 Every update preserves and verifies:
 
@@ -229,7 +228,7 @@ npm run seed:dev         # Dev fixture (prisma/seed-dev.ts, app_cleanstart_dev o
 The Docker setup includes PostgreSQL 15, a persistent private uploads volume, a standalone Next.js image, a one-shot migration service, health checks, log rotation, and resource limits.
 
 - Development: `docker compose -f docker-compose.dev.yml up -d`
-- Production: `bash scripts/deploy.sh`
+- Production (authorized root deployment session): `bash scripts/deploy.sh`
 - Production status: `docker compose -p approval-app --env-file .env.production -f docker-compose.prod.yml ps`
 - Application logs: `docker compose -p approval-app --env-file .env.production -f docker-compose.prod.yml logs -f app`
 

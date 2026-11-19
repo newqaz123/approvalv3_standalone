@@ -7,7 +7,7 @@
 # Output:  deploy/approval-app-<version>-<date>.tar.gz
 # ==============================================
 
-set -e
+set -e -o pipefail
 
 # Colors
 RED='\033[0;31m'
@@ -35,10 +35,10 @@ write_package_checksums() {
   (
     cd "$package_root"
     {
-      find images scripts tools -type f -print
-      printf '%s\n' docker-compose.prod.yml VERSION
+      find images scripts tools -type f -print || exit 1
+      printf '%s\n' docker-compose.prod.yml VERSION docs/upgrade-runbook.md
     } | LC_ALL=C sort | while IFS= read -r file; do
-      checksum_file "$file"
+      checksum_file "$file" || exit 1
     done > SHA256SUMS
   )
 }
@@ -107,7 +107,8 @@ echo -e "${GREEN}✓ postgres:15-alpine exported${NC}"
 # Step 2: Create package directory
 echo -e "${BLUE}[3/6]${NC} Creating package directory..."
 rm -rf "$PACKAGE_DIR"
-mkdir -p "$PACKAGE_DIR/images" "$PACKAGE_DIR/scripts/lib" "$PACKAGE_DIR/tools/lib"
+mkdir -p "$PACKAGE_DIR/images" "$PACKAGE_DIR/scripts/lib" "$PACKAGE_DIR/tools/lib" \
+  "$PACKAGE_DIR/docs" "$PACKAGE_DIR/scripts/upgrade"
 echo -e "${GREEN}✓ Package directory ready${NC}"
 
 # Step 3: Move exported images into package
@@ -122,6 +123,8 @@ echo -e "${BLUE}[5/6]${NC} Packaging config files..."
 cp "$PROJECT_DIR/docker-compose.prod.yml" "$PACKAGE_DIR/"
 cp "$PROJECT_DIR/.env.example" "$PACKAGE_DIR/.env.production.example"
 cp "$PROJECT_DIR/DEPLOY.md" "$PACKAGE_DIR/"
+cp "$PROJECT_DIR/docs/upgrade-runbook.md" "$PACKAGE_DIR/docs/"
+cp "$PROJECT_DIR/scripts/upgrade/precheck.sql" "$PROJECT_DIR/scripts/upgrade/postcheck.sql" "$PACKAGE_DIR/scripts/upgrade/"
 cp "$PROJECT_DIR/scripts/deploy.sh" "$PACKAGE_DIR/scripts/"
 cp "$PROJECT_DIR/scripts/deploy-offline.sh" "$PACKAGE_DIR/scripts/"
 cp "$PROJECT_DIR/scripts/backup.sh" "$PACKAGE_DIR/scripts/"
@@ -149,10 +152,14 @@ Built:   $(date -u +"%Y-%m-%d %H:%M UTC")
 Commit:  $(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 
 Quick Start:
-1. Extract the package on the server.
-2. Copy .env.production.example to .env.production and set production values.
-3. Run: bash scripts/deploy.sh
-4. Choose: Offline intranet package.
+1. Extract a package from a trusted release source on the server.
+2. Configure .env.production (use .env.production.example only if no configuration exists).
+3. For a legacy departments-to-organization upgrade, follow docs/upgrade-runbook.md first.
+4. From the package directory, run as an authorized administrator with effective UID 0
+   and a trusted administrator PATH: bash scripts/deploy.sh --offline .
+
+Use this package's own coordinator. SHA256SUMS detects corruption, not package provenance.
+See DEPLOY.md for prerequisites and the full procedure.
 EOF
 
 # Make packaged shell entry points executable.
