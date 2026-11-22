@@ -37,6 +37,7 @@ import type {
   AssignmentNode,
   OrganizationUnitNode,
   PositionNode,
+  ReportingPath,
   TeamNode,
 } from '@/lib/organization/model'
 
@@ -369,33 +370,18 @@ function classifySource(
   return 'INHERITED'
 }
 
-/**
- * Resolves what a future attempt for this submitter would look like WITHOUT
- * creating requests, saving snapshots, or publishing anything: the winning
- * route (nearest published scope on the submitter's reporting branch, or a
- * validated in-memory draft substituted at that scope), then the exact B3
- * option-A candidate set per step (own-team exact-position members ∪ path
- * holders, deduplicated by user, inactive accounts excluded, origin never a
- * candidate). Steps at or below the submitter's rank are not required and
- * do not appear — identical to the engine builder. Empty active candidate
- * sets are reported as skipped VACANT_POSITION; autoApproved mirrors the
- * builder's origin-rank >= limit-rank rule; noEligibleSteps mirrors
- * COMPLETED_NO_ELIGIBLE_STEPS.
- */
-export async function testWithSubmitter(
-  input: {
-    submitterUserId: string
-    phase: ApprovalPhase
-    draft?: {
-      approvalLimitPositionId: string
-      steps: ReadonlyArray<RouteStepInput>
-    }
-  },
-  db?: ApprovalChainsReadDb,
-): Promise<SubmitterTestResult> {
-  const store = db ?? (await createProductionReadDb())
-  const phase = validatedPhase(input.phase)
+type PreviewDb = Omit<ApprovalChainsReadDb, 'loadStrandedAttempts'>
 
+type SubmitterPreviewInput = {
+  submitterUserId: string
+  phase: ApprovalPhase
+  draft?: {
+    approvalLimitPositionId: string
+    steps: ReadonlyArray<RouteStepInput>
+  }
+}
+
+async function loadPreviewContext(store: PreviewDb) {
   const [units, positions, assignments, teams, users] = await Promise.all([
     store.loadUnits(),
     store.loadPositions(),
@@ -404,30 +390,30 @@ export async function testWithSubmitter(
     store.loadUsers(),
   ])
   const usersById = new Map(users.map((row) => [row.id, row]))
-  const repo = {
-    findUser: (userId: string) =>
-      Promise.resolve(
-        usersById.has(userId)
-          ? { id: userId, isActive: usersById.get(userId)!.isActive }
-          : null,
-      ),
-    loadUnits: () => Promise.resolve(units),
-    loadPositions: () => Promise.resolve(positions),
-    loadAssignments: () => Promise.resolve(assignments),
-    loadTeams: () => Promise.resolve(teams),
+  return {
+    units,
+    assignments,
+    usersById,
+    positionMap: new Map(positions.map((row) => [row.id, row])),
+    repo: {
+      findUser: async (userId: string) => usersById.get(userId) ?? null,
+      loadUnits: async () => units,
+      loadPositions: async () => positions,
+      loadAssignments: async () => assignments,
+      loadTeams: async () => teams,
+    },
   }
-  const path = await resolveReportingPath(input.submitterUserId, repo)
-  if (path === null) {
-    throw new ApprovalRouteConfigurationError(
-      `No reporting path for submitter ${input.submitterUserId} (inactive, missing, or unassigned)`,
-    )
-  }
+}
 
-  const positionMap = new Map(positions.map((row) => [row.id, row]))
-  const routes = await store.loadRouteVersions({
-    scopeUnitIds: path.unitPath,
-    phase,
-  })
+async function previewSubmitterPhase(
+  context: Awaited<ReturnType<typeof loadPreviewContext>>,
+  path: ReportingPath,
+  store: PreviewDb,
+  phase: ApprovalPhase,
+  draft?: SubmitterPreviewInput['draft'],
+): Promise<SubmitterTestResult> {
+  const { units, assignments, usersById, positionMap } = context
+  const routes = await store.loadRouteVersions({ scopeUnitIds: path.unitPath, phase })
   // Nearest published baseline on the branch: the scope the editor is
   // customizing. Also fails closed when the branch has no published route.
   const baseline = selectNearestRoute(path.unitPath, routes, phase)
@@ -436,13 +422,13 @@ export async function testWithSubmitter(
   let selected: ApprovalRouteVersionDefinition
   let routeVersionId: string
   let source: SubmitterTestResult['source']
-  if (input.draft) {
+  if (draft) {
     const draftDefinition = definitionFromInput(
       {
         scopeUnitId: baseline.scopeUnitId,
         phase,
-        approvalLimitPositionId: input.draft.approvalLimitPositionId,
-        steps: input.draft.steps,
+        approvalLimitPositionId: draft.approvalLimitPositionId,
+        steps: draft.steps,
       },
       'DRAFT',
     )
@@ -535,6 +521,61 @@ export async function testWithSubmitter(
     // submitter.
     noEligibleSteps: steps.length === 0 || steps.every((step) => step.skipped),
   }
+}
+
+/** Admin-only preview of an arbitrary submitter and optional unsaved draft. */
+export async function testWithSubmitter(
+  input: SubmitterPreviewInput,
+  db?: ApprovalChainsReadDb,
+): Promise<SubmitterTestResult> {
+  const store = db ?? (await createProductionReadDb())
+  const phase = validatedPhase(input.phase)
+  const context = await loadPreviewContext(store)
+  const path = await resolveReportingPath(input.submitterUserId, context.repo)
+  if (path === null) {
+    throw new ApprovalRouteConfigurationError(
+      `No reporting path for submitter ${input.submitterUserId} (inactive, missing, or unassigned)`,
+    )
+  }
+  return previewSubmitterPhase(context, path, store, phase, input.draft)
+}
+
+type PersonalApprovalPhase =
+  | { phase: ApprovalPhase; kind: 'unavailable' }
+  | { phase: ApprovalPhase; kind: 'ready'; routeUnitName: string; preview: SubmitterTestResult }
+
+export type PersonalApprovalChain =
+  | { kind: 'unassigned' }
+  | { kind: 'assigned'; unitPath: readonly string[]; phases: readonly PersonalApprovalPhase[] }
+
+/** Server-side only: the caller must pass the authenticated session's user ID. */
+export async function loadPersonalApprovalChain(
+  userId: string,
+  db?: PreviewDb,
+): Promise<PersonalApprovalChain> {
+  const store = db ?? createProductionReadDbFromClient(await loadPrismaClient())
+  const context = await loadPreviewContext(store)
+  if (!context.usersById.get(userId)?.isActive ||
+      !context.assignments.some((assignment) => assignment.isActive && assignment.userId === userId)) {
+    return { kind: 'unassigned' }
+  }
+  const path = await resolveReportingPath(userId, context.repo)
+  if (!path) return { kind: 'unassigned' }
+
+  const unitNames = new Map(context.units.map(({ id, name }) => [id, name]))
+  const phases = await Promise.all(APPROVAL_PHASES.map(async (phase): Promise<PersonalApprovalPhase> => {
+    try {
+      // FINAL assumes the requester starts approval themselves, so the
+      // requester's and initiator's rank cutoffs are identical.
+      const preview = await previewSubmitterPhase(context, path, store, phase)
+      return { phase, kind: 'ready', routeUnitName: unitNames.get(preview.scopeUnitId)!, preview }
+    } catch (error) {
+      if (error instanceof ApprovalRouteConfigurationError) return { phase, kind: 'unavailable' }
+      throw error
+    }
+  }))
+  // Route selection is restricted to path.unitPath; all these IDs were validated above.
+  return { kind: 'assigned', unitPath: path.unitPath.map((id) => unitNames.get(id)!), phases }
 }
 
 // ---------------------------------------------------------------------------

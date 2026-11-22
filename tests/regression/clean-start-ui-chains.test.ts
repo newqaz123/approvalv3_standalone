@@ -34,6 +34,7 @@ import type { ApprovalPhase } from '@/lib/approval-routes/definition'
 import {
   deleteRouteException,
   getApprovalChainsData,
+  loadPersonalApprovalChain,
   publishRoute,
   testWithSubmitter,
   type ApprovalChainsReadDb,
@@ -453,6 +454,73 @@ describe('publishRoute (fake db)', () => {
 // ---------------------------------------------------------------------------
 // testWithSubmitter — READ-ONLY option-A resolution
 // ---------------------------------------------------------------------------
+
+describe('loadPersonalApprovalChain (fake db)', () => {
+  function publishedRoutes(): FixtureRouteVersion[] {
+    return [
+      ...fixtureRouteVersions(),
+      { ...fixtureRouteVersions()[0], id: 'root-solution', phase: 'SOLUTION' },
+      { ...fixtureRouteVersions()[0], id: 'root-final', phase: 'FINAL' },
+    ]
+  }
+
+  it('shows the nearest published routes and eligible approvers for each phase', async () => {
+    const db = makeReadDb({ routeVersions: publishedRoutes() })
+    const chain = await loadPersonalApprovalChain('alice', db)
+    assert.equal(chain.kind, 'assigned')
+    assert.deepEqual(chain.unitPath, ['Section A', 'Operations', 'Company'])
+    assert.deepEqual(chain.phases.map(({ phase }) => phase), ['REQUEST', 'SOLUTION', 'FINAL'])
+    assert.deepEqual([...db.calls].sort(), [
+      'loadAssignments', 'loadPositions', 'loadRouteVersions:FINAL', 'loadRouteVersions:REQUEST',
+      'loadRouteVersions:SOLUTION', 'loadTeams', 'loadUnits', 'loadUsers',
+    ])
+    for (const [index, phase] of chain.phases.entries()) {
+      assert.equal(phase.kind, 'ready')
+      assert.equal(phase.routeUnitName, index === 0 ? 'Operations' : 'Company')
+      assert.deepEqual(phase.preview.steps.map(({ order, positionName, candidates }) => [
+        order, positionName, candidates.map(({ name }) => name),
+      ]), [
+        [1, 'Lead', ['Casey', 'Quinn']],
+        [2, 'Manager', ['Riley', 'Morgan', 'Pat']],
+        [3, 'Director', ['Dana']],
+      ])
+      assert.deepEqual(phase.preview, await testWithSubmitter({ submitterUserId: 'alice', phase: phase.phase }, db))
+    }
+  })
+
+  it('gives assignment guidance data before requiring a configured organization', async () => {
+    const db = makeReadDb({ units: [], assignments: [], teams: [] })
+    assert.deepEqual(await loadPersonalApprovalChain('admin-1', db), { kind: 'unassigned' })
+    assert.ok(!db.calls.some((call) => call.startsWith('loadRouteVersions:')))
+  })
+
+  for (const variant of ['missing', 'draft-only', 'invalid nearer'] as const) {
+    it(`isolates a ${variant} solution route from the other phases`, async () => {
+      let routeVersions = publishedRoutes()
+      if (variant === 'missing') routeVersions = routeVersions.filter(({ phase }) => phase !== 'SOLUTION')
+      if (variant === 'draft-only') routeVersions.find(({ phase }) => phase === 'SOLUTION')!.status = 'DRAFT'
+      if (variant === 'invalid nearer') routeVersions.push({
+        ...fixtureRouteVersions()[1],
+        id: 'invalid-ops-solution',
+        phase: 'SOLUTION',
+        steps: [{ order: 1, positionId: 'missing-position' }],
+      })
+      const chain = await loadPersonalApprovalChain('alice', makeReadDb({ routeVersions }))
+      assert.equal(chain.kind, 'assigned')
+      assert.deepEqual(chain.phases.map(({ phase, kind }) => [phase, kind]), [
+        ['REQUEST', 'ready'], ['SOLUTION', 'unavailable'], ['FINAL', 'ready'],
+      ])
+    })
+  }
+
+  it('does not masquerade a storage failure as an unconfigured route', async () => {
+    const db = makeReadDb({ routeVersions: publishedRoutes() })
+    const failure = new Error('database read failed')
+    const load = db.loadRouteVersions
+    db.loadRouteVersions = (input) => input.phase === 'SOLUTION' ? Promise.reject(failure) : load(input)
+    await assert.rejects(() => loadPersonalApprovalChain('alice', db), failure)
+  })
+})
 
 describe('testWithSubmitter (fake db)', () => {
   it('resolves an UNGROUPED submitter through the path only, nearest published scope, skipping vacant Lead', async () => {
