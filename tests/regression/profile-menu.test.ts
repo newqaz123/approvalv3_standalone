@@ -106,14 +106,13 @@ describe('profile and approval-chain user menu', () => {
     assert.match(profilePage, /ProfileForm/)
     assert.doesNotMatch(approvalChainPage, /getCurrentUserApprovalChain/)
     assert.doesNotMatch(approvalChainPage, /HierarchyView/)
-    assert.match(approvalChainPage, /published organization routes/)
+    assert.match(approvalChainPage, /<ApprovalChainView\b/)
   })
 
-  it('C1: approval-chain is informational and does not load legacy hierarchy actions', () => {
+  it('uses the personal published preview instead of legacy hierarchy actions', () => {
     assert.equal(existsSync('src/server-actions/hierarchy.ts'), false)
     const approvalChainPage = readFileSync('src/app/(dashboard)/approval-chain/page.tsx', 'utf8')
-    assert.match(approvalChainPage, /organization_assignments/)
-    assert.match(approvalChainPage, /unitPathNames/)
+    assert.match(approvalChainPage, /loadPersonalApprovalChain\(session\.user\.id\)/)
     assert.doesNotMatch(approvalChainPage, /from '@\/server-actions\/hierarchy'/)
   })
 })
