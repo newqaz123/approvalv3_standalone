@@ -50,6 +50,16 @@ it('shows the phase assumptions, route unit, and ordered steps with eligible nam
   assert.doesNotMatch(html, /private-|VACANT_POSITION/)
 })
 
+it('shows the Solution section with a permission message instead of a route', () => {
+  const html = renderChain({
+    kind: 'assigned', unitPath: ['Company'],
+    phases: [{ phase: 'SOLUTION', kind: 'not-permitted' }],
+  })
+  assert.match(html, /<h2[^>]*>Solution approval<\/h2>/)
+  assert.match(html, /You don.t have permission to submit solutions/)
+  assert.doesNotMatch(html, /If you submit a solution|Route from|<ol|No usable published route/)
+})
+
 it('explains no eligible steps without claiming automatic approval', () => {
   const html = renderChain({
     kind: 'assigned', unitPath: ['Company'],

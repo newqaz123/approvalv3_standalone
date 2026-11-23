@@ -464,8 +464,12 @@ describe('loadPersonalApprovalChain (fake db)', () => {
     ]
   }
 
-  it('shows the nearest published routes and eligible approvers for each phase', async () => {
-    const db = makeReadDb({ routeVersions: publishedRoutes() })
+  const solutionEnabledUnits = () => fixtureUnits().map((unit) =>
+    unit.id === 'ops' ? { ...unit, canWorkOnSolutions: true } : unit,
+  )
+
+  it('shows the nearest routes for all phases when solution permission is inherited', async () => {
+    const db = makeReadDb({ units: solutionEnabledUnits(), routeVersions: publishedRoutes() })
     const chain = await loadPersonalApprovalChain('alice', db)
     assert.equal(chain.kind, 'assigned')
     assert.deepEqual(chain.unitPath, ['Section A', 'Operations', 'Company'])
@@ -488,6 +492,16 @@ describe('loadPersonalApprovalChain (fake db)', () => {
     }
   })
 
+  it('omits the solution route for an ineligible user without affecting Request or Final', async () => {
+    const db = makeReadDb({ routeVersions: publishedRoutes() })
+    const chain = await loadPersonalApprovalChain('alice', db)
+    assert.equal(chain.kind, 'assigned')
+    assert.deepEqual(chain.phases.map(({ phase, kind }) => [phase, kind]), [
+      ['REQUEST', 'ready'], ['SOLUTION', 'not-permitted'], ['FINAL', 'ready'],
+    ])
+    assert.ok(!db.calls.includes('loadRouteVersions:SOLUTION'))
+  })
+
   it('gives assignment guidance data before requiring a configured organization', async () => {
     const db = makeReadDb({ units: [], assignments: [], teams: [] })
     assert.deepEqual(await loadPersonalApprovalChain('admin-1', db), { kind: 'unassigned' })
@@ -505,7 +519,7 @@ describe('loadPersonalApprovalChain (fake db)', () => {
         phase: 'SOLUTION',
         steps: [{ order: 1, positionId: 'missing-position' }],
       })
-      const chain = await loadPersonalApprovalChain('alice', makeReadDb({ routeVersions }))
+      const chain = await loadPersonalApprovalChain('alice', makeReadDb({ units: solutionEnabledUnits(), routeVersions }))
       assert.equal(chain.kind, 'assigned')
       assert.deepEqual(chain.phases.map(({ phase, kind }) => [phase, kind]), [
         ['REQUEST', 'ready'], ['SOLUTION', 'unavailable'], ['FINAL', 'ready'],
@@ -514,7 +528,7 @@ describe('loadPersonalApprovalChain (fake db)', () => {
   }
 
   it('does not masquerade a storage failure as an unconfigured route', async () => {
-    const db = makeReadDb({ routeVersions: publishedRoutes() })
+    const db = makeReadDb({ units: solutionEnabledUnits(), routeVersions: publishedRoutes() })
     const failure = new Error('database read failed')
     const load = db.loadRouteVersions
     db.loadRouteVersions = (input) => input.phase === 'SOLUTION' ? Promise.reject(failure) : load(input)

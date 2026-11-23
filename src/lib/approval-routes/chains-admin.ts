@@ -33,6 +33,7 @@ import { selectNearestRoute } from '@/lib/approval-routes/selection'
 import { selectStepCandidates } from '@/lib/approval-engine/candidates'
 import { isAttemptStranded } from '@/lib/approval-engine/decisions'
 import { resolveReportingPath } from '@/lib/organization/reporting-path'
+import { canSubmitSolutionWork } from '@/lib/permission-checks'
 import type {
   AssignmentNode,
   OrganizationUnitNode,
@@ -541,6 +542,7 @@ export async function testWithSubmitter(
 }
 
 type PersonalApprovalPhase =
+  | { phase: 'SOLUTION'; kind: 'not-permitted' }
   | { phase: ApprovalPhase; kind: 'unavailable' }
   | { phase: ApprovalPhase; kind: 'ready'; routeUnitName: string; preview: SubmitterTestResult }
 
@@ -564,6 +566,13 @@ export async function loadPersonalApprovalChain(
 
   const unitNames = new Map(context.units.map(({ id, name }) => [id, name]))
   const phases = await Promise.all(APPROVAL_PHASES.map(async (phase): Promise<PersonalApprovalPhase> => {
+    if (phase === 'SOLUTION' && !canSubmitSolutionWork({
+      isActive: true, // Checked above before resolving the reporting path.
+      assignmentUnitId: path.unitId,
+      units: context.units,
+    })) {
+      return { phase, kind: 'not-permitted' }
+    }
     try {
       // FINAL assumes the requester starts approval themselves, so the
       // requester's and initiator's rank cutoffs are identical.

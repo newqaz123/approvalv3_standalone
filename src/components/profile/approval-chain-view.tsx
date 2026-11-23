@@ -49,9 +49,15 @@ export function ApprovalChainView({ chain }: { chain: PersonalApprovalChain }) {
                 >
                   <div className="space-y-1.5">
                     <h2 id={headingId} className="text-lg font-semibold">{copy.title}</h2>
-                    <p className="text-sm text-muted-foreground">{copy.description}</p>
+                    {entry.kind !== 'not-permitted' && (
+                      <p className="text-sm text-muted-foreground">{copy.description}</p>
+                    )}
                   </div>
-                  {entry.kind === 'unavailable' ? (
+                  {entry.kind === 'not-permitted' ? (
+                    <p className="rounded-md bg-muted px-3 py-2 text-sm">
+                      You don&rsquo;t have permission to submit solutions.
+                    </p>
+                  ) : entry.kind === 'unavailable' ? (
                     <p className="rounded-md bg-muted px-3 py-2 text-sm">
                       No usable published route for this phase. Please contact your administrator.
                     </p>
