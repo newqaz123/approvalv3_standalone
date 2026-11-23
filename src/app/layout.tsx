@@ -3,29 +3,37 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import { Toaster } from "sonner";
 import { auth } from "@/lib/auth-config";
+import { LanguageSelectionProvider } from "@/components/navigation/language-selector";
+import { LocaleProvider } from "@/lib/i18n/client";
+import { createTranslator } from "@/lib/i18n/messages";
+import { getRequestLocale } from "@/lib/i18n/server";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"] });
 
-export const metadata: Metadata = {
-	title: "ImproveFlow",
-	description: "Submit, review, and approve improvements",
-};
+export async function generateMetadata(): Promise<Metadata> {
+	const t = createTranslator(await getRequestLocale());
+	return { title: "ImproveFlow", description: t("app.description") };
+}
 
 export default async function RootLayout({
 	children,
 }: Readonly<{
 	children: React.ReactNode;
 }>) {
-	const session = await auth();
+	const [session, locale] = await Promise.all([auth(), getRequestLocale()]);
 
 	return (
-		<html lang="en">
+		<html lang={locale}>
 			<body className={inter.className}>
-				<SessionProvider session={session}>
-					{children}
-					<Toaster />
-				</SessionProvider>
+				<LocaleProvider locale={locale}>
+					<LanguageSelectionProvider>
+						<SessionProvider session={session}>
+							{children}
+							<Toaster />
+						</SessionProvider>
+					</LanguageSelectionProvider>
+				</LocaleProvider>
 			</body>
 		</html>
 	);

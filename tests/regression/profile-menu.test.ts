@@ -1,17 +1,22 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
+import { createTranslator } from '@/lib/i18n/messages'
 
 describe('profile and approval-chain user menu', () => {
   it('adds Profile and Approval Chain entries to the shared user dropdown', () => {
     const userMenu = readFileSync('src/components/navigation/user-menu.tsx', 'utf8')
 
-    assert.match(userMenu, /href="\/profile"/)
-    assert.match(userMenu, />\s*Profile\s*</)
-    assert.match(userMenu, /href="\/approval-chain"/)
-    assert.match(userMenu, />\s*Approval Chain\s*</)
-    assert.match(userMenu, /href="\/change-password"/)
-    assert.match(userMenu, />\s*Sign Out\s*</)
+    const t = createTranslator('en')
+    assert.match(userMenu, /href="\/profile"[^>]*>[\s\S]*?\{t\("account\.profile"\)\}\s*<\/Link>/)
+    assert.equal(t('account.profile'), 'Profile')
+    assert.match(userMenu, /href="\/approval-chain"[^>]*>[\s\S]*?\{t\("account\.approvalChain"\)\}\s*<\/Link>/)
+    assert.equal(t('account.approvalChain'), 'Approval Chain')
+    assert.match(userMenu, /href="\/change-password"[^>]*>[\s\S]*?\{t\("account\.changePassword"\)\}\s*<\/Link>/)
+    assert.equal(t('account.changePassword'), 'Change Password')
+    assert.match(userMenu, /\{t\("nav\.signOut"\)\}\s*<\/DropdownMenuItem>/)
+    assert.equal(t('nav.signOut'), 'Sign Out')
+    assert.match(userMenu, /<LanguageSelector placement="menu" \/>/)
     assert.match(userMenu, /callbackUrl: ['"]\/sign-in['"]/
     )
   })
@@ -61,7 +66,8 @@ describe('profile and approval-chain user menu', () => {
     assert.doesNotMatch(mobileNav, /h-9 w-9 rounded-full bg-blue-600/)
 
     // The mobile trigger is a real button meeting the 44px touch target.
-    assert.match(userMenu, /<button[\s\S]*?aria-label="Open user menu"/)
+    assert.match(userMenu, /<button[\s\S]*?aria-label=\{t\("nav\.openUserMenu"\)\}/)
+    assert.equal(createTranslator('en')('nav.openUserMenu'), 'Open user menu')
     assert.match(userMenu, /min-h-\[44px\]/)
     assert.match(userMenu, /min-w-\[44px\]/)
     assert.match(userMenu, /aria-expanded=\{menuOpen\}/)

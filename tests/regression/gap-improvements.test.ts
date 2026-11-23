@@ -101,7 +101,7 @@ describe("Gapforimprove regressions", () => {
 
 		// Icon-only below sm: the label must stay in the accessibility tree
 		// (sr-only), not display:none, or the links have no name.
-		assert.match(mobileNav, /'text-sm font-medium sr-only', labelVisibleClass\)}>\{tab\.name\}/);
+		assert.match(mobileNav, /'text-sm font-medium sr-only', labelVisibleClass\)}>\{t\(tab\.label\)\}/);
 		assert.doesNotMatch(mobileNav, /hidden sm:inline/);
 		assert.match(mobileNav, /aria-current=\{isActive \? 'page' : undefined\}/);
 	});
@@ -329,7 +329,7 @@ describe("Gapforimprove regressions", () => {
 			rootLayout,
 			/import \{ auth \} from ['"]@\/lib\/auth-config['"]/,
 		);
-		assert.match(rootLayout, /const session = await auth\(\)/);
+		assert.match(rootLayout, /const \[session, locale\] = await Promise\.all\(\[auth\(\), getRequestLocale\(\)\]\)/);
 		assert.match(rootLayout, /<SessionProvider session=\{session\}>/);
 	});
 

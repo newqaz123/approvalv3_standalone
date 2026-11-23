@@ -8,9 +8,11 @@ import { LayoutDashboard, FileText, Bell, BarChart3, WalletCards, Wrench, Settin
 import { cn } from '@/lib/utils'
 import { useScrollDirection } from '@/hooks/use-scroll-direction'
 import { UserMenu } from '@/components/navigation/user-menu'
+import { useTranslations } from '@/lib/i18n/client'
+import type { MessageKey } from '@/lib/i18n/messages'
 
 interface Tab {
-  name: string
+  label: MessageKey
   href: string
   icon: typeof LayoutDashboard
   badge?: boolean
@@ -19,24 +21,24 @@ interface Tab {
 }
 
 const tabs: Tab[] = [
-  { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-  { name: 'My Requests', href: '/requests', icon: FileText },
-  { name: 'Pending Approvals', href: '/requests/my-actions', icon: Bell, badge: true },
-  { name: 'Analytics', href: '/analytics', icon: BarChart3 },
-  { name: 'Budget', href: '/budget-monitor', icon: WalletCards },
+  { label: 'nav.dashboard', href: '/dashboard', icon: LayoutDashboard },
+  { label: 'nav.myRequests', href: '/requests', icon: FileText },
+  { label: 'nav.pendingApprovals', href: '/requests/my-actions', icon: Bell, badge: true },
+  { label: 'nav.analytics', href: '/analytics', icon: BarChart3 },
+  { label: 'nav.budget', href: '/budget-monitor', icon: WalletCards },
 ]
 
 const engineeringTabs: Tab[] = [
-  { name: 'Engineering', href: '/engineering', icon: Wrench, matchNested: true },
-  { name: 'My Requests', href: '/requests', icon: FileText },
-  { name: 'Pending Approvals', href: '/requests/my-actions', icon: Bell, badge: true },
-  { name: 'Analytics', href: '/analytics', icon: BarChart3 },
-  { name: 'Budget', href: '/budget-monitor', icon: WalletCards },
+  { label: 'nav.engineering', href: '/engineering', icon: Wrench, matchNested: true },
+  { label: 'nav.myRequests', href: '/requests', icon: FileText },
+  { label: 'nav.pendingApprovals', href: '/requests/my-actions', icon: Bell, badge: true },
+  { label: 'nav.analytics', href: '/analytics', icon: BarChart3 },
+  { label: 'nav.budget', href: '/budget-monitor', icon: WalletCards },
 ]
 
 // Admin is a flag on top of the user's unit, so this tab is appended to the
 // unit tabs instead of replacing them.
-const adminTab: Tab = { name: 'Admin', href: '/admin', icon: Settings, matchNested: true }
+const adminTab: Tab = { label: 'nav.admin', href: '/admin', icon: Settings, matchNested: true }
 
 /**
  * Mobile top tab bar navigation with smart scroll behavior.
@@ -44,6 +46,7 @@ const adminTab: Tab = { name: 'Admin', href: '/admin', icon: Settings, matchNest
  * Auto-hides when scrolling down, reappears when scrolling up.
  */
 export function MobileNav() {
+  const t = useTranslations()
   const pathname = usePathname()
   const { data: session } = useSession()
   const user = session?.user
@@ -116,7 +119,7 @@ export function MobileNav() {
 
   return (
     <nav
-      aria-label="Main"
+      aria-label={t('nav.main')}
       className={cn(
         'fixed top-0 left-0 right-0 z-50 bg-white border-b border-gray-200 transition-transform duration-300 lg:hidden',
         // translate-y-0 is still a transform and blocks iOS taps on the
@@ -148,11 +151,14 @@ export function MobileNav() {
                 <Icon className="h-5 w-5 flex-shrink-0" aria-hidden="true" />
                 {/* Icon-only on narrow screens: sr-only keeps the label as the
                     link's accessible name (display:none would drop it). */}
-                <span className={cn('text-sm font-medium sr-only', labelVisibleClass)}>{tab.name}</span>
+                <span className={cn('text-sm font-medium sr-only', labelVisibleClass)}>{t(tab.label)}</span>
 
                 {/* Notification badge for Pending Approvals */}
                 {tab.badge && pendingCount > 0 && (
-                  <span className="ml-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs text-white font-semibold">
+                  <span
+                    className="ml-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs text-white font-semibold"
+                    aria-label={t('nav.pendingActionCount', { count: pendingCount })}
+                  >
                     {pendingCount > 9 ? '9+' : pendingCount}
                   </span>
                 )}

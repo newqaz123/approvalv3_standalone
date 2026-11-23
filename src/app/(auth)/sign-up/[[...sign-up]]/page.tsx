@@ -3,44 +3,49 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { LanguageSelector } from '@/components/navigation/language-selector'
+import { useTranslations } from '@/lib/i18n/client'
+import type { MessageKey } from '@/lib/i18n/messages'
 import { signUp } from '@/server-actions/auth'
 import { User, Mail, Lock, ArrowRight, Loader2, CheckCircle, Shield, Info } from 'lucide-react'
 
 export default function SignUpPage() {
+  const t = useTranslations()
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
-  const [error, setError] = useState('')
+  const [error, setError] = useState<MessageKey | null>(null)
   const [loading, setLoading] = useState(false)
   const router = useRouter()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setError('')
+    setError(null)
 
     if (password !== confirmPassword) {
-      setError('Passwords do not match')
+      setError('account.passwordMismatch')
       return
     }
 
     if (password.length < 8) {
-      setError('Password must be at least 8 characters')
+      setError('account.passwordTooShort')
       return
     }
 
     setLoading(true)
 
     try {
-      await signUp({
-        name,
-        email,
-        password,
-      })
+      const result = await signUp({ name, email, password })
+      if (result.errorKey) {
+        setError(result.errorKey)
+        setLoading(false)
+        return
+      }
 
       router.push('/sign-in?registered=true')
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create account')
+    } catch {
+      setError('account.signUpFailed')
       setLoading(false)
     }
   }
@@ -60,22 +65,23 @@ export default function SignUpPage() {
             <Shield className="w-8 h-8 text-white" />
           </div>
           <h1 className="text-3xl font-bold text-slate-900 tracking-tight">
-            Create Account
+            {t('account.signUpTitle')}
           </h1>
           <p className="mt-2 text-slate-600">
-            Join the Approval System
+            {t('account.signUpIntro')}
           </p>
         </div>
 
         {/* Main Card */}
         <div className="bg-white/80 backdrop-blur-xl rounded-2xl shadow-xl shadow-slate-200/50 border border-slate-200/60 p-8">
+          <LanguageSelector placement="public" />
           {/* Error Message */}
           {error && (
-            <div className="mb-6 rounded-xl bg-red-50 border border-red-100 p-4 flex items-start gap-3">
+            <div role="alert" className="mb-6 rounded-xl bg-red-50 border border-red-100 p-4 flex items-start gap-3">
               <div className="w-5 h-5 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0 mt-0.5">
                 <span className="text-red-600 text-xs font-bold">!</span>
               </div>
-              <p className="text-sm text-red-700 font-medium">{error}</p>
+              <p className="text-sm text-red-700 font-medium">{t(error)}</p>
             </div>
           )}
 
@@ -86,7 +92,7 @@ export default function SignUpPage() {
                 htmlFor="name" 
                 className="block text-sm font-semibold text-slate-700"
               >
-                Full Name
+                {t('account.fullName')}
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -101,7 +107,7 @@ export default function SignUpPage() {
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   className="block w-full pl-11 pr-4 py-3 rounded-xl border border-slate-200 bg-white/50 text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all duration-200 text-sm"
-                  placeholder="John Doe"
+                  placeholder={t('account.exampleName')}
                 />
               </div>
             </div>
@@ -112,7 +118,7 @@ export default function SignUpPage() {
                 htmlFor="email" 
                 className="block text-sm font-semibold text-slate-700"
               >
-                Email address
+                {t('account.emailAddress')}
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -138,10 +144,10 @@ export default function SignUpPage() {
                 <Info className="h-5 w-5 text-indigo-600 flex-shrink-0 mt-0.5" />
                 <div>
                   <p className="text-sm font-semibold text-indigo-900">
-                    Account pending assignment
+                    {t('account.pendingAssignment')}
                   </p>
                   <p className="text-sm text-indigo-700 mt-1">
-                    After registration, an administrator will assign you to a department. Until then, you won&apos;t be able to create or approve requests.
+                    {t('account.pendingAssignmentHelp')}
                   </p>
                 </div>
               </div>
@@ -153,7 +159,7 @@ export default function SignUpPage() {
                 htmlFor="password" 
                 className="block text-sm font-semibold text-slate-700"
               >
-                Password
+                {t('account.password')}
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -169,7 +175,7 @@ export default function SignUpPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="block w-full pl-11 pr-4 py-3 rounded-xl border border-slate-200 bg-white/50 text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all duration-200 text-sm"
-                  placeholder="Min 8 characters"
+                  placeholder={t('account.minEight')}
                 />
               </div>
             </div>
@@ -180,7 +186,7 @@ export default function SignUpPage() {
                 htmlFor="confirmPassword" 
                 className="block text-sm font-semibold text-slate-700"
               >
-                Confirm Password
+                {t('account.confirmPassword')}
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -195,7 +201,7 @@ export default function SignUpPage() {
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   className="block w-full pl-11 pr-4 py-3 rounded-xl border border-slate-200 bg-white/50 text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all duration-200 text-sm"
-                  placeholder="Confirm your password"
+                  placeholder={t('account.enterConfirmPassword')}
                 />
               </div>
             </div>
@@ -209,11 +215,11 @@ export default function SignUpPage() {
               {loading ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Creating account...
+                  {t('account.creatingAccount')}
                 </>
               ) : (
                 <>
-                  Create account
+                  {t('account.signUp')}
                   <ArrowRight className="h-4 w-4 group-hover:translate-x-0.5 transition-transform" />
                 </>
               )}
@@ -223,12 +229,12 @@ export default function SignUpPage() {
           {/* Footer */}
           <div className="mt-6 pt-6 border-t border-slate-100 text-center">
             <p className="text-sm text-slate-500">
-              Already have an account?{' '}
+              {t('account.hasAccount')}{' '}
               <Link
                 href="/sign-in"
                 className="font-semibold text-indigo-600 hover:text-indigo-700 transition-colors"
               >
-                Sign in
+                {t('account.signIn')}
               </Link>
             </p>
           </div>
@@ -238,11 +244,11 @@ export default function SignUpPage() {
         <div className="mt-8 flex items-center justify-center gap-6 text-slate-400">
           <div className="flex items-center gap-2 text-xs">
             <div className="w-2 h-2 rounded-full bg-emerald-500" />
-            Secure registration
+            {t('account.secureRegistration')}
           </div>
           <div className="flex items-center gap-2 text-xs">
             <div className="w-2 h-2 rounded-full bg-emerald-500" />
-            Admin verified
+            {t('account.adminVerified')}
           </div>
         </div>
       </div>

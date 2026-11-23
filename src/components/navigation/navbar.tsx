@@ -17,6 +17,7 @@ import { UserMenu } from "@/components/navigation/user-menu";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import { AUTHENTICATED_SHELL_CLASS } from "@/lib/authenticated-shell";
 import { cn } from "@/lib/utils";
+import { useTranslations } from "@/lib/i18n/client";
 import { useState, useEffect } from "react";
 
 const NAV_LINK_BASE =
@@ -32,6 +33,7 @@ function navLinkClass(isActive: boolean) {
 }
 
 export function Navbar() {
+	const t = useTranslations();
 	const { data: session } = useSession();
 	const user = session?.user;
 	const pathname = usePathname();
@@ -113,13 +115,14 @@ export function Navbar() {
 	}, [user?.id]);
 
 	return (
-		<nav className="border-b bg-white">
+		<nav aria-label={t("nav.main")} className="border-b bg-white">
 			<div data-auth-shell className={AUTHENTICATED_SHELL_CLASS}>
 				<div className="flex h-16 items-center justify-between">
 					{/* Left side - Logo and main nav */}
 					<div className="flex min-w-0 items-center gap-3 xl:gap-5">
 						<Link
 							href="/requests"
+							lang="en"
 							className="shrink-0 whitespace-nowrap text-xl font-bold text-gray-900"
 						>
 							Approval System
@@ -132,7 +135,7 @@ export function Navbar() {
 								className={navLinkClass(isRequestsActive)}
 							>
 								<FileText className="h-4 w-4" />
-								Requests
+								{t("nav.requests")}
 							</Link>
 
 							<Link
@@ -141,11 +144,11 @@ export function Navbar() {
 								className={navLinkClass(isMyActionsActive)}
 							>
 								<Bell className="h-4 w-4" />
-								My Actions
+								{t("nav.myActions")}
 								{pendingCount > 0 && (
 									<span
 										className="ml-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[11px] font-semibold leading-none text-white"
-										aria-label={`${pendingCount} pending actions`}
+										aria-label={t("nav.pendingActionCount", { count: pendingCount })}
 									>
 										{pendingCount > 9 ? "9+" : pendingCount}
 									</span>
@@ -158,7 +161,7 @@ export function Navbar() {
 								className={navLinkClass(isAnalyticsActive)}
 							>
 								<BarChart3 className="h-4 w-4" />
-								Analytics
+								{t("nav.analytics")}
 							</Link>
 
 							<Link
@@ -167,7 +170,7 @@ export function Navbar() {
 								className={navLinkClass(isBudgetMonitorActive)}
 							>
 								<WalletCards className="h-4 w-4" />
-								Budget Monitor
+								{t("nav.budgetMonitor")}
 							</Link>
 
 							{!isEngineering && (
@@ -177,7 +180,7 @@ export function Navbar() {
 									className={navLinkClass(isDashboardActive)}
 								>
 									<LayoutDashboard className="h-4 w-4" />
-									Dashboard
+									{t("nav.dashboard")}
 								</Link>
 							)}
 
@@ -188,7 +191,7 @@ export function Navbar() {
 									className={navLinkClass(isEngineeringActive)}
 								>
 									<Wrench className="h-4 w-4" />
-									Engineering
+									{t("nav.engineering")}
 								</Link>
 							)}
 
@@ -199,7 +202,7 @@ export function Navbar() {
 									className={navLinkClass(isAdminActive)}
 								>
 									<Settings className="h-4 w-4" />
-									Admin Panel
+									{t("nav.adminPanel")}
 								</Link>
 							)}
 						</div>
@@ -212,7 +215,7 @@ export function Navbar() {
 
 						<div className="text-right">
 							<p className="text-sm font-medium text-gray-900">
-								{user?.name || "User"}
+								{user?.name || t("nav.user")}
 							</p>
 							<span
 								data-user-secondary

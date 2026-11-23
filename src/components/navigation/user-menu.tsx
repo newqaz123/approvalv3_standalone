@@ -12,6 +12,8 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { useTranslations } from "@/lib/i18n/client";
+import { LanguageSelector } from "@/components/navigation/language-selector";
 
 /**
  * Shared avatar + dropdown user menu used by both navigation shells
@@ -29,6 +31,7 @@ export function UserMenu({
 	onOpenChange?: (open: boolean) => void;
 	children?: React.ReactNode;
 }) {
+	const t = useTranslations();
 	const { data: session } = useSession();
 	const user = session?.user;
 	const [menuOpen, setMenuOpen] = useState(false);
@@ -64,8 +67,8 @@ export function UserMenu({
 							? "h-11 min-h-[44px] min-w-[44px] bg-blue-600 text-sm font-semibold text-white hover:ring-2 hover:ring-blue-500 hover:ring-offset-2"
 							: "hover:ring-2 hover:ring-blue-500 hover:ring-offset-2",
 					)}
-					title="User menu"
-					aria-label="Open user menu"
+					title={t("nav.userMenu")}
+					aria-label={t("nav.openUserMenu")}
 					aria-expanded={menuOpen}
 				>
 					{children ??
@@ -83,7 +86,7 @@ export function UserMenu({
 						className="flex min-h-[44px] cursor-pointer items-center gap-2"
 					>
 						<User className="h-4 w-4" />
-						Profile
+						{t("account.profile")}
 					</Link>
 				</DropdownMenuItem>
 				<DropdownMenuItem asChild>
@@ -92,7 +95,7 @@ export function UserMenu({
 						className="flex min-h-[44px] cursor-pointer items-center gap-2"
 					>
 						<GitBranch className="h-4 w-4" />
-						Approval Chain
+						{t("account.approvalChain")}
 					</Link>
 				</DropdownMenuItem>
 				<DropdownMenuItem asChild>
@@ -101,7 +104,7 @@ export function UserMenu({
 						className="flex min-h-[44px] cursor-pointer items-center gap-2"
 					>
 						<Lock className="h-4 w-4" />
-						Change Password
+						{t("account.changePassword")}
 					</Link>
 				</DropdownMenuItem>
 				<DropdownMenuItem
@@ -111,8 +114,9 @@ export function UserMenu({
 					className="min-h-[44px] cursor-pointer"
 				>
 					<LogOut className="h-4 w-4" />
-					Sign Out
+					{t("nav.signOut")}
 				</DropdownMenuItem>
+				<LanguageSelector placement="menu" />
 			</DropdownMenuContent>
 		</DropdownMenu>
 	);

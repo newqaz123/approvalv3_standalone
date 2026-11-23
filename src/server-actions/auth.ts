@@ -19,7 +19,7 @@ export async function signUp(input: SignUpInput) {
     where: { email: input.email },
   })
   if (existing) {
-    throw new Error('A user with this email already exists')
+    return { errorKey: 'account.emailExists' } as const
   }
 
   // Hash password

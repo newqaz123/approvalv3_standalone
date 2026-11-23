@@ -1,9 +1,10 @@
+import { account } from './catalogs/account'
 import { common } from './catalogs/common'
 import type { Locale } from './locale'
 
 const messages = {
-  en: { ...common.en },
-  th: { ...common.th },
+  en: { ...common.en, ...account.en },
+  th: { ...common.th, ...account.th },
 }
 
 export type MessageKey = keyof typeof messages.en

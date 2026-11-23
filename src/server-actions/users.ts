@@ -378,15 +378,15 @@ export async function getCurrentUserProfile(): Promise<CurrentUserProfile> {
 export async function updateOwnDisplayName(displayName: string) {
   const session = await auth()
   if (!session?.user?.id) {
-    throw new Error('Not authenticated')
+    return { errorKey: 'account.notAuthenticated' } as const
   }
 
   const nextName = displayName.trim().replace(/\s+/g, ' ')
   if (nextName.length < 2) {
-    throw new Error('Display name must be at least 2 characters')
+    return { errorKey: 'account.displayNameTooShort' } as const
   }
   if (nextName.length > 100) {
-    throw new Error('Display name must be 100 characters or fewer')
+    return { errorKey: 'account.displayNameTooLong' } as const
   }
 
   const existingUser = await prisma.user.findUnique({
@@ -399,7 +399,7 @@ export async function updateOwnDisplayName(displayName: string) {
   })
 
   if (!existingUser?.isActive) {
-    throw new Error('User not found')
+    return { errorKey: 'account.userNotFound' } as const
   }
 
   if (existingUser.name === nextName) {
@@ -444,7 +444,7 @@ export async function updateOwnDisplayName(displayName: string) {
 export async function changePassword(currentPassword: string, newPassword: string) {
   const session = await auth()
   if (!session?.user?.id) {
-    throw new Error('Not authenticated')
+    return { errorKey: 'account.notAuthenticated' } as const
   }
 
   const user = await prisma.user.findUnique({
@@ -453,12 +453,12 @@ export async function changePassword(currentPassword: string, newPassword: strin
   })
 
   if (!user?.passwordHash) {
-    throw new Error('User not found')
+    return { errorKey: 'account.userNotFound' } as const
   }
 
   const isValid = await compare(currentPassword, user.passwordHash)
   if (!isValid) {
-    throw new Error('Current password is incorrect')
+    return { errorKey: 'account.currentPasswordIncorrect' } as const
   }
 
   const passwordHash = await hash(newPassword, 12)

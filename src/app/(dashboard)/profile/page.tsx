@@ -1,15 +1,18 @@
+import { createTranslator } from '@/lib/i18n/messages'
+import { getRequestLocale } from '@/lib/i18n/server'
 import { ProfileForm } from '@/components/profile/profile-form'
 import { getCurrentUserProfile } from '@/server-actions/users'
 
 export default async function ProfilePage() {
+  const t = createTranslator(await getRequestLocale())
   const profile = await getCurrentUserProfile()
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-8">
       <div className="mb-8">
-        <h1 className="text-2xl font-bold text-gray-900">Profile</h1>
+        <h1 className="text-2xl font-bold text-gray-900">{t('account.profile')}</h1>
         <p className="mt-2 text-sm text-gray-600">
-          Manage your display name and review your account details.
+          {t('account.profileIntro')}
         </p>
       </div>
 

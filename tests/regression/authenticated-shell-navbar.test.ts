@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { createTranslator } from "@/lib/i18n/messages";
 
 const read = (path: string) => readFileSync(path, "utf8");
 
@@ -72,7 +73,9 @@ describe("authenticated shell and navigation", () => {
 	it("keeps the pending badge inline and collapses secondary user metadata", () => {
 		const source = read("src/components/navigation/navbar.tsx");
 
-		assert.match(source, /aria-label=\{`\$\{pendingCount\} pending actions`\}/);
+		assert.match(source, /aria-label=\{t\("nav\.pendingActionCount", \{ count: pendingCount \}\)\}/);
+		assert.equal(createTranslator("en")("nav.pendingActionCount", { count: 2 }), "2 pending actions");
+		assert.equal(createTranslator("th")("nav.pendingActionCount", { count: 2 }), "งานรอดำเนินการ 2 รายการ");
 		assert.doesNotMatch(source, /absolute -right-1 -top-1/);
 		assert.match(source, /data-user-secondary/);
 		assert.match(source, /hidden 2xl:inline/);

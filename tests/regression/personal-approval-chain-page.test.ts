@@ -6,10 +6,12 @@ import { createElement, type ReactElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import ts from 'typescript'
 import type { PersonalApprovalChain } from '@/lib/approval-routes/chains-admin'
+import type { Locale } from '@/lib/i18n/locale'
+import { createTranslator } from '@/lib/i18n/messages'
 
-function renderChain(chain: PersonalApprovalChain): string {
+function renderChain(chain: PersonalApprovalChain, locale: Locale = 'en'): string {
   const { ApprovalChainView } = require('@/components/profile/approval-chain-view') as typeof import('@/components/profile/approval-chain-view')
-  return renderToStaticMarkup(createElement(ApprovalChainView, { chain }))
+  return renderToStaticMarkup(createElement(ApprovalChainView, { chain, t: createTranslator(locale) }))
 }
 
 it('shows the phase assumptions, route unit, and ordered steps with eligible names', () => {
@@ -81,6 +83,21 @@ it('gives unassigned users guidance rather than route previews', () => {
   assert.doesNotMatch(html, /Route from|Request approval/)
 })
 
+it('translates the route label without transforming the configured unit name', () => {
+  const html = renderChain({
+    kind: 'assigned', unitPath: ['<Ops {unit}>'],
+    phases: [{
+      phase: 'REQUEST', kind: 'ready', routeUnitName: '<Ops {unit}>',
+      preview: {
+        source: 'CUSTOM', routeVersionId: 'route', scopeUnitId: 'unit',
+        autoApproved: false, noEligibleSteps: true, steps: [],
+      },
+    }],
+  }, 'th')
+  assert.match(html, /สายอนุมัติจาก &lt;Ops \{unit\}&gt;/)
+  assert.doesNotMatch(html, /Route from|<Ops/)
+})
+
 function loadPage(sessionUserId: string | null) {
   const output = ts.transpileModule(readFileSync('src/app/(dashboard)/approval-chain/page.tsx', 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
@@ -92,6 +109,7 @@ function loadPage(sessionUserId: string | null) {
     exports,
     require(name: string) {
       if (name === '@/lib/auth-config') return { auth: async () => sessionUserId ? { user: { id: sessionUserId } } : null }
+      if (name === '@/lib/i18n/server') return { getRequestLocale: async () => 'en' }
       if (name === 'next/navigation') return { redirect: (path: string) => {
         assert.equal(path, '/sign-in')
         throw signInRedirect
