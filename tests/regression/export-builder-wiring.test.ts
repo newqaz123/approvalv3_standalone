@@ -25,13 +25,14 @@ describe("completed approval export builder wiring", () => {
 		assert.match(builder, /buildSelectedExportPackageRequestItems/);
 		assert.match(builder, /buildPackageItemsKey/);
 		assert.match(builder, /\[packageItemsKey\]/);
-		assert.match(builder, /Approval Packet Export/);
-		assert.match(builder, /Export Approval Packet/);
-		assert.match(builder, /cannot be appended/);
+		assert.match(builder, /t\('requests\.exportPacketTitle'\)/);
+		assert.match(builder, /t\('requests\.exportPacket'\)/);
+		assert.match(builder, /t\('requests\.exportUnsupported'\)/);
+		assert.match(readFileSync('src/lib/i18n/catalogs/requests.ts', 'utf8'), /requests\.exportUnsupported[^\n]*cannot be appended/);
 		assert.match(builder, /disabled=\{!item\.mergeable\}/);
 		assert.match(builder, /moveExportPackageItem/);
-		assert.match(builder, /aria-label=\{`Move \$\{item\.fileName\} up`\}/);
-		assert.match(builder, /aria-label=\{`Move \$\{item\.fileName\} down`\}/);
+		assert.match(builder, /aria-label=\{t\('requests\.moveNamedUp', \{ name: itemLabel\(item\) \}\)\}/);
+		assert.match(builder, /aria-label=\{t\('requests\.moveNamedDown', \{ name: itemLabel\(item\) \}\)\}/);
 		assert.match(builder, /disabled=\{index === 0\}/);
 		assert.match(builder, /disabled=\{index === orderedItems\.length - 1\}/);
 		assert.doesNotMatch(builder, /rearrange|GripVertical|dnd-kit/i);
@@ -55,7 +56,7 @@ describe("completed approval export builder wiring", () => {
 			completedFinalModal,
 			/showExportBuilder &&[\s\S]*CompletedApprovalExportBuilder/,
 		);
-		assert.match(completedFinalModal, /Export Report/);
+		assert.match(completedFinalModal, /t\('requests\.exportReport'\)/);
 	});
 
 	it("routes ordered selected package items to the package server action", () => {
@@ -67,7 +68,7 @@ describe("completed approval export builder wiring", () => {
 		assert.match(router, /exportRequestPackageAsPDF/);
 		assert.match(router, /handleExportPackage/);
 		assert.match(router, /onExportPackage=\{handleExportPackage\}/);
-		assert.match(router, /Evidence package exported successfully/);
+		assert.match(router, /t\('requests\.packetExported'\)/);
 	});
 
 	it("appends selected attachments to the approval report in the package server action", () => {

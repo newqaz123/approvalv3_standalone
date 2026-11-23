@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from '@/lib/i18n/client'
 import {
 	Check,
 	ChevronDown,
@@ -109,10 +110,6 @@ export function getColorPaletteKeyAction(
 	return { focusIndex, close: false };
 }
 
-function tokenLabel(token: ColorToken): string {
-	return token.charAt(0).toUpperCase() + token.slice(1);
-}
-
 function preventSelectionTransfer(event: { preventDefault: () => void }): void {
 	event.preventDefault();
 }
@@ -202,6 +199,7 @@ export function PaletteSwatches<Token extends ColorToken>({
 	onComplete,
 	restoreSelection,
 }: ColorPaletteProps<Token>) {
+	const t = useTranslations();
 	const swatchRefs = useRef<Array<HTMLButtonElement | null>>([]);
 	const selectedIndex = activeToken
 		? entries.findIndex(([token]) => token === activeToken)
@@ -235,15 +233,15 @@ export function PaletteSwatches<Token extends ColorToken>({
 	}
 
 	return (
-		<div className="rich-text-color-palette" role="group" aria-label={`${label} palette`}>
+		<div className="rich-text-color-palette" role="group" aria-label={t('editor.palette', { name: label })}>
 			<div
 				className="rich-text-color-swatch-grid"
 				role="radiogroup"
-				aria-label={`${label} colors`}
+				aria-label={t('editor.colors', { name: label })}
 			>
 				{entries.map(([token, value], index) => {
 					const selected = activeToken === token;
-					const swatchLabel = tokenLabel(token);
+					const swatchLabel = t(`editor.color.${token}`);
 					return (
 						<Tooltip key={token}>
 							<TooltipTrigger asChild>
@@ -311,11 +309,12 @@ function ColorPopover<Token extends ColorToken>({
 	resetLabel,
 	icon,
 }: ColorPaletteProps<Token> & { icon: ReactNode }) {
+	const t = useTranslations();
 	const [open, setOpen] = useState(false);
 	const returnFocusToEditor = useRef(false);
 	const selectionRef = useRef<ColorSelection | null>(null);
 	const activeValue = colorValueForToken(kind, entries, activeToken);
-	const activeLabel = activeToken ? tokenLabel(activeToken) : "Default";
+	const activeLabel = activeToken ? t(`editor.color.${activeToken}`) : t('editor.default');
 
 	function complete() {
 		returnFocusToEditor.current = true;
@@ -367,7 +366,7 @@ function ColorPopover<Token extends ColorToken>({
 			<PopoverContent
 				align="start"
 				className="rich-text-color-popover"
-				aria-label={`${label} palette`}
+				aria-label={t('editor.palette', { name: label })}
 				onEscapeKeyDown={() => setOpen(false)}
 				onCloseAutoFocus={(event) => {
 					if (returnFocusToEditor.current) {
@@ -436,6 +435,7 @@ function CompactColorMenu({
 	textToken: TextColorToken | null;
 	highlightToken: HighlightColorToken | null;
 }) {
+	const t = useTranslations();
 	const [open, setOpen] = useState(false);
 	const returnFocusToEditor = useRef(false);
 	const selectionRef = useRef<ColorSelection | null>(null);
@@ -462,7 +462,7 @@ function CompactColorMenu({
 						<PopoverTrigger asChild>
 							<button
 								type="button"
-								aria-label="More formatting"
+								aria-label={t('editor.moreFormatting')}
 								aria-haspopup="dialog"
 								aria-expanded={open}
 								disabled={disabled}
@@ -472,17 +472,17 @@ function CompactColorMenu({
 								className={CONTROL_BUTTON_CLASS}
 							>
 								<MoreHorizontal className="h-4 w-4" aria-hidden="true" />
-								<span className="sr-only">More formatting</span>
+								<span className="sr-only">{t('editor.moreFormatting')}</span>
 							</button>
 						</PopoverTrigger>
 					</span>
 				</TooltipTrigger>
-				<TooltipContent>More formatting</TooltipContent>
+				<TooltipContent>{t('editor.moreFormatting')}</TooltipContent>
 			</Tooltip>
 			<PopoverContent
 				align="end"
 				className="rich-text-color-overflow-menu"
-				aria-label="More formatting"
+				aria-label={t('editor.moreFormatting')}
 				onEscapeKeyDown={() => setOpen(false)}
 				onCloseAutoFocus={(event) => {
 					if (returnFocusToEditor.current) {
@@ -496,10 +496,10 @@ function CompactColorMenu({
 					editor={editor}
 					disabled={disabled}
 					kind="text"
-					label="Text color"
+					label={t('editor.textColor')}
 					entries={textColorEntries}
 					activeToken={textToken}
-					resetLabel="Default text"
+					resetLabel={t('editor.defaultText')}
 					onComplete={complete}
 					restoreSelection={restoreTriggerSelection}
 				/>
@@ -508,10 +508,10 @@ function CompactColorMenu({
 					editor={editor}
 					disabled={disabled}
 					kind="highlight"
-					label="Highlight"
+					label={t('editor.highlight')}
 					entries={highlightColorEntries}
 					activeToken={highlightToken}
-					resetLabel="No highlight"
+					resetLabel={t('editor.noHighlight')}
 					onComplete={complete}
 					restoreSelection={restoreTriggerSelection}
 				/>
@@ -526,6 +526,7 @@ export function RichTextColorControls({
 	disabled,
 	compact,
 }: RichTextColorControlsProps) {
+	const t = useTranslations();
 	// The transaction number is the subscription trigger. Read the current
 	// editor directly so static rendering can still expose the initial
 	// selection; TipTap's useEditorState server snapshot intentionally uses a
@@ -552,7 +553,7 @@ export function RichTextColorControls({
 		<div
 			className="rich-text-color-controls"
 			data-compact={compact ? "true" : "false"}
-			aria-label="Text color and highlight controls"
+			aria-label={t('editor.colorControls')}
 		>
 			<TooltipProvider delayDuration={200}>
 				<div className="rich-text-color-controls-wide">
@@ -560,20 +561,20 @@ export function RichTextColorControls({
 						editor={editor}
 						disabled={controlsDisabled}
 						kind="text"
-						label="Text color"
+						label={t('editor.textColor')}
 						entries={textColorEntries}
 						activeToken={textToken}
-						resetLabel="Default text"
+						resetLabel={t('editor.defaultText')}
 						icon={<Palette className="h-4 w-4" aria-hidden="true" />}
 					/>
 					<ColorPopover
 						editor={editor}
 						disabled={controlsDisabled}
 						kind="highlight"
-						label="Highlight"
+						label={t('editor.highlight')}
 						entries={highlightColorEntries}
 						activeToken={highlightToken}
-						resetLabel="No highlight"
+						resetLabel={t('editor.noHighlight')}
 						icon={<Highlighter className="h-4 w-4" aria-hidden="true" />}
 					/>
 				</div>

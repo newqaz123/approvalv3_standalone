@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from '@/lib/i18n/client'
 import { useState, useTransition } from "react";
 import { Check, Users, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -39,6 +40,7 @@ export function EngineerPicPicker({
 	initialAssignedUsers,
 	currentUserId,
 }: EngineerPicPickerProps) {
+	const t = useTranslations();
 	const [open, setOpen] = useState(false);
 	const [searchValue, setSearchValue] = useState("");
 	const [selectedIds, setSelectedIds] = useState<string[]>(
@@ -72,14 +74,14 @@ export function EngineerPicPicker({
 				if (result.success) {
 					toast.success(
 						selectedIds.length === 0
-							? "PICs cleared successfully"
-							: `${selectedIds.length} PIC(s) assigned successfully`,
+							? t('requests.picsCleared')
+							: t('requests.picsAssigned', { count: selectedIds.length }),
 					);
 					setOpen(false);
 				}
 			} catch (error) {
 				toast.error(
-					error instanceof Error ? error.message : "Failed to assign PICs",
+					t('requests.error.assignPic'),
 				);
 			}
 		});
@@ -116,7 +118,7 @@ export function EngineerPicPicker({
 						/>
 					)}
 					{selectedUsers.length === 0 ? (
-						<span className="text-sm">Assign PIC</span>
+						<span className="text-sm">{t('requests.assignPic')}</span>
 					) : (
 						<div className="flex flex-wrap gap-1">
 							{selectedUsers.map((user) => (
@@ -135,7 +137,7 @@ export function EngineerPicPicker({
 			<PopoverContent className="w-[320px] p-0" align="start" side="bottom">
 				{retainedUsers.length > 0 && (
 					<div className="border-b p-3 space-y-2">
-						<p className="text-xs text-muted-foreground">Existing PICs (remove only)</p>
+						<p className="text-xs text-muted-foreground">{t('requests.existingPics')}</p>
 						{retainedUsers.map((user) => (
 							<div key={user.id} className="flex items-center justify-between gap-2">
 								<span className="text-sm">{user.name}</span>
@@ -143,7 +145,7 @@ export function EngineerPicPicker({
 									type="button"
 									variant="ghost"
 									size="sm"
-									aria-label={`Remove ${user.name}`}
+									aria-label={t('requests.removeNamed', { name: user.name })}
 									onClick={() => handleToggleUser(user.id)}
 									disabled={isPending}
 								>
@@ -155,11 +157,11 @@ export function EngineerPicPicker({
 				)}
 				<Command>
 					<CommandInput
-						placeholder="Search engineers..."
+						placeholder={t('requests.searchEngineers')}
 						value={searchValue}
 						onValueChange={setSearchValue}
 					/>
-					<CommandEmpty>No engineers found.</CommandEmpty>
+					<CommandEmpty>{t('requests.noEngineers')}</CommandEmpty>
 					<CommandGroup className="max-h-[300px] overflow-y-auto">
 						{filteredUsers.map((user) => {
 							const isSelected = selectedIds.includes(user.id);
@@ -196,7 +198,7 @@ export function EngineerPicPicker({
 				</Command>
 				<div className="border-t p-3 flex items-center justify-between gap-2">
 					<div className="text-xs text-muted-foreground">
-						{selectedIds.length} selected
+						{t('requests.selectedCount', { count: selectedIds.length })}
 					</div>
 					<div className="flex gap-2">
 						<Button
@@ -206,7 +208,7 @@ export function EngineerPicPicker({
 							onClick={() => setOpen(false)}
 							disabled={isPending}
 						>
-							Cancel
+							{t('common.cancel')}
 						</Button>
 						<Button
 							type="button"
@@ -217,10 +219,9 @@ export function EngineerPicPicker({
 							{isPending ? (
 								<>
 									<Loader2 className="h-4 w-4 mr-2 animate-spin" />
-									Saving...
-								</>
+									{t('common.saving')}</>
 							) : (
-								"Save"
+								t('requests.save')
 							)}
 						</Button>
 					</div>

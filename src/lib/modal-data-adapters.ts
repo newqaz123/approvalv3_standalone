@@ -1,4 +1,5 @@
 
+import { createTranslator, type MessageKey, type Translator } from '@/lib/i18n/messages'
 import { isCurrentInstanceApproval } from '@/lib/approval-engine/current-instance'
 
 // Types for the new modal components
@@ -38,6 +39,7 @@ export interface ModalFileAttachment {
 export interface ModalActivityItem {
   id: string
   action: string
+  actionKey?: MessageKey
   user: string
   timestamp: string
   details?: string
@@ -103,27 +105,27 @@ function findCurrentRejection<T extends {
   return rejected.find(a => a.approver || a.approvedAt) ?? rejected[0]
 }
 
-function toModalApprovalStep(approval: ApprovalStepSource): ModalApprovalStep {
+function toModalApprovalStep(approval: ApprovalStepSource, t: Translator): ModalApprovalStep {
   const base = {
     id: approval.id,
-    name: getApprovalDisplayName(approval),
-    role: getApprovalDisplayRole(approval),
+    name: getApprovalDisplayName(approval, t),
+    role: getApprovalDisplayRole(approval, t),
   }
   if (isStepClosedByEarlierRejection(approval)) {
-    return { ...base, status: 'not_reached', comment: 'Rejected at an earlier step', timestamp: '-' }
+    return { ...base, status: 'not_reached', comment: t('requests.earlierRejection'), timestamp: '-' }
   }
   return {
     ...base,
     status: approval.status as ModalApprovalStep['status'],
     comment: approval.comments ||
-            (approval.status === 'pending' ? 'Awaiting review' : 'No comment'),
+            (approval.status === 'pending' ? t('requests.awaitingReview') : t('requests.noComment')),
     timestamp: approval.approvedAt
       ? approval.approvedAt.toISOString()
       : approval.createdAt.toISOString(),
   }
 }
 
-function getApprovalDisplayName(approval: ApprovalDisplaySource): string {
+function getApprovalDisplayName(approval: ApprovalDisplaySource, t: Translator): string {
   if (approval.approver?.name) return approval.approver.name
   if (approval.requiredApprover?.name) return approval.requiredApprover.name
 
@@ -132,10 +134,10 @@ function getApprovalDisplayName(approval: ApprovalDisplaySource): string {
     .filter((name): name is string => Boolean(name))
 
   if (potentialApproverNames && potentialApproverNames.length > 0) {
-    return potentialApproverNames.join(' or ')
+    return potentialApproverNames.join(t('requests.approverOr'))
   }
 
-  return approval.requiredLevel ? `Level ${approval.requiredLevel} approver` : 'Unassigned approver'
+  return approval.requiredLevel ? t('requests.approverAtLevel', { level: approval.requiredLevel }) : t('requests.unassignedApprover')
 }
 
 function getApprovalDisplayRole(approval: {
@@ -143,10 +145,10 @@ function getApprovalDisplayRole(approval: {
   isCustomChain: boolean
   requiredLevel?: number | null
   requiredPositionName?: string | null
-}): string {
-  if (approval.isCustomChain) return `Custom Level ${approval.order}`
+}, t: Translator): string {
+  if (approval.isCustomChain) return t('requests.customLevel', { level: approval.order })
   if (approval.requiredPositionName) return approval.requiredPositionName
-  return approval.requiredLevel ? `Level ${approval.requiredLevel}` : 'Approval step'
+  return approval.requiredLevel ? t('requests.levelNumber', { level: approval.requiredLevel }) : t('requests.approvalStep')
 }
 
 /**
@@ -193,6 +195,29 @@ export function transformFileAttachments(files: Array<{
   }))
 }
 
+const activityMessageKeys = new Map<string, MessageKey>([
+  ['created', 'requests.activity.created'],
+  ['status_changed', 'requests.activity.statusChanged'],
+  ['file_attached', 'requests.activity.fileAttached'],
+  ['approved', 'requests.activity.approved'],
+  ['rejected', 'requests.activity.rejected'],
+  ['cancelled', 'requests.activity.cancelled'],
+  ['solution_submitted', 'requests.activity.solutionSubmitted'],
+  ['solution_approved', 'requests.activity.solutionApproved'],
+  ['solution_rejected', 'requests.activity.solutionRejected'],
+  ['manually_completed', 'requests.activity.manuallyCompleted'],
+  ['final_approval_initiated', 'requests.activity.finalInitiated'],
+  ['final_approval_approved', 'requests.activity.finalApproved'],
+  ['final_approval_rejected', 'requests.activity.finalRejected'],
+  ['resubmitted', 'requests.activity.resubmitted'],
+  ['solution_resubmitted', 'requests.activity.solutionResubmitted'],
+  ['engineers_assigned', 'requests.activity.engineersAssigned'],
+])
+
+export function translateActivityAction(t: Translator, activity: ModalActivityItem): string {
+  return activity.actionKey ? t(activity.actionKey) : activity.action
+}
+
 /**
  * Transform Prisma activities to modal timeline format
  */
@@ -209,6 +234,7 @@ export function transformActivitiesToTimeline(activities: Array<{
   return activities.map(activity => ({
     id: activity.id,
     action: formatActionLabel(activity.action),
+    actionKey: activityMessageKeys.get(activity.action),
     user: activity.user.name || activity.user.email,
     timestamp: activity.createdAt.toISOString(),
     details: activity.comments || undefined,
@@ -237,14 +263,14 @@ export function transformSolutionToModal(solution: {
     fileType: string
     description?: string | null
   }>
-}): ModalSolution {
+}, t: Translator = createTranslator('en')): ModalSolution {
   return {
     title: solution.title,
     description: solution.description,
     cost: Number(solution.costEstimate),
     currency: solution.currency,
     timeline: solution.timeline || undefined,
-    submittedBy: solution.submittedBy?.name || solution.submittedBy?.email || 'Engineering Team',
+    submittedBy: solution.submittedBy?.name || solution.submittedBy?.email || t('requests.engineeringTeam'),
     submittedAt: solution.submittedAt.toISOString(),
     files: transformFileAttachments(solution.fileAttachments || []),
   }
@@ -372,7 +398,7 @@ export function transformRequestToModalData(request: {
       }>
     }>
   }>
-}) {
+}, t: Translator = createTranslator('en')) {
   const solution = request.solutions?.[0]
   // Only the current attempt is drawn. Rows of a superseded attempt (rejected,
   // then resubmitted) stay in the database and the activity timeline; drawing
@@ -392,8 +418,8 @@ export function transformRequestToModalData(request: {
     const rejectedRequestApproval = findCurrentRejection(requestApprovals)
     if (rejectedRequestApproval) {
       rejectionInfo = {
-        reason: rejectedRequestApproval.comments || 'No reason provided',
-        rejectedBy: rejectedRequestApproval.approver?.name || 'Unknown',
+        reason: rejectedRequestApproval.comments || t('requests.noRejectionReason'),
+        rejectedBy: rejectedRequestApproval.approver?.name || t('requests.unknown'),
         rejectedAt: rejectedRequestApproval.approvedAt?.toISOString() || rejectedRequestApproval.createdAt.toISOString(),
       }
     }
@@ -405,8 +431,8 @@ export function transformRequestToModalData(request: {
     const rejection = rejectedSolutionApproval || rejectedFinalApproval
     if (rejection) {
       rejectionInfo = {
-        reason: rejection.comments || 'No reason provided',
-        rejectedBy: rejection.approver?.name || 'Unknown',
+        reason: rejection.comments || t('requests.noRejectionReason'),
+        rejectedBy: rejection.approver?.name || t('requests.unknown'),
         rejectedAt: rejection.approvedAt?.toISOString() || rejection.createdAt.toISOString(),
       }
     }
@@ -415,8 +441,8 @@ export function transformRequestToModalData(request: {
     const rejectedFinalApproval = findCurrentRejection(finalApprovals)
     if (rejectedFinalApproval) {
       rejectionInfo = {
-        reason: rejectedFinalApproval.comments || 'No reason provided',
-        rejectedBy: rejectedFinalApproval.approver?.name || 'Unknown',
+        reason: rejectedFinalApproval.comments || t('requests.noRejectionReason'),
+        rejectedBy: rejectedFinalApproval.approver?.name || t('requests.unknown'),
         rejectedAt: rejectedFinalApproval.approvedAt?.toISOString() || rejectedFinalApproval.createdAt.toISOString(),
       }
     }
@@ -438,7 +464,7 @@ export function transformRequestToModalData(request: {
 
   // Add solution data if exists
   const solutionData = solution ? {
-    solution: transformSolutionToModal(solution),
+    solution: transformSolutionToModal(solution, t),
   } : {}
 
   // Add stages based on what's available - group by workflow stage, not by level
@@ -449,7 +475,7 @@ export function transformRequestToModalData(request: {
   if (requestApprovals.length > 0) {
     const steps: ModalApprovalStep[] = requestApprovals
       .sort((a, b) => a.requiredLevel - b.requiredLevel || a.order - b.order)
-      .map(toModalApprovalStep)
+      .map((approval) => toModalApprovalStep(approval, t))
     
     stages.push({
       stageNumber: stageCounter++,
@@ -464,12 +490,12 @@ export function transformRequestToModalData(request: {
   if (solutionApprovals.length > 0) {
     const steps: ModalApprovalStep[] = solutionApprovals
       .sort((a, b) => a.requiredLevel - b.requiredLevel || a.order - b.order)
-      .map(toModalApprovalStep)
+      .map((approval) => toModalApprovalStep(approval, t))
     
     stages.push({
       stageNumber: stageCounter++,
       stageName: 'Design & Cost Approval',
-      submittedBy: solution?.submittedBy?.name || solution?.submittedBy?.email || 'Engineering Team',
+      submittedBy: solution?.submittedBy?.name || solution?.submittedBy?.email || t('requests.engineeringTeam'),
       submittedAt: solution?.submittedAt.toISOString(),
       steps,
     })
@@ -479,7 +505,7 @@ export function transformRequestToModalData(request: {
   if (finalApprovals.length > 0) {
     const steps: ModalApprovalStep[] = finalApprovals
       .sort((a, b) => a.requiredLevel - b.requiredLevel || a.order - b.order)
-      .map(toModalApprovalStep)
+      .map((approval) => toModalApprovalStep(approval, t))
     
     // Find who initiated final approval from activities
     const finalApprovalActivity = request.activities.find(a => a.action === 'final_approval_initiated')
@@ -487,7 +513,7 @@ export function transformRequestToModalData(request: {
     stages.push({
       stageNumber: stageCounter++,
       stageName: 'Final Approval',
-      submittedBy: finalApprovalActivity?.user.name || finalApprovalActivity?.user.email || 'Department Head',
+      submittedBy: finalApprovalActivity?.user.name || finalApprovalActivity?.user.email || t('requests.departmentHead'),
       submittedAt: finalApprovalActivity?.createdAt.toISOString() || finalApprovals[0].createdAt.toISOString(),
       steps,
     })
@@ -498,13 +524,13 @@ export function transformRequestToModalData(request: {
     finalApproval: {
       initiatedBy: request.activities.find(a => a.action === 'final_approval_initiated')?.user.name || 
                    request.activities.find(a => a.action === 'final_approval_initiated')?.user.email || 
-                   'Department Head',
+                   t('requests.departmentHead'),
       initiatedAt: request.activities.find(a => a.action === 'final_approval_initiated')?.createdAt.toISOString() || 
                    finalApprovals[0].createdAt.toISOString(),
       currentLevel: finalApprovals.filter(a => a.status === 'approved').length + 1,
       totalLevels: finalApprovals.length,
       nextApprover: finalApprovals.find(a => a.status === 'pending')
-        ? getApprovalDisplayName(finalApprovals.find(a => a.status === 'pending')!)
+        ? getApprovalDisplayName(finalApprovals.find(a => a.status === 'pending')!, t)
         : undefined,
     }
   } : {}

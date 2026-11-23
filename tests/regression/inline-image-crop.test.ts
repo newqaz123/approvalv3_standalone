@@ -1293,7 +1293,7 @@ describe('inline image crop focus return', () => {
     const button = { focus: () => { focused += 1 } }
     const scope = {
       querySelector: (selector: string) => (
-        selector === 'button[aria-label="Crop image"]' ? button : null
+        selector === 'button[data-inline-image-crop]' ? button : null
       ),
     }
     assert.equal(focusInlineImageCropButton(scope), true)

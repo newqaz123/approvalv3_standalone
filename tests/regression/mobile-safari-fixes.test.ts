@@ -177,7 +177,7 @@ describe("mobile modal content budgets", () => {
 			source,
 			/flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between/,
 		);
-		assert.match(source, /Submit Solution[\s\S]*?w-full sm:w-auto|w-full sm:w-auto[\s\S]*?Submit Solution/);
+		assert.match(source, /t\('requests\.submitSolution'\)[\s\S]*?w-full sm:w-auto|w-full sm:w-auto[\s\S]*?t\('requests\.submitSolution'\)/);
 		assert.match(source, /onSubmitSolution/);
 		assert.doesNotMatch(source, /canUserSubmitSolution/);
 		assert.match(router, /allowActions && canAct\("SUBMIT_SOLUTION"\)/);

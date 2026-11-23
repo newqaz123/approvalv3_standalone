@@ -1,5 +1,6 @@
 'use client'
 
+import { useTranslations } from '@/lib/i18n/client'
 import * as React from 'react'
 import {
   useEffect,
@@ -86,13 +87,14 @@ export function InlineImageResizeHandles({
   onKeyDown,
   onDoubleClick,
 }: InlineImageResizeHandlesProps) {
+  const t = useTranslations()
   return (
     <span contentEditable={false} className="inline-image-resize-handles">
       {INLINE_IMAGE_RESIZE_CORNERS.map(({ corner, edge }) => (
         <button
           key={corner}
           type="button"
-          aria-label={`Resize image ${corner}`}
+          aria-label={t('editor.resizeImage', { handle: corner })}
           disabled={disabled}
           className={`inline-image-resize-handle inline-image-resize-handle--${corner}`}
           onPointerDown={(event) => onPointerDown(edge, event)}
@@ -365,6 +367,7 @@ export function InlineImageNodeView({
   updateAttributes,
   deleteNode,
 }: NodeViewProps) {
+  const t = useTranslations()
   const options = extensionOptions(extension)
   const src = typeof node.attrs.src === 'string' ? node.attrs.src : ''
   const uploadId = typeof node.attrs.uploadId === 'string' ? node.attrs.uploadId : ''
@@ -379,7 +382,7 @@ export function InlineImageNodeView({
   const isLocalUpload = uploadId.length > 0 && options.localUploadIds?.has(uploadId) === true
   const coordinator = options.inlineImages
   const [removePending, setRemovePending] = useState(false)
-  const [removeError, setRemoveError] = useState<string | null>(null)
+  const [removeError, setRemoveError] = useState(false)
 
   const imageRef = useRef<HTMLImageElement | null>(null)
   const frameRef = useRef<HTMLSpanElement | null>(null)
@@ -617,7 +620,7 @@ export function InlineImageNodeView({
 
   const remove = async () => {
     if (removePending) return
-    setRemoveError(null)
+    setRemoveError(false)
 
     setRemovePending(true)
     try {
@@ -633,7 +636,7 @@ export function InlineImageNodeView({
         deleteNode,
       })
     } catch (error: unknown) {
-      setRemoveError(`Unable to remove image: ${uploadError(error)}`)
+      setRemoveError(true)
       setRemovePending(false)
     }
   }
@@ -752,19 +755,19 @@ export function InlineImageNodeView({
           className="inline-flex min-h-16 min-w-40 max-w-full flex-col items-center justify-center gap-1 rounded-md border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-600"
         >
           {status === 'error' ? (
-            <span>{typeof node.attrs.error === 'string' ? node.attrs.error : 'Image upload failed'}</span>
+            <span>{t('editor.imageUploadFailed')}</span>
           ) : (
             <>
-              <span>Uploading image…</span>
+              <span>{t('editor.imageUploading')}</span>
               <progress
                 value={Math.max(0, Math.min(100, Number(node.attrs.progress) || 0))}
                 max={100}
-                aria-label="Image upload progress"
+                aria-label={t('editor.imageUploadProgress')}
                 className="w-full"
               />
             </>
           )}
-          {removeError && <span role="alert">{removeError}</span>}
+          {removeError && <span role="alert">{t('editor.removeImageFailed')}</span>}
           {status === 'error' && (
             <span className="flex gap-2" contentEditable={false}>
               <button
@@ -774,7 +777,7 @@ export function InlineImageNodeView({
                 disabled={!editor.isEditable || removePending}
                 className="rounded border border-slate-300 px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50"
               >
-                Retry
+                {t('requests.retry')}
               </button>
               <button
                 type="button"
@@ -783,7 +786,7 @@ export function InlineImageNodeView({
                 disabled={!editor.isEditable || removePending}
                 className="rounded border border-slate-300 px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50"
               >
-                {removePending ? 'Removing…' : 'Remove'}
+                {removePending ? t('editor.removing') : t('editor.remove')}
               </button>
             </span>
           )}

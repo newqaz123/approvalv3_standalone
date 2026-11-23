@@ -1,5 +1,7 @@
 "use client";
 
+import { translateActivityAction, type ModalActivityItem } from '@/lib/modal-data-adapters'
+import { useTranslations } from '@/lib/i18n/client'
 import { formatFileSize } from "@/lib/format-file-size";
 import { useState } from "react";
 import { format } from "date-fns";
@@ -43,13 +45,6 @@ interface FileAttachment {
 	description?: string;
 }
 
-interface ActivityItem {
-	id: string;
-	action: string;
-	user: string;
-	timestamp: string;
-	details?: string;
-}
 
 interface User {
 	id: string;
@@ -83,7 +78,7 @@ interface SolutionModalProps {
 		};
 		requestFiles: FileAttachment[];
 		stages: ApprovalStage[];
-		activities: ActivityItem[];
+		activities: ModalActivityItem[];
 		lastModified: string;
 		rejection?: {
 			reason: string;
@@ -227,8 +222,9 @@ function RejectedAvatar() {
 function RetractableActivityTimeline({
 	activities,
 }: {
-	activities: ActivityItem[];
+	activities: ModalActivityItem[];
 }) {
+	const t = useTranslations();
 	const [isExpanded, setIsExpanded] = useState(false);
 
 	return (
@@ -240,10 +236,10 @@ function RetractableActivityTimeline({
 				<div className="flex items-center gap-2">
 					<Activity className="w-4 h-4 text-slate-400" />
 					<span className="text-sm font-bold text-slate-900 dark:text-slate-100">
-						Activity Timeline
+						{t('requests.activityTimeline')}
 					</span>
 					<span className="text-xs text-slate-400">
-						({activities.length} events)
+						{t('requests.eventCount', { count: activities.length })}
 					</span>
 				</div>
 				{isExpanded ? (
@@ -270,7 +266,7 @@ function RetractableActivityTimeline({
 										</span>
 										<span className="text-xs text-slate-500 dark:text-slate-400">
 											{" "}
-											• {activity.action}
+											• {translateActivityAction(t, activity)}
 										</span>
 										{activity.details && (
 											<p className="text-xs text-slate-400 italic mt-1">
@@ -304,6 +300,7 @@ function CustomApprovalPicker({
 	selectedIds: string[];
 	onChange: (ids: string[]) => void;
 }) {
+	const t = useTranslations();
 	const [isExpanded, setIsExpanded] = useState(false);
 	const [searchQuery, setSearchQuery] = useState("");
 
@@ -352,11 +349,11 @@ function CustomApprovalPicker({
 				<div className="flex items-center gap-2">
 					<Settings2 className="w-4 h-4 text-purple-600" />
 					<span className="text-sm font-bold text-slate-900 dark:text-slate-100">
-						Custom Approval Hierarchy
+						{t('requests.customHierarchy')}
 					</span>
 					{selectedUsers.length > 0 && (
 						<span className="text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 px-2 py-0.5 rounded-full">
-							{selectedUsers.length} selected
+							{t('requests.selectedCount', { count: selectedUsers.length })}
 						</span>
 					)}
 				</div>
@@ -379,7 +376,7 @@ function CustomApprovalPicker({
 					{selectedUsers.length > 0 && (
 						<div className="mt-3 space-y-2">
 							<p className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-								Approval Order
+								{t('requests.approvalOrder')}
 							</p>
 							{selectedUsers.map((user, index) => (
 								<div
@@ -402,7 +399,7 @@ function CustomApprovalPicker({
 											{user.name}
 										</p>
 										<p className="text-xs text-slate-400">
-											{(user.unitPathNames.length ? user.unitPathNames.join(' / ') : 'No unit')} • {user.email}
+											{(user.unitPathNames.length ? user.unitPathNames.join(' / ') : t('requests.noUnit'))} • {user.email}
 										</p>
 									</div>
 									<div className="flex items-center gap-1">
@@ -435,15 +432,15 @@ function CustomApprovalPicker({
 					{/* Add Users */}
 					<div className="mt-3">
 						<p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
-							Add Approvers
+							{t('requests.addApprovers')}
 						</p>
 						<div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[260px] overflow-y-auto">
 							{availableUsers.length === 0 ? (
 								<p className="text-xs text-slate-400">
-									No more users available
+									{t('requests.noMoreUsers')}
 								</p>
 							) : filteredUsers.length === 0 ? (
-								<p className="text-xs text-slate-400">No approvers found</p>
+								<p className="text-xs text-slate-400">{t('requests.noApprovers')}</p>
 							) : (
 								filteredUsers.map((user) => (
 									<button
@@ -468,7 +465,7 @@ function CustomApprovalPicker({
 												{user.name}
 											</p>
 											<p className="text-xs text-slate-400">
-												{(user.unitPathNames.length ? user.unitPathNames.join(' / ') : 'No unit')} • {user.email}
+												{(user.unitPathNames.length ? user.unitPathNames.join(' / ') : t('requests.noUnit'))} • {user.email}
 											</p>
 										</div>
 										<Plus className="w-4 h-4 text-slate-400" />
@@ -495,6 +492,7 @@ function SolutionApprovalActions({
 	onReject?: (reason: string) => void | Promise<void>;
 	isSubmitting: boolean;
 }) {
+	const t = useTranslations();
 	const [showRejectForm, setShowRejectForm] = useState(false);
 	const [rejectReason, setRejectReason] = useState("");
 
@@ -514,17 +512,17 @@ function SolutionApprovalActions({
 				<div className="flex items-center gap-2">
 					<ThumbsDown className="w-5 h-5 text-red-600" />
 					<h4 className="font-bold text-red-900 dark:text-red-400">
-						Reject Solution
+						{t('requests.rejectSolutionHeading')}
 					</h4>
 				</div>
 				<div className="space-y-2">
 					<label className="text-xs font-bold text-red-900 dark:text-red-400">
-						Rejection Reason *
+						{t('requests.rejectionReasonRequired')}
 					</label>
 					<Textarea
 						value={rejectReason}
 						onChange={(e) => setRejectReason(e.target.value)}
-						placeholder="Please explain why you're rejecting this solution..."
+						placeholder={t('requests.rejectSolutionHint')}
 						rows={3}
 						className="bg-white dark:bg-slate-900 text-sm"
 						disabled={isSubmitting}
@@ -540,7 +538,7 @@ function SolutionApprovalActions({
 						disabled={isSubmitting}
 						size="sm"
 					>
-						Cancel
+						{t('common.cancel')}
 					</Button>
 					<Button
 						onClick={handleReject}
@@ -550,7 +548,7 @@ function SolutionApprovalActions({
 						size="sm"
 					>
 						{isSubmitting && <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />}
-						{isSubmitting ? "Rejecting..." : "Confirm Rejection"}
+						{isSubmitting ? t('requests.rejecting') : t('requests.confirmRejection')}
 					</Button>
 				</div>
 			</div>
@@ -564,11 +562,11 @@ function SolutionApprovalActions({
 				<div className="flex items-center gap-2 mb-3">
 					<ThumbsUp className="w-5 h-5 text-purple-600" />
 					<h4 className="font-bold text-purple-900 dark:text-purple-400">
-						Solution Approval
+						{t('requests.solutionApproval')}
 					</h4>
 				</div>
 				<p className="text-xs text-purple-700 dark:text-purple-300 mb-3">
-					This solution requires your approval.
+					{t('requests.solutionApprovalHelp')}
 				</p>
 
 				<div className="flex gap-2">
@@ -584,7 +582,7 @@ function SolutionApprovalActions({
 						) : (
 							<Check className="w-4 h-4 mr-1.5" />
 						)}
-						{isSubmitting ? "Approving..." : "Approve Solution"}
+						{isSubmitting ? t('requests.approving') : t('requests.approveSolutionHeading')}
 					</Button>
 					<Button
 						onClick={() => setShowRejectForm(true)}
@@ -594,7 +592,7 @@ function SolutionApprovalActions({
 						size="sm"
 					>
 						<ThumbsDown className="w-4 h-4 mr-1.5" />
-						Reject Solution
+						{t('requests.rejectSolutionHeading')}
 					</Button>
 				</div>
 			</div>
@@ -619,6 +617,7 @@ export function SolutionModal({
 	onCancelled,
 	subTasksElement,
 }: SolutionModalProps) {
+	const t = useTranslations();
 	const status = statusConfig[data.status];
 
 	return (
@@ -668,12 +667,11 @@ export function SolutionModal({
 								<div className="flex-1">
 									<h4 className="text-sm font-bold text-red-900 dark:text-red-400">
 										{data.status === "final_rejected"
-											? "Final Approval Rejected — solution needs revision"
-											: "Solution Rejected"}
+											? t('requests.finalRejectedRevision')
+											: t('requests.solutionRejected')}
 									</h4>
 									<p className="text-xs text-red-600 dark:text-red-300 mt-1">
-										Rejected by {data.rejection.rejectedBy} on{" "}
-										{format(new Date(data.rejection.rejectedAt), "MMM d, yyyy")}
+										{t('requests.rejectedByOn', { name: data.rejection.rejectedBy, date: format(new Date(data.rejection.rejectedAt), "MMM d, yyyy") })}
 									</p>
 									<div className="mt-2 p-2 bg-white dark:bg-slate-900 rounded border border-red-100 dark:border-red-800/30">
 										<p className="text-xs text-slate-700 dark:text-slate-300 italic">
@@ -687,7 +685,7 @@ export function SolutionModal({
 											size="sm"
 										>
 											<RotateCcw className="w-4 h-4 mr-1.5" />
-											Resubmit Solution
+											{t('requests.resubmitSolution')}
 										</Button>
 									)}
 								</div>
@@ -700,11 +698,11 @@ export function SolutionModal({
 						<div className="flex justify-between items-start mb-3">
 							<h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
 								<CheckCircle2 className="w-5 h-5 text-purple-600" />
-								Engineering Solution
+								{t('requests.engineeringSolution')}
 							</h3>
 							<div className="text-right">
 								<p className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-									Cost
+									{t('requests.cost')}
 								</p>
 								<p className="text-lg font-black text-slate-900 dark:text-slate-100">
 									{new Intl.NumberFormat("en-US", {
@@ -718,7 +716,7 @@ export function SolutionModal({
 							<FormattedText source={data.solution.description} />
 						</div>
 						<div className="flex items-center justify-between text-xs text-slate-500">
-							<span>Submitted by {data.solution.submittedBy}</span>
+							<span>{t('requests.submittedBy', { name: data.solution.submittedBy })}</span>
 							<span>
 								{format(new Date(data.solution.submittedAt), "MMM d, yyyy")}
 							</span>
@@ -729,7 +727,7 @@ export function SolutionModal({
 					<section>
 						<h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-3 flex items-center gap-2">
 							<Info className="w-4 h-4 text-slate-400" />
-							Request Description
+							{t('requests.requestDescription')}
 						</h3>
 						<div className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed bg-slate-50/70 dark:bg-slate-800/30 rounded-xl p-4 border border-slate-100 dark:border-slate-800">
 							<div>
@@ -742,14 +740,14 @@ export function SolutionModal({
 					<section>
 						<h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-3 flex items-center gap-2">
 							<Paperclip className="w-4 h-4 text-slate-400" />
-							Attached Documentation
+							{t('requests.attachedDocumentation')}
 						</h3>
 
 						{/* Initial Request Attachments */}
 						{data.requestFiles.length > 0 && (
 							<div className="mb-4">
 								<h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
-									Initial Request Attachments ({data.requestFiles.length})
+									{t('requests.initialRequestAttachments', { count: data.requestFiles.length })}
 								</h4>
 								<div className="grid grid-cols-1 gap-2">
 									{data.requestFiles.map((file) => (
@@ -779,7 +777,7 @@ export function SolutionModal({
 												<button
 													onClick={() => onPreviewFile(file.id)}
 													className="p-2 text-slate-400 hover:text-purple-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition-colors"
-													title="Preview"
+													title={t('requests.preview')}
 												>
 													<Eye className="w-4 h-4" />
 												</button>
@@ -788,7 +786,7 @@ export function SolutionModal({
 												<button
 													onClick={() => onDownloadFile(file.id)}
 													className="p-2 text-slate-400 hover:text-purple-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition-colors"
-													title="Download"
+													title={t('requests.download')}
 												>
 													<Download className="w-4 h-4" />
 												</button>
@@ -803,8 +801,7 @@ export function SolutionModal({
 						{data.solution.files && data.solution.files.length > 0 && (
 							<div>
 								<h4 className="text-xs font-bold text-purple-600 uppercase tracking-wider mb-2">
-									Engineering Solution Attachments ({data.solution.files.length}
-									)
+									{t('requests.engineeringSolutionAttachments', { count: data.solution.files.length })}
 								</h4>
 								<div className="grid grid-cols-1 gap-2">
 									{data.solution.files.map((file) => (
@@ -834,7 +831,7 @@ export function SolutionModal({
 												<button
 													onClick={() => onPreviewSolutionFile(file.id)}
 													className="p-2 text-slate-400 hover:text-purple-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition-colors"
-													title="Preview"
+													title={t('requests.preview')}
 												>
 													<Eye className="w-4 h-4" />
 												</button>
@@ -843,7 +840,7 @@ export function SolutionModal({
 												<button
 													onClick={() => onDownloadSolutionFile(file.id)}
 													className="p-2 text-slate-400 hover:text-purple-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition-colors"
-													title="Download"
+													title={t('requests.download')}
 												>
 													<Download className="w-4 h-4" />
 												</button>
@@ -861,7 +858,7 @@ export function SolutionModal({
 					<section>
 						<h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-4 flex items-center gap-2">
 							<TrendingUp className="w-5 h-5 text-slate-400" />
-							Approval Flow
+							{t('requests.approvalFlow')}
 						</h3>
 						<div className="flex flex-col gap-4">
 							{data.stages.map((stage) => (
@@ -872,14 +869,14 @@ export function SolutionModal({
 									<div className="w-full sm:w-28 shrink-0 pt-1 flex flex-row sm:flex-col justify-between sm:justify-start items-center sm:items-start border-b sm:border-b-0 border-slate-200 dark:border-slate-700 pb-2 sm:pb-0 mb-2 sm:mb-0">
 										<div>
 											<h4 className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-												Stage {stage.stageNumber}
+												{t('requests.stage')}{' '}{stage.stageNumber}
 											</h4>
 											<p className="text-xs text-slate-400 leading-tight mt-0.5">
 												{stage.stageName}
 											</p>
 											{stage.submittedBy && (
 												<p className="text-[10px] text-slate-400 leading-tight mt-1.5">
-													by {stage.submittedBy}
+													{t('requests.activityActor', { name: stage.submittedBy })}
 												</p>
 											)}
 											{stage.submittedAt && (
@@ -994,11 +991,11 @@ export function SolutionModal({
 					<div className="flex items-center gap-4">
 						<span className="flex items-center gap-1.5">
 							<Lock className="w-3.5 h-3.5" />
-							Secure Read-Only
+							{t('requests.readOnly')}
 						</span>
 						<span className="flex items-center gap-1.5">
 							<History className="w-3.5 h-3.5" />
-							Last Modified:{" "}
+							{t('requests.lastModified')}{" "}
 							{format(new Date(data.lastModified), "MMM d, yyyy")}
 						</span>
 					</div>

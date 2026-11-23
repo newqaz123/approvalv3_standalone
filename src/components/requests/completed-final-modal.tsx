@@ -1,5 +1,7 @@
 "use client";
 
+import { translateActivityAction, type ModalActivityItem } from '@/lib/modal-data-adapters'
+import { useTranslations } from '@/lib/i18n/client'
 import { formatFileSize } from "@/lib/format-file-size";
 import { format } from "date-fns";
 import {
@@ -64,13 +66,6 @@ interface FileAttachment {
 	description?: string;
 }
 
-interface ActivityItem {
-	id: string;
-	action: string;
-	user: string;
-	timestamp: string;
-	details?: string;
-}
 
 interface CompletedFinalModalProps {
 	open: boolean;
@@ -99,7 +94,7 @@ interface CompletedFinalModalProps {
 		};
 		requestFiles: FileAttachment[];
 		stages: ApprovalStage[];
-		activities: ActivityItem[];
+		activities: ModalActivityItem[];
 		lastModified: string;
 		completedAt: string;
 		finalApprovers: string[];
@@ -164,8 +159,9 @@ function SubmittedAvatar({ initials }: { initials: string }) {
 function RetractableActivityTimeline({
 	activities,
 }: {
-	activities: ActivityItem[];
+	activities: ModalActivityItem[];
 }) {
+	const t = useTranslations();
 	const [expanded, setExpanded] = useState(false);
 
 	return (
@@ -177,7 +173,7 @@ function RetractableActivityTimeline({
 				<div className="flex items-center gap-2">
 					<Activity className="w-4 h-4 text-slate-500" />
 					<span className="text-sm font-bold text-slate-700 dark:text-slate-300">
-						Activity Timeline
+						{t('requests.activityTimeline')}
 					</span>
 					<span className="text-xs text-slate-400">({activities.length})</span>
 				</div>
@@ -202,7 +198,7 @@ function RetractableActivityTimeline({
 								<div className="flex items-start justify-between gap-2">
 									<div>
 										<p className="text-sm font-medium text-slate-900 dark:text-slate-100">
-											{activity.action}
+											{translateActivityAction(t, activity)}
 										</p>
 										{activity.details && (
 											<p className="text-xs text-slate-500 mt-0.5">
@@ -215,7 +211,7 @@ function RetractableActivityTimeline({
 									</span>
 								</div>
 								<p className="text-xs text-slate-500 mt-1">
-									by {activity.user}
+									{t('requests.activityActor', { name: activity.user })}
 								</p>
 							</div>
 						</div>
@@ -238,6 +234,7 @@ export function CompletedFinalModal({
 	onExportPackage,
 	subTasksElement,
 }: CompletedFinalModalProps) {
+	const t = useTranslations();
 	const [showExportBuilder, setShowExportBuilder] = useState(false);
 	const exportBuilderRef = useRef<HTMLDivElement | null>(null);
 
@@ -291,16 +288,14 @@ export function CompletedFinalModal({
 							</div>
 							<div className="flex-1">
 								<h4 className="text-sm font-bold text-emerald-900 dark:text-emerald-400">
-									Final Approval Completed
+									{t('requests.finalApprovalCompleted')}
 								</h4>
 								<p className="text-xs text-emerald-600 dark:text-emerald-300 mt-1">
-									Completed on{" "}
-									{format(new Date(data.completedAt), "MMM d, yyyy")} • All
-									approvals granted
+									{t('requests.completedOn', { date: format(new Date(data.completedAt), "MMM d, yyyy") })} {t('requests.allApprovalsGranted')}
 								</p>
 								{data.finalApprovers.length > 0 && (
 									<p className="text-xs text-emerald-700 dark:text-emerald-300 mt-1">
-										Final approvers:{" "}
+										{t('requests.finalApprovers')}{" "}
 										<span className="font-medium">
 											{data.finalApprovers.join(", ")}
 										</span>
@@ -315,11 +310,11 @@ export function CompletedFinalModal({
 						<div className="flex justify-between items-start mb-3">
 							<h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
 								<CheckCircle2 className="w-5 h-5 text-amber-600" />
-								Engineering Solution
+								{t('requests.engineeringSolution')}
 							</h3>
 							<div className="text-right">
 								<p className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-									Approved Cost
+									{t('requests.approvedCost')}
 								</p>
 								<p className="text-lg font-black text-slate-900 dark:text-slate-100">
 									{new Intl.NumberFormat("en-US", {
@@ -336,12 +331,12 @@ export function CompletedFinalModal({
 						{data.solution.timeline && (
 							<div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400 mb-3">
 								<Clock3 className="w-4 h-4 text-slate-400" />
-								<span className="font-medium">Timeline:</span>
+								<span className="font-medium">{t('requests.timelineLabel')}</span>
 								<span>{data.solution.timeline}</span>
 							</div>
 						)}
 						<div className="flex items-center justify-between text-xs text-slate-500">
-							<span>Submitted by {data.solution.submittedBy}</span>
+							<span>{t('requests.submittedBy', { name: data.solution.submittedBy })}</span>
 							<span>
 								{format(new Date(data.solution.submittedAt), "MMM d, yyyy")}
 							</span>
@@ -352,7 +347,7 @@ export function CompletedFinalModal({
 					<section>
 						<h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-3 flex items-center gap-2">
 							<Info className="w-4 h-4 text-slate-400" />
-							Original Request Description
+							{t('requests.originalDescription')}
 						</h3>
 						<div className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed bg-slate-50/70 dark:bg-slate-800/30 rounded-xl p-4 border border-slate-100 dark:border-slate-800">
 							<div>
@@ -365,13 +360,13 @@ export function CompletedFinalModal({
 					<section>
 						<h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-3 flex items-center gap-2">
 							<Paperclip className="w-4 h-4 text-slate-400" />
-							Attached Documentation
+							{t('requests.attachedDocumentation')}
 						</h3>
 
 						{data.requestFiles.length > 0 && (
 							<div className="mb-4">
 								<h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
-									Request Attachments ({data.requestFiles.length})
+									{t('requests.requestAttachments', { count: data.requestFiles.length })}
 								</h4>
 								<div className="grid grid-cols-1 gap-2">
 									{data.requestFiles.map((file) => (
@@ -401,7 +396,7 @@ export function CompletedFinalModal({
 												<button
 													onClick={() => onPreviewFile(file.id)}
 													className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition-colors"
-													title="Preview"
+													title={t('requests.preview')}
 												>
 													<Eye className="w-4 h-4" />
 												</button>
@@ -410,7 +405,7 @@ export function CompletedFinalModal({
 												<button
 													onClick={() => onDownloadRequestFile(file.id)}
 													className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition-colors"
-													title="Download"
+													title={t('requests.download')}
 												>
 													<Download className="w-4 h-4" />
 												</button>
@@ -424,7 +419,7 @@ export function CompletedFinalModal({
 						{data.solution.files.length > 0 && (
 							<div>
 								<h4 className="text-xs font-bold text-amber-600 uppercase tracking-wider mb-2">
-									Solution Attachments ({data.solution.files.length})
+									{t('requests.solutionAttachments', { count: data.solution.files.length })}
 								</h4>
 								<div className="grid grid-cols-1 gap-2">
 									{data.solution.files.map((file) => (
@@ -454,7 +449,7 @@ export function CompletedFinalModal({
 												<button
 													onClick={() => onPreviewSolutionFile(file.id)}
 													className="p-2 text-slate-400 hover:text-amber-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition-colors"
-													title="Preview"
+													title={t('requests.preview')}
 												>
 													<Eye className="w-4 h-4" />
 												</button>
@@ -463,7 +458,7 @@ export function CompletedFinalModal({
 												<button
 													onClick={() => onDownloadSolutionFile(file.id)}
 													className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition-colors"
-													title="Download"
+													title={t('requests.download')}
 												>
 													<Download className="w-4 h-4" />
 												</button>
@@ -493,7 +488,7 @@ export function CompletedFinalModal({
 					<section>
 						<h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-4 flex items-center gap-2">
 							<TrendingUp className="w-5 h-5 text-slate-400" />
-							Complete Approval Chain
+							{t('requests.completeApprovalChain')}
 						</h3>
 						<div className="flex flex-col gap-4">
 							{data.stages.map((stage) => (
@@ -504,14 +499,14 @@ export function CompletedFinalModal({
 									<div className="w-full sm:w-28 shrink-0 pt-1 flex flex-row sm:flex-col justify-between sm:justify-start items-center sm:items-start border-b sm:border-b-0 border-slate-200 dark:border-slate-700 pb-2 sm:pb-0 mb-2 sm:mb-0">
 										<div>
 											<h4 className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-												Stage {stage.stageNumber}
+												{t('requests.stage')}{' '}{stage.stageNumber}
 											</h4>
 											<p className="text-xs text-slate-400 leading-tight mt-0.5">
 												{stage.stageName}
 											</p>
 											{stage.submittedBy && (
 												<p className="text-[10px] text-slate-400 leading-tight mt-1.5">
-													by {stage.submittedBy}
+													{t('requests.activityActor', { name: stage.submittedBy })}
 												</p>
 											)}
 											{stage.submittedAt && (
@@ -603,11 +598,11 @@ export function CompletedFinalModal({
 					<div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400 font-medium">
 						<span className="flex items-center gap-1.5">
 							<CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-							All Approvals Complete
+							{t('requests.allApprovalsComplete')}
 						</span>
 						<span className="flex items-center gap-1.5">
 							<History className="w-3.5 h-3.5" />
-							Completed: {format(new Date(data.completedAt), "MMM d, yyyy")}
+							{t('requests.completedColon')}{' '}{format(new Date(data.completedAt), "MMM d, yyyy")}
 						</span>
 					</div>
 					<Button
@@ -616,7 +611,7 @@ export function CompletedFinalModal({
 						className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white"
 					>
 						<Printer className="w-4 h-4 mr-1.5" />
-						Export Report
+						{t('requests.exportReport')}
 					</Button>
 				</div>
 			</DialogContent>

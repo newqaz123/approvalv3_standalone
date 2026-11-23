@@ -1,5 +1,7 @@
 "use client";
 
+import type { Translator } from '@/lib/i18n/messages'
+import { useTranslations } from '@/lib/i18n/client'
 import { Table as TableIcon, ChevronDown, Trash2, Check } from "lucide-react";
 import { useEditorState, type Editor } from "@tiptap/react";
 import { cellAround } from "@tiptap/pm/tables";
@@ -57,42 +59,42 @@ function currentCellVerticalAlign(editor: Editor): string | null {
 	return normalizeTableVerticalAlign(node?.attrs.verticalAlign);
 }
 
-function tableMenuItems(editor: Editor): TableMenuItem[] {
+function tableMenuItems(editor: Editor, t: Translator): TableMenuItem[] {
 	const cell = selectionTableCell(editor);
 	return [
 		{
-			label: "Add column before",
+			label: t('editor.addColumnBefore'),
 			enabled: editor.can().addColumnBefore(),
 			run: (current) => current.chain().focus().addColumnBefore().run(),
 		},
 		{
-			label: "Add column after",
+			label: t('editor.addColumnAfter'),
 			enabled: editor.can().addColumnAfter(),
 			run: (current) => current.chain().focus().addColumnAfter().run(),
 		},
 		{
-			label: "Delete column",
+			label: t('editor.deleteColumn'),
 			enabled: editor.can().deleteColumn(),
 			run: (current) => current.chain().focus().deleteColumn().run(),
 		},
 		{
-			label: "Add row above",
+			label: t('editor.addRowAbove'),
 			enabled: editor.can().addRowBefore(),
 			run: (current) => current.chain().focus().addRowBefore().run(),
 		},
 		{
-			label: "Add row below",
+			label: t('editor.addRowBelow'),
 			enabled: editor.can().addRowAfter(),
 			run: (current) => current.chain().focus().addRowAfter().run(),
 		},
 		{
-			label: "Delete row",
+			label: t('editor.deleteRow'),
 			enabled: editor.can().deleteRow(),
 			run: (current) => current.chain().focus().deleteRow().run(),
 		},
 		// Keyboard-operable reorder path mirroring the drag handles.
 		{
-			label: "Move row up",
+			label: t('editor.moveRowUp'),
 			enabled:
 				cell !== null && cell.row > 0,
 			run: (current) => {
@@ -103,7 +105,7 @@ function tableMenuItems(editor: Editor): TableMenuItem[] {
 			},
 		},
 		{
-			label: "Move row down",
+			label: t('editor.moveRowDown'),
 			enabled: cell !== null && cell.row < cell.height - 1,
 			run: (current) => {
 				const info = selectionTableCell(current);
@@ -113,7 +115,7 @@ function tableMenuItems(editor: Editor): TableMenuItem[] {
 			},
 		},
 		{
-			label: "Move column left",
+			label: t('editor.moveColumnLeft'),
 			enabled: cell !== null && cell.col > 0,
 			run: (current) => {
 				const info = selectionTableCell(current);
@@ -123,7 +125,7 @@ function tableMenuItems(editor: Editor): TableMenuItem[] {
 			},
 		},
 		{
-			label: "Move column right",
+			label: t('editor.moveColumnRight'),
 			enabled: cell !== null && cell.col < cell.width - 1,
 			run: (current) => {
 				const info = selectionTableCell(current);
@@ -133,22 +135,22 @@ function tableMenuItems(editor: Editor): TableMenuItem[] {
 			},
 		},
 		{
-			label: "Toggle header row",
+			label: t('editor.toggleHeaderRow'),
 			enabled: editor.can().toggleHeaderRow(),
 			run: (current) => current.chain().focus().toggleHeaderRow().run(),
 		},
 		{
-			label: "Merge cells",
+			label: t('editor.mergeCells'),
 			enabled: editor.can().mergeCells(),
 			run: (current) => current.chain().focus().mergeCells().run(),
 		},
 		{
-			label: "Split cell",
+			label: t('editor.splitCell'),
 			enabled: editor.can().splitCell(),
 			run: (current) => current.chain().focus().splitCell().run(),
 		},
 		{
-			label: "Delete table",
+			label: t('editor.deleteTable'),
 			enabled: editor.can().deleteTable(),
 			run: (current) => current.chain().focus().deleteTable().run(),
 			danger: true,
@@ -157,9 +159,9 @@ function tableMenuItems(editor: Editor): TableMenuItem[] {
 }
 
 const VERTICAL_ALIGN_OPTIONS = [
-	{ value: "top", label: "Align top" },
-	{ value: "middle", label: "Align middle" },
-	{ value: "bottom", label: "Align bottom" },
+	{ value: "top", labelKey: 'editor.alignTop' },
+	{ value: "middle", labelKey: 'editor.alignMiddle' },
+	{ value: "bottom", labelKey: 'editor.alignBottom' },
 ] as const;
 
 function preventFocusTransfer(event: MouseEvent): void {
@@ -189,6 +191,7 @@ export function RichTextTableControls({
 	editor,
 	disabled,
 }: RichTextTableControlsProps) {
+	const t = useTranslations();
 	// Subscribe to editor transactions so can()/isActive states re-render,
 	// mirroring the color controls' subscription pattern.
 	useEditorState({
@@ -201,7 +204,7 @@ export function RichTextTableControls({
 	const controlsDisabled = disabled || !editor.isEditable;
 	const insideTable = editor.isActive("table");
 	const canInsertTable = editor.can().insertTable(INSERT_TABLE_ARGS);
-	const items = tableMenuItems(editor);
+	const items = tableMenuItems(editor, t);
 	const activeVerticalAlign = currentCellVerticalAlign(editor);
 
 	function runItem(item: TableMenuItem) {
@@ -246,7 +249,7 @@ export function RichTextTableControls({
 							<PopoverTrigger asChild>
 								<button
 									type="button"
-									aria-label="Table"
+									aria-label={t('editor.table')}
 									aria-haspopup="dialog"
 									aria-expanded={open}
 									aria-pressed={insideTable}
@@ -254,19 +257,19 @@ export function RichTextTableControls({
 									className={CONTROL_BUTTON_CLASS}
 								>
 									<TableIcon className="h-4 w-4" aria-hidden="true" />
-									<span className="sr-only">Table</span>
+									<span className="sr-only">{t('editor.table')}</span>
 									<ChevronDown className="h-3 w-3" aria-hidden="true" />
 								</button>
 							</PopoverTrigger>
 						</span>
 					</TooltipTrigger>
-					<TooltipContent>Table</TooltipContent>
+					<TooltipContent>{t('editor.table')}</TooltipContent>
 				</Tooltip>
 			</TooltipProvider>
 			<PopoverContent
 				align="start"
 				className="rich-text-table-menu"
-				aria-label="Table controls"
+				aria-label={t('editor.tableControls')}
 				onEscapeKeyDown={() => setOpen(false)}
 				onCloseAutoFocus={(event) => {
 					if (returnFocusToEditor.current) {
@@ -278,7 +281,7 @@ export function RichTextTableControls({
 			>
 				<button
 					type="button"
-					aria-label="Insert table"
+					aria-label={t('editor.insertTable')}
 					disabled={controlsDisabled || !canInsertTable}
 					onPointerDown={preventFocusTransfer}
 					onMouseDown={preventFocusTransfer}
@@ -286,10 +289,10 @@ export function RichTextTableControls({
 					className={MENU_ITEM_CLASS}
 				>
 					<TableIcon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-					Insert table
+					{t('editor.insertTable')}
 				</button>
 				<hr className={MENU_DIVIDER_CLASS} aria-hidden="true" />
-				<p className={MENU_LABEL_CLASS}>Vertical align</p>
+				<p className={MENU_LABEL_CLASS}>{t('editor.verticalAlign')}</p>
 				<div>
 					{VERTICAL_ALIGN_OPTIONS.map((option) => {
 						const selected = activeVerticalAlign === option.value;
@@ -297,7 +300,7 @@ export function RichTextTableControls({
 							<button
 								key={option.value}
 								type="button"
-								aria-label={option.label}
+								aria-label={t(option.labelKey)}
 								aria-pressed={selected}
 								disabled={controlsDisabled || !insideTable}
 								onPointerDown={preventFocusTransfer}
@@ -309,13 +312,13 @@ export function RichTextTableControls({
 									className={`h-3.5 w-3.5 shrink-0 ${selected ? "" : "invisible"}`}
 									aria-hidden="true"
 								/>
-								{option.label}
+								{t(option.labelKey)}
 							</button>
 						);
 					})}
 					<button
 						type="button"
-						aria-label="Default vertical align"
+						aria-label={t('editor.defaultAlign')}
 						aria-pressed={activeVerticalAlign === null}
 						disabled={controlsDisabled || !insideTable}
 						onPointerDown={preventFocusTransfer}
@@ -329,7 +332,7 @@ export function RichTextTableControls({
 							}`}
 							aria-hidden="true"
 						/>
-						Default (top)
+						{t('editor.defaultTop')}
 					</button>
 				</div>
 				<hr className={MENU_DIVIDER_CLASS} aria-hidden="true" />

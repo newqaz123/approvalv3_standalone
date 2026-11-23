@@ -1,5 +1,7 @@
 "use client";
 
+import { translateActivityAction, type ModalActivityItem } from '@/lib/modal-data-adapters'
+import { useTranslations } from '@/lib/i18n/client'
 import { formatFileSize } from "@/lib/format-file-size";
 import { useState } from "react";
 import { format } from "date-fns";
@@ -74,13 +76,6 @@ interface FileAttachment {
 	description?: string;
 }
 
-interface ActivityItem {
-	id: string;
-	action: string;
-	user: string;
-	timestamp: string;
-	details?: string;
-}
 
 interface ApproverModalProps {
 	mode: "request" | "solution" | "final";
@@ -115,7 +110,7 @@ interface ApproverModalProps {
 		};
 		requestFiles: FileAttachment[];
 		stages: ApprovalStage[];
-		activities: ActivityItem[];
+		activities: ModalActivityItem[];
 		lastModified: string;
 		rejection?: {
 			reason: string;
@@ -241,8 +236,9 @@ function SubmittedAvatar({ initials }: { initials: string }) {
 function RetractableActivityTimeline({
 	activities,
 }: {
-	activities: ActivityItem[];
+	activities: ModalActivityItem[];
 }) {
+	const t = useTranslations();
 	const [expanded, setExpanded] = useState(false);
 
 	return (
@@ -254,7 +250,7 @@ function RetractableActivityTimeline({
 				<div className="flex items-center gap-2">
 					<Activity className="w-4 h-4 text-slate-500" />
 					<span className="text-sm font-bold text-slate-700 dark:text-slate-300">
-						Activity Timeline
+						{t('requests.activityTimeline')}
 					</span>
 					<span className="text-xs text-slate-400">({activities.length})</span>
 				</div>
@@ -279,7 +275,7 @@ function RetractableActivityTimeline({
 								<div className="flex items-start justify-between gap-2">
 									<div>
 										<p className="text-sm font-medium text-slate-900 dark:text-slate-100">
-											{activity.action}
+											{translateActivityAction(t, activity)}
 										</p>
 										{activity.details && (
 											<p className="text-xs text-slate-500 mt-0.5">
@@ -292,7 +288,7 @@ function RetractableActivityTimeline({
 									</span>
 								</div>
 								<p className="text-xs text-slate-500 mt-1">
-									by {activity.user}
+									{t('requests.activityActor', { name: activity.user })}
 								</p>
 							</div>
 						</div>
@@ -315,6 +311,7 @@ function ApprovalActions({
 	onReject?: (reason: string) => void | Promise<void>;
 	isSubmitting: boolean;
 }) {
+	const t = useTranslations();
 	const [showRejectForm, setShowRejectForm] = useState(false);
 	const [showApproveForm, setShowApproveForm] = useState(false);
 	const [comment, setComment] = useState("");
@@ -336,24 +333,19 @@ function ApprovalActions({
 				<div className="flex items-center gap-2">
 					<ThumbsDown className="w-5 h-5 text-red-600" />
 					<h4 className="font-bold text-red-900 dark:text-red-400">
-						Reject{" "}
-						{mode === "final"
-							? "Final Approval"
-							: mode === "solution"
-								? "Solution"
-								: "Request"}
+						{mode === 'final' ? t('requests.rejectFinalHeading') : mode === 'solution' ? t('requests.rejectSolutionHeading') : t('requests.rejectRequestHeading')}
 					</h4>
 				</div>
 				<div className="space-y-2">
 					<label className="text-xs font-bold text-red-900 dark:text-red-400">
-						Rejection Reason <span className="text-red-500">*</span>
+						{t('requests.rejectionReason')}{' '}<span className="text-red-500">*</span>
 					</label>
 					<Textarea
 						value={rejectReason}
 						onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
 							setRejectReason(e.target.value)
 						}
-						placeholder="Please explain the reason for rejection..."
+						placeholder={t('requests.rejectionHint')}
 						rows={3}
 						className="bg-white dark:bg-slate-900 text-sm"
 						disabled={isSubmitting}
@@ -369,7 +361,7 @@ function ApprovalActions({
 						disabled={isSubmitting}
 						size="sm"
 					>
-						Cancel
+						{t('common.cancel')}
 					</Button>
 					<Button
 						onClick={handleReject}
@@ -379,7 +371,7 @@ function ApprovalActions({
 						size="sm"
 					>
 						{isSubmitting && <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />}
-						{isSubmitting ? "Rejecting..." : "Confirm Rejection"}
+						{isSubmitting ? t('requests.rejecting') : t('requests.confirmRejection')}
 					</Button>
 				</div>
 			</div>
@@ -411,12 +403,7 @@ function ApprovalActions({
 								: "text-emerald-900 dark:text-emerald-400",
 						)}
 					>
-						Approve{" "}
-						{mode === "final"
-							? "Final Approval"
-							: mode === "solution"
-								? "Solution"
-								: "Request"}
+						{mode === 'final' ? t('requests.approveFinalHeading') : mode === 'solution' ? t('requests.approveSolutionHeading') : t('requests.approveRequestHeading')}
 					</h4>
 				</div>
 				<div className="space-y-2">
@@ -428,14 +415,14 @@ function ApprovalActions({
 								: "text-emerald-900 dark:text-emerald-400",
 						)}
 					>
-						Approval Comment
+						{t('requests.approvalComment')}
 					</label>
 					<Textarea
 						value={comment}
 						onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
 							setComment(e.target.value)
 						}
-						placeholder="Add an optional comment for your approval..."
+						placeholder={t('requests.approvalCommentHint')}
 						rows={3}
 						className="bg-white dark:bg-slate-900 text-sm"
 						disabled={isSubmitting}
@@ -451,7 +438,7 @@ function ApprovalActions({
 						disabled={isSubmitting}
 						size="sm"
 					>
-						Cancel
+						{t('common.cancel')}
 					</Button>
 					<Button
 						onClick={handleApprove}
@@ -466,7 +453,7 @@ function ApprovalActions({
 						size="sm"
 					>
 						{isSubmitting && <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />}
-						{isSubmitting ? "Approving..." : "Confirm Approval"}
+						{isSubmitting ? t('requests.approving') : t('requests.confirmApproval')}
 					</Button>
 				</div>
 			</div>
@@ -496,7 +483,7 @@ function ApprovalActions({
 							: "text-slate-900 dark:text-slate-100",
 					)}
 				>
-					{mode === "final" ? "Final Approval Required" : "Review Decision"}
+					{mode === "final" ? t('requests.finalApprovalRequired') : t('requests.reviewDecision')}
 				</h4>
 			</div>
 			<div className="flex gap-2">
@@ -512,7 +499,7 @@ function ApprovalActions({
 					size="sm"
 				>
 					<ThumbsUp className="w-4 h-4 mr-1.5" />
-					Approve
+					{t('requests.approve')}
 				</Button>
 				<Button
 					onClick={() => setShowRejectForm(true)}
@@ -522,7 +509,7 @@ function ApprovalActions({
 					size="sm"
 				>
 					<ThumbsDown className="w-4 h-4 mr-1.5" />
-					Reject
+					{t('requests.reject')}
 				</Button>
 			</div>
 		</div>
@@ -549,6 +536,7 @@ export function ApproverModal({
 	onCancelled,
 	subTasksElement,
 }: ApproverModalProps) {
+	const t = useTranslations();
 	const status = statusConfig[resolveApproverHeaderStatus(data.status)];
 
 	// Debug: Log stage data to verify submitter information
@@ -612,14 +600,13 @@ export function ApproverModal({
 								<div className="flex-1">
 									<h4 className="text-sm font-bold text-red-900 dark:text-red-400">
 										{mode === "final"
-											? "Final Approval Rejected"
+											? t('requests.finalRejected')
 											: mode === "solution"
-												? "Solution Rejected"
-												: "Request Rejected"}
+												? t('requests.solutionRejected')
+												: t('requests.requestRejected')}
 									</h4>
 									<p className="text-xs text-red-600 dark:text-red-300 mt-1">
-										Rejected by {data.rejection.rejectedBy} on{" "}
-										{format(new Date(data.rejection.rejectedAt), "MMM d, yyyy")}
+										{t('requests.rejectedByOn', { name: data.rejection.rejectedBy, date: format(new Date(data.rejection.rejectedAt), "MMM d, yyyy") })}
 									</p>
 									<div className="mt-2 p-2 bg-white dark:bg-slate-900 rounded border border-red-100 dark:border-red-800/30">
 										<p className="text-xs text-slate-700 dark:text-slate-300 italic">
@@ -649,11 +636,11 @@ export function ApproverModal({
 											mode === "final" ? "text-amber-600" : "text-purple-600",
 										)}
 									/>
-									Engineering Solution
+									{t('requests.engineeringSolution')}
 								</h3>
 								<div className="text-right">
 									<p className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-										Cost
+										{t('requests.cost')}
 									</p>
 									<p className="text-lg font-black text-slate-900 dark:text-slate-100">
 										{new Intl.NumberFormat("en-US", {
@@ -670,12 +657,12 @@ export function ApproverModal({
 							{data.solution.timeline && (
 								<div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400 mb-3">
 									<Clock3 className="w-4 h-4 text-slate-400" />
-									<span className="font-medium">Timeline:</span>
+									<span className="font-medium">{t('requests.timelineLabel')}</span>
 									<span>{data.solution.timeline}</span>
 								</div>
 							)}
 							<div className="flex items-center justify-between text-xs text-slate-500">
-								<span>Submitted by {data.solution.submittedBy}</span>
+								<span>{t('requests.submittedBy', { name: data.solution.submittedBy })}</span>
 								<span>
 									{format(new Date(data.solution.submittedAt), "MMM d, yyyy")}
 								</span>
@@ -689,18 +676,18 @@ export function ApproverModal({
 							<div className="flex items-center gap-2 mb-3">
 								<Shield className="w-5 h-5 text-amber-600" />
 								<h4 className="font-bold text-slate-900 dark:text-slate-100">
-									Final Approval Status
+									{t('requests.finalApprovalStatus')}
 								</h4>
 							</div>
 							<div className="grid grid-cols-2 gap-4 text-sm">
 								<div>
-									<p className="text-xs text-slate-500">Initiated By</p>
+									<p className="text-xs text-slate-500">{t('requests.initiatedBy')}</p>
 									<p className="font-medium">
 										{data.finalApproval.initiatedBy}
 									</p>
 								</div>
 								<div>
-									<p className="text-xs text-slate-500">Initiated Date</p>
+									<p className="text-xs text-slate-500">{t('requests.initiatedDate')}</p>
 									<p className="font-medium">
 										{format(
 											new Date(data.finalApproval.initiatedAt),
@@ -709,15 +696,14 @@ export function ApproverModal({
 									</p>
 								</div>
 								<div>
-									<p className="text-xs text-slate-500">Progress</p>
+									<p className="text-xs text-slate-500">{t('requests.progress')}</p>
 									<p className="font-medium">
-										Level {data.finalApproval.currentLevel} of{" "}
-										{data.finalApproval.totalLevels}
+										{t('requests.levelOf', { level: data.finalApproval.currentLevel, total: data.finalApproval.totalLevels })}
 									</p>
 								</div>
 								{data.finalApproval.nextApprover && (
 									<div>
-										<p className="text-xs text-slate-500">Waiting For</p>
+										<p className="text-xs text-slate-500">{t('requests.waitingFor')}</p>
 										<p className="font-medium text-amber-600">
 											{data.finalApproval.nextApprover}
 										</p>
@@ -731,7 +717,7 @@ export function ApproverModal({
 					<section>
 						<h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-3 flex items-center gap-2">
 							<Info className="w-4 h-4 text-slate-400" />
-							Request Description
+							{t('requests.requestDescription')}
 						</h3>
 						<div className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed bg-slate-50/70 dark:bg-slate-800/30 rounded-xl p-4 border border-slate-100 dark:border-slate-800">
 							<div>
@@ -744,14 +730,14 @@ export function ApproverModal({
 					<section>
 						<h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-3 flex items-center gap-2">
 							<Paperclip className="w-4 h-4 text-slate-400" />
-							Attached Documentation
+							{t('requests.attachedDocumentation')}
 						</h3>
 
 						{/* Request Attachments */}
 						{data.requestFiles.length > 0 && (
 							<div className="mb-4">
 								<h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
-									Initial Request Attachments ({data.requestFiles.length})
+									{t('requests.initialRequestAttachments', { count: data.requestFiles.length })}
 								</h4>
 								<div className="grid grid-cols-1 gap-2">
 									{data.requestFiles.map((file) => (
@@ -782,7 +768,7 @@ export function ApproverModal({
 													type="button"
 													onClick={() => onPreviewFile(file.id)}
 													className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/30 rounded transition-colors"
-													title="Preview"
+													title={t('requests.preview')}
 												>
 													<Eye className="w-4 h-4" />
 												</button>
@@ -792,7 +778,7 @@ export function ApproverModal({
 													type="button"
 													onClick={() => onDownloadRequestFile(file.id)}
 													className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition-colors"
-													title="Download"
+													title={t('requests.download')}
 												>
 													<Download className="w-4 h-4" />
 												</button>
@@ -812,8 +798,7 @@ export function ApproverModal({
 										mode === "final" ? "text-amber-600" : "text-purple-600",
 									)}
 								>
-									Engineering Solution Attachments ({data.solution.files.length}
-									)
+									{t('requests.engineeringSolutionAttachments', { count: data.solution.files.length })}
 								</h4>
 								<div className="grid grid-cols-1 gap-2">
 									{data.solution.files.map((file) => (
@@ -859,7 +844,7 @@ export function ApproverModal({
 															? "hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/30"
 															: "hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-950/30",
 													)}
-													title="Preview"
+													title={t('requests.preview')}
 												>
 													<Eye className="w-4 h-4" />
 												</button>
@@ -869,7 +854,7 @@ export function ApproverModal({
 													type="button"
 													onClick={() => onDownloadSolutionFile(file.id)}
 													className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition-colors"
-													title="Download"
+													title={t('requests.download')}
 												>
 													<Download className="w-4 h-4" />
 												</button>
@@ -887,7 +872,7 @@ export function ApproverModal({
 					<section>
 						<h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-4 flex items-center gap-2">
 							<TrendingUp className="w-5 h-5 text-slate-400" />
-							{mode === "final" ? "Final Approval Chain" : "Approval Flow"}
+							{mode === "final" ? t('requests.finalApprovalChain') : t('requests.approvalFlow')}
 						</h3>
 						<div className="flex flex-col gap-4">
 							{data.stages.map((stage) => (
@@ -898,14 +883,14 @@ export function ApproverModal({
 									<div className="w-full sm:w-28 shrink-0 pt-1 flex flex-row sm:flex-col justify-between sm:justify-start items-center sm:items-start border-b sm:border-b-0 border-slate-200 dark:border-slate-700 pb-2 sm:pb-0 mb-2 sm:mb-0">
 										<div>
 											<h4 className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-												Stage {stage.stageNumber}
+												{t('requests.stage')}{' '}{stage.stageNumber}
 											</h4>
 											<p className="text-xs text-slate-400 leading-tight mt-0.5">
 												{stage.stageName}
 											</p>
 											{stage.submittedBy && (
 												<p className="text-[10px] text-slate-400 leading-tight mt-1.5">
-													by {stage.submittedBy}
+													{t('requests.activityActor', { name: stage.submittedBy })}
 												</p>
 											)}
 											{stage.submittedAt && (
@@ -1034,11 +1019,11 @@ export function ApproverModal({
 					<div className="flex items-center gap-4">
 						<span className="flex items-center gap-1.5">
 							<Lock className="w-3.5 h-3.5" />
-							Secure Read-Only
+							{t('requests.readOnly')}
 						</span>
 						<span className="flex items-center gap-1.5">
 							<History className="w-3.5 h-3.5" />
-							Last Modified:{" "}
+							{t('requests.lastModified')}{" "}
 							{format(new Date(data.lastModified), "MMM d, yyyy")}
 						</span>
 					</div>

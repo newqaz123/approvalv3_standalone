@@ -1,5 +1,7 @@
 'use client'
 
+import type { MessageKey } from '@/lib/i18n/messages'
+import { useTranslations } from '@/lib/i18n/client'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Loader2 } from 'lucide-react'
@@ -19,10 +21,11 @@ interface RequestDeepLinkModalProps {
 }
 
 export function RequestDeepLinkModal({ requestId, returnTo }: RequestDeepLinkModalProps) {
+  const t = useTranslations()
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
-  const [loadError, setLoadError] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState<MessageKey | null>(null)
 
   useEffect(() => {
     const hasRequestId = Boolean(requestId)
@@ -48,21 +51,21 @@ export function RequestDeepLinkModal({ requestId, returnTo }: RequestDeepLinkMod
         <Dialog open={open} onOpenChange={handleOpenChange}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>{loadError ? 'Could not open request' : 'Opening request'}</DialogTitle>
+              <DialogTitle>{loadError ? t('requests.openFailedTitle') : t('requests.openingRequest')}</DialogTitle>
               <DialogDescription>
-                {loadError || 'Loading the request from your email link.'}
+                {t(loadError ?? 'requests.loadingDeepLink')}
               </DialogDescription>
             </DialogHeader>
             {loadError ? (
               <div className="flex justify-end">
                 <Button type="button" onClick={() => handleOpenChange(false)}>
-                  Close
+                  {t('requests.close')}
                 </Button>
               </div>
             ) : (
               <div className="flex items-center gap-3 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Loading request...
+                {t('requests.loadingRequestMore')}
               </div>
             )}
           </DialogContent>

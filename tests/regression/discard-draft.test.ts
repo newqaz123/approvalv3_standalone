@@ -141,7 +141,7 @@ describe('draft form cancel wiring', () => {
     assert.match(removeExisting, /isBusy/)
     assert.match(removeExisting, /solutionCommitInFlightRef\.current/)
     assert.match(removeExisting, /closeInFlightRef\.current/)
-    assert.match(source, /disabled=\{requestCloseControlsLocked\}[\s\S]*?title="Remove file"/)
+    assert.match(source, /disabled=\{requestCloseControlsLocked\}[\s\S]*?title=\{t\('requests\.removeFile'\)\}/)
     assert.match(source, /const deletedFileIdsSnapshot = \[\.\.\.deletedFileIds\]/)
     assert.match(source, /deletedFileIds: deletedFileIdsSnapshot/)
   })

@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from '@/lib/i18n/client'
 import { FileText, ChevronRight, Clock, UserCircle, Check } from "lucide-react";
 import { format } from "date-fns";
 import { StatusBadge } from "@/components/requests/status-badge";
@@ -51,6 +52,7 @@ export function RequestCard({
 	showDepartment = false,
 	showApprovalProgress = false,
 }: RequestCardProps) {
+	const t = useTranslations();
 	const date = new Date(request.createdAt);
 	const fileCount = request._count?.fileAttachments || 0;
 
@@ -125,14 +127,14 @@ export function RequestCard({
 				<div className="flex flex-wrap items-center gap-3 text-xs text-gray-600 border-t border-gray-100 pt-2 mt-1">
 					{showRequester && request.requester?.name && (
 						<div className="flex items-center gap-1">
-							<span className="font-medium">Requester:</span>
+							<span className="font-medium">{t('requests.requesterColon')}</span>
 							<span>{request.requester.name}</span>
 						</div>
 					)}
 
 					{showDepartment && request.department?.name && (
 						<div className="flex items-center gap-1">
-							<span className="font-medium">Dept:</span>
+							<span className="font-medium">{t('requests.deptColon')}</span>
 							<span>{request.department.name}</span>
 						</div>
 					)}
@@ -154,9 +156,9 @@ export function RequestCard({
 						request.approvalLevel !== undefined &&
 						request.totalApprovalLevels !== undefined && (
 							<div className="flex items-center gap-1">
-								<span className="font-medium">Approval:</span>
+								<span className="font-medium">{t('requests.approvalColon')}</span>
 								<span>
-									Level {request.approvalLevel} of {request.totalApprovalLevels}
+									{t('requests.levelOf', { level: request.approvalLevel, total: request.totalApprovalLevels })}
 								</span>
 							</div>
 						)}
@@ -165,7 +167,7 @@ export function RequestCard({
 						request.approvalCount !== undefined &&
 						request.totalApprovals !== undefined && (
 							<div className="flex items-center gap-1">
-								<span className="font-medium">Approvals:</span>
+								<span className="font-medium">{t('requests.approvalsColon')}</span>
 								<span>
 									{request.approvalCount}/{request.totalApprovals}
 								</span>

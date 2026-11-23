@@ -95,7 +95,7 @@ test("create payload is readyAttachmentIds exactly once; failure keeps drafts", 
 	);
 	assert.match(
 		requestBranch,
-		/if \(!result\.success\) \{\s*abortRequestCommit\(\);\s*requestCommitInFlightRef\.current = false;\s*setSubmitError\(result\.error \|\| "Failed to submit"\);\s*return;/,
+		/if \(!result\.success\) \{\s*abortRequestCommit\(\);\s*requestCommitInFlightRef\.current = false;\s*setSubmitError\(result\.error \|\| t\('requests\.error\.submit'\)\);\s*return;/,
 	);
 	assert.doesNotMatch(
 		requestBranch.split("if (!result.success)")[1]?.split("clearStagedRequestAttachments")[0] ?? "",
@@ -131,23 +131,23 @@ test("request list renders counts, real percent, pending/uploading/success/error
 	assert.ok(requestList.length > 0, "request attachment list found");
 	assert.match(
 		requestList,
-		/\{readyAttachmentIds\.length\}\/\{stagedRequestItems\.length\} files ready/,
+		/t\('requests\.filesReady', \{ ready: readyAttachmentIds\.length, total: stagedRequestItems\.length \}\)/,
 	);
-	assert.match(requestList, />Pending</);
+	assert.match(requestList, />\{t\('requests\.attachmentPending'\)\}</);
 	assert.match(requestList, /item\.status === "uploading"/);
 	assert.match(requestList, /value=\{item\.progress\}/);
 	assert.match(requestList, /\{item\.progress\}%/);
-	assert.match(requestList, />Uploaded</);
+	assert.match(requestList, />\{t\('requests\.uploaded'\)\}</);
 	assert.match(requestList, /item\.cleanupRequested/);
-	assert.match(requestList, />Removing\.\.\.</);
-	assert.match(requestList, /\{item\.error\}/);
-	assert.match(requestList, /Retry/);
+	assert.match(requestList, />\{t\('requests\.removing'\)\}</);
+	assert.match(requestList, /t\(item\.cleanupRequested \? 'requests\.error\.cleanAttachment' : 'requests\.error\.upload'\)/);
+	assert.match(requestList, /t\('requests\.retry'\)/);
 	assert.match(requestList, /retryStagedRequestItem\(item\.id\)/);
 	assert.match(requestList, /removeStagedRequestItem\(item\.id\)/);
 	assert.match(requestList, /canRetryStagedUpload\(item\)/);
 	assert.doesNotMatch(requestList, /value=\{100\}/);
 	assert.doesNotMatch(requestList, /progress:\s*100/);
-	assert.doesNotMatch(requestList, /Add a description for this file/);
+	assert.doesNotMatch(requestList, /t\('requests\.fileDescriptionHint'\)/);
 	assert.doesNotMatch(requestList, /requestPhaseLabel/);
 	assert.doesNotMatch(requestList, /failedIndices/);
 });
@@ -156,7 +156,7 @@ test("cancel/close awaits owner-scoped staged DELETE reset; in-flight commit doe
 	assert.match(closeHandler, /requestCommitInFlightRef\.current/);
 	assert.match(closeHandler, /await resetStagedRequestAttachments\(\)/);
 	assert.match(closeHandler, /await resetSolutionAttachments\(\)/);
-	assert.match(closeHandler, /Failed to clean up draft files/);
+	assert.match(closeHandler, /t\('requests\.error\.cleanDraft'\)/);
 	assert.match(resetDraft, /requestCommitInFlightRef\.current = false/);
 	assert.match(resetDraft, /closeInFlightRef\.current = false/);
 });
@@ -192,7 +192,7 @@ test("request close is re-entry guarded so concurrent paths start one reset/DELE
 		closeHandler,
 		/finally \{[\s\S]*if \(mode === "request"\) \{\s*closeInFlightRef\.current = false;/
 	);
-	assert.match(closeHandler, /Failed to clean up draft files/);
+	assert.match(closeHandler, /t\('requests\.error\.cleanDraft'\)/);
 	const closeCallIdx = closeHandler.indexOf("onOpenChange(false)");
 	const catchIdx = closeHandler.indexOf("} catch (error)");
 	assert.ok(closeCallIdx !== -1 && catchIdx !== -1);
@@ -295,17 +295,17 @@ test("solution/resubmit stages eagerly via the solution-scope hook with request-
 	assert.ok(solutionList.length > 0, "solution attachment list found");
 	assert.match(
 		solutionList,
-		/\{solutionReadyAttachmentIds\.length\}\/\{attachmentItems\.length\} files ready/,
+		/t\('requests\.filesReady', \{ ready: solutionReadyAttachmentIds\.length, total: attachmentItems\.length \}\)/,
 	);
-	assert.match(solutionList, />Pending</);
+	assert.match(solutionList, />\{t\('requests\.attachmentPending'\)\}</);
 	assert.match(solutionList, /item\.status === "uploading"/);
 	assert.match(solutionList, /value=\{item\.progress\}/);
 	assert.match(solutionList, /\{item\.progress\}%/);
-	assert.match(solutionList, />Uploaded</);
+	assert.match(solutionList, />\{t\('requests\.uploaded'\)\}</);
 	assert.match(solutionList, /item\.cleanupRequested/);
-	assert.match(solutionList, />Removing\.\.\.</);
-	assert.match(solutionList, /\{item\.error\}/);
-	assert.match(solutionList, /Retry/);
+	assert.match(solutionList, />\{t\('requests\.removing'\)\}</);
+	assert.match(solutionList, /t\(item\.cleanupRequested \? 'requests\.error\.cleanAttachment' : 'requests\.error\.upload'\)/);
+	assert.match(solutionList, /t\('requests\.retry'\)/);
 	assert.match(solutionList, /handleRetryAttachment\(item\.id\)/);
 	assert.match(solutionList, /handleRemoveAttachment\(item\.id\)/);
 	assert.match(solutionList, /canRetryStagedUpload\(item\)/);

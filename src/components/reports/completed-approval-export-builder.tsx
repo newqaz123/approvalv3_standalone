@@ -1,5 +1,6 @@
 'use client'
 
+import { useTranslations } from '@/lib/i18n/client'
 import { useEffect, useMemo, useState, useTransition } from 'react'
 import { ArrowDown, ArrowUp, CheckCircle2, FileArchive, FileText, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -21,20 +22,26 @@ interface CompletedApprovalExportBuilderProps {
   onExportPackage: (items: ExportPackageRequestItem[]) => Promise<void>
 }
 
-const kindLabel: Record<ExportPackageItem['kind'], string> = {
-  'approval-report': 'Approval packet',
-  pdf: 'PDF',
-  image: 'Image',
-  docx: 'DOCX to PDF',
-  xlsx: 'XLSX to PDF',
-  unsupported: 'Unsupported format',
-}
+const sourceLabelKey = {
+  'approval-report': 'requests.packetReportName',
+  'request-attachment': 'requests.packetRequest',
+  'solution-attachment': 'requests.packetSolution',
+} as const
+
+const kindLabelKey = {
+  'approval-report': 'requests.packetReport',
+  image: 'editor.image',
+  docx: 'requests.packetDocx',
+  xlsx: 'requests.packetXlsx',
+  unsupported: 'requests.packetUnsupported',
+} as const
 
 export function CompletedApprovalExportBuilder({
   requestAttachments,
   solutionAttachments,
   onExportPackage,
 }: CompletedApprovalExportBuilderProps) {
+  const t = useTranslations()
   const packageItemsKey = buildPackageItemsKey(requestAttachments, solutionAttachments)
   const defaultItems = useMemo(
     () => buildDefaultExportPackageItems({ requestAttachments, solutionAttachments }),
@@ -51,6 +58,7 @@ export function CompletedApprovalExportBuilder({
     setItems(defaultItems)
   }, [defaultItems])
 
+  const itemLabel = (item: ExportPackageItem) => item.type === 'approval-report' ? t('requests.packetReportName') : item.fileName
   const orderedItems = reorderExportPackageItems(items)
   const selectedMergeableCount = orderedItems.filter((item) => item.selected && item.mergeable).length
   const reportSelected = orderedItems.some(
@@ -83,7 +91,7 @@ export function CompletedApprovalExportBuilder({
     const requestItems = buildSelectedExportPackageRequestItems(items)
 
     if (requestItems.length === 0) {
-      setError('Select the approval report to export.')
+      setError(t('requests.exportSelectReport'))
       return
     }
 
@@ -91,7 +99,7 @@ export function CompletedApprovalExportBuilder({
       try {
         await onExportPackage(requestItems)
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to export package.')
+        setError(t('requests.error.exportPackage'))
       }
     })
   }
@@ -102,16 +110,15 @@ export function CompletedApprovalExportBuilder({
         <div>
           <h3 className="flex items-center gap-2 text-sm font-black text-slate-900 dark:text-slate-100">
             <FileArchive className="h-4 w-4 text-emerald-600" />
-            Approval Packet Export
+            {t('requests.exportPacketTitle')}
           </h3>
           <p className="mt-1 text-xs text-slate-500">
-            Select attachments to append and arrange the packet order. The
-            approval report is always included.
+            {t('requests.exportPacketHelp')}
           </p>
         </div>
         <div className="flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700">
           <CheckCircle2 className="h-3.5 w-3.5" />
-          {selectedMergeableCount} selected
+          {t('requests.selectedCount', { count: selectedMergeableCount })}
         </div>
       </div>
 
@@ -128,21 +135,21 @@ export function CompletedApprovalExportBuilder({
               checked={item.selected}
               disabled={!item.mergeable}
               onCheckedChange={(checked) => setItemSelected(item.id, checked === true)}
-              aria-label={`Select ${item.fileName}`}
+              aria-label={t('requests.selectNamed', { name: itemLabel(item) })}
             />
 
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <FileText className="h-4 w-4 text-slate-500" />
                 <span className="truncate text-sm font-bold text-slate-900 dark:text-slate-100">
-                  {item.fileName}
+                  {itemLabel(item)}
                 </span>
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] font-medium text-slate-500">
-                <span>{item.sourceLabel}</span>
+                <span>{t(sourceLabelKey[item.type])}</span>
                 <span className="h-1 w-1 rounded-full bg-slate-300" />
                 <span className={item.mergeable ? 'text-emerald-700' : 'text-amber-700'}>
-                  {kindLabel[item.kind]}
+                  {item.kind === 'pdf' ? 'PDF' : t(kindLabelKey[item.kind])}
                 </span>
                 {item.description && (
                   <>
@@ -161,7 +168,7 @@ export function CompletedApprovalExportBuilder({
                 className="h-8 w-8 p-0"
                 disabled={index === 0}
                 onClick={() => moveItem(item.id, 'up')}
-                aria-label={`Move ${item.fileName} up`}
+                aria-label={t('requests.moveNamedUp', { name: itemLabel(item) })}
               >
                 <ArrowUp className="h-3.5 w-3.5" />
               </Button>
@@ -172,7 +179,7 @@ export function CompletedApprovalExportBuilder({
                 className="h-8 w-8 p-0"
                 disabled={index === orderedItems.length - 1}
                 onClick={() => moveItem(item.id, 'down')}
-                aria-label={`Move ${item.fileName} down`}
+                aria-label={t('requests.moveNamedDown', { name: itemLabel(item) })}
               >
                 <ArrowDown className="h-3.5 w-3.5" />
               </Button>
@@ -183,8 +190,7 @@ export function CompletedApprovalExportBuilder({
 
       <div className="flex flex-col gap-3 border-t border-slate-100 p-4 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-xs text-slate-500">
-          Unsupported formats stay listed in the report&apos;s Attachment Index
-          but cannot be appended to the PDF.
+          {t('requests.exportUnsupported')}
         </p>
         <Button
           type="button"
@@ -195,13 +201,11 @@ export function CompletedApprovalExportBuilder({
           {isPending ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Building packet...
-            </>
+              {t('requests.buildingPacket')}</>
           ) : (
             <>
               <FileArchive className="mr-2 h-4 w-4" />
-              Export Approval Packet
-            </>
+              {t('requests.exportPacket')}</>
           )}
         </Button>
       </div>

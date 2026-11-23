@@ -1,5 +1,7 @@
 "use client";
 
+import { translateActivityAction, type ModalActivityItem } from '@/lib/modal-data-adapters'
+import { useTranslations } from '@/lib/i18n/client'
 import { formatFileSize } from "@/lib/format-file-size";
 import { useState, useRef } from "react";
 import { format } from "date-fns";
@@ -74,13 +76,6 @@ interface FileAttachment {
 	description?: string;
 }
 
-interface ActivityItem {
-	id: string;
-	action: string;
-	user: string;
-	timestamp: string;
-	details?: string;
-}
 
 interface User {
 	id: string;
@@ -117,7 +112,7 @@ interface SubmitFinalApprovalModalProps {
 		};
 		requestFiles: FileAttachment[];
 		stages: ApprovalStage[];
-		activities: ActivityItem[];
+		activities: ModalActivityItem[];
 		lastModified: string;
 	};
 	availableUsers: User[];
@@ -184,8 +179,9 @@ function SubmittedAvatar({ initials }: { initials: string }) {
 function RetractableActivityTimeline({
 	activities,
 }: {
-	activities: ActivityItem[];
+	activities: ModalActivityItem[];
 }) {
+	const t = useTranslations();
 	const [expanded, setExpanded] = useState(false);
 
 	return (
@@ -197,7 +193,7 @@ function RetractableActivityTimeline({
 				<div className="flex items-center gap-2">
 					<Activity className="w-4 h-4 text-slate-500" />
 					<span className="text-sm font-bold text-slate-700 dark:text-slate-300">
-						Activity Timeline
+						{t('requests.activityTimeline')}
 					</span>
 					<span className="text-xs text-slate-400">({activities.length})</span>
 				</div>
@@ -222,7 +218,7 @@ function RetractableActivityTimeline({
 								<div className="flex items-start justify-between gap-2">
 									<div>
 										<p className="text-sm font-medium text-slate-900 dark:text-slate-100">
-											{activity.action}
+											{translateActivityAction(t, activity)}
 										</p>
 										{activity.details && (
 											<p className="text-xs text-slate-500 mt-0.5">
@@ -235,7 +231,7 @@ function RetractableActivityTimeline({
 									</span>
 								</div>
 								<p className="text-xs text-slate-500 mt-1">
-									by {activity.user}
+									{t('requests.activityActor', { name: activity.user })}
 								</p>
 							</div>
 						</div>
@@ -258,6 +254,7 @@ function CustomApprovalPicker({
 	onChange: (approvers: string[]) => void;
 	disabled?: boolean;
 }) {
+	const t = useTranslations();
 	const [isOpen, setIsOpen] = useState(false);
 	const [searchQuery, setSearchQuery] = useState("");
 	const searchInputRef = useRef<HTMLInputElement>(null);
@@ -319,7 +316,7 @@ function CustomApprovalPicker({
 			<div className="space-y-2">
 				{selectedApprovers.length === 0 && (
 					<p className="text-sm text-slate-400 italic">
-						No custom approvers selected
+						{t('requests.noCustomApprovers')}
 					</p>
 				)}
 				{selectedApprovers.map((userId, index) => {
@@ -332,10 +329,10 @@ function CustomApprovalPicker({
 						>
 							<div className="flex-1 min-w-0">
 								<p className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">
-									Level {index + 1}: {user.name}
+									{t('requests.level')}{' '}{index + 1}: {user.name}
 								</p>
 								<p className="text-xs text-slate-400 truncate">
-									{(user.unitPathNames.length ? user.unitPathNames.join(' / ') : 'No unit')} • {user.email}
+									{(user.unitPathNames.length ? user.unitPathNames.join(' / ') : t('requests.noUnit'))} • {user.email}
 								</p>
 							</div>
 							<div className="flex items-center gap-1">
@@ -374,7 +371,7 @@ function CustomApprovalPicker({
 					className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-dashed border-slate-300 dark:border-slate-700 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
 				>
 					<Plus className="w-4 h-4" />
-					Add Approver
+					{t('requests.addApprover')}
 				</button>
 
 				{isOpen && (
@@ -394,11 +391,11 @@ function CustomApprovalPicker({
 						<div className="max-h-[260px] overflow-y-auto">
 							{unselectedUsers.length === 0 ? (
 								<p className="px-3 py-2 text-sm text-slate-400 italic">
-									No more users available
+									{t('requests.noMoreUsers')}
 								</p>
 							) : filteredUsers.length === 0 ? (
 								<p className="px-3 py-2 text-sm text-slate-400 italic">
-									No approvers found
+									{t('requests.noApprovers')}
 								</p>
 							) : (
 								filteredUsers.map((user) => (
@@ -416,7 +413,7 @@ function CustomApprovalPicker({
 											{user.name}
 										</p>
 										<p className="text-xs text-slate-500">
-											{(user.unitPathNames.length ? user.unitPathNames.join(' / ') : 'No unit')} • {user.email}
+											{(user.unitPathNames.length ? user.unitPathNames.join(' / ') : t('requests.noUnit'))} • {user.email}
 										</p>
 									</button>
 								))
@@ -452,6 +449,7 @@ export function SubmitFinalApprovalModal({
 	onPreviewSolutionFile,
 	subTasksElement,
 }: SubmitFinalApprovalModalProps) {
+	const t = useTranslations();
 	const [useCustomHierarchy, setUseCustomHierarchy] = useState(false);
 	const [customApprovers, setCustomApprovers] = useState<string[]>([]);
 
@@ -487,11 +485,11 @@ export function SubmitFinalApprovalModal({
 						<div className="flex justify-between items-start mb-3">
 							<h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
 								<CheckCircle2 className="w-5 h-5 text-amber-600" />
-								Engineering Solution
+								{t('requests.engineeringSolution')}
 							</h3>
 							<div className="text-right">
 								<p className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-									Cost
+									{t('requests.cost')}
 								</p>
 								<p className="text-lg font-black text-slate-900 dark:text-slate-100">
 									{new Intl.NumberFormat("en-US", {
@@ -508,12 +506,12 @@ export function SubmitFinalApprovalModal({
 						{data.solution.timeline && (
 							<div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400 mb-3">
 								<Clock3 className="w-4 h-4 text-slate-400" />
-								<span className="font-medium">Timeline:</span>
+								<span className="font-medium">{t('requests.timelineLabel')}</span>
 								<span>{data.solution.timeline}</span>
 							</div>
 						)}
 						<div className="flex items-center justify-between text-xs text-slate-500">
-							<span>Submitted by {data.solution.submittedBy}</span>
+							<span>{t('requests.submittedBy', { name: data.solution.submittedBy })}</span>
 							<span>
 								{format(new Date(data.solution.submittedAt), "MMM d, yyyy")}
 							</span>
@@ -524,7 +522,7 @@ export function SubmitFinalApprovalModal({
 					<section>
 						<h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-3 flex items-center gap-2">
 							<Info className="w-4 h-4 text-slate-400" />
-							Original Request Description
+							{t('requests.originalDescription')}
 						</h3>
 						<div className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed bg-slate-50/70 dark:bg-slate-800/30 rounded-xl p-4 border border-slate-100 dark:border-slate-800">
 							<div>
@@ -537,13 +535,13 @@ export function SubmitFinalApprovalModal({
 					<section>
 						<h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-3 flex items-center gap-2">
 							<Paperclip className="w-4 h-4 text-slate-400" />
-							Attached Documentation
+							{t('requests.attachedDocumentation')}
 						</h3>
 
 						{data.requestFiles.length > 0 && (
 							<div className="mb-4">
 								<h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
-									Request Attachments ({data.requestFiles.length})
+									{t('requests.requestAttachments', { count: data.requestFiles.length })}
 								</h4>
 								<div className="grid grid-cols-1 gap-2">
 									{data.requestFiles.map((file) => (
@@ -573,7 +571,7 @@ export function SubmitFinalApprovalModal({
 												<button
 													onClick={() => onPreviewFile(file.id)}
 													className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition-colors"
-													title="Preview"
+													title={t('requests.preview')}
 												>
 													<Eye className="w-4 h-4" />
 												</button>
@@ -582,7 +580,7 @@ export function SubmitFinalApprovalModal({
 												<button
 													onClick={() => onDownloadRequestFile(file.id)}
 													className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition-colors"
-													title="Download"
+													title={t('requests.download')}
 												>
 													<Download className="w-4 h-4" />
 												</button>
@@ -596,7 +594,7 @@ export function SubmitFinalApprovalModal({
 						{data.solution.files.length > 0 && (
 							<div>
 								<h4 className="text-xs font-bold text-amber-600 uppercase tracking-wider mb-2">
-									Solution Attachments ({data.solution.files.length})
+									{t('requests.solutionAttachments', { count: data.solution.files.length })}
 								</h4>
 								<div className="grid grid-cols-1 gap-2">
 									{data.solution.files.map((file) => (
@@ -626,7 +624,7 @@ export function SubmitFinalApprovalModal({
 												<button
 													onClick={() => onPreviewSolutionFile(file.id)}
 													className="p-2 text-slate-400 hover:text-amber-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition-colors"
-													title="Preview"
+													title={t('requests.preview')}
 												>
 													<Eye className="w-4 h-4" />
 												</button>
@@ -635,7 +633,7 @@ export function SubmitFinalApprovalModal({
 												<button
 													onClick={() => onDownloadSolutionFile(file.id)}
 													className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition-colors"
-													title="Download"
+													title={t('requests.download')}
 												>
 													<Download className="w-4 h-4" />
 												</button>
@@ -653,7 +651,7 @@ export function SubmitFinalApprovalModal({
 					<section>
 						<h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-4 flex items-center gap-2">
 							<TrendingUp className="w-5 h-5 text-slate-400" />
-							Previous Approvals
+							{t('requests.previousApprovals')}
 						</h3>
 						<div className="flex flex-col gap-4">
 							{data.stages.map((stage) => (
@@ -664,7 +662,7 @@ export function SubmitFinalApprovalModal({
 									<div className="w-full sm:w-28 shrink-0 pt-1 flex flex-row sm:flex-col justify-between sm:justify-start items-center sm:items-start border-b sm:border-b-0 border-slate-200 dark:border-slate-700 pb-2 sm:pb-0 mb-2 sm:mb-0">
 										<div>
 											<h4 className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-												Stage {stage.stageNumber}
+												{t('requests.stage')}{' '}{stage.stageNumber}
 											</h4>
 											<p className="text-xs text-slate-400 leading-tight mt-0.5">
 												{stage.stageName}
@@ -742,12 +740,11 @@ export function SubmitFinalApprovalModal({
 						<div className="flex items-center gap-2 mb-4">
 							<Shield className="w-5 h-5 text-amber-600" />
 							<h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
-								Initiate Final Approval
+								{t('requests.initiateFinal')}
 							</h3>
 						</div>
 						<p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
-							Configure the final approval chain for this solution. The solution
-							has already been approved by the engineering team.
+							{t('requests.initiateFinalHelp')}
 						</p>
 
 						<div className="bg-white dark:bg-slate-900 rounded-lg p-4 border border-slate-200 dark:border-slate-800">
@@ -755,12 +752,12 @@ export function SubmitFinalApprovalModal({
 								<div className="flex items-center gap-2">
 									<Settings2 className="w-4 h-4 text-slate-500" />
 									<span className="text-sm font-bold">
-										Custom Approval Hierarchy
+										{t('requests.customHierarchy')}
 									</span>
 								</div>
 								<div className="flex items-center gap-2">
 									<span className="text-xs text-slate-500">
-										{useCustomHierarchy ? "On" : "Off"}
+										{useCustomHierarchy ? t('requests.on') : t('requests.off')}
 									</span>
 									<button
 										onClick={() => setUseCustomHierarchy(!useCustomHierarchy)}
@@ -783,8 +780,8 @@ export function SubmitFinalApprovalModal({
 							</div>
 							<p className="text-xs text-slate-500 mb-3">
 								{useCustomHierarchy
-									? "Define a custom approval chain for this solution."
-									: "Use the default department hierarchy for final approval."}
+									? t('requests.customSolutionChain')
+									: t('requests.useDefaultFinal')}
 							</p>
 
 							{useCustomHierarchy && (
@@ -818,11 +815,11 @@ export function SubmitFinalApprovalModal({
 					<div className="flex items-center gap-4 text-xs text-slate-400 font-medium">
 						<span className="flex items-center gap-1.5">
 							<Lock className="w-3.5 h-3.5" />
-							Secure Read-Only
+							{t('requests.readOnly')}
 						</span>
 						<span className="flex items-center gap-1.5">
 							<History className="w-3.5 h-3.5" />
-							Last Modified:{" "}
+							{t('requests.lastModified')}{" "}
 							{format(new Date(data.lastModified), "MMM d, yyyy")}
 						</span>
 					</div>
@@ -832,7 +829,7 @@ export function SubmitFinalApprovalModal({
 							onClick={() => onOpenChange(false)}
 							disabled={isSubmitting}
 						>
-							Cancel
+							{t('common.cancel')}
 						</Button>
 						<Button
 							onClick={async () => {
@@ -851,7 +848,7 @@ export function SubmitFinalApprovalModal({
 							) : (
 								<Play className="w-4 h-4 mr-1.5" />
 							)}
-							{isSubmitting ? "Starting..." : "Start Final Approval"}
+							{isSubmitting ? t('requests.starting') : t('requests.startFinal')}
 						</Button>
 					</div>
 				</div>

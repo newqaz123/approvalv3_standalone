@@ -1,5 +1,6 @@
 'use server'
 
+import type { MessageKey } from '@/lib/i18n/messages'
 import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 import { getCurrentUser } from '@/lib/cache/user-cache'
@@ -16,16 +17,31 @@ import {
   existingManageSubTasksDecision,
 } from '@/lib/action-permissions'
 
+type SubTaskFailure = { success: false; error: string; errorKey?: MessageKey }
 type ActionResult<T = undefined> = T extends undefined
-  ? { success: true } | { success: false; error: string }
-  : { success: true; data: T } | { success: false; error: string }
+  ? { success: true } | SubTaskFailure
+  : { success: true; data: T } | SubTaskFailure
+
+class SubTaskActionError extends Error {
+  constructor(message: string, readonly errorKey: MessageKey) {
+    super(message)
+  }
+}
+
+function subTaskFailure(error: unknown, fallback: string): SubTaskFailure {
+  return {
+    success: false,
+    error: error instanceof Error ? error.message : fallback,
+    ...(error instanceof SubTaskActionError ? { errorKey: error.errorKey } : {}),
+  }
+}
 
 async function requireSubTaskManager() {
   const user = await getCurrentUser()
-  if (!user) throw new Error('Only engineering and admin users can manage sub-tasks')
+  if (!user) throw new SubTaskActionError('Only engineering and admin users can manage sub-tasks', 'requests.error.permission')
   const isSolutionWorker = await isActorSolutionWorker(createSolutionWorkActorDb(prisma), user.id)
   if (!canManageEngineeringSubTasks({ ...user, isSolutionWorker })) {
-    throw new Error('Only engineering and admin users can manage sub-tasks')
+    throw new SubTaskActionError('Only engineering and admin users can manage sub-tasks', 'requests.error.permission')
   }
 
   return { ...user, isSolutionWorker }
@@ -36,7 +52,7 @@ async function requireVisibleStageRequest(requestId: string) {
   // The all-request tracking option is read-only, not sub-task/WR access.
   // Solution workers keep sub-task/WR access through every sub-task stage.
   if (!user || !(await canUserViewRequest(user.id, requestId, { includeEngineeringViewAll: false, includeSubTaskWork: true }))) {
-    throw new Error('Request not found')
+    throw new SubTaskActionError('Request not found', 'requests.error.notFoundOrNoAccess')
   }
 
   const request = await prisma.requests.findUnique({
@@ -44,9 +60,9 @@ async function requireVisibleStageRequest(requestId: string) {
     select: { id: true, status: true, isDeleted: true },
   })
 
-  if (!request || request.isDeleted) throw new Error('Request not found')
+  if (!request || request.isDeleted) throw new SubTaskActionError('Request not found', 'requests.error.notFoundOrNoAccess')
   if (!isSubTaskVisibleForRequestStatus(request.status)) {
-    throw new Error('Sub-tasks are not available for this request stage')
+    throw new SubTaskActionError('Sub-tasks are not available for this request stage', 'requests.error.notAvailable')
   }
 
   return request
@@ -80,7 +96,7 @@ function assertCanManageSubTasks(
     },
   })
   if (!manageAction.allowed) {
-    throw new Error('Only engineering and admin users can manage sub-tasks')
+    throw new SubTaskActionError('Only engineering and admin users can manage sub-tasks', 'requests.error.permission')
   }
 }
 
@@ -90,7 +106,7 @@ async function getStage(stageId: string) {
     select: { id: true, isOthers: true, isActive: true },
   })
 
-  if (!stage || !stage.isActive) throw new Error('Selected stage is not available')
+  if (!stage || !stage.isActive) throw new SubTaskActionError('Selected stage is not available', 'requests.error.stageUnavailable')
   return stage
 }
 
@@ -102,7 +118,7 @@ async function getActiveSubContractor(subContractorId?: string | null) {
     select: { id: true, isActive: true },
   })
 
-  if (!contractor || !contractor.isActive) throw new Error('Selected subcontractor is not available')
+  if (!contractor || !contractor.isActive) throw new SubTaskActionError('Selected subcontractor is not available', 'requests.error.subcontractorUnavailable')
   return contractor.id
 }
 
@@ -140,7 +156,7 @@ export async function createSubTask(input: {
       stageIsOthers: stage.isOthers,
       customStageText: input.customStageText,
     })
-    if (!validation.success) return validation
+    if (!validation.success) return { ...validation, errorKey: 'requests.error.subTaskValidation' }
     const subContractorId = await getActiveSubContractor(input.subContractorId)
 
     const subTask = await prisma.request_sub_tasks.create({
@@ -159,7 +175,7 @@ export async function createSubTask(input: {
     revalidateRequestViews()
     return { success: true, data: subTask }
   } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : 'Failed to create sub-task' }
+    return subTaskFailure(error, 'Failed to create sub-task')
   }
 }
 
@@ -176,7 +192,7 @@ export async function updateSubTask(input: {
       where: { id: input.id },
       select: { requestId: true },
     })
-    if (!existing) throw new Error('Sub-task not found')
+    if (!existing) throw new SubTaskActionError('Sub-task not found', 'requests.error.subTaskUnavailable')
     const request = await requireVisibleStageRequest(existing.requestId)
     assertCanManageSubTasks(user, request)
     const stage = await getStage(input.stageId)
@@ -185,7 +201,7 @@ export async function updateSubTask(input: {
       stageIsOthers: stage.isOthers,
       customStageText: input.customStageText,
     })
-    if (!validation.success) return validation
+    if (!validation.success) return { ...validation, errorKey: 'requests.error.subTaskValidation' }
     const subContractorId = await getActiveSubContractor(input.subContractorId)
 
     await prisma.request_sub_tasks.update({
@@ -202,7 +218,7 @@ export async function updateSubTask(input: {
     revalidateRequestViews()
     return { success: true }
   } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : 'Failed to update sub-task' }
+    return subTaskFailure(error, 'Failed to update sub-task')
   }
 }
 
@@ -213,7 +229,7 @@ export async function setSubTaskCompleted(id: string, completed: boolean): Promi
       where: { id },
       select: { requestId: true },
     })
-    if (!existing) throw new Error('Sub-task not found')
+    if (!existing) throw new SubTaskActionError('Sub-task not found', 'requests.error.subTaskUnavailable')
     const request = await requireVisibleStageRequest(existing.requestId)
     assertCanManageSubTasks(user, request)
     const completedStage = completed
@@ -224,7 +240,7 @@ export async function setSubTaskCompleted(id: string, completed: boolean): Promi
       : null
 
     if (completed && !completedStage) {
-      throw new Error('Completed stage is not available')
+      throw new SubTaskActionError('Completed stage is not available', 'requests.error.stageUnavailable')
     }
 
     await prisma.request_sub_tasks.update({
@@ -241,7 +257,7 @@ export async function setSubTaskCompleted(id: string, completed: boolean): Promi
     revalidateRequestViews()
     return { success: true }
   } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : 'Failed to update completion' }
+    return subTaskFailure(error, 'Failed to update completion')
   }
 }
 
@@ -252,7 +268,7 @@ export async function deleteSubTask(id: string): Promise<ActionResult> {
       where: { id },
       select: { requestId: true },
     })
-    if (!existing) throw new Error('Sub-task not found')
+    if (!existing) throw new SubTaskActionError('Sub-task not found', 'requests.error.subTaskUnavailable')
     const request = await requireVisibleStageRequest(existing.requestId)
     assertCanManageSubTasks(user, request)
 
@@ -261,7 +277,7 @@ export async function deleteSubTask(id: string): Promise<ActionResult> {
     revalidateRequestViews()
     return { success: true }
   } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : 'Failed to delete sub-task' }
+    return subTaskFailure(error, 'Failed to delete sub-task')
   }
 }
 
@@ -283,7 +299,7 @@ export async function toggleWorkRequisitionReceived(requestId: string, received:
     revalidateRequestViews()
     return { success: true }
   } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : 'Failed to update WR status' }
+    return subTaskFailure(error, 'Failed to update WR status')
   }
 }
 
@@ -303,6 +319,6 @@ export async function createSubContractor(name: string): Promise<ActionResult<{ 
     revalidatePath('/engineering')
     return { success: true, data: contractor }
   } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : 'Failed to create subcontractor' }
+    return subTaskFailure(error, 'Failed to create subcontractor')
   }
 }

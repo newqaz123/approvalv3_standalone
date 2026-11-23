@@ -213,7 +213,7 @@ describe('re-based approver unit labels', () => {
       assert.match(source, /unitPathNames/, `${path} accepts unitPathNames`)
       assert.match(
         source,
-        /unitPathNames\.length \? [\s\S]*join\(['"] \/ ['"]\)[\s\S]*No unit/,
+        /unitPathNames\.length \? [\s\S]*join\(['"] \/ ['"]\)[\s\S]*t\('requests\.noUnit'\)/,
         `${path} renders unit path with email`,
       )
       assert.doesNotMatch(source, /departmentName/, path)

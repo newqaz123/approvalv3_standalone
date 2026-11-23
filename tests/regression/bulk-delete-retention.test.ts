@@ -21,7 +21,9 @@ it('bulk delete by date archives rows instead of soft-deleting them', () => {
   assert.match(body, /isDeleted: false,\n\s+isArchived: false,\n\s+\},\n\s+data: \{\n\s+isArchived: true/)
 
   // Dialog points at retention and speaks archive
-  assert.match(dialog, /\/admin\/retention/)
+  assert.match(dialog, /t\('requests\.archiveRestoreHelp'\)/)
+  const catalog = readFileSync('src/lib/i18n/catalogs/requests.ts', 'utf8')
+  assert.match(catalog, /requests\.archiveRestoreHelp[^\n]*\/admin\/retention/)
   assert.doesNotMatch(dialog, /\/admin\/deleted-requests/)
   assert.doesNotMatch(dialog, /soft delete/i)
   assert.doesNotMatch(dialog, /Soft delete/i)

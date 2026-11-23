@@ -26,12 +26,12 @@ describe("ApproverSearchField", () => {
 	it("exposes an accessible search field with live result count", () => {
 		const source = read("src/components/approvals/approver-search-field.tsx");
 
-		assert.match(source, /Search approvers/);
-		assert.match(source, /Search by name, email, department, role, or level/);
+		assert.match(source, /t\('requests\.searchApprovers'\)/);
+		assert.match(source, /t\('requests\.searchApproversHint'\)/);
 		assert.match(source, /role="status"/);
 		assert.match(source, /aria-live="polite"/);
-		assert.match(source, /1 approver/);
-		assert.match(source, /approvers/);
+		assert.match(source, /resultCount === 1 \? t\('requests\.oneApprover'\)/);
+		assert.match(source, /t\('requests\.approverCount', \{ count: resultCount \}\)/);
 		assert.match(source, /min-h-(?:11|\[44px\])/);
 		assert.match(source, /focus-visible:/);
 	});
@@ -94,15 +94,15 @@ describe("CustomApprovalPicker search", () => {
 		assert.match(source, /onOpenChange=\{handleOpenChange\}/);
 		assert.match(
 			source,
-			/<CommandList className="max-h-\[260px\] overflow-y-auto">\s*\{availableUsers\.length > 0 && filteredUsers\.length === 0 && \(\s*<CommandEmpty>No approvers found<\/CommandEmpty>\s*\)\}\s*<CommandGroup/,
+			/<CommandList className="max-h-\[260px\] overflow-y-auto">\s*\{availableUsers\.length > 0 && filteredUsers\.length === 0 && \(\s*<CommandEmpty>\{t\('requests\.noApprovers'\)\}<\/CommandEmpty>\s*\)\}\s*<CommandGroup/,
 		);
 	});
 
 	it("distinguishes a search miss from exhausted selection", () => {
-		assert.match(source, /<CommandEmpty>No approvers found<\/CommandEmpty>/);
+		assert.match(source, /<CommandEmpty>\{t\('requests\.noApprovers'\)\}<\/CommandEmpty>/);
 		assert.match(
 			source,
-			/availableUsers\.length === 0 && \(\s*<p className="text-xs text-muted-foreground">No more users available<\/p>\s*\)/,
+			/availableUsers\.length === 0 && \(\s*<p className="text-xs text-muted-foreground">\{t\('requests\.noMoreUsers'\)\}<\/p>\s*\)/,
 		);
 		assert.match(
 			source,
@@ -110,7 +110,7 @@ describe("CustomApprovalPicker search", () => {
 		);
 		assert.match(
 			source,
-			/availableUsers\.length > 0 && filteredUsers\.length === 0 && \(\s*<CommandEmpty>No approvers found<\/CommandEmpty>\s*\)/,
+			/availableUsers\.length > 0 && filteredUsers\.length === 0 && \(\s*<CommandEmpty>\{t\('requests\.noApprovers'\)\}<\/CommandEmpty>\s*\)/,
 		);
 		assert.doesNotMatch(source, /No users found\./);
 	});
@@ -159,8 +159,8 @@ function assertLiveModalPicker(path: string, harnessName: string) {
 	assert.match(source, /data-picker-open/);
 	assert.match(source, /data-picker-root/);
 	assert.match(source, /data-picker-item/);
-	assert.match(source, /No approvers found/);
-	assert.match(source, /No more users available/);
+	assert.match(source, /t\('requests\.noApprovers'\)/);
+	assert.match(source, /t\('requests\.noMoreUsers'\)/);
 	assert.match(source, /max-h-\[260px\] overflow-y-auto/);
 	assert.match(source, /const setPickerOpen = \(nextOpen: boolean\)/);
 	assert.match(source, /requestAnimationFrame/);
@@ -169,7 +169,7 @@ function assertLiveModalPicker(path: string, harnessName: string) {
 	assert.match(source, /onClick=\{\(\) => setPickerOpen\(false\)\}/);
 	assert.match(
 		source,
-		/unselectedUsers\.length === 0 \? \([\s\S]*No more users available[\s\S]*\) : filteredUsers\.length === 0 \? \([\s\S]*No approvers found[\s\S]*\) : \(/,
+		/unselectedUsers\.length === 0 \? \([\s\S]*t\('requests\.noMoreUsers'\)[\s\S]*\) : filteredUsers\.length === 0 \? \([\s\S]*t\('requests\.noApprovers'\)[\s\S]*\) : \(/,
 	);
 	assert.match(
 		source,
@@ -241,11 +241,11 @@ describe("Legacy solution modal CustomApprovalPicker search", () => {
 		assert.match(source, /data-picker-root/);
 		assert.match(source, /data-picker-item/);
 		assert.match(source, /resultCount=\{filteredUsers\.length\}/);
-		assert.match(source, /No more users available/);
-		assert.match(source, /No approvers found/);
+		assert.match(source, /t\('requests\.noMoreUsers'\)/);
+		assert.match(source, /t\('requests\.noApprovers'\)/);
 		assert.match(
 			source,
-			/availableUsers\.length === 0[\s\S]*No more users available[\s\S]*filteredUsers\.length === 0[\s\S]*No approvers found[\s\S]*filteredUsers\.map/,
+			/availableUsers\.length === 0[\s\S]*t\('requests\.noMoreUsers'\)[\s\S]*filteredUsers\.length === 0[\s\S]*t\('requests\.noApprovers'\)[\s\S]*filteredUsers\.map/,
 		);
 		assert.match(source, /max-h-\[260px\] overflow-y-auto/);
 		assert.match(source, /user\.email/);

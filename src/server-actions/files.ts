@@ -1,5 +1,6 @@
 'use server'
 
+import type { MessageKey } from '@/lib/i18n/messages'
 import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
@@ -174,7 +175,7 @@ export async function uploadFileAction(
   const { user: _authUser } = (await auth()) ?? {}; const userId = _authUser?.id
 
   if (!userId) {
-    return { success: false, error: 'Unauthorized' }
+    return { success: false, error: 'Unauthorized', errorKey: 'requests.error.permission' as const satisfies MessageKey }
   }
 
   const file = formData.get('file') as File | null
@@ -182,7 +183,7 @@ export async function uploadFileAction(
   const description = formData.get('description') as string | null
 
   if (!file || !requestId) {
-    return { success: false, error: 'File and requestId are required' }
+    return { success: false, error: 'File and requestId are required', errorKey: 'requests.error.fileRequired' as const satisfies MessageKey }
   }
 
   // Validate file size and type using the shared attachment policy
@@ -192,7 +193,7 @@ export async function uploadFileAction(
     size: file.size,
   })
   if (policyError) {
-    return { success: false, error: policyError }
+    return { success: false, error: policyError, errorKey: 'requests.error.attachmentMetadata' as const satisfies MessageKey }
   }
 
   const dbRequest = await prisma.requests.findUnique({
@@ -201,17 +202,17 @@ export async function uploadFileAction(
   })
 
   if (!dbRequest) {
-    return { success: false, error: 'Request not found' }
+    return { success: false, error: 'Request not found', errorKey: 'requests.error.notFoundOrNoAccess' as const satisfies MessageKey }
   }
 
   if (!(await canUserViewRequest(userId, requestId, { includeEngineeringViewAll: false }))) {
-    return { success: false, error: 'Not authorized to upload to this request' }
+    return { success: false, error: 'Not authorized to upload to this request', errorKey: 'requests.error.permission' as const satisfies MessageKey }
   }
 
   const visibilityDb = createRequestVisibilityDb(prisma)
   const actor = await visibilityDb.findActor(userId)
   if (!actor || !actor.isActive) {
-    return { success: false, error: 'Not authorized to upload to this request' }
+    return { success: false, error: 'Not authorized to upload to this request', errorKey: 'requests.error.permission' as const satisfies MessageKey }
   }
   const units = await loadOrganizationUnitNodes()
   const isRequester = dbRequest.requesterId === userId
@@ -241,7 +242,7 @@ export async function uploadFileAction(
     },
   })
   if (!uploadAction.allowed) {
-    return { success: false, error: 'Not authorized to upload to this request' }
+    return { success: false, error: 'Not authorized to upload to this request', errorKey: 'requests.error.permission' as const satisfies MessageKey }
   }
 
   const bytes = Buffer.from(await file.arrayBuffer())
@@ -254,7 +255,7 @@ export async function uploadFileAction(
     })
   } catch (error) {
     console.warn('[uploadFileAction] Failed to optimize image attachment', error)
-    return { success: false, error: 'Unable to process image' }
+    return { success: false, error: 'Unable to process image', errorKey: 'requests.error.imageProcessing' as const satisfies MessageKey }
   }
 
   // Persist the attachment through the private storage layer. The stored path

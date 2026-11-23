@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from '@/lib/i18n/client'
 import { KeyboardEvent, useEffect, useMemo, useState } from "react";
 import { NeedsActionList, NeedsActionListProps } from "./needs-action-list";
 import { EngineerPicPicker } from "./engineer-pic-picker";
@@ -75,6 +76,7 @@ export function EngineeringDashboardTabs({
 	subTaskStages,
 	subContractors,
 }: EngineeringDashboardTabsProps) {
+	const t = useTranslations();
 	const [activeTab, setActiveTab] = useState<"needs-action" | "all">(
 		"needs-action",
 	);
@@ -92,7 +94,7 @@ export function EngineeringDashboardTabs({
 								: "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
 						}`}
 					>
-						Needs My Action
+						{t('requests.needsMyAction')}
 					</button>
 					<button
 						onClick={() => setActiveTab("all")}
@@ -102,7 +104,7 @@ export function EngineeringDashboardTabs({
 								: "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
 						}`}
 					>
-						Follow up work
+						{t('requests.followUpWork')}
 					</button>
 				</nav>
 			</div>
@@ -164,6 +166,7 @@ function AllEngineeringRequests({
 	}>;
 	currentUserId: string;
 }) {
+	const t = useTranslations();
 	const [selectedRequestId, setSelectedRequestId] = useState<string | null>(
 		null,
 	);
@@ -219,14 +222,14 @@ function AllEngineeringRequests({
 		subContractorIds.length >= 3 ? [] : selectedSubContractors;
 	const collapsedSubContractorChip =
 		subContractorIds.length >= 3
-			? `${selectedSubContractors.length} subcontractors`
+			? t('requests.subcontractorCount', { count: selectedSubContractors.length })
 			: null;
 	const subContractorButtonLabel =
 		selectedSubContractors.length === 1
 			? selectedSubContractors[0].name
 			: selectedSubContractors.length > 1
-				? "Subcontractor"
-				: "Add";
+				? t('requests.subcontractor')
+				: t('requests.add');
 	const hasActiveFilters =
 		selectedStage !== null ||
 		subContractorIds.length > 0 ||
@@ -381,7 +384,7 @@ function AllEngineeringRequests({
 					className="flex flex-wrap items-center gap-2"
 				>
 					<span className="mr-1 text-sm font-semibold text-gray-500">
-						Stage
+						{t('requests.stage')}
 					</span>
 					{subTaskStages.map((stage) => (
 						<FilterChip
@@ -398,7 +401,7 @@ function AllEngineeringRequests({
 					<FilterSeparator />
 
 					<span className="mx-1 text-sm font-semibold text-gray-500">
-						Sub-contractor
+						{t('requests.subContractor')}
 					</span>
 					{visibleSubContractorChips.map((subContractor) => (
 						<Badge
@@ -408,7 +411,7 @@ function AllEngineeringRequests({
 							{subContractor.name}
 							<button
 								type="button"
-								aria-label={`Remove ${subContractor.name} subcontractor filter`}
+								aria-label={t('requests.removeSubcontractorFilter', { name: subContractor.name })}
 								onClick={() => removeSubContractorFilter(subContractor.id)}
 								className="rounded-full text-blue-500 hover:text-blue-700"
 							>
@@ -421,7 +424,7 @@ function AllEngineeringRequests({
 							{collapsedSubContractorChip}
 							<button
 								type="button"
-								aria-label="Clear subcontractor filters"
+								aria-label={t('requests.clearSubcontractorFilters')}
 								onClick={clearSubContractorFilter}
 								className="rounded-full text-blue-500 hover:text-blue-700"
 							>
@@ -438,7 +441,7 @@ function AllEngineeringRequests({
 								type="button"
 								variant="outline"
 								role="combobox"
-								aria-label="Subcontractor filter"
+								aria-label={t('requests.subcontractorFilter')}
 								aria-expanded={subContractorFilterOpen}
 								className="h-8 gap-2 rounded-full border-dashed bg-white px-3 text-xs font-semibold text-gray-600 hover:bg-gray-50"
 							>
@@ -458,7 +461,7 @@ function AllEngineeringRequests({
 								<CommandInput
 									value={subContractorQuery}
 									onValueChange={setSubContractorQuery}
-									placeholder="Search subcontractor"
+									placeholder={t('requests.searchSubcontractor')}
 								/>
 								<CommandList>
 									<CommandGroup>
@@ -475,7 +478,7 @@ function AllEngineeringRequests({
 													checked={selectedSubContractorIdSet.has(
 														subContractor.id,
 													)}
-													aria-label={`${subContractor.name} subcontractor filter`}
+													aria-label={t('requests.namedSubcontractorFilter', { name: subContractor.name })}
 													tabIndex={-1}
 													className="h-4 w-4"
 												/>
@@ -484,7 +487,7 @@ function AllEngineeringRequests({
 										))}
 									</CommandGroup>
 									{filteredSubContractors.length === 0 && (
-										<CommandEmpty>No subcontractors found</CommandEmpty>
+										<CommandEmpty>{t('requests.noSubcontractors')}</CommandEmpty>
 									)}
 								</CommandList>
 								<div className="border-t p-2">
@@ -496,7 +499,7 @@ function AllEngineeringRequests({
 										className="h-8 w-full justify-center text-xs font-semibold text-gray-600"
 										disabled={subContractorIds.length === 0}
 									>
-										Clear
+										{t('requests.clear')}
 									</Button>
 								</div>
 							</Command>
@@ -506,7 +509,7 @@ function AllEngineeringRequests({
 					<FilterSeparator />
 
 					<span className="mx-1 text-sm font-semibold text-gray-500">
-						Stale
+						{t('requests.stale')}
 					</span>
 					<Popover open={staleFilterOpen} onOpenChange={setStaleFilterOpen}>
 						<PopoverTrigger asChild>
@@ -514,12 +517,12 @@ function AllEngineeringRequests({
 								type="button"
 								variant="outline"
 								className="h-8 gap-2 rounded-full bg-white px-3 text-xs font-semibold text-gray-600 hover:bg-gray-50"
-								aria-label="Last update > X days"
+								aria-label={t('requests.lastUpdateFilter')}
 							>
 								<Clock className="h-3.5 w-3.5" />
 								{selectedStalePreset
-									? `>${selectedStalePreset} days`
-									: "Any date"}
+									? t('requests.olderThan', { count: selectedStalePreset })
+									: t('requests.anyDate')}
 								{!selectedStalePreset && (
 									<ChevronsUpDown className="h-3.5 w-3.5 opacity-60" />
 								)}
@@ -534,7 +537,7 @@ function AllEngineeringRequests({
 										setStaleFilterOpen(false);
 									}}
 								>
-									Any update
+									{t('requests.anyUpdate')}
 								</FilterMenuItem>
 								{STALE_DAY_PRESETS.map((days) => (
 									<FilterMenuItem
@@ -546,9 +549,9 @@ function AllEngineeringRequests({
 										}}
 									>
 										<span className="flex flex-col items-start leading-tight">
-											<span>&gt;{days} days</span>
+											<span>{t('requests.olderThan', { count: days })}</span>
 											<span className="text-xs font-normal text-gray-500">
-												No update &gt; {days} days
+												{t('requests.noUpdateFor', { count: days })}
 											</span>
 										</span>
 									</FilterMenuItem>
@@ -560,7 +563,7 @@ function AllEngineeringRequests({
 					<FilterSeparator />
 
 					<span className="mx-1 text-sm font-semibold text-gray-500">
-						Engineer PIC
+						{t('requests.engineerPic')}
 					</span>
 					<FilterChip
 						active={selectedEngineer === ENGINEER_UNASSIGNED_FILTER}
@@ -572,7 +575,7 @@ function AllEngineeringRequests({
 							)
 						}
 					>
-						Unassigned
+						{t('requests.unassigned')}
 					</FilterChip>
 					{engineeringUsers.map((engineer) => (
 						<FilterChip
@@ -598,7 +601,7 @@ function AllEngineeringRequests({
 								onClick={clearAllFilters}
 								className="h-8 rounded-full px-3 text-xs font-semibold text-gray-600 hover:bg-white"
 							>
-								Clear all
+								{t('requests.clearAllLower')}
 							</Button>
 						</>
 					)}
@@ -610,14 +613,12 @@ function AllEngineeringRequests({
 					<p className="mb-4 flex items-center gap-2 rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-800">
 						<Info className="h-4 w-4 shrink-0" />
 						<span>
-							This table does not show completed requests, including work with
-							WR received and every sub-task checked complete, or cancelled
-							work.
+							{t('requests.queueExclusions')}
 						</span>
 					</p>
 					{filteredRequests.length === 0 ? (
 						<div className="text-center text-gray-500 py-8">
-							No engineering requests found
+							{t('requests.noEngineeringRequests')}
 						</div>
 					) : (
 						<div className="space-y-8">
@@ -628,17 +629,16 @@ function AllEngineeringRequests({
 											Sent to Engineer
 										</h2>
 										<p className="text-sm text-gray-500">
-											Needs an engineering solution before approval can
-											continue.
+											{t('requests.needsEngineeringSolution')}
 										</p>
 									</div>
 									<span className="rounded-full border border-gray-200 px-2.5 py-1 text-xs font-semibold text-gray-500">
-										{sentToEngineerRequests.length} open
+										{t('requests.openCount', { count: sentToEngineerRequests.length })}
 									</span>
 								</div>
 								{visibleSentToEngineer.length === 0 ? (
 									<div className="rounded-lg border border-dashed py-6 text-center text-sm text-gray-500">
-										No requests awaiting a solution
+										{t('requests.noneAwaitingSolution')}
 									</div>
 								) : (
 									<div className="space-y-2">
@@ -670,7 +670,7 @@ function AllEngineeringRequests({
 											)
 										}
 									>
-										Show {sentToEngineerHiddenCount} more in Sent to Engineer
+										{t('requests.showMoreEngineer', { count: sentToEngineerHiddenCount })}
 									</Button>
 								)}
 							</section>
@@ -679,20 +679,19 @@ function AllEngineeringRequests({
 								<div className="flex items-end justify-between gap-3">
 									<div>
 										<h2 className="text-lg font-semibold text-gray-900">
-											Follow-up work
+											{t('requests.followUpHeading')}
 										</h2>
 										<p className="text-sm text-gray-500">
-											Sent back or final approval is still open because WR or a
-											sub-task is incomplete.
+											{t('requests.followUpHelp')}
 										</p>
 									</div>
 									<span className="rounded-full border border-gray-200 px-2.5 py-1 text-xs font-semibold text-gray-500">
-										{followUpRequests.length} open
+										{t('requests.openCount', { count: followUpRequests.length })}
 									</span>
 								</div>
 								{visibleFollowUp.length === 0 ? (
 									<div className="rounded-lg border border-dashed py-6 text-center text-sm text-gray-500">
-										No follow-up work found
+										{t('requests.noneFollowingUp')}
 									</div>
 								) : (
 									<div className="space-y-2">
@@ -723,7 +722,7 @@ function AllEngineeringRequests({
 											)
 										}
 									>
-										Show {followUpHiddenCount} more in Follow-up work
+										{t('requests.showMoreFollowUp', { count: followUpHiddenCount })}
 									</Button>
 								)}
 							</section>
@@ -788,6 +787,7 @@ function FollowUpRequestRow({
 	formatCreatedDate: (value: Date | string) => string;
 	formatLastUpdate: (value: Date | string) => string;
 }) {
+	const t = useTranslations();
 	const summary = getSubTaskSummary(request.subTasks);
 	// Hover never fires on touch: the progress row also toggles an inline
 	// sub-task list below md.
@@ -837,7 +837,7 @@ function FollowUpRequestRow({
 						)}
 						{request.workRequisitionReceived && (
 							<Badge className="shrink-0 border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-50">
-								WR Received
+								{t('requests.wrReceivedShort')}
 							</Badge>
 						)}
 					</div>
@@ -847,9 +847,9 @@ function FollowUpRequestRow({
 					>
 						{formatCreatedDate(request.createdAt)}
 						{" · "}
-						{request.department?.name || "No department"}
+						{request.department?.name || t('account.noDepartment')}
 						{" · "}
-						{request.requester?.name || "Unknown"}
+						{request.requester?.name || t('requests.unknown')}
 					</p>
 				</div>
 				<div className="flex w-full flex-col items-start gap-2 md:w-auto md:flex-row md:items-center md:shrink-0">
@@ -870,7 +870,7 @@ function FollowUpRequestRow({
 								onSubmitSolution(request.id);
 							}}
 						>
-							{request.hasRejection ? "Resubmit solution" : "Submit solution"}
+							{request.hasRejection ? t('requests.resubmitSolutionLower') : t('requests.submitSolutionLower')}
 						</Button>
 					)}
 				</div>
@@ -881,7 +881,7 @@ function FollowUpRequestRow({
 						type="button"
 						data-testid="follow-up-request-progress"
 						className="group/progress mt-4 flex w-full items-center gap-3 rounded-md px-0 text-left transition-colors"
-						aria-label={`Sub-task progress ${summary.completed} of ${summary.total} completed`}
+						aria-label={t('requests.subTaskProgress', { done: summary.completed, total: summary.total })}
 						aria-expanded={subTasksOpen}
 						onClick={(event) => {
 							event.stopPropagation();
@@ -894,7 +894,7 @@ function FollowUpRequestRow({
 						/>
 						<span className="shrink-0 text-sm text-gray-400">
 							{summary.total === 0
-								? "No subtasks"
+								? t('requests.noSubtasksCompact')
 								: `${summary.completed}/${summary.total}`}
 						</span>
 					</button>
@@ -934,7 +934,7 @@ function FollowUpRequestRow({
 					))}
 					{hiddenSubContractorCount > 0 && (
 						<span className="rounded-full border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-500">
-							+{hiddenSubContractorCount} more
+							+{t('requests.moreCount', { count: hiddenSubContractorCount })}
 						</span>
 					)}
 				</div>
@@ -950,15 +950,16 @@ function SubTaskList({
 	subTasks: FollowUpRequest["subTasks"];
 	formatLastUpdate: (value: Date | string) => string;
 }) {
+	const t = useTranslations();
 	return (
 		<div className="space-y-2">
 			<p className="text-sm font-semibold text-gray-900">
-				Sub-task items
+				{t('requests.subTaskItems')}
 			</p>
 			<div className="max-h-72 overflow-y-auto space-y-2 pr-1">
 				{subTasks.length === 0 ? (
 					<div className="rounded-md border border-dashed p-3 text-sm text-gray-500">
-						No sub-tasks yet
+						{t('requests.noSubTasks')}
 					</div>
 				) : (
 					subTasks.map((subTask) => {
@@ -983,7 +984,7 @@ function SubTaskList({
 												? "bg-emerald-100 text-emerald-700 hover:bg-emerald-100"
 												: "bg-gray-100 text-gray-600 hover:bg-gray-100",
 										)}
-										aria-label="Stage badge"
+										aria-label={t('requests.stageBadge')}
 									>
 										{stageName}
 									</Badge>
@@ -1000,8 +1001,8 @@ function SubTaskList({
 										{subTask.isCompleted ? "Completed" : "Not completed"}
 									</span>
 									{" • "}
-									{subTask.subContractor?.name ?? "No subcontractor"} •
-									Last update {formatLastUpdate(subTask.updatedAt)}
+									{subTask.subContractor?.name ?? t('requests.noSubcontractor')}{' • '}
+									{t('requests.lastUpdate', { date: formatLastUpdate(subTask.updatedAt) })}
 								</p>
 							</div>
 						);

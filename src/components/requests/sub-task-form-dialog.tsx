@@ -1,5 +1,6 @@
 'use client'
 
+import { useTranslations } from '@/lib/i18n/client'
 import { useEffect, useMemo, useState } from 'react'
 import { Check, ChevronsUpDown, Pencil, Plus } from 'lucide-react'
 import {
@@ -70,6 +71,7 @@ export function SubTaskFormDialog({
   onChanged,
   className,
 }: SubTaskFormDialogProps) {
+  const t = useTranslations()
   const [open, setOpen] = useState(false)
   const [description, setDescription] = useState('')
   const [stageId, setStageId] = useState('')
@@ -124,7 +126,7 @@ export function SubTaskFormDialog({
     setAddingSubContractor(false)
 
     if (!result.success) {
-      setError(result.error)
+      setError(t(result.errorKey ?? 'requests.error.createSubcontractor'))
       return
     }
 
@@ -162,7 +164,7 @@ export function SubTaskFormDialog({
     setSubmitting(false)
 
     if (!result.success) {
-      setError(result.error)
+      setError(t(result.errorKey ?? 'requests.error.updateSubTask'))
       return
     }
 
@@ -177,15 +179,15 @@ export function SubTaskFormDialog({
           type="button"
           size={task ? 'icon' : 'sm'}
           variant={task ? 'ghost' : 'outline'}
-          aria-label={task ? 'Edit sub-task' : undefined}
-          title={task ? 'Edit sub-task' : undefined}
+          aria-label={task ? t('requests.editSubTask') : undefined}
+          title={task ? t('requests.editSubTask') : undefined}
           className={cn(task ? 'h-8 w-8' : 'gap-2', className)}
         >
           {task ? <Pencil className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
           {task ? (
-            <span className="sr-only">Edit sub-task</span>
+            <span className="sr-only">{t('requests.editSubTask')}</span>
           ) : (
-            <span>Add sub-task</span>
+            <span>{t('requests.addSubTask')}</span>
           )}
         </Button>
       </DialogTrigger>
@@ -194,30 +196,30 @@ export function SubTaskFormDialog({
         data-testid={task ? 'edit-sub-task-dialog' : 'add-sub-task-dialog'}
       >
         <DialogHeader>
-          <DialogTitle>{task ? 'Edit sub-task' : 'Add sub-task'}</DialogTitle>
+          <DialogTitle>{task ? t('requests.editSubTask') : t('requests.addSubTask')}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
           <div className="space-y-2">
             <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-              Description
+              {t('requests.description')}
             </label>
             <Textarea
               value={description}
               onChange={(event) => setDescription(event.target.value)}
               rows={3}
-              placeholder="Describe the engineering follow-up work"
+              placeholder={t('requests.subTaskDescriptionHint')}
             />
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                Stage
+                {t('requests.stage')}
               </label>
               <Select value={stageId} onValueChange={setStageId}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Select stage" />
+                  <SelectValue placeholder={t('requests.selectStage')} />
                 </SelectTrigger>
                 <SelectContent>
                   {stages.map((stage) => (
@@ -231,7 +233,7 @@ export function SubTaskFormDialog({
 
             <div className="space-y-2">
               <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                Subcontractor
+                {t('requests.subcontractor')}
               </label>
               <Popover open={subContractorOpen} onOpenChange={setSubContractorOpen}>
                 <PopoverTrigger asChild>
@@ -239,12 +241,12 @@ export function SubTaskFormDialog({
                     type="button"
                     variant="outline"
                     role="combobox"
-                    aria-label="Subcontractor"
+                    aria-label={t('requests.subcontractor')}
                     aria-expanded={subContractorOpen}
                     className="w-full justify-between font-normal"
                   >
                     <span className="truncate">
-                      {selectedSubContractor?.name ?? 'No subcontractor'}
+                      {selectedSubContractor?.name ?? t('requests.noSubcontractor')}
                     </span>
                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                   </Button>
@@ -255,7 +257,7 @@ export function SubTaskFormDialog({
                       value={subContractorSearch}
                       onValueChange={setSubContractorSearch}
                       onKeyDown={handleSubContractorKeyDown}
-                      placeholder="Search or add subcontractor"
+                      placeholder={t('requests.searchOrAddSubcontractor')}
                     />
                     <CommandList>
                       <CommandGroup>
@@ -268,7 +270,7 @@ export function SubTaskFormDialog({
                           }}
                         >
                           <Check className={cn('h-4 w-4', subContractorId === NO_SUBCONTRACTOR ? 'opacity-100' : 'opacity-0')} />
-                          No subcontractor
+                          {t('requests.noSubcontractor')}
                         </CommandItem>
                         {filteredSubContractors.map((subcontractor) => (
                           <CommandItem
@@ -291,12 +293,12 @@ export function SubTaskFormDialog({
                             disabled={addingSubContractor}
                           >
                             <Plus className="h-4 w-4" />
-                            Add &quot;{subContractorSearch.trim()}&quot;
+                            {t('requests.addNamed', { name: subContractorSearch.trim() })}
                           </CommandItem>
                         )}
                       </CommandGroup>
                       {filteredSubContractors.length === 0 && !canAddSubContractor && (
-                        <CommandEmpty>No subcontractors found</CommandEmpty>
+                        <CommandEmpty>{t('requests.noSubcontractors')}</CommandEmpty>
                       )}
                     </CommandList>
                   </Command>
@@ -308,12 +310,12 @@ export function SubTaskFormDialog({
           {selectedStage?.isOthers && (
             <div className="space-y-2">
               <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                Custom stage text
+                {t('requests.customStage')}
               </label>
               <Input
                 value={customStageText}
                 onChange={(event) => setCustomStageText(event.target.value)}
-                placeholder="Type the custom stage"
+                placeholder={t('requests.customStageHint')}
               />
             </div>
           )}
@@ -325,7 +327,7 @@ export function SubTaskFormDialog({
 
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => setOpen(false)}>
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button
             type="button"
@@ -333,7 +335,7 @@ export function SubTaskFormDialog({
             disabled={submitting || !description.trim() || !stageId || (selectedStage?.isOthers && !customStageText.trim())}
             data-testid={task ? 'edit-sub-task-save' : 'add-sub-task-save'}
           >
-            {submitting ? 'Saving...' : 'Save'}
+            {submitting ? t('common.saving') : t('requests.save')}
           </Button>
         </DialogFooter>
       </DialogContent>

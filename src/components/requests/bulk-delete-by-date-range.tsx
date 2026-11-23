@@ -1,5 +1,6 @@
 'use client'
 
+import { useTranslations } from '@/lib/i18n/client'
 import { useState, useEffect } from 'react'
 import { useSession } from 'next-auth/react'
 import { Archive, AlertTriangle, Calendar, Search } from 'lucide-react'
@@ -18,6 +19,7 @@ import { bulkDeleteRequestsByDateRange } from '@/server-actions/requests'
 import { useRouter } from 'next/navigation'
 
 export function BulkDeleteByDateRange() {
+  const t = useTranslations()
   const { data: session } = useSession(); const user = session?.user
   const router = useRouter()
   const [open, setOpen] = useState(false)
@@ -53,7 +55,7 @@ export function BulkDeleteByDateRange() {
     setPreview(null)
 
     if (!dateFrom || !dateTo) {
-      setError('Please select both from and to dates')
+      setError(t('requests.selectBothDates'))
       return
     }
 
@@ -73,10 +75,10 @@ export function BulkDeleteByDateRange() {
         })
         setShowConfirm(true)
       } else {
-        setError(result.error || 'Failed to preview requests')
+        setError(t('requests.error.archivePreview'))
       }
     } catch (err) {
-      setError('An error occurred while previewing requests')
+      setError(t('requests.error.archivePreviewUnexpected'))
     } finally {
       setIsPreviewing(false)
     }
@@ -87,7 +89,7 @@ export function BulkDeleteByDateRange() {
     setError(null)
 
     if (confirmText !== 'ARCHIVE') {
-      setError('Please type "ARCHIVE" to confirm')
+      setError(t('requests.archiveConfirmationRequired'))
       return
     }
 
@@ -104,10 +106,10 @@ export function BulkDeleteByDateRange() {
         setOpen(false)
         router.refresh()
       } else {
-        setError(result.error || 'Failed to delete requests')
+        setError(t('requests.error.bulkArchive'))
       }
     } catch (err) {
-      setError('An error occurred while deleting requests')
+      setError(t('requests.error.bulkArchiveUnexpected'))
     } finally {
       setIsSubmitting(false)
     }
@@ -118,21 +120,21 @@ export function BulkDeleteByDateRange() {
       <DialogTrigger asChild>
         <Button variant="outline" size="sm">
           <Archive className="h-4 w-4 mr-1" />
-          Bulk Archive by Date
+          {t('requests.bulkArchiveByDate')}
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Archive className="h-5 w-5" />
-            Bulk Archive Requests by Date
+            {t('requests.bulkArchiveTitle')}
           </DialogTitle>
           <DialogDescription className="space-y-2">
             <span className="block">
-              Archive multiple requests that were created within a specific date range.
+              {t('requests.bulkArchiveHelp')}
             </span>
             <span className="block font-semibold text-amber-600 dark:text-amber-400">
-              ⚠️ This will archive requests — hidden from lists, reversible on Retention.
+              {t('requests.bulkArchiveWarning')}
             </span>
           </DialogDescription>
         </DialogHeader>
@@ -144,7 +146,7 @@ export function BulkDeleteByDateRange() {
               <div className="space-y-2">
                 <Label htmlFor="dateFrom">
                   <Calendar className="h-4 w-4 inline mr-1" />
-                  From Date (Created)
+                  {t('requests.createdFrom')}
                 </Label>
                 <input
                   id="dateFrom"
@@ -159,7 +161,7 @@ export function BulkDeleteByDateRange() {
               <div className="space-y-2">
                 <Label htmlFor="dateTo">
                   <Calendar className="h-4 w-4 inline mr-1" />
-                  To Date (Created)
+                  {t('requests.createdTo')}
                 </Label>
                 <input
                   id="dateTo"
@@ -174,9 +176,7 @@ export function BulkDeleteByDateRange() {
 
             <div className="bg-blue-50 border border-blue-200 rounded-md p-3 text-sm">
               <p className="text-blue-800">
-                This will find all requests created between{' '}
-                <strong>{dateFrom || 'start date'}</strong> and{' '}
-                <strong>{dateTo || 'end date'}</strong>.
+                {t('requests.archiveDateRange', { start: dateFrom || t('requests.startDate'), end: dateTo || t('requests.endDate') })}
               </p>
             </div>
 
@@ -193,7 +193,7 @@ export function BulkDeleteByDateRange() {
                 onClick={() => setOpen(false)}
                 disabled={isPreviewing}
               >
-                Cancel
+                {t('common.cancel')}
               </Button>
               <Button
                 type="submit"
@@ -203,13 +203,11 @@ export function BulkDeleteByDateRange() {
                 {isPreviewing ? (
                   <>
                     <Search className="h-4 w-4 mr-2 animate-spin" />
-                    Previewing...
-                  </>
+                    {t('requests.previewing')}</>
                 ) : (
                   <>
                     <Search className="h-4 w-4 mr-2" />
-                    Preview
-                  </>
+                    {t('requests.preview')}</>
                 )}
               </Button>
             </DialogFooter>
@@ -219,20 +217,20 @@ export function BulkDeleteByDateRange() {
           <form onSubmit={handleDelete} className="space-y-4">
             <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
               <h3 className="font-semibold text-blue-900 mb-2">
-                Found {preview?.count || 0} requests to archive:
+                {t('requests.archiveFound', { count: preview?.count || 0 })}
               </h3>
               <div className="max-h-60 overflow-y-auto space-y-2">
                 {preview?.requests.map((request: any, index: number) => (
                   <div key={request.id} className="text-sm bg-white p-2 rounded border">
                     <p className="font-medium">{index + 1}. {request.title}</p>
                     <p className="text-xs text-gray-600">
-                      Requester: {request.requester?.name} ({request.requester?.email})
+                      {t('requests.requesterColon')}{' '}{request.requester?.name} ({request.requester?.email})
                     </p>
                     <p className="text-xs text-gray-600">
-                      Status: {request.status}
+                      {t('requests.statusColon')}{' '}{request.status}
                     </p>
                     <p className="text-xs text-gray-600">
-                      Created: {new Date(request.createdAt).toLocaleString()}
+                      {t('requests.createdColon')}{' '}{new Date(request.createdAt).toLocaleString()}
                     </p>
                   </div>
                 ))}
@@ -241,16 +239,16 @@ export function BulkDeleteByDateRange() {
 
             <div className="bg-amber-50 border border-amber-200 rounded-md p-3">
               <p className="text-sm font-semibold text-amber-700 dark:text-amber-400">
-                ⚠️ Warning: This will archive {preview?.count || 0} requests!
+                {t('requests.archiveWarningCount', { count: preview?.count || 0 })}
               </p>
               <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
-                Requests will be hidden from normal lists and can be unarchived from /admin/retention
+                {t('requests.archiveRestoreHelp')}
               </p>
             </div>
 
             <div className="space-y-2">
               <Label>
-                Type &ldquo;ARCHIVE&rdquo; to confirm
+                {t('requests.archiveConfirmation')}
               </Label>
               <input
                 type="text"
@@ -275,13 +273,13 @@ export function BulkDeleteByDateRange() {
                 onClick={() => setShowConfirm(false)}
                 disabled={isSubmitting}
               >
-                Back
+                {t('requests.back')}
               </Button>
               <Button
                 type="submit"
                 disabled={isSubmitting || confirmText !== 'ARCHIVE'}
               >
-                {isSubmitting ? 'Archiving...' : `Archive ${preview?.count || 0} Requests`}
+                {isSubmitting ? t('requests.archiving') : t('requests.archiveCount', { count: preview?.count || 0 })}
               </Button>
             </DialogFooter>
           </form>

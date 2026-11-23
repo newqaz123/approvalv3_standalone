@@ -1,5 +1,7 @@
 "use client";
 
+import { translateActivityAction, type ModalActivityItem } from '@/lib/modal-data-adapters'
+import { useTranslations } from '@/lib/i18n/client'
 import { formatFileSize } from "@/lib/format-file-size";
 import { format } from "date-fns";
 import { Download, Eye, Info, Paperclip, TrendingUp, History, FileImage, FileSpreadsheet, File, FileText, Check, Activity, ChevronDown, ChevronUp, CheckCircle2, Package, Clock3, Shield } from "lucide-react";
@@ -38,13 +40,6 @@ interface FileAttachment {
 	description?: string;
 }
 
-interface ActivityItem {
-	id: string;
-	action: string;
-	user: string;
-	timestamp: string;
-	details?: string;
-}
 
 interface CompletedSolutionModalProps {
 	open: boolean;
@@ -73,7 +68,7 @@ interface CompletedSolutionModalProps {
 		};
 		requestFiles: FileAttachment[];
 		stages: ApprovalStage[];
-		activities: ActivityItem[];
+		activities: ModalActivityItem[];
 		lastModified: string;
 		sentToRequesterAt: string;
 		requesterName?: string;
@@ -140,8 +135,9 @@ function SubmittedAvatar({ initials }: { initials: string }) {
 function RetractableActivityTimeline({
 	activities,
 }: {
-	activities: ActivityItem[];
+	activities: ModalActivityItem[];
 }) {
+	const t = useTranslations();
 	const [expanded, setExpanded] = useState(false);
 
 	return (
@@ -153,7 +149,7 @@ function RetractableActivityTimeline({
 				<div className="flex items-center gap-2">
 					<Activity className="w-4 h-4 text-slate-500" />
 					<span className="text-sm font-bold text-slate-700 dark:text-slate-300">
-						Activity Timeline
+						{t('requests.activityTimeline')}
 					</span>
 					<span className="text-xs text-slate-400">({activities.length})</span>
 				</div>
@@ -178,7 +174,7 @@ function RetractableActivityTimeline({
 								<div className="flex items-start justify-between gap-2">
 									<div>
 										<p className="text-sm font-medium text-slate-900 dark:text-slate-100">
-											{activity.action}
+											{translateActivityAction(t, activity)}
 										</p>
 										{activity.details && (
 											<p className="text-xs text-slate-500 mt-0.5">
@@ -191,7 +187,7 @@ function RetractableActivityTimeline({
 									</span>
 								</div>
 								<p className="text-xs text-slate-500 mt-1">
-									by {activity.user}
+									{t('requests.activityActor', { name: activity.user })}
 								</p>
 							</div>
 						</div>
@@ -216,6 +212,7 @@ export function CompletedSolutionModal({
 	onPreviewSolutionFile,
 	subTasksElement,
 }: CompletedSolutionModalProps) {
+	const t = useTranslations();
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
 			<DialogContent className="max-w-5xl w-full max-h-[90vh] p-0 gap-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl rounded-xl overflow-hidden">
@@ -246,15 +243,14 @@ export function CompletedSolutionModal({
 							</div>
 							<div className="flex-1">
 								<h4 className="text-sm font-bold text-purple-900 dark:text-purple-400">
-									Solution Approved & Sent to Requester
+									{t('requests.solutionApprovedSent')}
 								</h4>
 								<p className="text-xs text-purple-600 dark:text-purple-300 mt-1">
-									Sent on{" "}
-									{format(new Date(data.sentToRequesterAt), "MMM d, yyyy")}
+									{t('requests.sentOn', { date: format(new Date(data.sentToRequesterAt), "MMM d, yyyy") })}
 								</p>
 								{data.requesterName && (
 									<p className="text-xs text-purple-700 dark:text-purple-300 mt-1">
-										Requester:{" "}
+										{t('requests.requesterColon')}{" "}
 										<span className="font-medium">{data.requesterName}</span>
 									</p>
 								)}
@@ -267,11 +263,11 @@ export function CompletedSolutionModal({
 						<div className="flex justify-between items-start mb-3">
 							<h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
 								<CheckCircle2 className="w-5 h-5 text-purple-600" />
-								Engineering Solution
+								{t('requests.engineeringSolution')}
 							</h3>
 							<div className="text-right">
 								<p className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-									Cost
+									{t('requests.cost')}
 								</p>
 								<p className="text-lg font-black text-slate-900 dark:text-slate-100">
 									{new Intl.NumberFormat("en-US", {
@@ -287,12 +283,12 @@ export function CompletedSolutionModal({
 						{data.solution.timeline && (
 							<div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400 mb-3">
 								<Clock3 className="w-4 h-4 text-slate-400" />
-								<span className="font-medium">Timeline:</span>
+								<span className="font-medium">{t('requests.timelineLabel')}</span>
 								<span>{data.solution.timeline}</span>
 							</div>
 						)}
 						<div className="flex items-center justify-between text-xs text-slate-500">
-							<span>Submitted by {data.solution.submittedBy}</span>
+							<span>{t('requests.submittedBy', { name: data.solution.submittedBy })}</span>
 							<span>
 								{format(new Date(data.solution.submittedAt), "MMM d, yyyy")}
 							</span>
@@ -303,7 +299,7 @@ export function CompletedSolutionModal({
 					<section>
 						<h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-3 flex items-center gap-2">
 							<Info className="w-4 h-4 text-slate-400" />
-							Original Request Description
+							{t('requests.originalDescription')}
 						</h3>
 						<div className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed bg-slate-50/70 dark:bg-slate-800/30 rounded-xl p-4 border border-slate-100 dark:border-slate-800">
 							<div>
@@ -316,14 +312,14 @@ export function CompletedSolutionModal({
 					<section>
 						<h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-3 flex items-center gap-2">
 							<Paperclip className="w-4 h-4 text-slate-400" />
-							Attached Documentation
+							{t('requests.attachedDocumentation')}
 						</h3>
 
 						{/* Request Attachments */}
 						{data.requestFiles.length > 0 && (
 							<div className="mb-4">
 								<h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
-									Request Attachments ({data.requestFiles.length})
+									{t('requests.requestAttachments', { count: data.requestFiles.length })}
 								</h4>
 								<div className="grid grid-cols-1 gap-2">
 									{data.requestFiles.map((file) => (
@@ -353,7 +349,7 @@ export function CompletedSolutionModal({
 												<button
 													onClick={() => onPreviewFile(file.id)}
 													className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition-colors"
-													title="Preview"
+													title={t('requests.preview')}
 												>
 													<Eye className="w-4 h-4" />
 												</button>
@@ -362,7 +358,7 @@ export function CompletedSolutionModal({
 												<button
 													onClick={() => onDownloadRequestFile(file.id)}
 													className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition-colors"
-													title="Download"
+													title={t('requests.download')}
 												>
 													<Download className="w-4 h-4" />
 												</button>
@@ -377,7 +373,7 @@ export function CompletedSolutionModal({
 						{data.solution.files.length > 0 && (
 							<div>
 								<h4 className="text-xs font-bold text-purple-600 uppercase tracking-wider mb-2">
-									Solution Attachments ({data.solution.files.length})
+									{t('requests.solutionAttachments', { count: data.solution.files.length })}
 								</h4>
 								<div className="grid grid-cols-1 gap-2">
 									{data.solution.files.map((file) => (
@@ -407,7 +403,7 @@ export function CompletedSolutionModal({
 												<button
 													onClick={() => onPreviewSolutionFile(file.id)}
 													className="p-2 text-slate-400 hover:text-purple-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition-colors"
-													title="Preview"
+													title={t('requests.preview')}
 												>
 													<Eye className="w-4 h-4" />
 												</button>
@@ -416,7 +412,7 @@ export function CompletedSolutionModal({
 												<button
 													onClick={() => onDownloadSolutionFile(file.id)}
 													className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition-colors"
-													title="Download"
+													title={t('requests.download')}
 												>
 													<Download className="w-4 h-4" />
 												</button>
@@ -434,7 +430,7 @@ export function CompletedSolutionModal({
 					<section>
 						<h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-4 flex items-center gap-2">
 							<TrendingUp className="w-5 h-5 text-slate-400" />
-							Approval Flow
+							{t('requests.approvalFlow')}
 						</h3>
 						<div className="flex flex-col gap-4">
 							{data.stages.map((stage) => (
@@ -445,14 +441,14 @@ export function CompletedSolutionModal({
 									<div className="w-full sm:w-28 shrink-0 pt-1 flex flex-row sm:flex-col justify-between sm:justify-start items-center sm:items-start border-b sm:border-b-0 border-slate-200 dark:border-slate-700 pb-2 sm:pb-0 mb-2 sm:mb-0">
 										<div>
 											<h4 className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-												Stage {stage.stageNumber}
+												{t('requests.stage')}{' '}{stage.stageNumber}
 											</h4>
 											<p className="text-xs text-slate-400 leading-tight mt-0.5">
 												{stage.stageName}
 											</p>
 											{stage.submittedBy && (
 												<p className="text-[10px] text-slate-400 leading-tight mt-1.5">
-													by {stage.submittedBy}
+													{t('requests.activityActor', { name: stage.submittedBy })}
 												</p>
 											)}
 											{stage.submittedAt && (
@@ -544,11 +540,11 @@ export function CompletedSolutionModal({
 					<div className="flex items-center gap-4">
 						<span className="flex items-center gap-1.5">
 							<CheckCircle2 className="w-3.5 h-3.5 text-purple-500" />
-							Solution Approved
+							{t('requests.solutionApproved')}
 						</span>
 						<span className="flex items-center gap-1.5">
 							<History className="w-3.5 h-3.5" />
-							Last Modified:{" "}
+							{t('requests.lastModified')}{" "}
 							{format(new Date(data.lastModified), "MMM d, yyyy")}
 						</span>
 					</div>
@@ -566,7 +562,7 @@ export function CompletedSolutionModal({
 								className="flex items-center gap-2 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold rounded-lg transition-colors"
 							>
 								<Shield className="w-4 h-4" />
-								Submit Final Approval
+								{t('requests.submitFinalShort')}
 							</button>
 						)}
 					</div>

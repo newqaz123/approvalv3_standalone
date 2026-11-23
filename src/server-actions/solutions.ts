@@ -1,5 +1,6 @@
 'use server'
 
+import type { MessageKey } from '@/lib/i18n/messages'
 import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
 import { RequestStatus, type Prisma } from '@prisma/client'
@@ -655,7 +656,7 @@ export async function approveSolution(solutionId: string, comments?: string, exp
     })
 
     if (request && isStaleData(request.updatedAt, expectedUpdatedAt)) {
-      return { success: false, stale: true, message: 'This request was updated by another user.' }
+      return { success: false, stale: true, message: 'This request was updated by another user.', errorKey: 'requests.error.approvalChanged' as const satisfies MessageKey }
     }
   }
 
@@ -750,7 +751,7 @@ export async function rejectSolution(solutionId: string, comments: string, expec
     })
 
     if (request && isStaleData(request.updatedAt, expectedUpdatedAt)) {
-      return { success: false, stale: true, message: 'This request was updated by another user.' }
+      return { success: false, stale: true, message: 'This request was updated by another user.', errorKey: 'requests.error.approvalChanged' as const satisfies MessageKey }
     }
   }
 
@@ -1204,7 +1205,7 @@ export async function approveFinalApproval(requestId: string, comments?: string,
     })
 
     if (request && isStaleData(request.updatedAt, expectedUpdatedAt)) {
-      return { success: false, stale: true, message: 'This request was updated by another user.' }
+      return { success: false, stale: true, message: 'This request was updated by another user.', errorKey: 'requests.error.approvalChanged' as const satisfies MessageKey }
     }
   }
 
@@ -1286,7 +1287,7 @@ export async function rejectFinalApproval(requestId: string, comments: string, e
     })
 
     if (request && isStaleData(request.updatedAt, expectedUpdatedAt)) {
-      return { success: false, stale: true, message: 'This request was updated by another user.' }
+      return { success: false, stale: true, message: 'This request was updated by another user.', errorKey: 'requests.error.approvalChanged' as const satisfies MessageKey }
     }
   }
 

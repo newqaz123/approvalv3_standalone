@@ -1,5 +1,7 @@
 'use client'
 
+import type { MessageKey } from '@/lib/i18n/messages'
+import { useTranslations } from '@/lib/i18n/client'
 import { useState } from 'react'
 import { formatDistanceToNow } from 'date-fns'
 import {
@@ -67,19 +69,20 @@ export function SubTasksSection({
   canManage,
   onChanged,
 }: SubTasksSectionProps) {
+  const t = useTranslations()
   const [isOpen, setIsOpen] = useState(false)
   const [pendingId, setPendingId] = useState<string | null>(null)
   const [pendingWr, setPendingWr] = useState(false)
   const summary = getSubTaskSummary(subTasks)
   const wrLabel = getWorkRequisitionLabel(workRequisitionReceived)
   const wrTooltip = workRequisitionReceived
-    ? 'Work requisition received'
-    : 'Work requisition not received'
+    ? t('requests.workRequisitionReceived')
+    : t('requests.workRequisitionNotReceived')
   const progressValue = summary.total === 0
     ? 0
     : Math.round((summary.completed / summary.total) * 100)
 
-  const runTaskAction = async (id: string, action: () => Promise<{ success: boolean; error?: string }>) => {
+  const runTaskAction = async (id: string, action: () => Promise<{ success: boolean; errorKey?: MessageKey }>) => {
     setPendingId(id)
     const result = await action()
     if (result.success) {
@@ -88,7 +91,7 @@ export function SubTasksSection({
       return
     }
     setPendingId(null)
-    toast.error(result.error || 'Failed to update sub-task')
+    toast.error(t(result.errorKey ?? 'requests.error.updateSubTask'))
   }
 
   const handleToggleWorkRequisition = async (received: boolean) => {
@@ -100,7 +103,7 @@ export function SubTasksSection({
       return
     }
     setPendingWr(false)
-    toast.error(result.error || 'Failed to update WR status')
+    toast.error(t(result.errorKey ?? 'requests.error.updateWr'))
   }
 
   return (
@@ -110,7 +113,7 @@ export function SubTasksSection({
           <ListChecks className="h-4 w-4 shrink-0 text-slate-500" />
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-center gap-2">
-              <p className="text-sm font-bold text-slate-800 dark:text-slate-200">Sub-tasks</p>
+              <p className="text-sm font-bold text-slate-800 dark:text-slate-200">{t('requests.subTasks')}</p>
               <Badge variant="secondary" className="h-6 rounded-md text-xs">
                 {summary.label}
               </Badge>
@@ -118,7 +121,7 @@ export function SubTasksSection({
             <Progress
               value={progressValue}
               className="mt-2 h-1.5 max-w-xs bg-slate-200 [&>div]:bg-emerald-500"
-              aria-label={`Sub-task progress ${summary.completed} of ${summary.total} completed`}
+              aria-label={t('requests.subTaskProgress', { done: summary.completed, total: summary.total })}
             />
           </div>
         </div>
@@ -148,7 +151,7 @@ export function SubTasksSection({
                 disabled={!canManage || pendingWr}
                 onCheckedChange={(checked) => handleToggleWorkRequisition(checked === true)}
               />
-              <span>Work requisition received</span>
+              <span>{t('requests.workRequisitionReceived')}</span>
             </label>
           </div>
 
@@ -157,7 +160,7 @@ export function SubTasksSection({
           {subTasks.length === 0 ? (
             <div className="flex items-center gap-2 rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500 dark:border-slate-800">
               <ClipboardCheck className="h-4 w-4" />
-              <span>No sub-tasks yet</span>
+              <span>{t('requests.noSubTasks')}</span>
             </div>
           ) : (
             <div className="space-y-3">
@@ -205,26 +208,26 @@ export function SubTasksSection({
                                 type="button"
                                 size="icon"
                                 variant="ghost"
-                                aria-label="Delete sub-task"
-                                title="Delete sub-task"
+                                aria-label={t('requests.deleteSubTask')}
+                                title={t('requests.deleteSubTask')}
                                 className="h-8 w-8 text-slate-400 hover:text-red-600"
                                 disabled={isPending}
                                 onClick={() => runTaskAction(task.id, () => deleteSubTask(task.id))}
                               >
                                 <Trash2 className="h-4 w-4" />
-                                <span className="sr-only">Delete</span>
+                                <span className="sr-only">{t('requests.delete')}</span>
                               </Button>
                             </div>
                           )}
                         </div>
 
                         <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                          <span>{task.subContractor?.name ?? 'No subcontractor'}</span>
+                          <span>{task.subContractor?.name ?? t('requests.noSubcontractor')}</span>
                           <Badge variant="secondary" className="rounded-md">
                             {stageText}
                           </Badge>
                           <span>
-                            Last edited by {task.updatedBy?.name ?? task.createdBy?.name ?? 'Unknown'}{' '}
+                            {t('requests.lastEditedBy', { name: task.updatedBy?.name ?? task.createdBy?.name ?? t('requests.unknown') })}{' '}
                             {formatDistanceToNow(new Date(task.updatedAt), { addSuffix: true })}
                           </span>
                         </div>

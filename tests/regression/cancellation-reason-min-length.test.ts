@@ -53,10 +53,10 @@ describe('cancellation reason minimum length (5 characters)', () => {
 
   it('shows persistent helper text "Minimum 5 characters." beneath the cancellation field', () => {
     const dialog = read('src/components/requests/cancel-request-dialog.tsx')
-    assert.match(dialog, /Minimum 5 characters\./)
+    assert.match(dialog, /t\('requests\.cancelReasonMinimum'\)/)
     // Persistent helper text lives in FormDescription (always rendered),
     // not only inside the error-gated FormMessage.
-    assert.match(dialog, /<FormDescription[^>]*>\s*Minimum 5 characters\./)
+    assert.match(dialog, /<FormDescription[^>]*>\s*\{t\('requests\.cancelReasonMinimum'\)\}/)
   })
 
   it('validates on change so 4 characters stay blocked and 5 enable submission', () => {

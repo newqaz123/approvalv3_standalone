@@ -434,7 +434,7 @@ describe('inline image form wiring contracts', () => {
 
     it('awaits the request callback and only clears after confirmed success', () => {
       assert.match(source, /const result = await onSubmitRequest\(\{[\s\S]*?stagedAttachmentIds: readyAttachmentIds,[\s\S]*?inlineImageSessionId: inlineImages\.uploadSessionId,[\s\S]*?\}\);/)
-      assert.match(source, /if \(!result\.success\) \{[\s\S]*?setSubmitError\(result\.error \|\| "Failed to submit"\)[\s\S]*?return;[\s\S]*?\}/)
+      assert.match(source, /if \(!result\.success\) \{[\s\S]*?setSubmitError\(result\.error \|\| t\('requests\.error\.submit'\)\)[\s\S]*?return;[\s\S]*?\}/)
       const requestBranch = source.split('if (mode === "request" && onSubmitRequest)')[1]?.split('if (isSolutionMode)')[0] ?? ''
       assert.match(requestBranch, /inlineImages\.clear\(\)/)
       assert.match(requestBranch, /clearStagedRequestAttachments\(\)/)
@@ -516,7 +516,7 @@ describe('inline image form wiring contracts', () => {
       const handler = source.split('const handleResubmitRequest = async')[1]?.split('const handleRestartFinalApproval')[0] ?? ''
       assert.match(handler, /inlineImageSessionId: data\.inlineImageSessionId/)
       assert.match(handler, /return \{ success: true \}/)
-      assert.match(handler, /return \{ success: false, error: "Failed to resubmit request" \}/)
+      assert.match(handler, /return \{ success: false, error: t\('requests\.error\.resubmitRequest'\) \}/)
       assert.match(handler, /success: false,/)
     })
 
@@ -536,8 +536,8 @@ describe('inline image form wiring contracts', () => {
       const handler = source.split('const handleSubmitRequest = async')[1]?.split('const handleExportXlsx')[0] ?? ''
       assert.match(handler, /inlineImageSessionId: data\.inlineImageSessionId/)
       assert.match(handler, /return \{ success: true \}/)
-      assert.match(handler, /return \{ success: false, error: result\.error \|\| 'Failed to create request' \}/)
-      assert.match(handler, /return \{ success: false, error: 'An error occurred while creating the request' \}/)
+      assert.match(handler, /const error = t\(result\.errorKey \?\? 'requests\.error\.create'\)[\s\S]*?return \{ success: false, error \}/)
+      assert.match(handler, /return \{ success: false, error: t\('requests\.error\.createUnexpected'\) \}/)
     })
 
     it('follows the same contract from the follow-up dashboard', () => {

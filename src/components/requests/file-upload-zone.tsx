@@ -1,5 +1,6 @@
 'use client'
 
+import { useTranslations } from '@/lib/i18n/client'
 import { formatFileSize } from '@/lib/format-file-size'
 import { useState, useCallback } from 'react'
 import { Upload, File, X, Check } from 'lucide-react'
@@ -30,6 +31,7 @@ export function FileUploadZone({
   maxFiles = 10,
   disabled = false,
 }: FileUploadZoneProps) {
+  const t = useTranslations()
   const [files, setFiles] = useState<UploadedFile[]>([])
 
   const handleFileSelect = useCallback(async (selectedFiles: FileList) => {
@@ -105,14 +107,14 @@ export function FileUploadZone({
         setFiles((prev) =>
           prev.map((f) =>
             f.id === uploadedFile.id
-              ? { ...f, status: 'error', error: result.error || 'Upload failed' }
+              ? { ...f, status: 'error', error: t(result.errorKey ?? 'requests.error.upload') }
               : f
           )
         )
       }
     } catch (error) {
       clearInterval(progressInterval)
-      const errorMessage = error instanceof Error ? error.message : 'Upload failed'
+      const errorMessage = t('requests.error.upload')
       setFiles((prev) =>
         prev.map((f) =>
           f.id === uploadedFile.id ? { ...f, status: 'error', error: errorMessage } : f
@@ -145,10 +147,10 @@ export function FileUploadZone({
         >
           <Upload className="mx-auto h-12 w-12 text-gray-400" />
           <p className="mt-2 text-sm text-gray-600">
-            Click to upload or drag and drop
+            {t('requests.uploadDragDrop')}
           </p>
           <p className="text-xs text-gray-500">
-            PDF, Word, Excel, PowerPoint, Images (max 10MB each, max {maxFiles} files)
+            {t('requests.uploadLimit', { count: maxFiles })}
           </p>
         </label>
       </div>
@@ -177,7 +179,7 @@ export function FileUploadZone({
                   <p className="text-sm font-medium truncate">{file.file.name}</p>
                   <p className="text-xs text-gray-500">
                     {isOptimized
-                      ? `${formatFileSize(file.file.size)} → ${formatFileSize(storedSize)} · optimized`
+                      ? t('requests.optimized', { before: formatFileSize(file.file.size), after: formatFileSize(storedSize) })
                       : formatFileSize(storedSize)}
                     {file.status === 'uploading' && ` - ${file.progress}%`}
                   </p>

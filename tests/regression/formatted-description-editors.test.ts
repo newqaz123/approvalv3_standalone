@@ -55,9 +55,9 @@ describe('formatted description editors', () => {
 
   it('exposes paragraph alignment on the main formatting toolbar', () => {
     const source = read('src/components/rich-text/rich-text-editor.tsx')
-    assert.match(source, /label="Align left"/)
-    assert.match(source, /label="Align center"/)
-    assert.match(source, /label="Align right"/)
+    assert.match(source, /label=\{t\('editor\.alignLeft'\)\}/)
+    assert.match(source, /label=\{t\('editor\.alignCenter'\)\}/)
+    assert.match(source, /label=\{t\('editor\.alignRight'\)\}/)
     assert.match(source, /setRichTextBlockAlign/)
   })
 })

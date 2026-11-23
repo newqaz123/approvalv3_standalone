@@ -1,5 +1,6 @@
 'use client'
 
+import { useTranslations } from '@/lib/i18n/client'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,23 +25,24 @@ export function DiscardDraftDialog({
   onConfirm,
   confirmDisabled,
 }: DiscardDraftDialogProps) {
+  const t = useTranslations()
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Leave without submitting?</AlertDialogTitle>
+          <AlertDialogTitle>{t('requests.discardTitle')}</AlertDialogTitle>
           <AlertDialogDescription>
-            Your draft will be discarded.
+            {t('requests.discardDescription')}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={confirmDisabled}>Stay</AlertDialogCancel>
+          <AlertDialogCancel disabled={confirmDisabled}>{t('requests.discardStay')}</AlertDialogCancel>
           <AlertDialogAction
             onClick={onConfirm}
             disabled={confirmDisabled}
             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
           >
-            Discard draft
+            {t('requests.discardDraft')}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

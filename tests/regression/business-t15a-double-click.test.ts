@@ -1,3 +1,4 @@
+import { createTranslator } from '../../src/lib/i18n/messages'
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -1191,11 +1192,13 @@ describe('T15A measurement: STATIC SOURCE-CONTRACT PINS (no browser execution â€
     // Verified against src/components/requests/request-modal-router.tsx â€”
     // the actual success text ENDS with "successfully" (router :622), and the
     // only two initiation-error branches are :626 and :630.
-    assert.match(routerSource, /toast\.success\("Final approval initiated successfully"\)/)
-    assert.match(routerSource, /toast\.error\("Failed to initiate final approval"\)/)
-    assert.match(routerSource, /toast\.error\("An error occurred while initiating final approval"\)/)
+    assert.match(routerSource, /toast\.success\(t\('requests\.finalStarted'\)\)/)
+    assert.match(routerSource, /toast\.error\(t\('requests\.error\.startFinal'\)\)/)
+    assert.match(routerSource, /toast\.error\(t\('requests\.error\.startFinalUnexpected'\)\)/)
     assert.equal(FINAL_TRIGGER_SUCCESS_TOAST, 'Final approval initiated successfully')
+    assert.equal(createTranslator('en')('requests.finalStarted'), FINAL_TRIGGER_SUCCESS_TOAST)
     assert.equal(FINAL_TRIGGER_RESULT_ERROR_TOAST, 'Failed to initiate final approval')
+    assert.equal(createTranslator('en')('requests.error.startFinal'), FINAL_TRIGGER_RESULT_ERROR_TOAST)
     assert.equal(FINAL_TRIGGER_CATCH_ERROR_TOAST, 'An error occurred while initiating final approval')
   })
 })

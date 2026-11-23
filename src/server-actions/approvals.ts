@@ -1,5 +1,6 @@
 'use server'
 
+import type { MessageKey } from '@/lib/i18n/messages'
 import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
 import type { Prisma } from '@prisma/client'
@@ -131,7 +132,7 @@ export async function approveRequest(
     })
 
     if (request && isStaleData(request.updatedAt, expectedUpdatedAt)) {
-      return { success: false, stale: true, message: 'This request was updated by another user.' }
+      return { success: false, stale: true, message: 'This request was updated by another user.', errorKey: 'requests.error.approvalChanged' as const satisfies MessageKey }
     }
   }
 
@@ -216,7 +217,7 @@ export async function rejectRequest(
     })
 
     if (request && isStaleData(request.updatedAt, expectedUpdatedAt)) {
-      return { success: false, stale: true, message: 'This request was updated by another user.' }
+      return { success: false, stale: true, message: 'This request was updated by another user.', errorKey: 'requests.error.approvalChanged' as const satisfies MessageKey }
     }
   }
 

@@ -1,5 +1,6 @@
 'use client'
 
+import { useTranslations } from '@/lib/i18n/client'
 import * as React from 'react'
 import type { ReactNode } from 'react'
 import {
@@ -37,11 +38,13 @@ function stopEditorSelection(event: { stopPropagation: () => void }) {
 
 function ToolbarIconButton({
   label,
+  cropAction,
   onClick,
   disabled,
   children,
 }: {
   label: string
+  cropAction?: boolean
   onClick: () => void
   disabled: boolean
   children: ReactNode
@@ -52,6 +55,7 @@ function ToolbarIconButton({
         <button
           type="button"
           aria-label={label}
+          data-inline-image-crop={cropAction ? "true" : undefined}
           disabled={disabled}
           onMouseDown={stopEditorSelection}
           onClick={onClick}
@@ -76,29 +80,30 @@ export function InlineImageToolbar({
   onResetSize,
   onRemove,
 }: InlineImageToolbarProps) {
+  const t = useTranslations()
   return (
     <TooltipProvider delayDuration={200}>
       <span
         contentEditable={false}
         role="toolbar"
-        aria-label="Image actions"
+        aria-label={t('editor.imageActions')}
         data-placement={placement}
         className="inline-image-floating-toolbar"
       >
-        <ToolbarIconButton label="Rotate image left" disabled={!editable} onClick={onRotateLeft}>
+        <ToolbarIconButton label={t('editor.rotateLeft')} disabled={!editable} onClick={onRotateLeft}>
           <RotateCcw className="h-4 w-4" aria-hidden="true" />
         </ToolbarIconButton>
-        <ToolbarIconButton label="Rotate image right" disabled={!editable} onClick={onRotateRight}>
+        <ToolbarIconButton label={t('editor.rotateRight')} disabled={!editable} onClick={onRotateRight}>
           <RotateCw className="h-4 w-4" aria-hidden="true" />
         </ToolbarIconButton>
         <span className="inline-image-toolbar-divider" aria-hidden="true" />
-        <ToolbarIconButton label="Crop image" disabled={!editable} onClick={onCrop}>
+        <ToolbarIconButton cropAction label={t('editor.cropImage')} disabled={!editable} onClick={onCrop}>
           <Crop className="h-4 w-4" aria-hidden="true" />
         </ToolbarIconButton>
-        <ToolbarIconButton label="Reset image size" disabled={!editable} onClick={onResetSize}>
+        <ToolbarIconButton label={t('editor.resetImageSize')} disabled={!editable} onClick={onResetSize}>
           <Scaling className="h-4 w-4" aria-hidden="true" />
         </ToolbarIconButton>
-        <ToolbarIconButton label="Remove image" disabled={!editable || removePending} onClick={onRemove}>
+        <ToolbarIconButton label={t('editor.removeImage')} disabled={!editable || removePending} onClick={onRemove}>
           <Trash2 className="h-4 w-4" aria-hidden="true" />
         </ToolbarIconButton>
       </span>

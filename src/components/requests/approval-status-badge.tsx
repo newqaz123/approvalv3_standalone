@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from '@/lib/i18n/client'
 import { useState, type ComponentProps } from "react";
 import { Clock } from "lucide-react";
 import {
@@ -83,12 +84,13 @@ function ApprovalTimeline({
 	currentPendingIndex: number;
 	rejectedCount: number;
 }) {
+	const t = useTranslations();
 	return (
 		<>
 			{/* Header: stage chip + progress */}
 			<div className="border-b border-gray-100 px-4 pt-3.5 pb-3">
 				<div className="flex items-center justify-between gap-2">
-					<p className="text-sm font-semibold text-gray-900">Approval chain</p>
+					<p className="text-sm font-semibold text-gray-900">{t('requests.approvalChain')}</p>
 					<span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-700 ring-1 ring-inset ring-indigo-600/20">
 						{hasPendingInFinal ? "Final" : "Initial"}
 					</span>
@@ -106,8 +108,8 @@ function ApprovalTimeline({
 					/>
 				</div>
 				<p className="mt-1.5 text-xs text-gray-500">
-					{stageApprovedCount} of {chainLength} approved
-					{currentLevel !== null && ` · waiting for level ${currentLevel}`}
+					{t('requests.approvedCount', { approved: stageApprovedCount, total: chainLength })}
+					{currentLevel !== null && t('requests.waitingForLevel', { level: currentLevel })}
 				</p>
 			</div>
 

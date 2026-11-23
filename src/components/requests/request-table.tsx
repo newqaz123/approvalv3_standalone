@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from '@/lib/i18n/client'
 import React, { useState, useMemo, useCallback, useEffect } from "react";
 import {
 	ColumnDef,
@@ -64,6 +65,7 @@ export function RequestTable({
 	initialData,
 	onDataRefresh,
 }: RequestTableProps) {
+	const t = useTranslations();
 	const [data, setData] = useState<RequestListRow[]>(initialData);
 	const [selectedRequestId, setSelectedRequestId] = useState<string | null>(
 		null,
@@ -95,7 +97,7 @@ export function RequestTable({
 		() => [
 			{
 				accessorKey: "title",
-				header: "Title",
+				header: t('requests.title'),
 				size: 380,
 				cell: ({ row }) => (
 					<div className="relative flex min-w-0 items-center gap-2">
@@ -122,7 +124,7 @@ export function RequestTable({
 			},
 			{
 				accessorKey: "requester",
-				header: "Requester",
+				header: t('requests.requester'),
 				size: 150,
 				cell: ({ row }) => (
 					<span className="inline-block text-gray-500 transition-all duration-200 ease-out group-hover/row:text-gray-600 motion-safe:group-hover/row:translate-x-0.5 motion-reduce:transform-none">
@@ -132,7 +134,7 @@ export function RequestTable({
 			},
 			{
 				accessorKey: "status",
-				header: "Status",
+				header: t('common.status'),
 				size: 130,
 				cell: ({ row }) => (
 					<div className="flex min-w-0 items-center">
@@ -151,7 +153,7 @@ export function RequestTable({
 			},
 			{
 				id: "approvalStatus",
-				header: "Approval Status",
+				header: t('requests.approvalStatus'),
 				size: 150,
 				cell: ({ row }) => (
 					<div className="flex items-center justify-center transition-all duration-200 ease-out motion-safe:group-hover/row:translate-x-0.5 motion-reduce:transform-none">
@@ -201,7 +203,7 @@ export function RequestTable({
 			},
 			{
 				accessorKey: "department",
-				header: "Department",
+				header: t('account.department'),
 				size: 130,
 				cell: ({ row }) => (
 					<span className="inline-block text-gray-500 transition-all duration-200 ease-out group-hover/row:text-gray-600 motion-safe:group-hover/row:translate-x-0.5 motion-reduce:transform-none">
@@ -211,7 +213,7 @@ export function RequestTable({
 			},
 			{
 				accessorKey: "_count.fileAttachments",
-				header: "Files",
+				header: t('requests.files'),
 				size: 70,
 				cell: ({ row }) => {
 					const count = row.original._count.fileAttachments;
@@ -225,7 +227,7 @@ export function RequestTable({
 			},
 			{
 				accessorKey: "createdAt",
-				header: "Created",
+				header: t('requests.created'),
 				size: 130,
 				cell: ({ row }) => {
 					const date = new Date(row.getValue("createdAt"));
@@ -238,7 +240,7 @@ export function RequestTable({
 				},
 			},
 		],
-		[],
+		[t],
 	);
 
 	const table = useReactTable({
@@ -292,7 +294,7 @@ export function RequestTable({
 								<TableRow
 									key={row.id}
 									tabIndex={0}
-									aria-label={`Open request ${row.original.title}`}
+									aria-label={t('requests.openRequest', { title: row.original.title })}
 									className={cn(
 										"group/row cursor-pointer transition-colors duration-200 ease-out hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500",
 									)}
@@ -323,9 +325,9 @@ export function RequestTable({
 								>
 									<div className="flex flex-col items-center justify-center text-gray-500">
 										<FileText className="h-8 w-8 mb-2 opacity-50" />
-										<p>No requests found</p>
+										<p>{t('requests.noRequests')}</p>
 										<p className="text-sm">
-											Create your first request to get started
+											{t('requests.createFirstRequest')}
 										</p>
 									</div>
 								</TableCell>

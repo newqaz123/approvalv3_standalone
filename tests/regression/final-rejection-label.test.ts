@@ -18,7 +18,7 @@ describe("final rejection label in the solution modal", () => {
 
 	it("titles the rejection banner from the status, not a fixed string", () => {
 		const source = modal();
-		assert.match(source, /data\.status === "final_rejected"\s*\?\s*"Final Approval Rejected — solution needs revision"\s*:\s*"Solution Rejected"/);
+		assert.match(source, /data\.status === "final_rejected"\s*\?\s*t\('requests\.finalRejectedRevision'\)\s*:\s*t\('requests\.solutionRejected'\)/);
 	});
 
 	it("router picks final_rejected only when the current rejection is FINAL", () => {

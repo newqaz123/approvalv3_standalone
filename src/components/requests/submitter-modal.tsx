@@ -1,5 +1,7 @@
 "use client";
 
+import { inlineImageBlockingKey } from '@/lib/i18n/messages'
+import { useTranslations } from '@/lib/i18n/client'
 import { formatFileSize } from "@/lib/format-file-size";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { format } from "date-fns";
@@ -63,7 +65,6 @@ import {
 	useStagedRequestAttachments,
 } from "@/hooks/use-staged-request-attachments";
 import {
-	inlineImageBlockingMessage,
 	useInlineDescriptionImages,
 } from "@/hooks/use-inline-description-images";
 import { isDraftFieldDirty, requestDiscardDraft } from "@/lib/discard-draft";
@@ -78,8 +79,6 @@ import { FilePreviewDialog } from "@/components/requests/file-preview-dialog";
 import { useAttachmentPreview } from "@/hooks/use-attachment-preview";
 import { ApproverSearchField } from "@/components/approvals/approver-search-field";
 import { filterApproversByQuery } from "@/lib/approver-search";
-
-const ACCEPTED_UPLOAD_TYPES = "PDF, Word, Excel, PowerPoint, Images";
 
 interface FileAttachment {
 	id: string;
@@ -182,6 +181,7 @@ function CustomApprovalPicker({
 	selectedApprovers: string[];
 	onChange: (approvers: string[]) => void;
 }) {
+	const t = useTranslations();
 	const [isOpen, setIsOpen] = useState(false);
 	const [searchQuery, setSearchQuery] = useState("");
 	const searchInputRef = useRef<HTMLInputElement>(null);
@@ -241,7 +241,7 @@ function CustomApprovalPicker({
 			<div className="space-y-2">
 				{selectedApprovers.length === 0 && (
 					<p className="text-sm text-slate-400 italic">
-						No custom approvers selected
+						{t('requests.noCustomApprovers')}
 					</p>
 				)}
 				{selectedApprovers.map((userId, index) => {
@@ -254,10 +254,10 @@ function CustomApprovalPicker({
 						>
 							<div className="flex-1 min-w-0">
 								<p className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">
-									Level {index + 1}: {user.name}
+									{t('requests.level')}{' '}{index + 1}: {user.name}
 								</p>
 								<p className="text-xs text-slate-400 truncate">
-									{(user.unitPathNames.length ? user.unitPathNames.join(' / ') : 'No unit')} • {user.email}
+									{(user.unitPathNames.length ? user.unitPathNames.join(' / ') : t('requests.noUnit'))} • {user.email}
 								</p>
 							</div>
 							<div className="flex items-center gap-1">
@@ -295,7 +295,7 @@ function CustomApprovalPicker({
 					className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-dashed border-slate-300 dark:border-slate-700 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
 				>
 					<Plus className="w-4 h-4" />
-					Add Approver
+					{t('requests.addApprover')}
 				</button>
 
 				{isOpen && (
@@ -314,11 +314,11 @@ function CustomApprovalPicker({
 						<div className="max-h-[260px] overflow-y-auto">
 							{unselectedUsers.length === 0 ? (
 								<p className="px-3 py-2 text-sm text-slate-400 italic">
-									No more users available
+									{t('requests.noMoreUsers')}
 								</p>
 							) : filteredUsers.length === 0 ? (
 								<p className="px-3 py-2 text-sm text-slate-400 italic">
-									No approvers found
+									{t('requests.noApprovers')}
 								</p>
 							) : (
 								filteredUsers.map((user) => (
@@ -335,7 +335,7 @@ function CustomApprovalPicker({
 											{user.name}
 										</p>
 										<p className="text-xs text-slate-500">
-											{(user.unitPathNames.length ? user.unitPathNames.join(' / ') : 'No unit')} • {user.email}
+											{(user.unitPathNames.length ? user.unitPathNames.join(' / ') : t('requests.noUnit'))} • {user.email}
 										</p>
 									</button>
 								))
@@ -370,6 +370,7 @@ export function SubmitterModal({
 	onSubmitSolution,
 	onResubmit,
 }: SubmitterModalProps) {
+	const t = useTranslations();
 	const initialSolutionDraft = useMemo(
 		() =>
 			createSubmitterSolutionDraftBaseline({
@@ -525,9 +526,8 @@ export function SubmitterModal({
 	// One inline image coordinator for both description editors (request and
 	// solution/resubmit modes); every save path claims or cleans its session.
 	const inlineImages = useInlineDescriptionImages();
-	const inlineImageBlockingGuidance = inlineImageBlockingMessage(
-		inlineImages.blockingReason,
-	);
+	const inlineImageBlocking = inlineImageBlockingKey(inlineImages.blockingReason);
+	const inlineImageBlockingGuidance = inlineImageBlocking && t(inlineImageBlocking);
 	const [isBusy, setIsBusy] = useState(false);
 	const [submitError, setSubmitError] = useState<string | null>(null);
 	const [discardOpen, setDiscardOpen] = useState(false);
@@ -669,7 +669,7 @@ export function SubmitterModal({
 			return;
 		}
 		if (inlineImages.hasBlockingOperations) {
-			setSubmitError(inlineImageBlockingMessage(inlineImages.blockingReason));
+			setSubmitError(inlineImageBlockingGuidance);
 			return;
 		}
 		setSubmitError(null);
@@ -694,7 +694,7 @@ export function SubmitterModal({
 				if (!result.success) {
 					abortRequestCommit();
 					requestCommitInFlightRef.current = false;
-					setSubmitError(result.error || "Failed to submit");
+					setSubmitError(result.error || t('requests.error.submit'));
 					return;
 				}
 				clearStagedRequestAttachments();
@@ -704,9 +704,7 @@ export function SubmitterModal({
 				abortRequestCommit();
 				requestCommitInFlightRef.current = false;
 				setSubmitError(
-					error instanceof Error
-						? error.message
-						: "An error occurred",
+					t('requests.error.submit'),
 				);
 			} finally {
 				setIsBusy(false);
@@ -747,7 +745,7 @@ export function SubmitterModal({
 						onOpenChange(false);
 					} else {
 						abortSolutionCommit();
-						setSubmitError(res.error || "Failed to submit solution");
+						setSubmitError(res.error || t('requests.error.submitSolution'));
 					}
 				} else if (mode === "resubmit" && onResubmit) {
 					const res = await onResubmit({
@@ -769,13 +767,13 @@ export function SubmitterModal({
 						onOpenChange(false);
 					} else {
 						abortSolutionCommit();
-						setSubmitError(res.error || "Failed to resubmit solution");
+						setSubmitError(res.error || t('requests.error.resubmitSolution'));
 					}
 				}
 			} catch (error) {
 				abortSolutionCommit();
 				setSubmitError(
-					error instanceof Error ? error.message : "An error occurred",
+					t('requests.error.submit'),
 				);
 			} finally {
 				// Keep the ref set through onOpenChange(false) so a synchronous dialog
@@ -880,9 +878,7 @@ export function SubmitterModal({
 			}
 		} catch (error) {
 			setSubmitError(
-				error instanceof Error
-					? error.message
-					: "Failed to clean up draft files",
+				t('requests.error.cleanDraft'),
 			);
 		} finally {
 			if (mode === "request") {
@@ -942,21 +938,22 @@ export function SubmitterModal({
 								<RotateCcw className="w-5 h-5 text-amber-600" />
 							)}
 							<DialogTitle className="text-lg font-bold text-slate-900 dark:text-slate-100 tracking-tight m-0">
-								{mode === "request" && "Submit New Request"}
-								{mode === "solution" && "Submit Engineering Solution"}
-								{mode === "resubmit" && "Resubmit Solution"}
+								{mode === "request" && t('requests.newRequestHeading')}
+								{mode === "solution" && t('requests.submitEngineeringSolution')}
+								{mode === "resubmit" && t('requests.resubmitSolution')}
 							</DialogTitle>
 						</div>
 						<DialogDescription className="sr-only">
 							{mode === "request" &&
-								"Fill out the form to submit a new improvement request"}
+								t('requests.submitRequestHelp')}
 							{mode === "solution" &&
-								"Provide engineering solution details and cost estimate"}
-							{mode === "resubmit" && "Update and resubmit your solution"}
+								t('requests.submitSolutionHelp')}
+							{mode === "resubmit" && t('requests.resubmitSolutionHelp')}
 						</DialogDescription>
 						<button
 							type="button"
 							onClick={requestClose}
+							aria-label={t('requests.close')}
 							disabled={requestCloseControlsLocked}
 							className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors text-slate-400 hover:text-slate-600 disabled:pointer-events-none disabled:opacity-30"
 						>
@@ -973,12 +970,10 @@ export function SubmitterModal({
 								<AlertTriangle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
 								<div>
 									<h4 className="text-sm font-bold text-red-900 dark:text-red-400">
-										Solution Was Rejected
+										{t('requests.solutionWasRejected')}
 									</h4>
 									<p className="text-xs text-red-600 dark:text-red-300 mt-1">
-										Rejected by {initialData.rejectedBy} on{" "}
-										{initialData.rejectedAt &&
-											format(new Date(initialData.rejectedAt), "MMM d, yyyy")}
+										{t('requests.rejectedByOn', { name: initialData.rejectedBy ?? '', date: initialData.rejectedAt ? format(new Date(initialData.rejectedAt), "MMM d, yyyy") : '' })}
 									</p>
 									<div className="mt-2 p-2 bg-white dark:bg-slate-900 rounded border border-red-100 dark:border-red-800/30">
 										<p className="text-xs text-slate-700 dark:text-slate-300 italic">
@@ -996,7 +991,7 @@ export function SubmitterModal({
 							{/* Template Selection */}
 							<div>
 								<Label htmlFor="template" className="text-sm font-bold">
-									Template
+									{t('requests.template')}
 								</Label>
 								<Select
 									value={selectedTemplate}
@@ -1007,15 +1002,15 @@ export function SubmitterModal({
 										<SelectValue
 											placeholder={
 												loadingTemplates
-													? "Loading templates..."
-													: "Select a template (optional)"
+													? t('requests.loadingTemplates')
+													: t('requests.selectTemplate')
 											}
 										/>
 									</SelectTrigger>
 									<SelectContent>
 										{templates.length === 0 && !loadingTemplates && (
 											<SelectItem value="none" disabled>
-												No templates available
+												{t('requests.noTemplates')}
 											</SelectItem>
 										)}
 										{templates.map((template) => (
@@ -1026,12 +1021,12 @@ export function SubmitterModal({
 									</SelectContent>
 								</Select>
 								<p className="text-xs text-slate-500 mt-1">
-									Select a template to pre-fill common fields (optional)
+									{t('requests.selectTemplateHelp')}
 								</p>
 							</div>
 							<div>
 								<Label htmlFor="title" className="text-sm font-bold">
-									Request Title <span className="text-red-500">*</span>
+									{t('requests.requestTitle')}{' '}<span className="text-red-500">*</span>
 								</Label>
 								<Input
 									id="title"
@@ -1039,13 +1034,13 @@ export function SubmitterModal({
 									onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
 										setTitle(e.target.value)
 									}
-									placeholder="Enter a clear title for your request..."
+									placeholder={t('requests.requestTitleHint')}
 									className="mt-1.5"
 								/>
 							</div>
 							<div>
 								<Label htmlFor="description" className="text-sm font-bold">
-									Description <span className="text-red-500">*</span>
+									{t('requests.description')}{' '}<span className="text-red-500">*</span>
 								</Label>
 								<RichTextEditor
 									id="description"
@@ -1071,9 +1066,9 @@ export function SubmitterModal({
 										className="flex items-center gap-2 text-sm text-blue-700 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 transition-colors"
 									>
 										<ExternalLink className="w-4 h-4" />
-										<span className="font-medium">View Original Request</span>
+										<span className="font-medium">{t('requests.viewOriginal')}</span>
 										<span className="text-xs text-blue-500">
-											({initialData.requestTitle || "Request Details"})
+											({initialData.requestTitle || t('requests.requestDetails')})
 										</span>
 									</a>
 								</div>
@@ -1081,7 +1076,7 @@ export function SubmitterModal({
 							{mode === "solution" && (
 								<div>
 									<Label htmlFor="solutionTitle" className="text-sm font-bold">
-										Solution Title <span className="text-red-500">*</span>
+										{t('requests.solutionTitle')}{' '}<span className="text-red-500">*</span>
 									</Label>
 									<Input
 										id="solutionTitle"
@@ -1089,7 +1084,7 @@ export function SubmitterModal({
 										onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
 											setSolutionTitle(e.target.value)
 										}
-										placeholder="Enter solution title..."
+										placeholder={t('requests.solutionTitleHint')}
 										className="mt-1.5"
 									/>
 								</div>
@@ -1099,7 +1094,7 @@ export function SubmitterModal({
 									htmlFor="solutionDescription"
 									className="text-sm font-bold"
 								>
-									Solution Description <span className="text-red-500">*</span>
+									{t('requests.solutionDescription')}{' '}<span className="text-red-500">*</span>
 								</Label>
 								<RichTextEditor
 									id="solutionDescription"
@@ -1118,7 +1113,7 @@ export function SubmitterModal({
 										className="text-sm font-bold flex items-center gap-1.5"
 									>
 										<DollarSign className="w-4 h-4" />
-										Cost <span className="text-red-500">*</span>
+										{t('requests.cost')}{' '}<span className="text-red-500">*</span>
 									</Label>
 									<div className="flex gap-2 mt-1.5">
 										<select
@@ -1152,7 +1147,7 @@ export function SubmitterModal({
 										className="text-sm font-bold flex items-center gap-1.5"
 									>
 										<Clock className="w-4 h-4" />
-										Timeline <span className="text-red-500">*</span>
+										{t('requests.timeline')}{' '}<span className="text-red-500">*</span>
 									</Label>
 									<Input
 										id="timeline"
@@ -1160,7 +1155,7 @@ export function SubmitterModal({
 										onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
 											setTimeline(e.target.value)
 										}
-										placeholder="e.g., 2 weeks, 3 months"
+										placeholder={t('requests.timelineHint')}
 										className="mt-1.5"
 									/>
 								</div>
@@ -1173,7 +1168,7 @@ export function SubmitterModal({
 										<div className="flex items-center gap-2">
 											<Settings2 className="w-4 h-4 text-slate-500" />
 											<span className="text-sm font-bold">
-												Custom Approval Hierarchy
+												{t('requests.customHierarchy')}
 											</span>
 										</div>
 										<Switch
@@ -1182,8 +1177,7 @@ export function SubmitterModal({
 										/>
 									</div>
 									<p className="text-xs text-slate-500 mb-3">
-										Enable to define a custom approval chain instead of using
-										the default hierarchy.
+										{t('requests.customChainHelp')}
 									</p>
 
 									{useCustomHierarchy && (
@@ -1206,14 +1200,14 @@ export function SubmitterModal({
 					<section>
 						<h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-3 flex items-center gap-2">
 							<Paperclip className="w-4 h-4 text-slate-400" />
-							Attachments
+							{t('requests.attachments')}
 						</h3>
 
 						{/* Existing Files (for resubmit mode) */}
 						{mode === "resubmit" && existingFiles.length > 0 && (
 							<div className="mb-4">
 								<h4 className="text-xs font-bold text-slate-500 mb-2">
-									Existing Attachments ({existingFiles.length})
+									{t('requests.existingAttachments', { count: existingFiles.length })}
 								</h4>
 								<div className="space-y-2">
 									{existingFiles.map((file) => {
@@ -1244,7 +1238,7 @@ export function SubmitterModal({
 													type="button"
 													onClick={() => previewSavedFile(file)}
 													className="p-1 text-slate-400 hover:text-indigo-600 transition-colors"
-													title="Preview"
+													title={t('requests.preview')}
 												>
 													<Eye className="w-4 h-4" />
 												</button>
@@ -1252,7 +1246,7 @@ export function SubmitterModal({
 													onClick={() => removeExistingFile(file.id)}
 													disabled={requestCloseControlsLocked}
 													className="p-1 text-slate-400 hover:text-red-500 transition-colors disabled:pointer-events-none disabled:opacity-30"
-													title="Remove file"
+													title={t('requests.removeFile')}
 												>
 													<Trash2 className="w-4 h-4" />
 												</button>
@@ -1261,7 +1255,7 @@ export function SubmitterModal({
 									})}
 								</div>
 								<p className="text-xs text-slate-400 mt-2 italic">
-									Removed files will be deleted when you resubmit
+									{t('requests.removalOnResubmit')}
 								</p>
 							</div>
 						)}
@@ -1277,7 +1271,7 @@ export function SubmitterModal({
 							>
 								<FileUp className="w-5 h-5 text-slate-400" />
 								<span className="text-sm font-medium text-slate-600 dark:text-slate-400">
-									Click to upload files
+									{t('requests.uploadFiles')}
 								</span>
 								<input
 									type="file"
@@ -1291,11 +1285,10 @@ export function SubmitterModal({
 								/>
 							</label>
 							<p className="mt-2 text-xs text-slate-500">
-								Allowed: {ACCEPTED_UPLOAD_TYPES}. Maximum size:{" "}
-								{Math.round(MAX_ATTACHMENT_BYTES / 1024 / 1024)}MB per file.
+								{t('requests.fileLimit', { types: t('requests.uploadTypes'), size: Math.round(MAX_ATTACHMENT_BYTES / 1024 / 1024) })}
 							</p>
 							{fileUploadError && (
-								<p className="mt-2 text-xs text-red-600">{fileUploadError}</p>
+								<p className="mt-2 text-xs text-red-600">{t('requests.error.attachmentMetadata')}</p>
 							)}
 						</div>
 
@@ -1304,7 +1297,7 @@ export function SubmitterModal({
 						{isSolutionMode && attachmentItems.length > 0 && (
 							<div className="space-y-2">
 								<p className="text-xs text-slate-500">
-									{solutionReadyAttachmentIds.length}/{attachmentItems.length} files ready
+									{t('requests.filesReady', { ready: solutionReadyAttachmentIds.length, total: attachmentItems.length })}
 								</p>
 								{attachmentItems.map((item) => {
 									const showCleanupError =
@@ -1348,7 +1341,7 @@ export function SubmitterModal({
 															type="button"
 															onClick={() => previewLocalFile(item.file)}
 															className="p-1 text-slate-400 hover:text-indigo-600 transition-colors"
-															title="Preview"
+															title={t('requests.preview')}
 														>
 															<Eye className="w-4 h-4" />
 														</button>
@@ -1364,13 +1357,13 @@ export function SubmitterModal({
 												{item.cleanupRequested ? (
 													item.error ? (
 														<p className="text-xs text-red-600 mt-1">
-															{item.error}
+															{t(item.cleanupRequested ? 'requests.error.cleanAttachment' : 'requests.error.upload')}
 														</p>
 													) : (
-														<p className="text-xs text-slate-500 mt-1">Removing...</p>
+														<p className="text-xs text-slate-500 mt-1">{t('requests.removing')}</p>
 													)
 												) : item.status === "pending" ? (
-													<p className="text-xs text-slate-500 mt-1">Pending</p>
+													<p className="text-xs text-slate-500 mt-1">{t('requests.attachmentPending')}</p>
 												) : item.status === "uploading" ? (
 													<div className="mt-1 space-y-1">
 														<Progress value={item.progress} className="h-2" />
@@ -1379,10 +1372,10 @@ export function SubmitterModal({
 														</p>
 													</div>
 												) : item.status === "success" ? (
-													<p className="text-xs text-green-600 mt-1">Uploaded</p>
+													<p className="text-xs text-green-600 mt-1">{t('requests.uploaded')}</p>
 												) : item.status === "error" && item.error ? (
 													<p className="text-xs text-red-600 mt-1">
-														{item.error}
+														{t(item.cleanupRequested ? 'requests.error.cleanAttachment' : 'requests.error.upload')}
 													</p>
 												) : null}
 											</div>
@@ -1395,7 +1388,7 @@ export function SubmitterModal({
 													className="p-1 text-blue-600 hover:text-blue-700 transition-colors disabled:opacity-30 flex items-center gap-1 text-xs"
 												>
 													<RotateCcw className="w-4 h-4" />
-													Retry
+													{t('requests.retry')}
 												</button>
 											)}
 										</div>
@@ -1406,7 +1399,7 @@ export function SubmitterModal({
 						{!isSolutionMode && stagedRequestItems.length > 0 && (
 							<div className="space-y-2">
 								<p className="text-xs text-slate-500">
-									{readyAttachmentIds.length}/{stagedRequestItems.length} files ready
+									{t('requests.filesReady', { ready: readyAttachmentIds.length, total: stagedRequestItems.length })}
 								</p>
 								{stagedRequestItems.map((item) => {
 									const showCleanupError =
@@ -1450,7 +1443,7 @@ export function SubmitterModal({
 															type="button"
 															onClick={() => previewLocalFile(item.file)}
 															className="p-1 text-slate-400 hover:text-indigo-600 transition-colors"
-															title="Preview"
+															title={t('requests.preview')}
 														>
 															<Eye className="w-4 h-4" />
 														</button>
@@ -1466,13 +1459,13 @@ export function SubmitterModal({
 												{item.cleanupRequested ? (
 													item.error ? (
 														<p className="text-xs text-red-600 mt-1">
-															{item.error}
+															{t(item.cleanupRequested ? 'requests.error.cleanAttachment' : 'requests.error.upload')}
 														</p>
 													) : (
-														<p className="text-xs text-slate-500 mt-1">Removing...</p>
+														<p className="text-xs text-slate-500 mt-1">{t('requests.removing')}</p>
 													)
 												) : item.status === "pending" ? (
-													<p className="text-xs text-slate-500 mt-1">Pending</p>
+													<p className="text-xs text-slate-500 mt-1">{t('requests.attachmentPending')}</p>
 												) : item.status === "uploading" ? (
 													<div className="mt-1 space-y-1">
 														<Progress value={item.progress} className="h-2" />
@@ -1481,10 +1474,10 @@ export function SubmitterModal({
 														</p>
 													</div>
 												) : item.status === "success" ? (
-													<p className="text-xs text-green-600 mt-1">Uploaded</p>
+													<p className="text-xs text-green-600 mt-1">{t('requests.uploaded')}</p>
 												) : item.status === "error" && item.error ? (
 													<p className="text-xs text-red-600 mt-1">
-														{item.error}
+														{t(item.cleanupRequested ? 'requests.error.cleanAttachment' : 'requests.error.upload')}
 													</p>
 												) : null}
 											</div>
@@ -1495,7 +1488,7 @@ export function SubmitterModal({
 													className="p-1 text-blue-600 hover:text-blue-700 transition-colors disabled:opacity-30 flex items-center gap-1 text-xs"
 												>
 													<RotateCcw className="w-4 h-4" />
-													Retry
+													{t('requests.retry')}
 												</button>
 											)}
 										</div>
@@ -1522,7 +1515,7 @@ export function SubmitterModal({
 						disabled={isBusy || requestCloseControlsLocked}
 						className={submitError ? "" : "ml-auto"}
 					>
-						{isBusy ? "Cleaning up..." : "Cancel"}
+						{isBusy ? t('requests.cleaningUp') : t('common.cancel')}
 					</Button>
 					<Button
 						onClick={handleSubmit}
@@ -1537,27 +1530,23 @@ export function SubmitterModal({
 						{isBusy ? (
 							<>
 								<Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
-								Submitting...
-							</>
+								{t('requests.submitting')}</>
 						) : (
 							<>
 								{mode === "request" && (
 									<>
 										<Send className="w-4 h-4 mr-1.5" />
-										Submit Request
-									</>
+										{t('requests.submitRequest')}</>
 								)}
 								{mode === "solution" && (
 									<>
 										<CheckCircle2 className="w-4 h-4 mr-1.5" />
-										Submit Solution
-									</>
+										{t('requests.submitSolution')}</>
 								)}
 								{mode === "resubmit" && (
 									<>
 										<RotateCcw className="w-4 h-4 mr-1.5" />
-										Resubmit Solution
-									</>
+										{t('requests.resubmitSolution')}</>
 								)}
 							</>
 						)}

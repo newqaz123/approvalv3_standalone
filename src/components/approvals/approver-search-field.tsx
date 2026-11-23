@@ -1,5 +1,6 @@
 'use client'
 
+import { useTranslations } from '@/lib/i18n/client'
 import { useId, type Ref } from 'react'
 import { Search } from 'lucide-react'
 import { CommandInput } from '@/components/ui/command'
@@ -27,13 +28,14 @@ export function ApproverSearchField({
   inputKind = 'input',
   disabled = false,
 }: ApproverSearchFieldProps) {
+  const t = useTranslations()
   const inputId = useId()
-  const countLabel = resultCount === 1 ? '1 approver' : `${resultCount} approvers`
+  const countLabel = resultCount === 1 ? t('requests.oneApprover') : t('requests.approverCount', { count: resultCount })
 
   return (
     <div className={cn('space-y-2', className)}>
       <label htmlFor={inputId} className="sr-only">
-        Search approvers
+        {t('requests.searchApprovers')}
       </label>
       {inputKind === 'command' ? (
         <CommandInput
@@ -43,7 +45,7 @@ export function ApproverSearchField({
           value={value}
           onValueChange={onChange}
           disabled={disabled}
-          placeholder="Search by name, email, department, role, or level"
+          placeholder={t('requests.searchApproversHint')}
           className="min-h-11 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         />
       ) : (
@@ -56,7 +58,7 @@ export function ApproverSearchField({
             value={value}
             onChange={(event) => onChange(event.target.value)}
             disabled={disabled}
-            placeholder="Search by name, email, department, role, or level"
+            placeholder={t('requests.searchApproversHint')}
             className="min-h-11 pl-9 focus-visible:ring-1"
           />
         </div>

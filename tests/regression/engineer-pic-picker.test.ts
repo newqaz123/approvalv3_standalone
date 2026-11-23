@@ -1,3 +1,4 @@
+import { createTranslator } from '../../src/lib/i18n/messages'
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -35,6 +36,7 @@ function pickerHarness() {
       Command: 'command', CommandEmpty: 'command-empty', CommandGroup: 'command-group',
       CommandInput: 'command-input', CommandItem: 'command-item',
     },
+    '@/lib/i18n/client': { useTranslations: () => createTranslator('en') },
     '@/lib/utils': { cn: (...values: unknown[]) => values.filter(Boolean).join(' ') },
     '@/server-actions/requests': {
       async assignEngineers(requestId: string, ids: string[]) {

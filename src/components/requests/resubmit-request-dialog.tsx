@@ -1,5 +1,7 @@
 'use client'
 
+import { inlineImageBlockingKey } from '@/lib/i18n/messages'
+import { useTranslations } from '@/lib/i18n/client'
 import { formatFileSize } from '@/lib/format-file-size'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
@@ -61,6 +63,7 @@ export function ResubmitRequestDialog({
   existingFiles = [],
   onResubmitted,
 }: ResubmitRequestDialogProps) {
+  const t = useTranslations()
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -70,7 +73,8 @@ export function ResubmitRequestDialog({
   // One inline image coordinator per mounted dialog; the editor uploads
   // through it and the save/cancel lifecycle below claims or cleans it.
   const inlineImages = useInlineDescriptionImages()
-  const inlineImageBlockingGuidance = inlineImageBlockingMessage(inlineImages.blockingReason)
+  const inlineImageBlocking = inlineImageBlockingKey(inlineImages.blockingReason)
+  const inlineImageBlockingGuidance = inlineImageBlocking && t(inlineImageBlocking)
 
   const form = useForm<ResubmitFormValues>({
     resolver: zodResolver(resubmitSchema),
@@ -96,9 +100,9 @@ export function ResubmitRequestDialog({
     try {
       await deleteFileAttachment({ fileId })
       setFiles((prev) => prev.filter((f) => f.id !== fileId))
-      toast.success('File removed')
+      toast.success(t('requests.fileRemoved'))
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to remove file'
+      const errorMessage = t('requests.error.removeFile')
       toast.error(errorMessage)
     } finally {
       setIsRemoving(null)
@@ -107,7 +111,7 @@ export function ResubmitRequestDialog({
 
   async function onSubmit(data: ResubmitFormValues) {
     if (inlineImages.hasBlockingOperations) {
-      setError(inlineImageBlockingMessage(inlineImages.blockingReason))
+      setError(inlineImageBlockingGuidance)
       return
     }
     setIsSubmitting(true)
@@ -130,10 +134,10 @@ export function ResubmitRequestDialog({
         router.refresh()
         onResubmitted?.()
       } else {
-        setError('Failed to resubmit request')
+        setError(t('requests.error.resubmitRequest'))
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to resubmit request')
+      setError(t('requests.error.resubmitRequest'))
     } finally {
       setIsSubmitting(false)
     }
@@ -146,7 +150,7 @@ export function ResubmitRequestDialog({
     try {
       await inlineImages.reset()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to clean up draft images')
+      setError(t('requests.error.cleanDraftImages'))
       return
     }
     setOpen(false)
@@ -165,15 +169,14 @@ export function ResubmitRequestDialog({
       <DialogTrigger asChild>
         <Button variant="default" size="sm">
           <Edit className="h-4 w-4 mr-1" />
-          Edit & Resubmit
+          {t('requests.editResubmit')}
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Edit & Resubmit Request</DialogTitle>
+          <DialogTitle>{t('requests.editResubmitRequest')}</DialogTitle>
           <DialogDescription>
-            Update your request details and resubmit for approval. This will
-            clear all previous approvals and rejections, starting fresh.
+            {t('requests.editResubmitHelp')}
           </DialogDescription>
         </DialogHeader>
 
@@ -184,11 +187,11 @@ export function ResubmitRequestDialog({
               name="title"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Title</FormLabel>
+                  <FormLabel>{t('requests.title')}</FormLabel>
                   <FormControl>
                     <Input
                       {...field}
-                      placeholder="Brief title for your improvement request"
+                      placeholder={t('requests.briefRequestTitle')}
                     />
                   </FormControl>
                   <FormMessage />
@@ -201,7 +204,7 @@ export function ResubmitRequestDialog({
               name="description"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Description</FormLabel>
+                  <FormLabel>{t('requests.description')}</FormLabel>
                   <FormControl>
                     <RichTextEditor
                       value={field.value ?? ""}
@@ -218,7 +221,7 @@ export function ResubmitRequestDialog({
             {/* Current Attachments Section */}
             {files.length > 0 && (
               <div className="space-y-3">
-                <h4 className="text-sm font-medium">Current Attachments</h4>
+                <h4 className="text-sm font-medium">{t('requests.currentAttachments')}</h4>
                 <div className="space-y-2">
                   {files.map((file) => (
                     <div
@@ -248,7 +251,7 @@ export function ResubmitRequestDialog({
 
             {/* New File Upload Section */}
             <div className="space-y-2">
-              <h4 className="text-sm font-medium">Add New Attachments</h4>
+              <h4 className="text-sm font-medium">{t('requests.addAttachments')}</h4>
               <FileUploadZone
                 requestId={requestId}
                 disabled={isSubmitting}
@@ -269,10 +272,10 @@ export function ResubmitRequestDialog({
                 onClick={handleDialogClose}
                 disabled={isSubmitting}
               >
-                Cancel
+                {t('common.cancel')}
               </Button>
               <Button type="submit" disabled={isSubmitting || inlineImages.hasBlockingOperations}>
-                {isSubmitting ? 'Resubmitting...' : 'Resubmit Request'}
+                {isSubmitting ? t('requests.resubmitting') : t('requests.resubmitRequest')}
               </Button>
             </DialogFooter>
           </form>

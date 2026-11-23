@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from '@/lib/i18n/client'
 import {
 	ArrowDownToLine,
 	ArrowUpToLine,
@@ -91,6 +92,7 @@ export function RichTextTableHoverControls({
 	disabled,
 	containerRef,
 }: RichTextTableHoverControlsProps) {
+	const t = useTranslations();
 	// Re-render on transactions so merge/split visibility tracks selection.
 	useEditorState({
 		editor,
@@ -418,7 +420,7 @@ export function RichTextTableHoverControls({
 					{/* Column controls above the hovered column */}
 					<button
 						type="button"
-						aria-label="Insert column after this column"
+						aria-label={t('editor.insertAfterColumn')}
 						className="rich-text-table-hover-button absolute z-20 -translate-x-1/2"
 						style={{
 							left: colCenter,
@@ -466,7 +468,7 @@ export function RichTextTableHoverControls({
 					{/* Row controls left of the hovered row */}
 					<button
 						type="button"
-						aria-label="Insert row below this row"
+						aria-label={t('editor.insertBelowRow')}
 						className="rich-text-table-hover-button absolute z-20"
 						style={{
 							left: Math.max(2, activeHover.tableRect.left - 62),
@@ -516,7 +518,7 @@ export function RichTextTableHoverControls({
 					{/* Append a row at the end of the table */}
 					<button
 						type="button"
-						aria-label="Add row at end of table"
+						aria-label={t('editor.addLastRow')}
 						className="rich-text-table-hover-button absolute z-20"
 						style={{
 							left: Math.max(2, activeHover.tableRect.left - 28),
@@ -580,25 +582,25 @@ export function RichTextTableHoverControls({
 					{mergeVisible && (
 						<button
 							type="button"
-							aria-label="Merge selected cells"
+							aria-label={t('editor.mergeSelected')}
 							className="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-slate-700 hover:bg-slate-100"
 							onMouseDown={(event) => event.preventDefault()}
 							onClick={() => editor.chain().focus().mergeCells().run()}
 						>
 							<Merge className="h-3.5 w-3.5" />
-							Merge cells
+							{t('editor.mergeCells')}
 						</button>
 					)}
 					{splitVisible && (
 						<button
 							type="button"
-							aria-label="Split merged cell"
+							aria-label={t('editor.splitMerged')}
 							className="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-slate-700 hover:bg-slate-100"
 							onMouseDown={(event) => event.preventDefault()}
 							onClick={() => editor.chain().focus().splitCell().run()}
 						>
 							<Split className="h-3.5 w-3.5" />
-							Split cell
+							{t('editor.splitCell')}
 						</button>
 					)}
 				</div>
@@ -622,12 +624,12 @@ export function RichTextTableHoverControls({
 				>
 					{(gripMenu.kind === "row"
 						? [
-							{ key: "above", label: "Insert row above", icon: <ArrowUpToLine className="h-3.5 w-3.5" />, command: "addRowBefore" as const },
-							{ key: "below", label: "Insert row below", icon: <ArrowDownToLine className="h-3.5 w-3.5" />, command: "addRowAfter" as const },
+							{ key: "above", label: t('editor.insertRowAbove'), icon: <ArrowUpToLine className="h-3.5 w-3.5" />, command: "addRowBefore" as const },
+							{ key: "below", label: t('editor.insertRowBelow'), icon: <ArrowDownToLine className="h-3.5 w-3.5" />, command: "addRowAfter" as const },
 						  ]
 						: [
-							{ key: "left", label: "Insert column left", icon: <ArrowUpToLine className="h-3.5 w-3.5" />, command: "addColumnBefore" as const },
-							{ key: "right", label: "Insert column right", icon: <ArrowDownToLine className="h-3.5 w-3.5" />, command: "addColumnAfter" as const },
+							{ key: "left", label: t('editor.insertColumnLeft'), icon: <ArrowUpToLine className="h-3.5 w-3.5" />, command: "addColumnBefore" as const },
+							{ key: "right", label: t('editor.insertColumnRight'), icon: <ArrowDownToLine className="h-3.5 w-3.5" />, command: "addColumnAfter" as const },
 						  ]
 					).map((item) => (
 						<button
@@ -655,7 +657,7 @@ export function RichTextTableHoverControls({
 					<hr className="my-1 h-px border-0 bg-slate-200" aria-hidden="true" />
 					<button
 						type="button"
-						aria-label={gripMenu.kind === "row" ? "Delete row" : "Delete column"}
+						aria-label={gripMenu.kind === "row" ? t('editor.deleteRow') : t('editor.deleteColumn')}
 						className="inline-flex items-center gap-1.5 rounded px-2 py-1.5 text-left text-xs text-red-700 hover:bg-red-50"
 						onMouseDown={(event) => event.preventDefault()}
 						onClick={() => {
@@ -671,7 +673,7 @@ export function RichTextTableHoverControls({
 						}}
 					>
 						<Trash2 className="h-3.5 w-3.5" />
-						{gripMenu.kind === "row" ? "Delete row" : "Delete column"}
+						{gripMenu.kind === "row" ? t('editor.deleteRow') : t('editor.deleteColumn')}
 					</button>
 				</div>
 			)}

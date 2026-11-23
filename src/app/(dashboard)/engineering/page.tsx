@@ -1,3 +1,5 @@
+import { createTranslator } from '@/lib/i18n/messages'
+import { getRequestLocale } from '@/lib/i18n/server'
 import { auth } from "@/lib/auth-config";
 import { redirect } from "next/navigation";
 import prisma from "@/lib/prisma";
@@ -14,11 +16,13 @@ import { FileText, Clock, CheckCircle2, TrendingUp, Minus } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
-export const metadata = {
-	title: "Engineering Dashboard | Approval System",
-};
+export async function generateMetadata() {
+	const t = createTranslator(await getRequestLocale());
+	return { title: t('requests.engineeringPageTitle') };
+}
 
 export default async function EngineeringDashboardPage() {
+	const t = createTranslator(await getRequestLocale());
 	const session = await auth();
 	const userId = session?.user?.id;
 
@@ -239,38 +243,38 @@ export default async function EngineeringDashboardPage() {
 			{/* Page Header */}
 			<div>
 				<h1 className="text-3xl font-bold text-gray-900">
-					Engineering Dashboard
+					{t('requests.engineeringDashboard')}
 				</h1>
 				<p className="text-gray-600 mt-1">
-					Manage engineering solutions and approvals
+					{t('requests.engineeringIntro')}
 				</p>
 			</div>
 
 			{/* Quick Stats */}
 			<div className="grid grid-cols-1 md:grid-cols-3 gap-4">
 				<EngineeringMetricCard
-					title="Total in Pipeline"
+					title={t('requests.totalPipeline')}
 					value={totalInPipeline}
-					description="Active engineering workload"
-					detail="Sent back, final approval, and pending solution"
+					description={t('requests.activeWorkload')}
+					detail={t('requests.engineeringDetailPipeline')}
 					deltaValue={totalInPipelineDelta}
 					icon={FileText}
 					tone="blue"
 				/>
 				<EngineeringMetricCard
-					title="Awaiting Solution"
+					title={t('requests.awaitingSolution')}
 					value={awaitingSolution}
-					description="Needs engineering response"
-					detail="Open requests waiting for solution submission"
+					description={t('requests.engineeringResponseNeeded')}
+					detail={t('requests.engineeringDetailWaiting')}
 					deltaValue={awaitingSolutionDelta}
 					icon={Clock}
 					tone="amber"
 				/>
 				<EngineeringMetricCard
-					title="In Approval Process"
+					title={t('requests.inApprovalProcess')}
 					value={inApprovalProcess}
-					description="Solution review in progress"
-					detail="Submitted solutions waiting for approval"
+					description={t('requests.solutionReviewInProgress')}
+					detail={t('requests.engineeringDetailReview')}
 					deltaValue={inApprovalProcessDelta}
 					icon={CheckCircle2}
 					tone="violet"
@@ -290,7 +294,7 @@ export default async function EngineeringDashboardPage() {
 	);
 }
 
-function EngineeringMetricCard({
+async function EngineeringMetricCard({
 	title,
 	value,
 	description,
@@ -307,6 +311,7 @@ function EngineeringMetricCard({
 	icon: typeof FileText;
 	tone: "blue" | "amber" | "violet";
 }) {
+	const t = createTranslator(await getRequestLocale());
 	const isZeroState = value === 0;
 	const toneClasses = {
 		blue: "border-blue-200 bg-blue-50 text-blue-700",
@@ -368,8 +373,8 @@ function EngineeringMetricCard({
 							>
 								<DeltaIcon className="h-3.5 w-3.5" />
 								{deltaValue > 0
-									? `+${deltaValue} since yesterday`
-									: "No new since yesterday"}
+									? t('requests.sinceYesterday', { count: deltaValue })
+									: t('requests.noneSinceYesterday')}
 							</p>
 						</div>
 						<div

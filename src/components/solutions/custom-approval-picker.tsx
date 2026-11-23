@@ -1,5 +1,6 @@
 'use client'
 
+import { useTranslations } from '@/lib/i18n/client'
 import { useState } from 'react'
 import { Check, ChevronsUpDown, User, Plus, X, ChevronUp, ChevronDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -42,6 +43,7 @@ export function CustomApprovalPicker({
   currentUserId,
   disabled = false,
 }: CustomApprovalPickerProps) {
+  const t = useTranslations()
   const [open, setOpen] = useState(false)
   const [searchValue, setSearchValue] = useState('')
 
@@ -92,7 +94,7 @@ export function CustomApprovalPicker({
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <label className="text-sm font-medium">Custom Approval Chain</label>
+        <label className="text-sm font-medium">{t('requests.customApprovalChain')}</label>
         <div className="flex items-center gap-2">
           <Popover open={open} onOpenChange={handleOpenChange}>
             <PopoverTrigger asChild>
@@ -105,7 +107,7 @@ export function CustomApprovalPicker({
                 className="gap-2"
               >
                 <Plus className="h-4 w-4" />
-                Add Approver
+                {t('requests.addApprover')}
               </Button>
             </PopoverTrigger>
             <PopoverContent className="p-0" align="start" side="bottom">
@@ -117,7 +119,7 @@ export function CustomApprovalPicker({
                 />
                 <CommandList className="max-h-[260px] overflow-y-auto">
                   {availableUsers.length > 0 && filteredUsers.length === 0 && (
-                    <CommandEmpty>No approvers found</CommandEmpty>
+                    <CommandEmpty>{t('requests.noApprovers')}</CommandEmpty>
                   )}
                   <CommandGroup>
                     {filteredUsers.map((user) => (
@@ -130,7 +132,7 @@ export function CustomApprovalPicker({
                         <User className="mr-2 h-4 w-4" />
                         <span className="flex-1">{user.name}</span>
                         <span className="text-xs text-muted-foreground">
-                          {(user.unitPathNames.length ? user.unitPathNames.join(' / ') : 'No unit')} • {user.email}
+                          {(user.unitPathNames.length ? user.unitPathNames.join(' / ') : t('requests.noUnit'))} • {user.email}
                         </span>
                         <Check
                           className={cn(
@@ -146,19 +148,19 @@ export function CustomApprovalPicker({
             </PopoverContent>
           </Popover>
           {availableUsers.length === 0 && (
-            <p className="text-xs text-muted-foreground">No more users available</p>
+            <p className="text-xs text-muted-foreground">{t('requests.noMoreUsers')}</p>
           )}
         </div>
       </div>
 
       {selectedUsers.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          No custom approvers selected. Default engineering hierarchy will be used.
+          {t('requests.customApproversDefault')}
         </p>
       ) : (
         <div className="space-y-2">
           <p className="text-xs text-muted-foreground">
-            Approvals will proceed in this order:
+            {t('requests.customApproversOrder')}
           </p>
           <div className="space-y-2">
             {selectedUsers.map((user, index) => (
@@ -175,7 +177,7 @@ export function CustomApprovalPicker({
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate">{user.name}</p>
                   <p className="text-xs text-muted-foreground truncate">
-                    {(user.unitPathNames.length ? user.unitPathNames.join(' / ') : 'No unit')} • {user.email}
+                    {(user.unitPathNames.length ? user.unitPathNames.join(' / ') : t('requests.noUnit'))} • {user.email}
                   </p>
                 </div>
                 <div className="flex items-center gap-1">

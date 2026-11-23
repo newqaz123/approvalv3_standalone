@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from '@/lib/i18n/client'
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
@@ -160,6 +161,7 @@ export default function RichTextEditor({
 	minHeight = 160,
 	inlineImages,
 }: RichTextEditorProps) {
+	const t = useTranslations();
 	const lastEmitted = useRef<string | null>(null);
 	const editorRef = useRef<Editor | null>(null);
 	const fileByUploadId = useRef<Map<string, File>>(new Map());
@@ -410,11 +412,11 @@ export default function RichTextEditor({
 			<div
 				className="rich-text-toolbar-wrapper flex flex-wrap items-center gap-1"
 				role="toolbar"
-				aria-label="Formatting"
+				aria-label={t('editor.formatting')}
 			>
 				<ToolbarButton
 					editor={editor}
-					label="Bold"
+					label={t('editor.bold')}
 					active={editor.isActive("bold")}
 					enabled={editor.can().chain().focus().toggleBold().run()}
 					disabled={commandsDisabled}
@@ -424,7 +426,7 @@ export default function RichTextEditor({
 				</ToolbarButton>
 				<ToolbarButton
 					editor={editor}
-					label="Italic"
+					label={t('editor.italic')}
 					active={editor.isActive("italic")}
 					enabled={editor.can().chain().focus().toggleItalic().run()}
 					disabled={commandsDisabled}
@@ -434,7 +436,7 @@ export default function RichTextEditor({
 				</ToolbarButton>
 				<ToolbarButton
 					editor={editor}
-					label="Underline"
+					label={t('editor.underline')}
 					active={editor.isActive("underline")}
 					enabled={editor.can().chain().focus().toggleUnderline().run()}
 					disabled={commandsDisabled}
@@ -444,7 +446,7 @@ export default function RichTextEditor({
 				</ToolbarButton>
 				<ToolbarButton
 					editor={editor}
-					label="Strikethrough"
+					label={t('editor.strikethrough')}
 					active={editor.isActive("strike")}
 					enabled={editor.can().chain().focus().toggleStrike().run()}
 					disabled={commandsDisabled}
@@ -454,7 +456,7 @@ export default function RichTextEditor({
 				</ToolbarButton>
 				<ToolbarButton
 					editor={editor}
-					label="Bullet list"
+					label={t('editor.bullets')}
 					active={editor.isActive("bulletList")}
 					enabled={editor.can().chain().focus().toggleBulletList().run()}
 					disabled={commandsDisabled}
@@ -464,7 +466,7 @@ export default function RichTextEditor({
 				</ToolbarButton>
 				<ToolbarButton
 					editor={editor}
-					label="Numbered list"
+					label={t('editor.numbered')}
 					active={editor.isActive("orderedList")}
 					enabled={editor.can().chain().focus().toggleOrderedList().run()}
 					disabled={commandsDisabled}
@@ -474,7 +476,7 @@ export default function RichTextEditor({
 				</ToolbarButton>
 				<ToolbarButton
 					editor={editor}
-					label="Heading 2"
+					label={t('editor.heading2')}
 					active={editor.isActive("heading", { level: 2 })}
 					enabled={editor
 						.can()
@@ -491,7 +493,7 @@ export default function RichTextEditor({
 				</ToolbarButton>
 				<ToolbarButton
 					editor={editor}
-					label="Heading 3"
+					label={t('editor.heading3')}
 					active={editor.isActive("heading", { level: 3 })}
 					enabled={editor
 						.can()
@@ -508,7 +510,7 @@ export default function RichTextEditor({
 				</ToolbarButton>
 				<ToolbarButton
 					editor={editor}
-					label="Align left"
+					label={t('editor.alignLeft')}
 					active={currentRichTextBlockAlign(editor) === "left"}
 					enabled={editor.isEditable}
 					disabled={commandsDisabled}
@@ -518,7 +520,7 @@ export default function RichTextEditor({
 				</ToolbarButton>
 				<ToolbarButton
 					editor={editor}
-					label="Align center"
+					label={t('editor.alignCenter')}
 					active={currentRichTextBlockAlign(editor) === "center"}
 					enabled={editor.isEditable}
 					disabled={commandsDisabled}
@@ -528,7 +530,7 @@ export default function RichTextEditor({
 				</ToolbarButton>
 				<ToolbarButton
 					editor={editor}
-					label="Align right"
+					label={t('editor.alignRight')}
 					active={currentRichTextBlockAlign(editor) === "right"}
 					enabled={editor.isEditable}
 					disabled={commandsDisabled}
@@ -538,7 +540,7 @@ export default function RichTextEditor({
 				</ToolbarButton>
 				<ToolbarButton
 					editor={editor}
-					label="Add link"
+					label={t('editor.addLink')}
 					active={editor.isActive("link")}
 					enabled={editor
 						.can()
@@ -552,7 +554,7 @@ export default function RichTextEditor({
 							| string
 							| undefined;
 						const url = window.prompt(
-							"Link URL (https:// or mailto:)",
+							t('editor.linkUrl'),
 							previous ?? "https://",
 						);
 						if (url === null) return;
@@ -572,7 +574,7 @@ export default function RichTextEditor({
 				</ToolbarButton>
 				<button
 					type="button"
-					aria-label="Image"
+					aria-label={t('editor.image')}
 					disabled={!canInsertImages || !editor}
 					onClick={() => imageInputRef.current?.click()}
 					className={TOOLBAR_BUTTON}
@@ -584,7 +586,7 @@ export default function RichTextEditor({
 					type="file"
 					accept="image/jpeg,image/png,image/webp,image/gif"
 					multiple
-					aria-label="Choose images"
+					aria-label={t('editor.chooseImages')}
 					disabled={!canInsertImages}
 					className="sr-only"
 					onChange={(event) => {
@@ -600,7 +602,7 @@ export default function RichTextEditor({
 				<RichTextTableControls editor={editor} disabled={commandsDisabled} />
 				<ToolbarButton
 					editor={editor}
-					label="Undo"
+					label={t('editor.undo')}
 					active={false}
 					enabled={editor.can().chain().focus().undo().run()}
 					disabled={commandsDisabled}
@@ -610,7 +612,7 @@ export default function RichTextEditor({
 				</ToolbarButton>
 				<ToolbarButton
 					editor={editor}
-					label="Redo"
+					label={t('editor.redo')}
 					active={false}
 					enabled={editor.can().chain().focus().redo().run()}
 					disabled={commandsDisabled}

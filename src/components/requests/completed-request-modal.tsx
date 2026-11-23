@@ -1,5 +1,7 @@
 "use client";
 
+import { translateActivityAction, type ModalActivityItem } from '@/lib/modal-data-adapters'
+import { useTranslations } from '@/lib/i18n/client'
 import { formatFileSize } from "@/lib/format-file-size";
 import { format } from "date-fns";
 import {
@@ -55,13 +57,6 @@ interface FileAttachment {
 	description?: string;
 }
 
-interface ActivityItem {
-	id: string;
-	action: string;
-	user: string;
-	timestamp: string;
-	details?: string;
-}
 
 interface CompletedRequestModalProps {
 	open: boolean;
@@ -80,7 +75,7 @@ interface CompletedRequestModalProps {
 		requestDescription: string;
 		requestFiles: FileAttachment[];
 		stages: ApprovalStage[];
-		activities: ActivityItem[];
+		activities: ModalActivityItem[];
 		lastModified: string;
 		sentToEngineerAt: string;
 		engineerAssigned?: string;
@@ -144,8 +139,9 @@ function SubmittedAvatar({ initials }: { initials: string }) {
 function RetractableActivityTimeline({
 	activities,
 }: {
-	activities: ActivityItem[];
+	activities: ModalActivityItem[];
 }) {
+	const t = useTranslations();
 	const [expanded, setExpanded] = useState(false);
 
 	return (
@@ -157,7 +153,7 @@ function RetractableActivityTimeline({
 				<div className="flex items-center gap-2">
 					<Activity className="w-4 h-4 text-slate-500" />
 					<span className="text-sm font-bold text-slate-700 dark:text-slate-300">
-						Activity Timeline
+						{t('requests.activityTimeline')}
 					</span>
 					<span className="text-xs text-slate-400">({activities.length})</span>
 				</div>
@@ -182,7 +178,7 @@ function RetractableActivityTimeline({
 								<div className="flex items-start justify-between gap-2">
 									<div>
 										<p className="text-sm font-medium text-slate-900 dark:text-slate-100">
-											{activity.action}
+											{translateActivityAction(t, activity)}
 										</p>
 										{activity.details && (
 											<p className="text-xs text-slate-500 mt-0.5">
@@ -195,7 +191,7 @@ function RetractableActivityTimeline({
 									</span>
 								</div>
 								<p className="text-xs text-slate-500 mt-1">
-									by {activity.user}
+									{t('requests.activityActor', { name: activity.user })}
 								</p>
 							</div>
 						</div>
@@ -217,6 +213,7 @@ export function CompletedRequestModal({
 	onPreviewFile,
 	subTasksElement,
 }: CompletedRequestModalProps) {
+	const t = useTranslations();
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
 			<DialogContent className="max-w-5xl w-full max-h-[90vh] p-0 gap-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl rounded-xl overflow-hidden">
@@ -247,16 +244,14 @@ export function CompletedRequestModal({
 							</div>
 							<div className="flex-1">
 								<h4 className="text-sm font-bold text-emerald-900 dark:text-emerald-400">
-									Request Approved & Sent to Engineer
+									{t('requests.requestApprovedSent')}
 								</h4>
 								<p className="text-xs text-emerald-600 dark:text-emerald-300 mt-1">
-									Sent on{" "}
-									{format(new Date(data.sentToEngineerAt), "MMM d, yyyy")} •
-									Awaiting engineering solution
+									{t('requests.sentOn', { date: format(new Date(data.sentToEngineerAt), "MMM d, yyyy") })} {t('requests.awaitingEngineeringSolution')}
 								</p>
 								{data.engineerAssigned && (
 									<p className="text-xs text-emerald-700 dark:text-emerald-300 mt-1">
-										Assigned to:{" "}
+										{t('requests.assignedTo')}{" "}
 										<span className="font-medium">{data.engineerAssigned}</span>
 									</p>
 								)}
@@ -268,7 +263,7 @@ export function CompletedRequestModal({
 					<section>
 						<h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-3 flex items-center gap-2">
 							<Info className="w-4 h-4 text-slate-400" />
-							Request Description
+							{t('requests.requestDescription')}
 						</h3>
 						<div className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed bg-slate-50/70 dark:bg-slate-800/30 rounded-xl p-4 border border-slate-100 dark:border-slate-800">
 							<div>
@@ -281,7 +276,7 @@ export function CompletedRequestModal({
 					<section>
 						<h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-3 flex items-center gap-2">
 							<Paperclip className="w-4 h-4 text-slate-400" />
-							Attached Documentation ({data.requestFiles.length})
+							{t('requests.attachedDocumentationCount', { count: data.requestFiles.length })}
 						</h3>
 						<div className="grid grid-cols-1 gap-2">
 							{data.requestFiles.map((file) => (
@@ -311,7 +306,7 @@ export function CompletedRequestModal({
 										<button
 											onClick={() => onPreviewFile(file.id)}
 											className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition-colors"
-											title="Preview"
+											title={t('requests.preview')}
 										>
 											<Eye className="w-4 h-4" />
 										</button>
@@ -320,7 +315,7 @@ export function CompletedRequestModal({
 										<button
 											onClick={() => onDownloadFile(file.id)}
 											className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition-colors"
-											title="Download"
+											title={t('requests.download')}
 										>
 											<Download className="w-4 h-4" />
 										</button>
@@ -336,7 +331,7 @@ export function CompletedRequestModal({
 					<section>
 						<h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-4 flex items-center gap-2">
 							<TrendingUp className="w-5 h-5 text-slate-400" />
-							Approval Flow
+							{t('requests.approvalFlow')}
 						</h3>
 						<div className="flex flex-col gap-4">
 							{data.stages.map((stage) => (
@@ -347,14 +342,14 @@ export function CompletedRequestModal({
 									<div className="w-full sm:w-28 shrink-0 pt-1 flex flex-row sm:flex-col justify-between sm:justify-start items-center sm:items-start border-b sm:border-b-0 border-slate-200 dark:border-slate-700 pb-2 sm:pb-0 mb-2 sm:mb-0">
 										<div>
 											<h4 className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-												Stage {stage.stageNumber}
+												{t('requests.stage')}{' '}{stage.stageNumber}
 											</h4>
 											<p className="text-xs text-slate-400 leading-tight mt-0.5">
 												{stage.stageName}
 											</p>
 											{stage.submittedBy && (
 												<p className="text-[10px] text-slate-400 leading-tight mt-1.5">
-													by {stage.submittedBy}
+													{t('requests.activityActor', { name: stage.submittedBy })}
 												</p>
 											)}
 											{stage.submittedAt && (
@@ -446,11 +441,11 @@ export function CompletedRequestModal({
 					<div className="flex flex-wrap items-center gap-x-4 gap-y-1">
 						<span className="flex items-center gap-1.5">
 							<CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-							Request Approved
+							{t('requests.requestApproved')}
 						</span>
 						<span className="flex items-center gap-1.5">
 							<History className="w-3.5 h-3.5" />
-							Last Modified:{" "}
+							{t('requests.lastModified')}{" "}
 							{format(new Date(data.lastModified), "MMM d, yyyy")}
 						</span>
 					</div>
@@ -468,7 +463,7 @@ export function CompletedRequestModal({
 								className="flex w-full sm:w-auto items-center justify-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-bold rounded-lg transition-colors"
 							>
 								<CheckCircle2 className="w-4 h-4" />
-								Submit Solution
+								{t('requests.submitSolution')}
 							</button>
 						)}
 					</div>

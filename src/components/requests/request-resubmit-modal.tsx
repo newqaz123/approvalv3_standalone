@@ -1,5 +1,7 @@
 "use client";
 
+import { inlineImageBlockingKey } from '@/lib/i18n/messages'
+import { useTranslations } from '@/lib/i18n/client'
 import { formatFileSize } from "@/lib/format-file-size";
 import { useState, useEffect } from "react";
 import { format } from "date-fns";
@@ -29,7 +31,6 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { RichTextEditor } from "@/components/rich-text/rich-text-editor-lazy";
 import {
-	inlineImageBlockingMessage,
 	useInlineDescriptionImages,
 } from "@/hooks/use-inline-description-images";
 import { Input } from "@/components/ui/input";
@@ -41,8 +42,6 @@ import { useAttachmentPreview } from "@/hooks/use-attachment-preview";
 
 const ACCEPTED_UPLOAD_EXTENSIONS =
 	".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.gif";
-const ACCEPTED_UPLOAD_TYPES = "PDF, Word, Excel, PowerPoint, Images";
-
 // Types
 interface FileAttachment {
 	id: string;
@@ -102,13 +101,13 @@ export function RequestResubmitModal({
 	requestTitle,
 	onCancelled,
 }: RequestResubmitModalProps) {
+	const t = useTranslations();
 	const canResubmit = Boolean(onResubmit);
 	// One inline image coordinator per mounted modal; the editor uploads
 	// through it and the submit/close lifecycle below claims or cleans it.
 	const inlineImages = useInlineDescriptionImages();
-	const inlineImageBlockingGuidance = inlineImageBlockingMessage(
-		inlineImages.blockingReason,
-	);
+	const inlineImageBlocking = inlineImageBlockingKey(inlineImages.blockingReason);
+	const inlineImageBlockingGuidance = inlineImageBlocking && t(inlineImageBlocking);
 	const [title, setTitle] = useState(initialData.title);
 	const [description, setDescription] = useState(initialData.description);
 	const [existingFiles, setExistingFiles] = useState<FileAttachment[]>(
@@ -160,7 +159,7 @@ export function RequestResubmitModal({
 	const handleSubmit = async () => {
 		if (!onResubmit) return;
 		if (inlineImages.hasBlockingOperations) {
-			setSubmitError(inlineImageBlockingMessage(inlineImages.blockingReason));
+			setSubmitError(inlineImageBlockingGuidance);
 			return;
 		}
 		setIsBusy(true);
@@ -176,14 +175,14 @@ export function RequestResubmitModal({
 				inlineImageSessionId: inlineImages.uploadSessionId,
 			});
 			if (!result.success) {
-				setSubmitError(result.error || "Failed to resubmit request");
+				setSubmitError(result.error || t('requests.error.resubmitRequest'));
 				return;
 			}
 			inlineImages.clear();
 			onOpenChange(false);
 		} catch (error) {
 			setSubmitError(
-				error instanceof Error ? error.message : "An error occurred",
+				t('requests.error.resubmitRequest'),
 			);
 		} finally {
 			setIsBusy(false);
@@ -205,9 +204,7 @@ export function RequestResubmitModal({
 			onOpenChange(false);
 		} catch (error) {
 			setSubmitError(
-				error instanceof Error
-					? error.message
-					: "Failed to clean up draft images",
+				t('requests.error.cleanDraftImages'),
 			);
 		} finally {
 			setIsBusy(false);
@@ -228,7 +225,7 @@ export function RequestResubmitModal({
 						<div className="flex items-center gap-3">
 							<RotateCcw className="w-5 h-5 text-amber-600" />
 							<DialogTitle className="text-lg font-bold text-slate-900 dark:text-slate-100 tracking-tight m-0">
-								{canResubmit ? "Resubmit Request" : "Rejected Request"}
+								{canResubmit ? t('requests.resubmitRequest') : t('requests.rejectedRequest')}
 							</DialogTitle>
 						</div>
 						<button
@@ -248,11 +245,10 @@ export function RequestResubmitModal({
 							<AlertTriangle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
 							<div>
 								<h4 className="text-sm font-bold text-red-900 dark:text-red-400">
-									Request Was Rejected
+									{t('requests.requestWasRejected')}
 								</h4>
 								<p className="text-xs text-red-600 dark:text-red-300 mt-1">
-									Rejected by {initialData.rejectedBy} on{" "}
-									{format(new Date(initialData.rejectedAt), "MMM d, yyyy")}
+									{t('requests.rejectedByOn', { name: initialData.rejectedBy, date: format(new Date(initialData.rejectedAt), "MMM d, yyyy") })}
 								</p>
 								<div className="mt-2 p-2 bg-white dark:bg-slate-900 rounded border border-red-100 dark:border-red-800/30">
 									<p className="text-xs text-slate-700 dark:text-slate-300 italic">
@@ -267,7 +263,7 @@ export function RequestResubmitModal({
 					<div className="space-y-4">
 						<div>
 							<Label htmlFor="title" className="text-sm font-bold">
-								Request Title <span className="text-red-500">*</span>
+								{t('requests.requestTitle')}{' '}<span className="text-red-500">*</span>
 							</Label>
 							<Input
 								id="title"
@@ -276,13 +272,13 @@ export function RequestResubmitModal({
 								onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
 									setTitle(e.target.value)
 								}
-								placeholder="Enter a clear title for your request..."
+								placeholder={t('requests.requestTitleHint')}
 								className="mt-1.5"
 							/>
 						</div>
 						<div>
 							<Label htmlFor="description" className="text-sm font-bold">
-								Description <span className="text-red-500">*</span>
+								{t('requests.description')}{' '}<span className="text-red-500">*</span>
 							</Label>
 							<RichTextEditor
 								id="description"
@@ -302,7 +298,7 @@ export function RequestResubmitModal({
 						<section>
 							<h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-3 flex items-center gap-2">
 								<Paperclip className="w-4 h-4 text-slate-400" />
-								Existing Attachments ({existingFiles.length})
+								{t('requests.existingAttachments', { count: existingFiles.length })}
 							</h3>
 							<div className="space-y-2">
 								{existingFiles.map((file) => (
@@ -332,7 +328,7 @@ export function RequestResubmitModal({
 											type="button"
 											onClick={() => previewSavedFile(file)}
 											className="p-1 text-slate-400 hover:text-indigo-600 transition-colors"
-											title="Preview"
+											title={t('requests.preview')}
 										>
 											<Eye className="w-4 h-4" />
 										</button>
@@ -340,7 +336,7 @@ export function RequestResubmitModal({
 											<button
 												onClick={() => removeExistingFile(file.id)}
 												className="p-1 text-slate-400 hover:text-red-500 transition-colors"
-												title="Remove file"
+												title={t('requests.removeFile')}
 											>
 												<Trash2 className="w-4 h-4" />
 											</button>
@@ -350,7 +346,7 @@ export function RequestResubmitModal({
 							</div>
 							{canResubmit ? (
 								<p className="text-xs text-slate-400 mt-2 italic">
-									Removed files will be deleted when you resubmit
+									{t('requests.removalOnResubmit')}
 								</p>
 							) : null}
 						</section>
@@ -361,14 +357,14 @@ export function RequestResubmitModal({
 						<section>
 							<h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-3 flex items-center gap-2">
 								<FileUp className="w-4 h-4" />
-								Add New Attachments
+								{t('requests.addAttachments')}
 							</h3>
 
 							<div className="mb-4">
 								<label className="flex items-center justify-center gap-2 px-4 py-3 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
 									<FileUp className="w-5 h-5 text-slate-400" />
 									<span className="text-sm font-medium text-slate-600 dark:text-slate-400">
-										Click to upload additional files
+										{t('requests.uploadMore')}
 									</span>
 									<input
 										type="file"
@@ -379,7 +375,7 @@ export function RequestResubmitModal({
 									/>
 								</label>
 								<p className="mt-2 text-xs text-slate-500">
-									Allowed: {ACCEPTED_UPLOAD_TYPES}. Maximum size: 10MB per file.
+									{t('requests.fileLimit', { types: t('requests.uploadTypes'), size: 10 })}
 								</p>
 							</div>
 
@@ -410,7 +406,7 @@ export function RequestResubmitModal({
 															type="button"
 															onClick={() => previewLocalFile(file)}
 															className="p-1 text-slate-400 hover:text-indigo-600 transition-colors"
-															title="Preview"
+															title={t('requests.preview')}
 														>
 															<Eye className="w-4 h-4" />
 														</button>
@@ -428,7 +424,7 @@ export function RequestResubmitModal({
 													onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
 														updateFileDescription(file.name, e.target.value)
 													}
-													placeholder="Add a description for this file..."
+													placeholder={t('requests.fileDescriptionHint')}
 													className="w-full text-xs px-2 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded"
 												/>
 											</div>
@@ -448,7 +444,7 @@ export function RequestResubmitModal({
 							onClick={requestClose}
 							disabled={isBusy}
 						>
-							{canResubmit ? "Cancel" : "Close"}
+							{canResubmit ? t('common.cancel') : t('requests.close')}
 						</Button>
 						{canResubmit && showCancel && requestId && requestTitle ? (
 							<CancelRequestDialog
@@ -476,7 +472,7 @@ export function RequestResubmitModal({
 								className="bg-amber-600 hover:bg-amber-700 text-white"
 							>
 								<RotateCcw className="w-4 h-4 mr-1.5" />
-								Resubmit Request
+								{t('requests.resubmitRequest')}
 							</Button>
 						</div>
 					) : null}

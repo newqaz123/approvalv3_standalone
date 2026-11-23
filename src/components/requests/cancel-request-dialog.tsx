@@ -1,5 +1,6 @@
 'use client'
 
+import { useTranslations } from '@/lib/i18n/client'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -23,9 +24,9 @@ import {
   FormField,
   FormItem,
   FormLabel,
-  FormMessage,
+  useFormField,
 } from '@/components/ui/form'
-import { cancellationReasonSchema } from '@/lib/schemas/cancellation-schemas'
+import { CANCELLATION_REASON_MIN_LENGTH, cancellationReasonSchema } from '@/lib/schemas/cancellation-schemas'
 import { cancelRequest } from '@/server-actions/requests'
 
 const cancelSchema = z.object({
@@ -33,6 +34,16 @@ const cancelSchema = z.object({
 })
 
 type CancelFormValues = z.infer<typeof cancelSchema>
+
+function CancellationReasonMessage({ value }: { value: string }) {
+  const t = useTranslations()
+  const { error, formMessageId } = useFormField()
+  if (!error) return null
+  const key = value.trim().length < CANCELLATION_REASON_MIN_LENGTH
+    ? 'requests.error.cancellationMinimum'
+    : 'requests.error.cancellationMaximum'
+  return <p id={formMessageId} className="text-[0.8rem] font-medium text-destructive">{t(key)}</p>
+}
 
 interface CancelRequestDialogProps {
   requestId: string
@@ -51,6 +62,7 @@ export function CancelRequestDialog({
   onCancelled,
   onCancelRequest = cancelRequest,
 }: CancelRequestDialogProps) {
+  const t = useTranslations()
   const [open, setOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -78,10 +90,10 @@ export function CancelRequestDialog({
         form.reset()
         onCancelled?.()
       } else if (result.errors) {
-        setError(Object.values(result.errors).flat().join(', '))
+        setError(t('requests.error.cancellationValidation'))
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to cancel request')
+      setError(t('requests.error.cancel'))
     } finally {
       setIsSubmitting(false)
     }
@@ -91,14 +103,14 @@ export function CancelRequestDialog({
     <AlertDialog open={open} onOpenChange={setOpen}>
       <AlertDialogTrigger asChild>
         <Button variant="destructive" size="sm">
-          Cancel Request
+          {t('requests.cancelRequest')}
         </Button>
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Cancel Request?</AlertDialogTitle>
+          <AlertDialogTitle>{t('requests.cancelHeading')}</AlertDialogTitle>
           <AlertDialogDescription>
-            Are you sure you want to cancel &quot;{requestTitle}&quot;? This action cannot be undone.
+            {t('requests.cancelConfirmation', { title: requestTitle })}
           </AlertDialogDescription>
         </AlertDialogHeader>
 
@@ -109,16 +121,16 @@ export function CancelRequestDialog({
               name="reason"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Cancellation Reason (required)</FormLabel>
+                  <FormLabel>{t('requests.cancelReason')}</FormLabel>
                   <FormControl>
                     <Textarea
                       {...field}
-                      placeholder="Please explain why you're cancelling this request..."
+                      placeholder={t('requests.cancelReasonHint')}
                       rows={3}
                     />
                   </FormControl>
-                  <FormDescription>Minimum 5 characters.</FormDescription>
-                  <FormMessage />
+                  <FormDescription>{t('requests.cancelReasonMinimum')}</FormDescription>
+                  <CancellationReasonMessage value={field.value} />
                 </FormItem>
               )}
             />
@@ -129,14 +141,14 @@ export function CancelRequestDialog({
 
             <AlertDialogFooter>
               <AlertDialogCancel disabled={isSubmitting}>
-                Keep Request
+                {t('requests.keepRequest')}
               </AlertDialogCancel>
               <Button
                 type="submit"
                 variant="destructive"
                 disabled={isSubmitting || !form.formState.isValid}
               >
-                {isSubmitting ? 'Cancelling...' : 'Cancel Request'}
+                {isSubmitting ? t('requests.cancelling') : t('requests.cancelRequest')}
               </Button>
             </AlertDialogFooter>
           </form>

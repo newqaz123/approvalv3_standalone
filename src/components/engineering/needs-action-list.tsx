@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from '@/lib/i18n/client'
 import { useState } from "react";
 import { format } from "date-fns";
 import { CheckCircle2 } from "lucide-react";
@@ -24,6 +25,7 @@ export interface NeedsActionListProps {
 }
 
 export function NeedsActionList({ needsApproval }: NeedsActionListProps) {
+	const t = useTranslations();
 	const [selectedRequestId, setSelectedRequestId] = useState<string | null>(
 		null,
 	);
@@ -46,12 +48,12 @@ export function NeedsActionList({ needsApproval }: NeedsActionListProps) {
 			<div>
 				<h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
 					<CheckCircle2 className="h-5 w-5" />
-					Solutions Awaiting Your Approval
+					{t('requests.solutionsAwaitingYou')}
 				</h2>
 				{needsApproval.length === 0 ? (
 					<Card>
 						<CardContent className="py-8 text-center text-gray-500">
-							No solutions awaiting your approval
+							{t('requests.noSolutionsAwaitingYou')}
 						</CardContent>
 					</Card>
 				) : (
@@ -60,11 +62,11 @@ export function NeedsActionList({ needsApproval }: NeedsActionListProps) {
 							<Table>
 								<TableHeader>
 									<TableRow>
-										<TableHead>Request Title</TableHead>
-										<TableHead>Solution By</TableHead>
-										<TableHead>Cost Estimate</TableHead>
-										<TableHead>Submitted Date</TableHead>
-										<TableHead className="text-right">Action</TableHead>
+										<TableHead>{t('requests.requestTitle')}</TableHead>
+										<TableHead>{t('requests.solutionBy')}</TableHead>
+										<TableHead>{t('requests.costEstimate')}</TableHead>
+										<TableHead>{t('requests.submittedDate')}</TableHead>
+										<TableHead className="text-right">{t('requests.action')}</TableHead>
 									</TableRow>
 								</TableHeader>
 								<TableBody>
@@ -89,7 +91,7 @@ export function NeedsActionList({ needsApproval }: NeedsActionListProps) {
 													variant="outline"
 													onClick={() => handleReviewApprove(request.id)}
 												>
-													Review & Approve
+													{t('requests.reviewAndApprove')}
 												</Button>
 											</TableCell>
 										</TableRow>

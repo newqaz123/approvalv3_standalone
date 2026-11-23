@@ -33,9 +33,9 @@ it("shows an accessible skeleton while the selected request loads", () => {
 		/<Dialog open=\{open\} onOpenChange=\{onOpenChange\}>/,
 	);
 	assert.match(loadingBlock, /<DialogContent/);
-	assert.match(loadingBlock, /<DialogTitle>Loading request<\/DialogTitle>/);
+	assert.match(loadingBlock, /<DialogTitle>\{t\('requests\.loadingRequest'\)\}<\/DialogTitle>/);
 	assert.match(loadingBlock, /<DialogDescription className="sr-only">/);
-	assert.match(loadingBlock, /Request details are loading\./);
+	assert.match(loadingBlock, /t\('requests\.loadingRequestDescription'\)/);
 	assert.match(loadingBlock, /<RequestDetailSkeleton \/>/);
 	assert.doesNotMatch(loadingBlock, /return null/);
 });

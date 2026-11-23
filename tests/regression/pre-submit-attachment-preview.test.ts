@@ -27,7 +27,7 @@ describe('pre-submit attachment preview', () => {
       assert.match(source, /from ['"]@\/components\/requests\/file-preview-dialog['"]/)
       assert.match(source, /<FilePreviewDialog/)
       assert.match(source, /previewLocalFile/)
-      assert.match(source, /title="Preview"/)
+      assert.match(source, /title=\{t\('requests\.preview'\)\}/)
     })
   }
 

@@ -395,12 +395,12 @@ describe('re-based approval-action-pending-state source contracts', () => {
       assert.match(source, /disabled=\{isSubmitting\}/, `${name} must disable action controls while pending`)
       assert.match(
         source,
-        /isSubmitting\s*\?\s*"Approving\.\.\."\s*:\s*"(?:Confirm Approval|Approve Solution)"/,
+        /isSubmitting\s*\?\s*t\('requests\.approving'\)\s*:\s*t\('requests\.(?:confirmApproval|approveSolutionHeading)'\)/,
         `${name} must expose approval progress`,
       )
       assert.match(
         source,
-        /isSubmitting\s*\?\s*"Rejecting\.\.\."\s*:\s*"Confirm Rejection"/,
+        /isSubmitting\s*\?\s*t\('requests\.rejecting'\)\s*:\s*t\('requests\.confirmRejection'\)/,
         `${name} must expose rejection progress`,
       )
     }
@@ -412,11 +412,11 @@ describe('re-based approval-action-pending-state source contracts', () => {
     assert.match(startModal, /isSubmitting\?: boolean;/)
     assert.match(startModal, /await onSubmit\(/)
     assert.match(startModal, /disabled=\{isSubmitting\}/)
-    assert.match(startModal, /isSubmitting\s*\?\s*"Starting\.\.\."\s*:\s*"Start Final Approval"/)
+    assert.match(startModal, /isSubmitting\s*\?\s*t\('requests\.starting'\)\s*:\s*t\('requests\.startFinal'\)/)
     assert.match(restartModal, /isSubmitting\?: boolean;/)
     assert.match(restartModal, /await onRestart\(/)
     assert.match(restartModal, /disabled=\{isSubmitting\}/)
-    assert.match(restartModal, /isSubmitting\s*\?\s*"Restarting\.\.\."\s*:\s*"Restart Final Approval"/)
+    assert.match(restartModal, /isSubmitting\s*\?\s*t\('requests\.restarting'\)\s*:\s*t\('requests\.restartFinal'\)/)
   })
 
   it('announces pending actions and locks an already-open approver search', () => {

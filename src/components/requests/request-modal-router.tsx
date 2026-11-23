@@ -1,5 +1,7 @@
 "use client";
 
+import type { MessageKey } from '@/lib/i18n/messages'
+import { useTranslations } from '@/lib/i18n/client'
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { SubmitterModal } from "./submitter-modal";
@@ -61,7 +63,7 @@ interface RequestModalRouterProps {
 	onOpenChange: (open: boolean) => void;
 	onActionComplete?: () => void;
 	onLoadStateChange?: (loading: boolean) => void;
-	onLoadError?: (message: string) => void;
+	onLoadError?: (errorKey: MessageKey) => void;
 	viewOnly?: boolean;
 }
 
@@ -82,6 +84,7 @@ function RequestModalRouterContent({
 	onLoadError,
 	viewOnly = false,
 }: RequestModalRouterProps) {
+	const t = useTranslations();
 	const { data: session } = useSession();
 	const user = session?.user;
 	const router = useRouter();
@@ -130,7 +133,8 @@ function RequestModalRouterContent({
 			const request = await getRequest(requestId);
 
 			if (!request) {
-				onLoadError?.("Request not found or you may not have access.");
+				onLoadError?.('requests.error.notFoundOrNoAccess');
+				if (!onLoadError) toast.error(t('requests.error.notFoundOrNoAccess'));
 				setActionCapabilities(null);
 				setLoading(false);
 				onLoadStateChange?.(false);
@@ -186,7 +190,8 @@ function RequestModalRouterContent({
 			setRequestData(request);
 		} catch (error) {
 			console.error("Failed to load request data:", error);
-			onLoadError?.("Could not open request. Please refresh and try again.");
+			onLoadError?.('requests.error.openRequest');
+			if (!onLoadError) toast.error(t('requests.error.openRequest'));
 		} finally {
 			setLoading(false);
 			onLoadStateChange?.(false);
@@ -198,9 +203,9 @@ function RequestModalRouterContent({
 			<Dialog open={open} onOpenChange={onOpenChange}>
 				<DialogContent className="max-w-5xl w-full max-h-[90vh] overflow-y-auto">
 					<DialogHeader>
-						<DialogTitle>Loading request</DialogTitle>
+						<DialogTitle>{t('requests.loadingRequest')}</DialogTitle>
 						<DialogDescription className="sr-only">
-							Request details are loading.
+							{t('requests.loadingRequestDescription')}
 						</DialogDescription>
 					</DialogHeader>
 					<RequestDetailSkeleton />
@@ -213,7 +218,7 @@ function RequestModalRouterContent({
 	}
 
 	// Transform data for modals
-	const modalData = transformRequestToModalData(requestData);
+	const modalData = transformRequestToModalData(requestData, t);
 
 	// Determine permissions. Action buttons come from session-derived
 	// capabilities; canView/engineering/admin read is never a substitute.
@@ -339,13 +344,13 @@ function RequestModalRouterContent({
 			);
 
 			if (!file) {
-				toast.error("File not found");
+				toast.error(t('requests.error.fileNotFound'));
 				return;
 			}
 
 			const downloadUrl = getFileDownloadUrl(file.id);
 			if (!downloadUrl) {
-				toast.error("File is no longer available");
+				toast.error(t('requests.error.fileUnavailable'));
 				return;
 			}
 
@@ -353,7 +358,7 @@ function RequestModalRouterContent({
 
 			if (!res.ok) {
 				const data = await res.json().catch(() => ({}));
-				toast.error(data.error || "File is no longer available");
+				toast.error(data.error || t('requests.error.fileUnavailable'));
 				return;
 			}
 
@@ -368,7 +373,7 @@ function RequestModalRouterContent({
 			URL.revokeObjectURL(url);
 		} catch (error) {
 			console.error("Download error:", error);
-			toast.error("Failed to download file");
+			toast.error(t('requests.error.download'));
 		}
 	};
 
@@ -379,13 +384,13 @@ function RequestModalRouterContent({
 			);
 
 			if (!file) {
-				toast.error("File not found");
+				toast.error(t('requests.error.fileNotFound'));
 				return;
 			}
 
 			const downloadUrl = getFileDownloadUrl(file.id);
 			if (!downloadUrl) {
-				toast.error("File is no longer available");
+				toast.error(t('requests.error.fileUnavailable'));
 				return;
 			}
 
@@ -393,7 +398,7 @@ function RequestModalRouterContent({
 
 			if (!res.ok) {
 				const data = await res.json().catch(() => ({}));
-				toast.error(data.error || "File is no longer available");
+				toast.error(data.error || t('requests.error.fileUnavailable'));
 				return;
 			}
 
@@ -408,7 +413,7 @@ function RequestModalRouterContent({
 			URL.revokeObjectURL(url);
 		} catch (error) {
 			console.error("Download error:", error);
-			toast.error("Failed to download file");
+			toast.error(t('requests.error.download'));
 		}
 	};
 
@@ -416,7 +421,7 @@ function RequestModalRouterContent({
 		const file = requestData.fileAttachments?.find((f: any) => f.id === fileId);
 
 		if (!file) {
-			toast.error("File not found");
+			toast.error(t('requests.error.fileNotFound'));
 			return;
 		}
 
@@ -431,7 +436,7 @@ function RequestModalRouterContent({
 		);
 
 		if (!file) {
-			toast.error("File not found");
+			toast.error(t('requests.error.fileNotFound'));
 			return;
 		}
 
@@ -468,7 +473,7 @@ function RequestModalRouterContent({
 			const result = await exportRequestAsPDF(requestId);
 
 			if (!result.success || !result.data) {
-				toast.error(result.error || "Failed to generate PDF");
+				toast.error(t('requests.error.generatePdf'));
 				return;
 			}
 
@@ -477,10 +482,10 @@ function RequestModalRouterContent({
 				result.contentType || "application/pdf",
 				result.filename || `request-${requestId}.pdf`,
 			);
-			toast.success("PDF exported successfully");
+			toast.success(t('requests.pdfExported'));
 		} catch (error) {
 			console.error("PDF export error:", error);
-			toast.error("Failed to export PDF");
+			toast.error(t('requests.error.exportPdf'));
 		}
 	};
 
@@ -491,7 +496,7 @@ function RequestModalRouterContent({
 		const result = await exportRequestPackageAsPDF(requestId, items);
 
 		if (!result.success || !result.data) {
-			throw new Error(result.error || "Failed to generate PDF package");
+			throw new Error(t('requests.error.exportPackage'));
 		}
 
 		downloadBase64File(
@@ -499,7 +504,7 @@ function RequestModalRouterContent({
 			result.contentType || "application/pdf",
 			result.filename || `approval-package-${requestId}.pdf`,
 		);
-		toast.success("Evidence package exported successfully");
+		toast.success(t('requests.packetExported'));
 	};
 
 	const handleApprove = async (comment: string) => {
@@ -530,15 +535,15 @@ function RequestModalRouterContent({
 			}
 
 			if (result.success) {
-				toast.success("Approved successfully");
+				toast.success(t('requests.approved'));
 				handleClose();
 				router.refresh();
 			} else {
-				toast.error(result.message || "Failed to approve");
+				toast.error(t(result.errorKey ?? 'requests.error.approve'));
 			}
 		} catch (error) {
 			console.error("Approval error:", error);
-			toast.error("An error occurred while approving");
+			toast.error(t('requests.error.approveUnexpected'));
 		} finally {
 			setIsSubmitting(false);
 		}
@@ -572,15 +577,15 @@ function RequestModalRouterContent({
 			}
 
 			if (result.success) {
-				toast.success("Rejected successfully");
+				toast.success(t('requests.rejected'));
 				handleClose();
 				router.refresh();
 			} else {
-				toast.error(result.message || "Failed to reject");
+				toast.error(t(result.errorKey ?? 'requests.error.reject'));
 			}
 		} catch (error) {
 			console.error("Rejection error:", error);
-			toast.error("An error occurred while rejecting");
+			toast.error(t('requests.error.rejectUnexpected'));
 		} finally {
 			setIsSubmitting(false);
 		}
@@ -601,15 +606,15 @@ function RequestModalRouterContent({
 			);
 
 			if (result.success) {
-				toast.success("Final approval initiated successfully");
+				toast.success(t('requests.finalStarted'));
 				handleClose();
 				router.refresh();
 			} else {
-				toast.error("Failed to initiate final approval");
+				toast.error(t('requests.error.startFinal'));
 			}
 		} catch (error) {
 			console.error("Final approval error:", error);
-			toast.error("An error occurred while initiating final approval");
+			toast.error(t('requests.error.startFinalUnexpected'));
 		} finally {
 			setIsSubmitting(false);
 		}
@@ -620,7 +625,7 @@ function RequestModalRouterContent({
 		description: string;
 		inlineImageSessionId: string;
 	}): Promise<{ success: boolean; error?: string }> => {
-		if (isSubmitting) return { success: false, error: "Submission in progress" };
+		if (isSubmitting) return { success: false, error: t('requests.error.submissionBusy') };
 		setIsSubmitting(true);
 
 		try {
@@ -632,22 +637,19 @@ function RequestModalRouterContent({
 			});
 
 			if (result.success) {
-				toast.success("Request resubmitted successfully");
+				toast.success(t('requests.requestResubmitted'));
 				handleClose();
 				router.refresh();
 				return { success: true };
 			}
-			toast.error("Failed to resubmit request");
-			return { success: false, error: "Failed to resubmit request" };
+			toast.error(t('requests.error.resubmitRequest'));
+			return { success: false, error: t('requests.error.resubmitRequest') };
 		} catch (error) {
 			console.error("Resubmit request error:", error);
-			toast.error("An error occurred while resubmitting request");
+			toast.error(t('requests.error.resubmitRequestUnexpected'));
 			return {
 				success: false,
-				error:
-					error instanceof Error
-						? error.message
-						: "Failed to resubmit request",
+				error: t('requests.error.resubmitRequest'),
 			};
 		} finally {
 			setIsSubmitting(false);
@@ -670,15 +672,15 @@ function RequestModalRouterContent({
 			);
 
 			if (result.success) {
-				toast.success("Final approval restarted successfully");
+				toast.success(t('requests.finalRestarted'));
 				handleClose();
 				router.refresh();
 			} else {
-				toast.error("Failed to restart final approval");
+				toast.error(t('requests.error.restartFinal'));
 			}
 		} catch (error) {
 			console.error("Restart final approval error:", error);
-			toast.error("An error occurred while restarting final approval");
+			toast.error(t('requests.error.restartFinalUnexpected'));
 		} finally {
 			setIsSubmitting(false);
 		}
@@ -808,7 +810,7 @@ function RequestModalRouterContent({
 							});
 
 							if (result.success) {
-								toast.success("Solution resubmitted successfully");
+								toast.success(t('requests.solutionResubmitted'));
 								onOpenChange(false);
 								window.dispatchEvent(
 									new Event("approvalapp:request-data-changed"),
@@ -817,14 +819,11 @@ function RequestModalRouterContent({
 								router.refresh();
 								return { success: true };
 							}
-							return { success: false, error: "Failed to resubmit solution" };
+							return { success: false, error: t('requests.error.resubmitSolution') };
 						} catch (error) {
 							return {
 								success: false,
-								error:
-									error instanceof Error
-										? error.message
-										: "Failed to resubmit solution",
+								error: t('requests.error.resubmitSolution'),
 							};
 						} finally {
 							setIsSubmitting(false);
@@ -843,7 +842,7 @@ function RequestModalRouterContent({
 						...modalData,
 						status: "completed_request",
 						sentToEngineerAt: requestData.updatedAt.toISOString(),
-						engineerAssigned: "Engineering Team",
+						engineerAssigned: t('requests.engineeringTeam'),
 					}}
 					onSubmitSolution={
 						allowActions && canAct("SUBMIT_SOLUTION")
@@ -1032,7 +1031,7 @@ function RequestModalRouterContent({
 						});
 
 						if (result.success) {
-							toast.success("Solution submitted successfully");
+							toast.success(t('requests.solutionSubmitted'));
 							onOpenChange(false);
 							window.dispatchEvent(
 								new Event("approvalapp:request-data-changed"),
@@ -1041,14 +1040,11 @@ function RequestModalRouterContent({
 							router.refresh();
 							return { success: true };
 						}
-						return { success: false, error: "Failed to submit solution" };
+						return { success: false, error: t('requests.error.submitSolution') };
 					} catch (error) {
 						return {
 							success: false,
-							error:
-								error instanceof Error
-									? error.message
-									: "Failed to submit solution",
+							error: t('requests.error.submitSolution'),
 						};
 					} finally {
 						setIsSubmitting(false);
@@ -1089,7 +1085,7 @@ function RequestModalRouterContent({
 							});
 
 							if (result.success) {
-								toast.success("Solution resubmitted successfully");
+								toast.success(t('requests.solutionResubmitted'));
 								onOpenChange(false);
 								window.dispatchEvent(
 									new Event("approvalapp:request-data-changed"),
@@ -1098,14 +1094,11 @@ function RequestModalRouterContent({
 								router.refresh();
 								return { success: true };
 							}
-							return { success: false, error: "Failed to resubmit solution" };
+							return { success: false, error: t('requests.error.resubmitSolution') };
 						} catch (error) {
 							return {
 								success: false,
-								error:
-									error instanceof Error
-										? error.message
-										: "Failed to resubmit solution",
+								error: t('requests.error.resubmitSolution'),
 							};
 						} finally {
 							setIsSubmitting(false);
@@ -1134,7 +1127,7 @@ function RequestModalRouterContent({
 							);
 
 							if (result.success) {
-								toast.success("Final approval initiated successfully");
+								toast.success(t('requests.finalStarted'));
 								setShowSubmitFinalApprovalModal(false);
 								onOpenChange(false);
 								window.dispatchEvent(
@@ -1143,11 +1136,11 @@ function RequestModalRouterContent({
 								onActionComplete?.();
 								router.refresh();
 							} else {
-								toast.error("Failed to initiate final approval");
+								toast.error(t('requests.error.startFinal'));
 							}
 						} catch (error) {
 							console.error("Final approval error:", error);
-							toast.error("An error occurred while initiating final approval");
+							toast.error(t('requests.error.startFinalUnexpected'));
 						} finally {
 							setIsSubmitting(false);
 						}

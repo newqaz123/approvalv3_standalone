@@ -15,8 +15,9 @@ describe("Gapforimprove regressions", () => {
 			/application\/vnd\.openxmlformats-officedocument\.presentationml\.presentation/,
 		);
 		assert.match(policy, /pptx/);
-		assert.match(requestForm, /PowerPoint/);
-		assert.match(requestForm, /MB per file/);
+		assert.match(requestForm, /t\('requests\.uploadTypes'\)/);
+		assert.match(read('src/lib/i18n/catalogs/requests.ts'), /requests\.uploadTypes[^\n]*PowerPoint/);
+		assert.match(requestForm, /t\('requests\.fileLimit', \{/);
 	});
 
 	it("/requests status filter exposes every RequestStatus option used by dashboard", () => {
@@ -49,9 +50,9 @@ describe("Gapforimprove regressions", () => {
 		);
 		assert.match(requestFilters, /xl:flex-nowrap/);
 		assert.match(requestFilters, /h-10/);
-		assert.match(requestFilters, /From date/);
-		assert.match(requestFilters, /To date/);
-		assert.match(requestFilters, /Show only no WR/);
+		assert.match(requestFilters, /t\('requests\.fromDate'\)/);
+		assert.match(requestFilters, /t\('requests\.toDate'\)/);
+		assert.match(requestFilters, /t\('requests\.withoutWrOnly'\)/);
 		assert.doesNotMatch(requestFilters, /lg:col-span-3/);
 	});
 

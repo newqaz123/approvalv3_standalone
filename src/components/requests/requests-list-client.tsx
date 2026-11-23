@@ -1,5 +1,6 @@
 'use client'
 
+import { useTranslations } from '@/lib/i18n/client'
 import { useState } from 'react'
 import { Download, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -23,6 +24,7 @@ export function RequestsListClient({
   departments,
   requesters,
 }: RequestsListClientProps) {
+  const t = useTranslations()
   const [showNewRequestModal, setShowNewRequestModal] = useState(false)
   const [requestListRefreshSignal, setRequestListRefreshSignal] = useState(0)
   const [exportFilters, setExportFilters] = useState<GetRequestsFilters>({
@@ -47,18 +49,19 @@ export function RequestsListClient({
       })
 
       if (result.success) {
-        toast.success('Request created successfully')
+        toast.success(t('requests.requestCreated'))
         setRequestListRefreshSignal((signal) => signal + 1)
         router.refresh()
         return { success: true }
       } else {
-        toast.error(result.error || 'Failed to create request')
-        return { success: false, error: result.error || 'Failed to create request' }
+        const error = t(result.errorKey ?? 'requests.error.create')
+        toast.error(error)
+        return { success: false, error }
       }
     } catch (error) {
       console.error('Failed to create request:', error)
-      toast.error('An error occurred while creating the request')
-      return { success: false, error: 'An error occurred while creating the request' }
+      toast.error(t('requests.error.createUnexpected'))
+      return { success: false, error: t('requests.error.createUnexpected') }
     }
   }
 
@@ -72,7 +75,7 @@ export function RequestsListClient({
       link.click()
     } catch (error) {
       console.error('Failed to export requests:', error)
-      toast.error('Failed to export requests')
+      toast.error(t('requests.error.exportXlsx'))
     } finally {
       setIsExporting(false)
     }
@@ -82,9 +85,9 @@ export function RequestsListClient({
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
         <div>
-          <h1 className="text-3xl font-bold">Requests</h1>
+          <h1 className="text-3xl font-bold">{t('nav.requests')}</h1>
           <p className="text-muted-foreground">
-            View and track improvement requests from your department
+            {t('requests.listIntro')}
           </p>
         </div>
         <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
@@ -96,14 +99,14 @@ export function RequestsListClient({
             disabled={isExporting}
           >
             <Download className="mr-2 h-4 w-4" />
-            {isExporting ? 'Exporting…' : 'Export XLSX'}
+            {isExporting ? t('requests.exporting') : t('requests.exportXlsx')}
           </Button>
           <Button 
             className="w-full bg-slate-950 text-white hover:bg-slate-800 sm:w-auto"
             onClick={() => setShowNewRequestModal(true)}
           >
             <Plus className="mr-2 h-4 w-4" />
-            New Request
+            {t('requests.newRequest')}
           </Button>
         </div>
       </div>

@@ -1,3 +1,5 @@
+import { createTranslator } from '@/lib/i18n/messages'
+import { getRequestLocale } from '@/lib/i18n/server'
 import { Suspense } from 'react'
 import { RequestsListClient } from '@/components/requests/requests-list-client'
 import { RequestDeepLinkModal } from '@/components/requests/request-deep-link-modal'
@@ -27,6 +29,7 @@ async function RequestsList() {
 }
 
 export default async function RequestsPage({ searchParams }: RequestsPageProps) {
+  const t = createTranslator(await getRequestLocale())
   const { requestId } = await searchParams
 
   return (
@@ -35,7 +38,7 @@ export default async function RequestsPage({ searchParams }: RequestsPageProps) 
       {requestId ? (
         <RequestsList />
       ) : (
-        <Suspense fallback={<div>Loading...</div>}>
+        <Suspense fallback={<div>{t('requests.loading')}</div>}>
           <RequestsList />
         </Suspense>
       )}

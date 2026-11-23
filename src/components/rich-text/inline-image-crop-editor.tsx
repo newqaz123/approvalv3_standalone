@@ -1,5 +1,7 @@
 'use client'
 
+import type { MessageKey } from '@/lib/i18n/messages'
+import { useTranslations } from '@/lib/i18n/client'
 import * as React from 'react'
 import {
   useEffect,
@@ -49,15 +51,15 @@ const CROP_PRESETS: ReadonlyArray<{ preset: InlineImageCropPreset; label: string
   { preset: '16:9', label: '16:9' },
 ]
 
-const CROP_EDGES: ReadonlyArray<{ edge: InlineImageCropEdge; label: string }> = [
-  { edge: 'top', label: 'Move crop top edge' },
-  { edge: 'right', label: 'Move crop right edge' },
-  { edge: 'bottom', label: 'Move crop bottom edge' },
-  { edge: 'left', label: 'Move crop left edge' },
-  { edge: 'top-left', label: 'Move crop top-left corner' },
-  { edge: 'top-right', label: 'Move crop top-right corner' },
-  { edge: 'bottom-left', label: 'Move crop bottom-left corner' },
-  { edge: 'bottom-right', label: 'Move crop bottom-right corner' },
+const CROP_EDGES: ReadonlyArray<{ edge: InlineImageCropEdge; labelKey: MessageKey }> = [
+  { edge: 'top', labelKey: 'editor.cropTop' },
+  { edge: 'right', labelKey: 'editor.cropRight' },
+  { edge: 'bottom', labelKey: 'editor.cropBottom' },
+  { edge: 'left', labelKey: 'editor.cropLeft' },
+  { edge: 'top-left', labelKey: 'editor.cropTopLeft' },
+  { edge: 'top-right', labelKey: 'editor.cropTopRight' },
+  { edge: 'bottom-left', labelKey: 'editor.cropBottomLeft' },
+  { edge: 'bottom-right', labelKey: 'editor.cropBottomRight' },
 ]
 
 /** One live crop session on a node: its token, snapshot, and resolved dims. */
@@ -171,7 +173,7 @@ export function endInlineImageCropSession(input: {
 export function focusInlineImageCropButton(scope: {
   querySelector: (selector: string) => { focus: () => void } | null
 }): boolean {
-  const button = scope.querySelector('button[aria-label="Crop image"]')
+  const button = scope.querySelector('button[data-inline-image-crop]')
   if (!button) return false
   button.focus()
   return true
@@ -233,6 +235,7 @@ export function InlineImageCropEditor({
   onApply,
   onCancel,
 }: InlineImageCropEditorProps) {
+  const t = useTranslations()
   const [draft, setDraft] = useState<InlineImageCropDraft>(() => createInlineImageCropDraft(session.snapshot))
   const [status, setStatus] = useState<string>('Crop editor open')
   const draftRef = useRef(draft)
@@ -506,28 +509,28 @@ export function InlineImageCropEditor({
       <span
         className="inline-image-crop-controls"
         role="group"
-        aria-label="Crop controls"
+        aria-label={t('editor.cropControls')}
         onMouseDown={stopSurfaceEvents}
       >
         {CROP_PRESETS.map(({ preset, label }) => (
           <button
             key={preset}
             type="button"
-            aria-label={`Crop aspect ${preset}`}
+            aria-label={t('editor.cropAspect', { ratio: preset })}
             aria-pressed={draft.preset === preset}
             data-preset={preset}
             onClick={() => onPresetChange(preset)}
             className="inline-image-crop-button"
           >
-            {label}
+            {preset === 'free' ? t('editor.cropFree') : preset === 'original' ? t('editor.cropOriginal') : label}
           </button>
         ))}
         <span className="inline-image-toolbar-divider" aria-hidden="true" />
         <label className="inline-image-crop-zoom">
-          <span aria-hidden="true">Zoom</span>
+          <span aria-hidden="true">{t('editor.zoom')}</span>
           <input
             type="range"
-            aria-label="Image zoom"
+            aria-label={t('editor.imageZoom')}
             min={INLINE_IMAGE_CROP_MIN_ZOOM}
             max={INLINE_IMAGE_CROP_MAX_ZOOM}
             step={0.05}
@@ -536,24 +539,24 @@ export function InlineImageCropEditor({
           />
         </label>
         <span className="inline-image-toolbar-divider" aria-hidden="true" />
-        <button type="button" aria-label="Cancel crop" onClick={onCancel} className="inline-image-crop-button">
-          Cancel
+        <button type="button" aria-label={t('editor.cancelCrop')} onClick={onCancel} className="inline-image-crop-button">
+          {t('common.cancel')}
         </button>
         <button
           type="button"
-          aria-label="Reset crop"
+          aria-label={t('editor.resetCrop')}
           onClick={() => onPresetChange('original')}
           className="inline-image-crop-button"
         >
-          Reset
+          {t('editor.reset')}
         </button>
         <button
           type="button"
-          aria-label="Apply crop"
+          aria-label={t('editor.applyCrop')}
           onClick={onApplyCrop}
           className="inline-image-crop-button inline-image-crop-button--apply"
         >
-          Apply
+          {t('editor.apply')}
         </button>
       </span>
       <span
@@ -568,7 +571,7 @@ export function InlineImageCropEditor({
           className="inline-image-crop-rect"
           role="group"
           tabIndex={0}
-          aria-label="Crop region"
+          aria-label={t('editor.cropRegion')}
           style={{
             left: `${draft.crop.x / 100}%`,
             top: `${draft.crop.y / 100}%`,
@@ -581,11 +584,11 @@ export function InlineImageCropEditor({
           onPointerCancel={(event) => endRegionDrag(event, true)}
           onKeyDown={onRegionKeyDown}
         >
-          {CROP_EDGES.map(({ edge, label }) => (
+          {CROP_EDGES.map(({ edge, labelKey }) => (
             <button
               key={edge}
               type="button"
-              aria-label={label}
+              aria-label={t(labelKey)}
               className={`inline-image-crop-handle inline-image-crop-handle--${edge}`}
               onPointerDown={(event) => onHandlePointerDown(edge, event)}
               onPointerMove={onHandlePointerMove}

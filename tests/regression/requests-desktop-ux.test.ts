@@ -95,13 +95,13 @@ describe("Requests desktop data flow and header", () => {
 	it("retains the Requests heading, supporting copy, actions, and mobile stack", () => {
 		const listClient = read("src/components/requests/requests-list-client.tsx");
 
-		assert.match(listClient, />Requests</);
+		assert.match(listClient, /<h1[^>]*>\{t\('nav\.requests'\)\}<\/h1>/);
 		assert.match(
 			listClient,
-			/View and track improvement requests from your department/,
+			/t\('requests\.listIntro'\)/,
 		);
 		assert.match(listClient, /BulkDeleteByDateRange/);
-		assert.match(listClient, /New Request/);
+		assert.match(listClient, /t\('requests\.newRequest'\)/);
 		assert.match(listClient, /flex flex-col sm:flex-row/);
 		assert.doesNotMatch(listClient, /Export View/);
 		assert.doesNotMatch(listClient, />\s*Apply\s*</);
@@ -119,7 +119,7 @@ describe("Requests desktop table proportions and keyboard rows", () => {
 		assert.match(table, /<TableCell[^>]*className="h-\[60px\] py-3"/);
 		assert.doesNotMatch(table, /<TableRow[\s\S]{0,300}min-h-\[60px\]/);
 		assert.match(table, /tabIndex=\{0\}/);
-		assert.match(table, /aria-label=\{`Open request /);
+		assert.match(table, /aria-label=\{t\('requests\.openRequest', \{ title: row\.original\.title \}\)\}/);
 		assert.doesNotMatch(table, /<TableRow[\s\S]{0,300}role="button"/);
 		assert.match(
 			table,
@@ -190,13 +190,13 @@ describe("Requests modern status pills and hover motion", () => {
 	});
 
 	it("renders the Approving popup as a timeline stepper with progress header", () => {
-		assert.match(approvalBadge, /Approval chain/);
+		assert.match(approvalBadge, /t\('requests\.approvalChain'\)/);
 		assert.match(
 			approvalBadge,
 			/hasPendingInFinal \? ["']Final["'] : ["']Initial["']/,
 		);
-		assert.match(approvalBadge, /of.*approved|approved/);
-		assert.match(approvalBadge, /waiting for level/);
+		assert.match(approvalBadge, /t\('requests\.approvedCount', \{ approved: stageApprovedCount, total: chainLength \}\)/);
+		assert.match(approvalBadge, /t\('requests\.waitingForLevel', \{ level: currentLevel \}\)/);
 		// progress bar
 		assert.match(approvalBadge, /h-1\.5 w-full rounded-full bg-gray-100/);
 		assert.match(approvalBadge, /style=\{\{ width:/);

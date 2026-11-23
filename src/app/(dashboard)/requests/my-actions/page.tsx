@@ -1,3 +1,5 @@
+import { createTranslator } from '@/lib/i18n/messages'
+import { getRequestLocale } from '@/lib/i18n/server'
 import { Suspense } from 'react'
 import Link from 'next/link'
 import { ArrowLeft, Bell } from 'lucide-react'
@@ -11,6 +13,7 @@ interface MyActionsPageProps {
 }
 
 async function ActionItemsList() {
+  const t = createTranslator(await getRequestLocale())
   const requests = await getMyActionItems()
 
   return (
@@ -19,7 +22,7 @@ async function ActionItemsList() {
         <Link href="/requests">
           <Button variant="ghost" size="sm">
             <ArrowLeft className="h-4 w-4 mr-2" />
-            Back to All Requests
+            {t('requests.backToRequests')}
           </Button>
         </Link>
       </div>
@@ -27,9 +30,9 @@ async function ActionItemsList() {
       <div className="flex items-center gap-3">
         <Bell className="h-6 w-6 text-orange-500" />
         <div>
-          <h1 className="text-2xl font-bold">My Action Items</h1>
+          <h1 className="text-2xl font-bold">{t('requests.myActions')}</h1>
           <p className="text-muted-foreground">
-            Requests awaiting your approval ({requests.length})
+            {t('requests.awaitingYourApproval', { count: requests.length })}
           </p>
         </div>
       </div>
@@ -37,13 +40,13 @@ async function ActionItemsList() {
       {requests.length === 0 ? (
         <div className="border rounded-lg p-12 text-center">
           <Bell className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-          <h3 className="text-lg font-semibold mb-2">No Action Items</h3>
+          <h3 className="text-lg font-semibold mb-2">{t('requests.noActionItems')}</h3>
           <p className="text-muted-foreground">
-            You have no pending requests to approve at this time.
+            {t('requests.noPendingApprovals')}
           </p>
           <Link href="/requests">
             <Button variant="outline" className="mt-4">
-              View All Requests
+              {t('requests.viewAll')}
             </Button>
           </Link>
         </div>
@@ -55,6 +58,7 @@ async function ActionItemsList() {
 }
 
 export default async function MyActionsPage({ searchParams }: MyActionsPageProps) {
+  const t = createTranslator(await getRequestLocale())
   const { requestId } = await searchParams
 
   return (
@@ -63,7 +67,7 @@ export default async function MyActionsPage({ searchParams }: MyActionsPageProps
       {requestId ? (
         <ActionItemsList />
       ) : (
-        <Suspense fallback={<div>Loading...</div>}>
+        <Suspense fallback={<div>{t('requests.loading')}</div>}>
           <ActionItemsList />
         </Suspense>
       )}

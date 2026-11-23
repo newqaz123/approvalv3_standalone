@@ -283,7 +283,7 @@ describe("engineering sub-task server action wiring", () => {
 		);
 		assert.match(
 			source,
-			/if \(!request\s*\|\|\s*request\.isDeleted\) throw new Error\('Request not found'\)/,
+			/if \(!request\s*\|\|\s*request\.isDeleted\) throw new SubTaskActionError\('Request not found', 'requests\.error\.notFoundOrNoAccess'\)/,
 		);
 		assert.match(
 			source,
@@ -295,7 +295,7 @@ describe("engineering sub-task server action wiring", () => {
 		);
 		assert.match(
 			source,
-			/if \(!contractor \|\| !contractor\.isActive\) throw new Error\('Selected subcontractor is not available'\)/,
+			/if \(!contractor \|\| !contractor\.isActive\) throw new SubTaskActionError\('Selected subcontractor is not available', 'requests\.error\.subcontractorUnavailable'\)/,
 		);
 		assert.match(
 			source,
@@ -351,7 +351,7 @@ describe("engineering sub-task request and filter wiring", () => {
 			/wrStatus\?: ['"]all['"] \| ['"]not-received['"] \| ['"]received['"]/,
 		);
 		assert.match(requestFilters, /DEFAULT_WR_FILTER = ["']not-received["']/);
-		assert.match(requestFilters, /Show only no WR/);
+		assert.match(requestFilters, /t\('requests\.withoutWrOnly'\)/);
 		assert.match(requestFilters, /h-10 min-h-10/);
 		assert.match(requestFilters, /className=\{cn\(\s*['"]h-10 min-h-10 w-full/);
 		assert.match(requestFilters, /translate-x-4/);
@@ -410,7 +410,7 @@ describe("engineering sub-task request modal panel wiring", () => {
 			/Collapsible[\s\S]*open=\{isOpen\}[\s\S]*onOpenChange=\{setIsOpen\}/,
 		);
 		assert.doesNotMatch(source, /defaultOpen=\{false\}/);
-		assert.match(source, /Sub-tasks/);
+		assert.match(source, /t\('requests\.subTasks'\)/);
 		assert.match(source, /getSubTaskSummary/);
 		assert.match(source, /getWorkRequisitionLabel/);
 		assert.match(source, /Progress/);
@@ -427,24 +427,24 @@ describe("engineering sub-task request modal panel wiring", () => {
 		);
 		assert.match(collapsedTrigger, /<Progress[\s\S]*value=\{progressValue\}/);
 		assert.ok((collapsedTrigger.match(/<Badge\b/g) ?? []).length > 1);
-		assert.match(source, /Work requisition received/);
-		assert.match(source, /Last edited/);
-		assert.match(source, /Last edited by/);
+		assert.match(source, /t\('requests\.workRequisitionReceived'\)/);
+		assert.match(source, /requests\.lastEditedBy/);
+		assert.match(source, /requests\.lastEditedBy/);
 		assert.match(source, /task\.updatedBy\?\.name/);
 		assert.match(source, /canManage/);
 		assert.match(source, /toggleWorkRequisitionReceived/);
 		assert.match(source, /setSubTaskCompleted/);
 		assert.match(source, /deleteSubTask/);
-		assert.match(source, /aria-label="Delete sub-task"/);
+		assert.match(source, /aria-label=\{t\('requests\.deleteSubTask'\)\}/);
 		assert.match(source, /sr-only/);
 		assert.match(source, /className="flex justify-start pt-1"/);
 		assert.match(source, /items-center gap-2 text-xs/);
 		assert.match(taskCardBlock, /task\.subContractor\?\.name/);
 		assert.match(taskCardBlock, /Badge/);
-		assert.match(taskCardBlock, /Last edited by/);
+		assert.match(taskCardBlock, /requests\.lastEditedBy/);
 		assert.doesNotMatch(taskCardBlock, /<span>Delete<\/span>/);
 		assert.match(source, /import \{ toast \} from 'sonner'/);
-		assert.match(source, /toast\.error\(result\.error/);
+		assert.match(source, /toast\.error\(t\(result\.errorKey/);
 		assert.match(source, /onChanged\(\)/);
 	});
 
@@ -457,15 +457,15 @@ describe("engineering sub-task request modal panel wiring", () => {
 		assert.match(source, /'use client'/);
 		assert.match(source, /createSubTask/);
 		assert.match(source, /updateSubTask/);
-		assert.match(source, /aria-label=\{task \? 'Edit sub-task' : undefined\}/);
+		assert.match(source, /aria-label=\{task \? t\('requests\.editSubTask'\) : undefined\}/);
 		assert.match(
 			source,
-			/task \? \(\s*<span className="sr-only">Edit sub-task<\/span>/,
+			/task \? \(\s*<span className="sr-only">\{t\('requests\.editSubTask'\)\}<\/span>/,
 		);
 		assert.match(source, /isOthers/);
 		assert.match(source, /customStageText/);
 		assert.match(source, /subContractorId/);
-		assert.match(source, /No subcontractor/);
+		assert.match(source, /t\('requests\.noSubcontractor'\)/);
 	});
 
 	it("routes visible requests to SubTasksSection with options and permissions", () => {
@@ -541,7 +541,7 @@ describe("engineering stale sub-task filters", () => {
 
 		assert.doesNotMatch(tabs, /getStaleSubTaskRequests/);
 		assert.doesNotMatch(tabs, /SubContractorSettings/);
-		assert.match(tabs, /Follow up work/);
+		assert.match(tabs, /t\('requests\.followUpWork'\)/);
 		assert.match(
 			tabs,
 			/subTaskStages: Array<\{ id: string; name: string; isOthers: boolean \}>/,
@@ -592,31 +592,30 @@ describe("engineering stale sub-task filters", () => {
 		assert.match(tabs, /progressValue/);
 		assert.match(tabs, /data-testid="follow-up-filter-chipline"/);
 		assert.match(tabs, /FilterSeparator/);
-		assert.match(tabs, /Sub-contractor/);
+		assert.match(tabs, /t\('requests\.subContractor'\)/);
 		assert.match(tabs, /visibleSubContractorChips\.map/);
 		assert.match(tabs, /collapsedSubContractorChip/);
 		assert.match(tabs, /removeSubContractorFilter/);
 		assert.match(tabs, /clearAllFilters/);
-		assert.match(tabs, /Clear all/);
+		assert.match(tabs, /t\('requests\.clearAllLower'\)/);
 		assert.match(tabs, /Checkbox/);
 		assert.match(tabs, /Plus/);
 		assert.match(tabs, /border-dashed/);
 		assert.match(tabs, /Stale/);
 		assert.match(tabs, /Clock/);
-		assert.match(tabs, /Any date/);
+		assert.match(tabs, /t\('requests\.anyDate'\)/);
 		assert.match(tabs, /getSubTaskSummary/);
 		assert.match(tabs, /HoverCard/);
 		assert.match(tabs, /max-h-72 overflow-y-auto/);
 		assert.match(tabs, /\{stageName\}/);
-		assert.match(tabs, /Stage badge/);
+		assert.match(tabs, /t\('requests\.stageBadge'\)/);
 		assert.match(tabs, /Completed/);
 		assert.match(tabs, /Not completed/);
 		assert.match(tabs, /Info/);
-		assert.match(tabs, /This table does not show completed requests/);
-		assert.match(tabs, /WR received and every sub-task checked complete/);
-		assert.match(tabs, /cancelled\s+work/);
+		assert.match(tabs, /t\('requests\.queueExclusions'\)/);
+		assert.match(readFileSync('src/lib/i18n/catalogs/requests.ts', 'utf8'), /requests\.queueExclusions[^\n]*WR received and every sub-task checked complete[^\n]*cancelled work/);
 		assert.match(tabs, /request\.workRequisitionReceived/);
-		assert.match(tabs, /WR Received/);
+		assert.match(tabs, /t\('requests\.wrReceivedShort'\)/);
 		assert.match(tabs, /bg-emerald-50 text-emerald-700/);
 		assert.match(tabs, /group\/progress/);
 		assert.match(tabs, /cursor-pointer/);
@@ -626,10 +625,10 @@ describe("engineering stale sub-task filters", () => {
 		assert.match(tabs, /visibleSubContractorNames\.map/);
 		assert.match(tabs, /onSubContractorPillClick/);
 		assert.match(tabs, /handleSubContractorPillClick/);
-		assert.match(tabs, /aria-label="Subcontractor filter"/);
-		assert.match(tabs, /Last update > X days/);
+		assert.match(tabs, /aria-label=\{t\('requests\.subcontractorFilter'\)\}/);
+		assert.match(tabs, /t\('requests\.lastUpdateFilter'\)/);
 		assert.match(tabs, /STALE_DAY_PRESETS = \["3", "7", "14", "30"\]/);
-		assert.match(tabs, /No update &gt; \{days\} days/);
+		assert.match(tabs, /t\('requests\.noUpdateFor', \{ count: days \}\)/);
 		assert.doesNotMatch(tabs, /All stages/);
 		assert.match(tabs, /selectedStage === stage\.id \? null : stage\.id/);
 		assert.match(tabs, /selectedEngineer === ENGINEER_UNASSIGNED_FILTER/);
@@ -640,7 +639,7 @@ describe("engineering stale sub-task filters", () => {
 		);
 		assert.doesNotMatch(tabs, /All PIC/);
 		assert.match(tabs, /subContractorIds\.length >= 3/);
-		assert.match(tabs, /\$\{selectedSubContractors\.length\} subcontractors/);
+		assert.match(tabs, /t\('requests\.subcontractorCount', \{ count: selectedSubContractors\.length \}\)/);
 		assert.match(tabs, /StatusBadge[\s\S]*status=\{request\.status\}/);
 		assert.match(tabs, /subTask\.description/);
 		assert.match(tabs, /subTask\.subContractor/);
@@ -673,15 +672,15 @@ describe("engineering stale sub-task filters", () => {
 			/workRequisitionReceived: request\.workRequisitionReceived/,
 		);
 		assert.doesNotMatch(page, /'Cancelled'/);
-		assert.match(page, /Active engineering workload/);
-		assert.match(page, /Sent back, final approval, and pending solution/);
-		assert.match(page, /Needs engineering response/);
-		assert.match(page, /Solution review in progress/);
+		assert.match(page, /t\('requests\.activeWorkload'\)/);
+		assert.match(page, /t\('requests\.engineeringDetailPipeline'\)/);
+		assert.match(page, /t\('requests\.engineeringResponseNeeded'\)/);
+		assert.match(page, /t\('requests\.solutionReviewInProgress'\)/);
 		assert.match(page, /EngineeringMetricCard/);
 		assert.match(page, /startOfYesterday/);
 		assert.match(page, /deltaValue/);
 		assert.match(page, /isZeroState/);
-		assert.match(page, /No new since yesterday/);
+		assert.match(page, /t\('requests\.noneSinceYesterday'\)/);
 		assert.match(page, /TrendingUp/);
 		assert.match(page, /value === 0/);
 		assert.match(page, /text-gray-400/);
@@ -705,7 +704,7 @@ describe("engineering stale sub-task filters", () => {
 		assert.doesNotMatch(source, /Summary Cards/);
 		assert.doesNotMatch(source, /View all requests/);
 		assert.doesNotMatch(source, /View all approvals/);
-		assert.match(source, /Solutions Awaiting Your Approval/);
+		assert.match(source, /t\('requests\.solutionsAwaitingYou'\)/);
 		assert.doesNotMatch(source, /Requests Awaiting Solution/);
 		assert.doesNotMatch(source, /needsSolution/);
 		assert.doesNotMatch(source, /filteredNeedsSolution/);
@@ -727,8 +726,8 @@ describe("engineering stale sub-task filters", () => {
 		assert.match(tabs, /initialAssignedUsers=\{request\.assignedEngineers\}/);
 		assert.doesNotMatch(tabs, /PIC: \{request\.assignedEngineers/);
 		assert.match(tabs, /request\.status === ["']SentToEngineer["']/);
-		assert.match(tabs, /Submit solution/);
-		assert.match(tabs, /Resubmit solution/);
+		assert.match(tabs, /t\('requests\.submitSolutionLower'\)/);
+		assert.match(tabs, /t\('requests\.resubmitSolutionLower'\)/);
 		assert.match(tabs, /handleSubmitSolution/);
 	});
 
@@ -750,7 +749,7 @@ describe("engineering stale sub-task filters", () => {
 		assert.match(tabs, /createdAt: Date \| string/);
 		assert.match(tabs, /FOLLOW_UP_PAGE_SIZE = 8/);
 		assert.match(tabs, /Sent to Engineer/);
-		assert.match(tabs, /Follow-up work/);
+		assert.match(tabs, /t\('requests\.followUpHeading'\)/);
 		assert.match(tabs, /sentToEngineerRequests/);
 		assert.match(tabs, /followUpRequests/);
 		assert.match(tabs, /status === ["']SentToEngineer["']/);
@@ -758,9 +757,9 @@ describe("engineering stale sub-task filters", () => {
 		assert.match(tabs, /visibleFollowUp/);
 		assert.match(
 			tabs,
-			/Show \{sentToEngineerHiddenCount\} more in Sent to Engineer/,
+			/t\('requests\.showMoreEngineer', \{ count: sentToEngineerHiddenCount \}\)/,
 		);
-		assert.match(tabs, /Show \{followUpHiddenCount\} more in Follow-up work/);
+		assert.match(tabs, /t\('requests\.showMoreFollowUp', \{ count: followUpHiddenCount \}\)/);
 		assert.match(tabs, /formatCreatedDate/);
 		assert.match(picker, /border-\[#fecaca\] bg-\[#fef2f2\] text-\[#b91c1c\]/);
 	});
@@ -777,10 +776,10 @@ describe("engineering stale sub-task filters", () => {
 		assert.match(tabs, /data-testid="follow-up-request-contractors"/);
 		assert.match(tabs, /Progress/);
 		assert.match(tabs, /h-1 w-full bg-slate-200/);
-		assert.match(tabs, /No subtasks/);
+		assert.match(tabs, /t\('requests\.noSubtasksCompact'\)/);
 		assert.match(tabs, /visibleSubContractorNames/);
 		assert.match(tabs, /hiddenSubContractorCount/);
-		assert.match(tabs, /\+\{hiddenSubContractorCount\} more/);
+		assert.match(tabs, /\+\{t\('requests\.moreCount', \{ count: hiddenSubContractorCount \}\)\}/);
 		assert.doesNotMatch(tabs, /sr-only h-2/);
 		assert.match(tabs, /EngineerPicPicker/);
 		assert.doesNotMatch(tabs, /isComplete \? "Completed" : "Not completed"/);
@@ -826,7 +825,7 @@ describe("engineering stale sub-task filters", () => {
 		assert.match(tabs, /aria-expanded=\{subTasksOpen\}/);
 		assert.match(
 			tabs,
-			/\{subTasksOpen && \([\s\S]*?md:hidden[\s\S]*?Sub-task items/,
+			/\{subTasksOpen && \([\s\S]*?md:hidden[\s\S]*?requests\.subTaskItems/,
 		);
 		assert.match(
 			tabs,
@@ -964,12 +963,12 @@ describe("admin sub-task stage management wiring", () => {
 		assert.match(component, /'use client'/);
 		assert.match(component, /createSubContractor/);
 		assert.match(component, /CommandInput/);
-		assert.match(component, /aria-label="Subcontractor"/);
+		assert.match(component, /aria-label=\{t\('requests\.subcontractor'\)\}/);
 		assert.match(component, /subContractorSearch/);
 		assert.match(component, /filteredSubContractors/);
 		assert.match(
 			component,
-			/Add &quot;\{subContractorSearch\.trim\(\)\}&quot;/,
+			/t\('requests\.addNamed', \{ name: subContractorSearch\.trim\(\) \}\)/,
 		);
 		assert.match(component, /handleSubContractorKeyDown/);
 		assert.match(component, /onKeyDown=\{handleSubContractorKeyDown\}/);

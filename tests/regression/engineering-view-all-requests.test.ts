@@ -277,6 +277,7 @@ function actionFixture(status: string, owned = false, assignmentUnitId = 'engine
   }
   const dependencies: Record<string, unknown> = {
     '@/lib/prisma': { __esModule: true, default: prisma },
+    '@/lib/i18n/server': { async getRequestLocale() { return 'en' } },
     '@/lib/auth-config': { async auth() { return { user: data.user } } },
     '@/lib/cache/user-cache': { async getCurrentUser() { return data.user } },
     '@/lib/solution-work-actor': { createSolutionWorkActorDb() {}, async isActorSolutionWorker() { return true } },
@@ -414,6 +415,7 @@ function moduleFixture(request: Record<string, unknown> = {}) {
   const dependencies: Record<string, unknown> = {
     '@/lib/prisma': { __esModule: true, default: prisma },
     '@/lib/cache/user-cache': { async getCurrentUser() { return data.user } },
+    '@/lib/i18n/server': { async getRequestLocale() { return 'en' } },
     '@/lib/auth-config': { async auth() { return { user: data.user } } },
     'next/cache': { revalidatePath() {} },
     'next/navigation': { redirect(to: string) { throw new Error(`redirect ${to}`) } },

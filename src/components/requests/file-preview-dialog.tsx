@@ -1,5 +1,7 @@
 'use client'
 
+import type { Translator } from '@/lib/i18n/messages'
+import { useTranslations } from '@/lib/i18n/client'
 import { formatFileSize as defaultFormatFileSize } from '@/lib/format-file-size'
 import { useEffect, useMemo, useState } from 'react'
 import { Download, FileText, Loader2, X } from 'lucide-react'
@@ -40,9 +42,7 @@ type LoadState =
   | { status: 'loading' }
   | { status: 'text'; text: string }
   | { status: 'xlsx'; sheets: Array<{ name: string; rows: string[][] }> }
-  | { status: 'error'; message: string }
-
-const DEFAULT_ERROR = 'Preview is not available for this file. You can download the original file instead.'
+  | { status: 'error' }
 
 function normalizeCell(value: unknown): string {
   if (value === null || value === undefined) return ''
@@ -58,6 +58,7 @@ export function FilePreviewDialog({
   onDownload,
   formatFileSize = defaultFormatFileSize,
 }: FilePreviewDialogProps) {
+  const t = useTranslations()
   const [loadState, setLoadState] = useState<LoadState>({ status: 'idle' })
   const previewKind = useMemo<FilePreviewKind>(
     () => (file ? getFilePreviewKind(file) : 'unsupported'),
@@ -101,7 +102,7 @@ export function FilePreviewDialog({
         if (previewKind === 'docx') {
           const mammoth = await import('mammoth')
           const result = await mammoth.extractRawText({ arrayBuffer })
-          if (!cancelled) setLoadState({ status: 'text', text: result.value.trim() || 'No text content found.' })
+          if (!cancelled) setLoadState({ status: 'text', text: result.value.trim() })
           return
         }
 
@@ -117,7 +118,7 @@ export function FilePreviewDialog({
         if (!cancelled) setLoadState({ status: 'xlsx', sheets })
       } catch (error) {
         console.error('[FilePreviewDialog] Failed to load preview:', error)
-        if (!cancelled) setLoadState({ status: 'error', message: DEFAULT_ERROR })
+        if (!cancelled) setLoadState({ status: 'error' })
       }
     }
 
@@ -149,7 +150,7 @@ export function FilePreviewDialog({
           </div>
           <div className="min-w-0 flex-1">
             <DialogTitle className="line-clamp-2 break-words text-[15.5px] font-semibold leading-snug tracking-tight">
-              {file?.fileName || 'File preview'}
+              {file?.fileName || t('requests.filePreview')}
             </DialogTitle>
             <DialogDescription className="mt-0.5 text-[12.5px] text-slate-500">
               {fileTypeLabel}
@@ -165,17 +166,18 @@ export function FilePreviewDialog({
               onClick={() => onDownload(file)}
             >
               <Download className="h-5 w-5" />
-              <span className="sr-only">Download</span>
+              <span className="sr-only">{t('requests.download')}</span>
             </Button>
           ) : null}
           <DialogClose className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-slate-700 transition-colors hover:bg-slate-100">
             <X className="h-5 w-5" />
-            <span className="sr-only">Close</span>
+            <span className="sr-only">{t('requests.close')}</span>
           </DialogClose>
         </DialogHeader>
 
         <div className="min-h-0 overflow-auto bg-slate-100">
           {renderPreviewContent(
+            t,
             previewKind,
             url,
             loadState,
@@ -188,26 +190,27 @@ export function FilePreviewDialog({
 }
 
 function renderPreviewContent(
+  t: Translator,
   kind: FilePreviewKind,
   url: string | null,
   loadState: LoadState,
   onDownload?: () => void
 ) {
   if (!url) {
-    return <PreviewMessage message={DEFAULT_ERROR} onDownload={onDownload} />
+    return <PreviewMessage message={t('requests.error.preview')} onDownload={onDownload} />
   }
 
   if (kind === 'pdf') {
     // Phones get an svh floor so iOS toolbars cannot crop the document; the
     // desktop iframe keeps filling the tall fixed-height card.
-    return <iframe src={url} title="PDF preview" className="h-full min-h-0 w-full bg-white pointer-fine:h-full pointer-fine:min-h-[70vh]" />
+    return <iframe src={url} title={t('requests.pdfPreview')} className="h-full min-h-0 w-full bg-white pointer-fine:h-full pointer-fine:min-h-[70vh]" />
   }
 
   if (kind === 'image') {
     return (
       <div className="flex min-h-full items-start justify-center p-4">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={url} alt="Attachment preview" className="max-h-none max-w-full rounded bg-white object-contain" />
+        <img src={url} alt={t('requests.attachmentPreview')} className="max-h-none max-w-full rounded bg-white object-contain" />
       </div>
     )
   }
@@ -215,7 +218,7 @@ function renderPreviewContent(
   if (kind === 'unsupported') {
     return (
       <PreviewMessage
-        message="Preview is not available for this file type. Download the file to view it."
+        message={t('requests.previewUnsupported')}
         onDownload={onDownload}
       />
     )
@@ -225,19 +228,19 @@ function renderPreviewContent(
     return (
       <div className="flex min-h-full items-center justify-center gap-2 text-sm text-slate-600">
         <Loader2 className="h-4 w-4 animate-spin" />
-        Loading preview...
+        {t('requests.loadingPreview')}
       </div>
     )
   }
 
   if (loadState.status === 'error') {
-    return <PreviewMessage message={loadState.message} onDownload={onDownload} />
+    return <PreviewMessage message={t('requests.error.preview')} onDownload={onDownload} />
   }
 
   if (loadState.status === 'text') {
     return (
       <pre className="min-h-full whitespace-pre-wrap break-words bg-white p-4 text-sm leading-6 text-slate-800">
-        {loadState.text}
+        {loadState.text || t('requests.noTextContent')}
       </pre>
     )
   }
@@ -246,7 +249,7 @@ function renderPreviewContent(
     return <WorkbookPreview sheets={loadState.sheets} />
   }
 
-  return <PreviewMessage message="Preparing preview..." />
+  return <PreviewMessage message={t('requests.preparingPreview')} />
 }
 
 function PreviewMessage({
@@ -256,6 +259,7 @@ function PreviewMessage({
   message: string
   onDownload?: () => void
 }) {
+  const t = useTranslations()
   return (
     <div className="flex min-h-full flex-col items-center justify-center gap-3 p-6 text-center text-slate-600">
       <FileText className="h-10 w-10 text-slate-400" />
@@ -263,7 +267,7 @@ function PreviewMessage({
       {onDownload ? (
         <Button type="button" className="mt-2" onClick={onDownload}>
           <Download className="h-4 w-4" />
-          Download
+          {t('requests.download')}
         </Button>
       ) : null}
     </div>
@@ -271,8 +275,9 @@ function PreviewMessage({
 }
 
 function WorkbookPreview({ sheets }: { sheets: Array<{ name: string; rows: string[][] }> }) {
+  const t = useTranslations()
   if (sheets.length === 0) {
-    return <PreviewMessage message="No spreadsheet data found." />
+    return <PreviewMessage message={t('requests.noSpreadsheetData')} />
   }
 
   return (
@@ -281,7 +286,7 @@ function WorkbookPreview({ sheets }: { sheets: Array<{ name: string; rows: strin
         <section key={sheet.name}>
           <h3 className="mb-2 text-sm font-semibold text-slate-900">{sheet.name}</h3>
           {sheet.rows.length === 0 ? (
-            <p className="text-sm text-slate-500">This sheet is empty.</p>
+            <p className="text-sm text-slate-500">{t('requests.emptySheet')}</p>
           ) : (
             <div className="overflow-x-auto rounded-md border">
               <table className="min-w-full border-collapse text-left text-xs">

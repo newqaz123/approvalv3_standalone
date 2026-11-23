@@ -1,5 +1,6 @@
 'use server'
 
+import type { MessageKey } from '@/lib/i18n/messages'
 import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
 import { revalidateRequestViews } from './request-view-invalidation'
@@ -118,6 +119,7 @@ export async function createRequest(input: CreateRequestInput) {
     return {
       success: false,
       error: 'Active organization assignment is required to create requests',
+      errorKey: 'requests.error.assignmentRequired' as const satisfies MessageKey,
     }
   }
   const existingAssignment = await prisma.organization_assignments.findFirst({
@@ -128,6 +130,7 @@ export async function createRequest(input: CreateRequestInput) {
     return {
       success: false,
       error: 'Active organization assignment is required to create requests',
+      errorKey: 'requests.error.assignmentRequired' as const satisfies MessageKey,
     }
   }
 
@@ -138,6 +141,11 @@ export async function createRequest(input: CreateRequestInput) {
     return {
       success: false,
       errors: validatedFields.error.flatten().fieldErrors,
+      errorKey: (validatedFields.error.issues.some(({ path }) => path[0] === 'title')
+        ? 'requests.error.requestTitleRequired' as const
+        : validatedFields.error.issues.some(({ path }) => path[0] === 'description')
+          ? 'requests.error.requestDescriptionRequired' as const
+          : 'requests.error.requestValidation' as const) satisfies MessageKey,
     }
   }
 
@@ -158,16 +166,17 @@ export async function createRequest(input: CreateRequestInput) {
       select: { id: true, filePath: true, fileName: true },
     })
     if (drafts.length !== stagedAttachmentIds.length) {
-      return { success: false, error: ATTACHMENT_ADOPTION_ERROR }
+      return { success: false, error: ATTACHMENT_ADOPTION_ERROR, errorKey: 'requests.error.attachmentAdoption' as const satisfies MessageKey }
     }
     for (const draft of drafts) {
       if (!isRequestDraftReadyPath(draft.filePath)) {
-        return { success: false, error: ATTACHMENT_ADOPTION_ERROR }
+        return { success: false, error: ATTACHMENT_ADOPTION_ERROR, errorKey: 'requests.error.attachmentAdoption' as const satisfies MessageKey }
       }
       if (!(await attachmentFileExists(draft.filePath))) {
         return {
           success: false,
           error: `${draft.fileName}: Staged file is missing — please retry the upload`,
+          errorKey: 'requests.error.attachmentAdoption' as const satisfies MessageKey,
         }
       }
     }
@@ -269,7 +278,7 @@ export async function createRequest(input: CreateRequestInput) {
   } catch (error) {
     console.error('Failed to create request atomically:', error)
     if (error instanceof Error && error.message === ATTACHMENT_ADOPTION_ERROR) {
-      return { success: false, error: ATTACHMENT_ADOPTION_ERROR }
+      return { success: false, error: ATTACHMENT_ADOPTION_ERROR, errorKey: 'requests.error.attachmentAdoption' as const satisfies MessageKey }
     }
     if (
       error instanceof SubmissionDeniedError

@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from '@/lib/i18n/client'
 import { useState } from "react";
 import { Search, X } from "lucide-react";
 import { RequestStatus } from "@prisma/client";
@@ -68,6 +69,7 @@ export function RequestFilters({
 	requesters,
 	onFilterChange,
 }: RequestFiltersProps) {
+	const t = useTranslations();
 	const [filters, setFilters] = useState<RequestFilters>({
 		wrStatus: DEFAULT_WR_FILTER,
 	});
@@ -124,7 +126,7 @@ export function RequestFilters({
 					<div className="relative">
 						<Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
 						<Input
-							placeholder="Search title or description..."
+							placeholder={t('requests.searchRequests')}
 							value={filters.search || ""}
 							onChange={(e) => updateFilter("search", e.target.value)}
 							className="h-10 min-h-10 bg-white pl-9"
@@ -140,10 +142,10 @@ export function RequestFilters({
 						}
 					>
 						<SelectTrigger className="h-10 min-h-10">
-							<SelectValue placeholder="All Departments" />
+							<SelectValue placeholder={t('requests.allDepartments')} />
 						</SelectTrigger>
 						<SelectContent>
-							<SelectItem value="all">All Departments</SelectItem>
+							<SelectItem value="all">{t('requests.allDepartments')}</SelectItem>
 							{departments.map((dept) => (
 								<SelectItem key={dept.id} value={dept.id}>
 									{dept.name}
@@ -161,10 +163,10 @@ export function RequestFilters({
 						}
 					>
 						<SelectTrigger className="h-10 min-h-10">
-							<SelectValue placeholder="All Requesters" />
+							<SelectValue placeholder={t('requests.allRequesters')} />
 						</SelectTrigger>
 						<SelectContent>
-							<SelectItem value="all">All Requesters</SelectItem>
+							<SelectItem value="all">{t('requests.allRequesters')}</SelectItem>
 							{requesters.map((user) => (
 								<SelectItem key={user.id} value={user.id}>
 									{user.name}
@@ -176,12 +178,12 @@ export function RequestFilters({
 
 				<div className="date-filter-field relative min-w-0 overflow-hidden">
 					<span className="pointer-events-none flex h-10 min-h-10 items-center truncate rounded-md border border-input bg-white px-3 text-sm text-muted-foreground">
-						{filters.dateFrom || "From date"}
+						{filters.dateFrom || t('requests.fromDate')}
 					</span>
 					<Input
 						id="request-date-from"
 						type="date"
-						aria-label="From date"
+						aria-label={t('requests.fromDate')}
 						value={filters.dateFrom || ""}
 						onChange={(e) => updateFilter("dateFrom", e.target.value)}
 						className="absolute inset-0 h-10 min-h-10 w-full cursor-pointer opacity-0"
@@ -190,12 +192,12 @@ export function RequestFilters({
 
 				<div className="date-filter-field relative min-w-0 overflow-hidden">
 					<span className="pointer-events-none flex h-10 min-h-10 items-center truncate rounded-md border border-input bg-white px-3 text-sm text-muted-foreground">
-						{filters.dateTo || "To date"}
+						{filters.dateTo || t('requests.toDate')}
 					</span>
 					<Input
 						id="request-date-to"
 						type="date"
-						aria-label="To date"
+						aria-label={t('requests.toDate')}
 						value={filters.dateTo || ""}
 						onChange={(e) => updateFilter("dateTo", e.target.value)}
 						className="absolute inset-0 h-10 min-h-10 w-full cursor-pointer opacity-0"
@@ -227,7 +229,7 @@ export function RequestFilters({
 							)}
 						/>
 					</span>
-					<span>Show only no WR</span>
+					<span>{t('requests.withoutWrOnly')}</span>
 				</Button>
 
 				<Button
@@ -238,7 +240,7 @@ export function RequestFilters({
 					className="h-10 min-h-10 text-xs"
 				>
 					<X className="h-3 w-3 mr-1" />
-					Clear All
+					{t('requests.clearAll')}
 				</Button>
 			</div>
 
@@ -246,7 +248,7 @@ export function RequestFilters({
 				data-filter-tier="status"
 				className="flex flex-wrap items-center gap-1.5 border-t border-slate-200 pt-3 xl:flex-nowrap xl:gap-2"
 			>
-				<span className="text-xs font-medium text-gray-600">Status</span>
+				<span className="text-xs font-medium text-gray-600">{t('common.status')}</span>
 				{ALL_STATUSES.map((status) => {
 					const isChecked = filters.statuses?.includes(status) || false;
 					return (
