@@ -183,11 +183,17 @@ test.describe('mobile avatar selector', () => {
     let saves = 0
     let releaseFailure!: () => void
     const pendingFailure = new Promise<void>(resolve => { releaseFailure = resolve })
+    let releaseRetry!: () => void
+    const pendingRetry = new Promise<void>(resolve => { releaseRetry = resolve })
     await page.route('**/profile', async route => {
       if (!isThaiLanguageSave(route.request())) return route.fallback()
       saves++
       if (saves === 1) {
         await pendingFailure
+        return route.abort()
+      }
+      if (saves === 2) {
+        await pendingRetry
         return route.abort()
       }
       await route.continue()
@@ -206,13 +212,80 @@ test.describe('mobile avatar selector', () => {
       await expect(page.getByRole('heading', { name: 'Profile', exact: true })).toBeVisible()
       await expect(avatar(page)).toBeFocused()
 
-      await page.getByRole('button', { name: 'Try again', exact: true }).tap()
+      const retry = page.getByRole('button', { name: 'Try again', exact: true })
+      await retry.focus()
+      await page.keyboard.press('Enter')
+      await expect.poll(() => saves).toBe(2)
+      await expect(retry).toBeFocused()
+      await expect(retry).toBeDisabled()
+      await page.keyboard.press('Enter')
+      releaseRetry()
+
+      await expect(alert).toBeVisible()
+      await expect(retry).toBeEnabled()
+      await expect(retry).toBeFocused()
+      expect(saves).toBe(2)
+
+      await page.keyboard.press('Enter')
       await expect(lang(page)).toHaveAttribute('lang', 'th')
       await expect(alert).toBeHidden()
+      await expect(retry).toBeHidden()
+      await expect(avatar(page)).toBeFocused()
       await expect(menu(page)).toBeHidden()
-      expect(saves).toBe(2)
+      expect(saves).toBe(3)
     } finally {
       releaseFailure()
+      releaseRetry()
+      await page.unrouteAll({ behavior: 'wait' })
+    }
+  })
+
+  test('clears a failed retry after a same-page refresh confirms the committed locale', async ({ page }) => {
+    await signIn(page, ALICE)
+    const displayName = page.getByLabel('Display Name')
+    const originalName = await displayName.inputValue()
+    const draft = `${originalName} (unsaved test draft)`
+    let releaseFailure!: () => void
+    const pendingFailure = new Promise<void>(resolve => { releaseFailure = resolve })
+    let releaseProfileSave!: () => void
+    const pendingProfileSave = new Promise<void>(resolve => { releaseProfileSave = resolve })
+    await page.route('**/profile', async route => {
+      const request = route.request()
+      if (isThaiLanguageSave(request)) {
+        // Run the real write upstream, but drop its response to the browser.
+        const response = await route.fetch()
+        expect(response.ok()).toBe(true)
+        await pendingFailure
+        return route.abort()
+      }
+      if (request.method() === 'POST' && request.headers()['next-action'] && request.postData() === JSON.stringify([draft])) {
+        // Run the real profile success/refresh path without changing the name or audit log.
+        await pendingProfileSave
+        return route.continue({ postData: JSON.stringify([originalName]) })
+      }
+      await route.fallback()
+    })
+    try {
+      await avatar(page).tap()
+      await menu(page).getByRole('menuitemradio', { name: 'ไทย' }).tap()
+      await expect.poll(async () => (await prisma.user.findUniqueOrThrow({ where: { email: ALICE } })).preferredLocale).toBe('th')
+      await page.keyboard.press('Escape')
+      await expect(menu(page)).toBeHidden()
+      releaseFailure()
+      await expect(page.getByRole('button', { name: 'Try again', exact: true })).toBeVisible()
+      await expect(lang(page)).toHaveAttribute('lang', 'en')
+
+      await displayName.fill(draft)
+      await page.getByRole('button', { name: 'Save Profile' }).tap()
+      await displayName.focus()
+      releaseProfileSave()
+      await expect(lang(page)).toHaveAttribute('lang', 'th', { timeout: 20_000 })
+      await expect(page.getByRole('status').filter({ hasText: 'บันทึกโปรไฟล์แล้ว' })).toBeVisible()
+      await expect(page.getByRole('button', { name: 'ลองอีกครั้ง', exact: true })).toBeHidden()
+      await expect(page.getByLabel('ชื่อที่แสดง')).toBeFocused()
+    } finally {
+      releaseFailure()
+      releaseProfileSave()
       await page.unrouteAll({ behavior: 'wait' })
     }
   })

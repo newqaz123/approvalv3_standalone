@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useContext, useEffect, useId, useRef, useState, useTransition, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, useTransition, type ReactNode } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { RadioGroup } from '@radix-ui/react-dropdown-menu'
 import { DropdownMenuLabel, DropdownMenuRadioItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
@@ -24,6 +24,13 @@ const LanguageSelectionContext = createContext<{
   setMenuMounted: (mounted: boolean) => void
 } | null>(null)
 
+function restoreAvatarFocus(retryButton: HTMLButtonElement | null) {
+  if (!retryButton || document.activeElement !== retryButton) return
+  // Both responsive shells are mounted; the visible trigger may have changed.
+  const triggers = document.querySelectorAll<HTMLButtonElement>('[data-language-menu-trigger]')
+  Array.from(triggers).find(trigger => trigger.getClientRects().length > 0)?.focus({ preventScroll: true })
+}
+
 // Work stays in flight even if the menu closes or the viewport changes shells.
 // The selected locale itself always comes from the server's LocaleProvider.
 export function LanguageSelectionProvider({ children }: { children: ReactNode }) {
@@ -35,18 +42,34 @@ export function LanguageSelectionProvider({ children }: { children: ReactNode })
   const [failedSelection, setFailedSelection] = useState<FailedSelection | null>(null)
   const [menuMounted, setMenuMounted] = useState(false)
   const saving = useRef(false)
+  const retryButton = useRef<HTMLButtonElement>(null)
   const failure = failedSelection?.pathname === pathname ? failedSelection : null
 
-  function selectLanguage(next: Locale, placement: SelectorPlacement) {
+  // A different refresh can confirm a write whose response never arrived.
+  useLayoutEffect(() => {
+    if (failedSelection?.locale === locale) {
+      restoreAvatarFocus(retryButton.current)
+      setFailedSelection(null)
+    }
+  }, [failedSelection, locale])
+
+  function selectLanguage(next: Locale, placement: SelectorPlacement, retry = false) {
     if (saving.current || pending || next === locale) return
     saving.current = true
-    setFailedSelection(null)
+    if (!retry) setFailedSelection(null)
     const attemptedSelection = { pathname, locale: next, placement }
     startTransition(async () => {
       try {
         const result = await saveLanguage(next)
-        if (result.ok) router.refresh()
-        else setFailedSelection(attemptedSelection)
+        if (result.ok) {
+          if (retry) {
+            restoreAvatarFocus(retryButton.current)
+            setFailedSelection(null)
+          }
+          router.refresh()
+        } else {
+          setFailedSelection(attemptedSelection)
+        }
       } catch {
         setFailedSelection(attemptedSelection)
       } finally {
@@ -60,12 +83,16 @@ export function LanguageSelectionProvider({ children }: { children: ReactNode })
       {children}
       {failure?.placement === 'menu' && !menuMounted && (
         <div className="fixed inset-x-4 bottom-4 z-50 mx-auto flex max-w-md flex-wrap items-center gap-x-4 rounded-lg border border-red-200 bg-white px-4 py-2 text-sm text-red-700 shadow-lg">
-          <p role="alert" className="flex-1">{t('common.languageSaveFailed')}</p>
+          <div className="flex-1">
+            <p role="alert">{!pending && t('common.languageSaveFailed')}</p>
+            {pending && <p role="status">{t('common.saving')}</p>}
+          </div>
           <button
+            ref={retryButton}
             type="button"
-            className="min-h-[44px] rounded px-2 font-semibold underline focus-visible:outline focus-visible:outline-2"
-            disabled={pending}
-            onClick={() => selectLanguage(failure.locale, 'menu')}
+            className="min-h-[44px] rounded px-2 font-semibold underline focus-visible:outline focus-visible:outline-2 aria-disabled:opacity-50"
+            aria-disabled={pending || undefined}
+            onClick={() => selectLanguage(failure.locale, 'menu', true)}
           >
             {t('common.languageRetry')}
           </button>

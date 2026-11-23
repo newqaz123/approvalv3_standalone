@@ -67,6 +67,7 @@ export function UserMenu({
 							? "h-11 min-h-[44px] min-w-[44px] bg-blue-600 text-sm font-semibold text-white hover:ring-2 hover:ring-blue-500 hover:ring-offset-2"
 							: "hover:ring-2 hover:ring-blue-500 hover:ring-offset-2",
 					)}
+					data-language-menu-trigger
 					title={t("nav.userMenu")}
 					aria-label={t("nav.openUserMenu")}
 					aria-expanded={menuOpen}
