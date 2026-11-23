@@ -26,9 +26,9 @@ const LanguageSelectionContext = createContext<{
 
 function restoreAvatarFocus(retryButton: HTMLButtonElement | null) {
   if (!retryButton || document.activeElement !== retryButton) return
-  // Both responsive shells are mounted; the visible trigger may have changed.
+  // Both shells are mounted; focus the laid-out trigger and let the browser scroll it into view.
   const triggers = document.querySelectorAll<HTMLButtonElement>('[data-language-menu-trigger]')
-  Array.from(triggers).find(trigger => trigger.getClientRects().length > 0)?.focus({ preventScroll: true })
+  Array.from(triggers).find(trigger => trigger.getClientRects().length > 0)?.focus()
 }
 
 // Work stays in flight even if the menu closes or the viewport changes shells.
@@ -118,7 +118,7 @@ export function LanguageSelector({ placement }: { placement: SelectorPlacement }
 
   if (!selection) throw new Error('LanguageSelector requires LanguageSelectionProvider')
   const { pending, failed, selectLanguage } = selection
-  const failure = failed ? <p role="alert" className="px-2 py-1 text-sm text-red-700">{t('common.languageSaveFailed')}</p> : null
+  const failure = failed && !pending ? <p role="alert" className="px-2 py-1 text-sm text-red-700">{t('common.languageSaveFailed')}</p> : null
 
   if (placement === 'menu') {
     return (

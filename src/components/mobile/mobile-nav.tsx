@@ -43,7 +43,7 @@ const adminTab: Tab = { label: 'nav.admin', href: '/admin', icon: Settings, matc
 /**
  * Mobile top tab bar navigation with smart scroll behavior.
  * Visible only on mobile breakpoints (< lg).
- * Auto-hides when scrolling down, reappears when scrolling up.
+ * Auto-hides when scrolling down unless it has focus or the menu is open.
  */
 export function MobileNav() {
   const t = useTranslations()
@@ -124,7 +124,7 @@ export function MobileNav() {
         'fixed top-0 left-0 right-0 z-50 bg-white border-b border-gray-200 transition-transform duration-300 lg:hidden',
         // translate-y-0 is still a transform and blocks iOS taps on the
         // overflowing dropdown. Drop the transform entirely while open.
-        menuOpen ? 'transform-none' : isVisible ? 'translate-y-0' : '-translate-y-full'
+        menuOpen ? 'transform-none' : isVisible ? 'translate-y-0' : '-translate-y-full focus-within:transform-none'
       )}
     >
       <div className="flex items-center justify-between px-2 sm:px-4 h-16">

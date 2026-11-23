@@ -173,8 +173,51 @@ test('saved account language follows the account, including the first document, 
   }
 })
 
+async function scrollAvatarOffscreen(page: Page) {
+  // Make the short profile scrollable without introducing another app surface.
+  await page.locator('main').evaluate(element => {
+    element.style.minHeight = '200vh'
+    window.scrollTo(0, 600)
+  })
+  await expect(avatar(page)).not.toBeInViewport()
+}
+
+test('restores keyboard retry focus to the desktop avatar in view', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await signIn(page, ALICE)
+  let failed = false
+  await page.route('**/profile', async route => {
+    if (failed || !isThaiLanguageSave(route.request())) return route.fallback()
+    failed = true
+    return route.abort()
+  })
+  // Close the menu after the first failure; the next attempt uses the banner.
+  await avatar(page).click()
+  await menu(page).getByRole('menuitemradio', { name: 'ไทย' }).click()
+  await expect(menu(page).getByRole('alert')).toBeVisible()
+  await page.keyboard.press('Escape')
+  const retry = page.getByRole('button', { name: 'Try again', exact: true })
+  await retry.focus()
+  await scrollAvatarOffscreen(page)
+  await expect(retry).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(lang(page)).toHaveAttribute('lang', 'th')
+  await expect(avatar(page)).toBeFocused()
+  await expect(avatar(page)).toBeInViewport({ ratio: 1 })
+})
+
 test.describe('mobile avatar selector', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+
+  test('reveals the scroll-hidden mobile navbar when its avatar receives focus', async ({ page }) => {
+    await signIn(page, ALICE)
+    await scrollAvatarOffscreen(page)
+    // Restore focus without scrolling: the fixed navbar must reveal itself.
+    await avatar(page).evaluate(button => (button as HTMLButtonElement).focus({ preventScroll: true }))
+    await expect(avatar(page)).toBeFocused()
+    await expect(avatar(page)).toBeInViewport({ ratio: 1 })
+    expect(await page.evaluate(() => window.scrollY)).toBe(600)
+  })
 
   test('announces a failed save after the avatar menu closes and offers a retry there', async ({ page }) => {
     await signIn(page, ALICE)
@@ -226,15 +269,49 @@ test.describe('mobile avatar selector', () => {
       await expect(retry).toBeFocused()
       expect(saves).toBe(2)
 
+      await scrollAvatarOffscreen(page)
+      await expect(retry).toBeFocused()
       await page.keyboard.press('Enter')
       await expect(lang(page)).toHaveAttribute('lang', 'th')
       await expect(alert).toBeHidden()
       await expect(retry).toBeHidden()
       await expect(avatar(page)).toBeFocused()
+      await expect(avatar(page)).toBeInViewport({ ratio: 1 })
       await expect(menu(page)).toBeHidden()
       expect(saves).toBe(3)
     } finally {
       releaseFailure()
+      releaseRetry()
+      await page.unrouteAll({ behavior: 'wait' })
+    }
+  })
+
+  test('does not announce the old error when the avatar menu reopens during a direct retry', async ({ page }) => {
+    await signIn(page, ALICE)
+    const thai = menu(page).getByRole('menuitemradio', { name: 'ไทย' })
+    let saves = 0
+    let releaseRetry!: () => void
+    const pendingRetry = new Promise<void>(resolve => { releaseRetry = resolve })
+    await page.route('**/profile', async route => {
+      if (!isThaiLanguageSave(route.request())) return route.fallback()
+      if (++saves === 2) await pendingRetry
+      return route.abort()
+    })
+    try {
+      await avatar(page).tap()
+      await thai.tap()
+      await expect(menu(page).getByRole('alert')).toBeVisible()
+      await page.keyboard.press('Escape')
+      await page.getByRole('button', { name: 'Try again', exact: true }).tap()
+      await expect.poll(() => saves).toBe(2)
+      await avatar(page).tap()
+      await expect(thai).toBeDisabled()
+      await expect(menu(page).getByRole('menuitemradio', { checked: true })).toHaveText('English')
+      await expect(menu(page).getByRole('alert')).toBeHidden()
+      releaseRetry()
+      await expect(menu(page).getByRole('alert')).toHaveText('Could not save the language. Try again.')
+      await expect(thai).toBeEnabled()
+    } finally {
       releaseRetry()
       await page.unrouteAll({ behavior: 'wait' })
     }
