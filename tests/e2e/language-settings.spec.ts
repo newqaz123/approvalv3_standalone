@@ -1,4 +1,4 @@
-import { expect, test, type BrowserContext, type Page } from '@playwright/test'
+import { expect, test, type BrowserContext, type Page, type Request } from '@playwright/test'
 import { PrismaClient } from '@prisma/client'
 
 const BASE_URL = 'http://localhost:32143'
@@ -41,6 +41,11 @@ const lang = (page: Page) => page.locator('html')
 const publicSelector = (page: Page) => page.getByRole('group', { name: LABEL })
 const avatar = (page: Page) => page.getByRole('button', { name: /^(Open user menu|เปิดเมนูผู้ใช้)$/ })
 const menu = (page: Page) => page.getByRole('menu')
+
+function isThaiLanguageSave(request: Request) {
+  // Other Server Actions (e.g. the notification bell) also POST to /profile.
+  return request.method() === 'POST' && !!request.headers()['next-action'] && request.postData() === '["th"]'
+}
 
 async function chooseThaiInMenu(page: Page) {
   await avatar(page).click()
@@ -171,6 +176,47 @@ test('saved account language follows the account, including the first document, 
 test.describe('mobile avatar selector', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
 
+  test('announces a failed save after the avatar menu closes and offers a retry there', async ({ page }) => {
+    await signIn(page, ALICE)
+    await avatar(page).tap()
+    const thai = menu(page).getByRole('menuitemradio', { name: 'ไทย' })
+    let saves = 0
+    let releaseFailure!: () => void
+    const pendingFailure = new Promise<void>(resolve => { releaseFailure = resolve })
+    await page.route('**/profile', async route => {
+      if (!isThaiLanguageSave(route.request())) return route.fallback()
+      saves++
+      if (saves === 1) {
+        await pendingFailure
+        return route.abort()
+      }
+      await route.continue()
+    })
+    try {
+      await thai.tap()
+      await expect.poll(() => saves).toBe(1)
+      await page.keyboard.press('Escape')
+      await expect(menu(page)).toBeHidden()
+      await expect(avatar(page)).toBeFocused()
+      releaseFailure()
+
+      const alert = page.getByRole('alert').filter({ hasText: 'Could not save the language. Try again.' })
+      await expect(alert).toBeVisible()
+      await expect(lang(page)).toHaveAttribute('lang', 'en')
+      await expect(page.getByRole('heading', { name: 'Profile', exact: true })).toBeVisible()
+      await expect(avatar(page)).toBeFocused()
+
+      await page.getByRole('button', { name: 'Try again', exact: true }).tap()
+      await expect(lang(page)).toHaveAttribute('lang', 'th')
+      await expect(alert).toBeHidden()
+      await expect(menu(page)).toBeHidden()
+      expect(saves).toBe(2)
+    } finally {
+      releaseFailure()
+      await page.unrouteAll({ behavior: 'wait' })
+    }
+  })
+
   test('announces a failed save in the previous language and serializes retries across menu reopening', async ({ page }) => {
     await signIn(page, ALICE)
     await avatar(page).focus()
@@ -190,8 +236,7 @@ test.describe('mobile avatar selector', () => {
     let releaseRetry!: () => void
     const pendingRetry = new Promise<void>(resolve => { releaseRetry = resolve })
     await page.route('**/profile', async route => {
-      const request = route.request()
-      if (request.method() !== 'POST' || !request.headers()['next-action']) return route.fallback()
+      if (!isThaiLanguageSave(route.request())) return route.fallback()
       saves++
       if (saves === 1) return route.abort()
       await pendingRetry

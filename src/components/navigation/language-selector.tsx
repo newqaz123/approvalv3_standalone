@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useContext, useId, useRef, useState, useTransition, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useId, useRef, useState, useTransition, type ReactNode } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { RadioGroup } from '@radix-ui/react-dropdown-menu'
 import { DropdownMenuLabel, DropdownMenuRadioItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
@@ -13,33 +13,42 @@ const options = [
   { locale: 'en', label: 'common.languageEnglish' },
 ] as const
 
+type SelectorPlacement = 'menu' | 'public'
+
+type FailedSelection = { pathname: string; locale: Locale; placement: SelectorPlacement }
+
 const LanguageSelectionContext = createContext<{
   pending: boolean
   failed: boolean
-  selectLanguage: (locale: Locale) => void
+  selectLanguage: (locale: Locale, placement: SelectorPlacement) => void
+  setMenuMounted: (mounted: boolean) => void
 } | null>(null)
 
 // Work stays in flight even if the menu closes or the viewport changes shells.
 // The selected locale itself always comes from the server's LocaleProvider.
 export function LanguageSelectionProvider({ children }: { children: ReactNode }) {
   const locale = useLocale()
+  const t = useTranslations()
   const router = useRouter()
   const pathname = usePathname()
   const [pending, startTransition] = useTransition()
-  const [failedPath, setFailedPath] = useState<string | null>(null)
+  const [failedSelection, setFailedSelection] = useState<FailedSelection | null>(null)
+  const [menuMounted, setMenuMounted] = useState(false)
   const saving = useRef(false)
+  const failure = failedSelection?.pathname === pathname ? failedSelection : null
 
-  function selectLanguage(next: Locale) {
+  function selectLanguage(next: Locale, placement: SelectorPlacement) {
     if (saving.current || pending || next === locale) return
     saving.current = true
-    setFailedPath(null)
+    setFailedSelection(null)
+    const attemptedSelection = { pathname, locale: next, placement }
     startTransition(async () => {
       try {
         const result = await saveLanguage(next)
         if (result.ok) router.refresh()
-        else setFailedPath(pathname)
+        else setFailedSelection(attemptedSelection)
       } catch {
-        setFailedPath(pathname)
+        setFailedSelection(attemptedSelection)
       } finally {
         saving.current = false
       }
@@ -47,17 +56,39 @@ export function LanguageSelectionProvider({ children }: { children: ReactNode })
   }
 
   return (
-    <LanguageSelectionContext.Provider value={{ pending, failed: failedPath !== null && failedPath === pathname, selectLanguage }}>
+    <LanguageSelectionContext.Provider value={{ pending, failed: failure !== null, selectLanguage, setMenuMounted }}>
       {children}
+      {failure?.placement === 'menu' && !menuMounted && (
+        <div className="fixed inset-x-4 bottom-4 z-50 mx-auto flex max-w-md flex-wrap items-center gap-x-4 rounded-lg border border-red-200 bg-white px-4 py-2 text-sm text-red-700 shadow-lg">
+          <p role="alert" className="flex-1">{t('common.languageSaveFailed')}</p>
+          <button
+            type="button"
+            className="min-h-[44px] rounded px-2 font-semibold underline focus-visible:outline focus-visible:outline-2"
+            disabled={pending}
+            onClick={() => selectLanguage(failure.locale, 'menu')}
+          >
+            {t('common.languageRetry')}
+          </button>
+        </div>
+      )}
     </LanguageSelectionContext.Provider>
   )
 }
 
-export function LanguageSelector({ placement }: { placement: 'menu' | 'public' }) {
+export function LanguageSelector({ placement }: { placement: SelectorPlacement }) {
   const locale = useLocale()
   const t = useTranslations()
   const id = useId()
   const selection = useContext(LanguageSelectionContext)
+  const setMenuMounted = selection?.setMenuMounted
+
+  // Radix hides page content from assistive technology while its modal portal is mounted.
+  useEffect(() => {
+    if (placement !== 'menu' || !setMenuMounted) return
+    setMenuMounted(true)
+    return () => setMenuMounted(false)
+  }, [placement, setMenuMounted])
+
   if (!selection) throw new Error('LanguageSelector requires LanguageSelectionProvider')
   const { pending, failed, selectLanguage } = selection
   const failure = failed ? <p role="alert" className="px-2 py-1 text-sm text-red-700">{t('common.languageSaveFailed')}</p> : null
@@ -75,7 +106,7 @@ export function LanguageSelector({ placement }: { placement: 'menu' | 'public' }
               disabled={pending}
               onSelect={event => {
                 event.preventDefault()
-                selectLanguage(option.locale)
+                selectLanguage(option.locale, placement)
               }}
               className="min-h-[44px] cursor-pointer"
             >
@@ -99,7 +130,7 @@ export function LanguageSelector({ placement }: { placement: 'menu' | 'public' }
               name={id}
               checked={locale === option.locale}
               aria-disabled={pending || undefined}
-              onChange={() => selectLanguage(option.locale)}
+              onChange={() => selectLanguage(option.locale, placement)}
               className="h-4 w-4 accent-indigo-600"
             />
             <span lang={option.locale}>{t(option.label)}</span>
