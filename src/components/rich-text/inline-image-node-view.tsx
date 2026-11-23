@@ -376,9 +376,7 @@ export function InlineImageNodeView({
   const align = node.attrs.align === 'left' || node.attrs.align === 'right' ? node.attrs.align : 'center'
   const imageId = src ? parseInlineImageSrc(src) : null
   const isStable = imageId !== null && status !== 'error'
-  const transactionRemovalError = status === 'removal-error' && typeof node.attrs.error === 'string'
-    ? node.attrs.error
-    : null
+  const transactionRemovalFailed = status === 'removal-error'
   const isLocalUpload = uploadId.length > 0 && options.localUploadIds?.has(uploadId) === true
   const coordinator = options.inlineImages
   const [removePending, setRemovePending] = useState(false)
@@ -394,7 +392,7 @@ export function InlineImageNodeView({
   const discardSessionRef = useRef<(session: InlineImageResizeSession | null) => void>(() => undefined)
 
   const [cropSession, setCropSessionState] = useState<InlineImageCropNodeSession | null>(null)
-  const [cropGuidance, setCropGuidance] = useState<string | null>(null)
+  const [cropUnavailable, setCropUnavailable] = useState(false)
   const cropSessionRef = useRef<InlineImageCropNodeSession | null>(null)
   const focusCropAfterExitRef = useRef(false)
 
@@ -675,10 +673,10 @@ export function InlineImageNodeView({
       }),
     })
     if (!started.ok) {
-      setCropGuidance(started.guidance)
+      setCropUnavailable(true)
       return
     }
-    setCropGuidance(null)
+    setCropUnavailable(false)
     setCropSession(started.session)
   }
 
@@ -728,7 +726,7 @@ export function InlineImageNodeView({
             onApply: applyCropAttributes,
             onCancel: exitCropSession,
           } : null}
-          cropGuidance={cropGuidance}
+          cropGuidance={cropUnavailable ? t('editor.cropUnavailable') : null}
           onRotateLeft={() => updateSelectedAttributes({
             rotation: rotateInlineImage(rotation, 'left'),
           })}
@@ -793,12 +791,12 @@ export function InlineImageNodeView({
         </span>
       )}
 
-      {isStable && (transactionRemovalError || removeError) && (
+      {isStable && (transactionRemovalFailed || removeError) && (
         <span
           role="alert"
           className="mt-1 block max-w-full text-sm text-red-700"
         >
-          {transactionRemovalError ?? removeError}
+          {t('editor.removeImageFailed')}
         </span>
       )}
     </NodeViewWrapper>

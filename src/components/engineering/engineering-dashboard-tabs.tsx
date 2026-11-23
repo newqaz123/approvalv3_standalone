@@ -837,7 +837,7 @@ function FollowUpRequestRow({
 						)}
 						{request.workRequisitionReceived && (
 							<Badge className="shrink-0 border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-50">
-								{t('requests.wrReceivedShort')}
+								WR Received
 							</Badge>
 						)}
 					</div>

@@ -280,13 +280,14 @@ export async function createRequest(input: CreateRequestInput) {
     if (error instanceof Error && error.message === ATTACHMENT_ADOPTION_ERROR) {
       return { success: false, error: ATTACHMENT_ADOPTION_ERROR, errorKey: 'requests.error.attachmentAdoption' as const satisfies MessageKey }
     }
-    if (
-      error instanceof SubmissionDeniedError
-      || error instanceof ApprovalRouteConfigurationError
-      || error instanceof ApprovalEnginePlanError
-      || error instanceof ApprovalEngineConflictError
-    ) {
-      return { success: false, error: error.message }
+    if (error instanceof SubmissionDeniedError) {
+      return { success: false, error: error.message, errorKey: 'requests.error.assignmentRequired' as const satisfies MessageKey }
+    }
+    if (error instanceof ApprovalRouteConfigurationError || error instanceof ApprovalEnginePlanError) {
+      return { success: false, error: error.message, errorKey: 'requests.error.approvalRouteUnavailable' as const satisfies MessageKey }
+    }
+    if (error instanceof ApprovalEngineConflictError) {
+      return { success: false, error: error.message, errorKey: 'requests.error.createConflict' as const satisfies MessageKey }
     }
     return { success: false, error: 'Failed to create request — please try again' }
   }

@@ -237,7 +237,7 @@ export function InlineImageCropEditor({
 }: InlineImageCropEditorProps) {
   const t = useTranslations()
   const [draft, setDraft] = useState<InlineImageCropDraft>(() => createInlineImageCropDraft(session.snapshot))
-  const [status, setStatus] = useState<string>('Crop editor open')
+  const [announcement, setAnnouncement] = useState<'open' | 'reset' | InlineImageCropDraft>('open')
   const draftRef = useRef(draft)
   draftRef.current = draft
 
@@ -306,11 +306,6 @@ export function InlineImageCropEditor({
     })
   }
 
-  const describeCrop = (next: InlineImageCropDraft) => (
-    `Crop ${Math.round(next.crop.width / 100)}% wide, ${Math.round(next.crop.height / 100)}% tall`
-    + (next.zoom > 1 ? ` at ${Math.round(next.zoom * 100)}% zoom` : '')
-  )
-
   const onHandlePointerDown = (
     edge: InlineImageCropEdge,
     event: ReactPointerEvent<HTMLButtonElement>,
@@ -350,7 +345,7 @@ export function InlineImageCropEditor({
       updateDraft(drag.originDraft)
       return
     }
-    setStatus(describeCrop(draftRef.current))
+    setAnnouncement(draftRef.current)
   }
 
   const onHandleKeyDown = (
@@ -367,7 +362,7 @@ export function InlineImageCropEditor({
     event.stopPropagation()
     const next = stepInlineImageCropEdge(draftRef.current, edge, event.key, event.shiftKey)
     updateDraft(next)
-    setStatus(describeCrop(next))
+    setAnnouncement(draftRef.current)
   }
 
   const onRegionPointerDown = (event: ReactPointerEvent<HTMLSpanElement>) => {
@@ -453,7 +448,7 @@ export function InlineImageCropEditor({
       if (remaining.length !== 1) updateDraft(drag.pinch ? drag.pinch.draft : drag.originDraft)
       return
     }
-    if (remaining.length === 0) setStatus(describeCrop(draftRef.current))
+    if (remaining.length === 0) setAnnouncement(draftRef.current)
   }
 
   const onRegionKeyDown = (event: ReactKeyboardEvent<HTMLSpanElement>) => {
@@ -467,7 +462,7 @@ export function InlineImageCropEditor({
     event.stopPropagation()
     const next = stepInlineImageCropRegion(draftRef.current, event.key, event.shiftKey)
     updateDraft(next)
-    setStatus(describeCrop(next))
+    setAnnouncement(draftRef.current)
   }
 
   const onPresetChange = (preset: InlineImageCropPreset) => {
@@ -484,7 +479,7 @@ export function InlineImageCropEditor({
       visual.height,
     )
     updateDraft(next)
-    setStatus(preset === 'original' ? 'Crop reset to the full original image' : describeCrop(next))
+    setAnnouncement(preset === 'original' ? 'reset' : next)
   }
 
   const onZoomChange = (zoom: number) => {
@@ -600,7 +595,13 @@ export function InlineImageCropEditor({
         </span>
       </span>
       <span role="status" aria-live="polite" className="inline-image-crop-status">
-        {status}
+        {announcement === 'open' ? t('editor.cropOpened')
+          : announcement === 'reset' ? t('editor.cropResetOriginal')
+          : t(announcement.zoom > 1 ? 'editor.cropAdjustedZoom' : 'editor.cropAdjusted', {
+            width: Math.round(announcement.crop.width / 100),
+            height: Math.round(announcement.crop.height / 100),
+            zoom: Math.round(announcement.zoom * 100),
+          })}
       </span>
     </span>
   )

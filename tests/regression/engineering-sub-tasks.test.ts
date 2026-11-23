@@ -615,7 +615,7 @@ describe("engineering stale sub-task filters", () => {
 		assert.match(tabs, /t\('requests\.queueExclusions'\)/);
 		assert.match(readFileSync('src/lib/i18n/catalogs/requests.ts', 'utf8'), /requests\.queueExclusions[^\n]*WR received and every sub-task checked complete[^\n]*cancelled work/);
 		assert.match(tabs, /request\.workRequisitionReceived/);
-		assert.match(tabs, /t\('requests\.wrReceivedShort'\)/);
+		assert.match(tabs, /request\.workRequisitionReceived && \([\s\S]*?<Badge[^>]*>\s*WR Received\s*<\/Badge>/);
 		assert.match(tabs, /bg-emerald-50 text-emerald-700/);
 		assert.match(tabs, /group\/progress/);
 		assert.match(tabs, /cursor-pointer/);

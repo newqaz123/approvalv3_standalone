@@ -67,6 +67,15 @@ interface RequestModalRouterProps {
 	viewOnly?: boolean;
 }
 
+function downloadFailureKey(status: number): MessageKey {
+	switch (status) {
+		case 401: return 'requests.error.downloadSignIn';
+		case 403: return 'requests.error.downloadForbidden';
+		case 404: return 'requests.error.fileUnavailable';
+		default: return 'requests.error.download';
+	}
+}
+
 /**
  * Smart modal router that displays the appropriate modal variant
  * based on request status, user permissions, and current state
@@ -357,8 +366,7 @@ function RequestModalRouterContent({
 			const res = await fetch(downloadUrl);
 
 			if (!res.ok) {
-				const data = await res.json().catch(() => ({}));
-				toast.error(data.error || t('requests.error.fileUnavailable'));
+				toast.error(t(downloadFailureKey(res.status)));
 				return;
 			}
 
@@ -397,8 +405,7 @@ function RequestModalRouterContent({
 			const res = await fetch(downloadUrl);
 
 			if (!res.ok) {
-				const data = await res.json().catch(() => ({}));
-				toast.error(data.error || t('requests.error.fileUnavailable'));
+				toast.error(t(downloadFailureKey(res.status)));
 				return;
 			}
 

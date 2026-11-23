@@ -232,3 +232,233 @@ test('seeded Request, Solution and Final include rejection, rework and stable wo
     await Promise.allSettled([...contexts.values()].map((context) => context.close()))
   }
 })
+
+async function openThaiImageDraft(page: Page) {
+  const imageId = '123e4567-e89b-42d3-a456-426614174001'
+  const src = `/api/inline-images/${imageId}`
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAGUlEQVR4nGO4FGBDEmIY1RAwGkqXhmvSAACoeF4Qrn9alwAAAABJRU5ErkJggg==', 'base64')
+  const rawError = 'Fixture: internal image deletion failure'
+  await page.route('**/api/inline-images', (route) => route.fulfill({ json: {
+    id: imageId, src, alt: 'Workflow image', fileType: 'image/png', fileSize: png.length, width: 16, height: 16,
+  } }))
+  await page.route(`**${src}`, (route) => route.request().method() === 'DELETE'
+    ? route.fulfill({ status: 500, json: { error: rawError } })
+    : route.fulfill({ contentType: 'image/png', body: png }))
+
+  await page.goto('/test-harness/language-workflow?locale=th')
+  await page.getByRole('button', { name: 'Open fixture draft' }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.locator('input[type=file][accept^="image/"]').setInputFiles({ name: 'workflow.png', mimeType: 'image/png', buffer: png })
+  const image = dialog.getByAltText('Workflow image', { exact: true })
+  await expect(image).toBeVisible()
+  await image.click()
+  return { dialog, image, src, rawError }
+}
+
+test('Thai crop announces open, adjustment and reset', async ({ page }) => {
+  const { dialog } = await openThaiImageDraft(page)
+  await dialog.getByRole('button', { name: 'ครอบตัดรูปภาพ', exact: true }).click()
+  const status = dialog.locator('.inline-image-crop-status')
+  await expect(status).toHaveText('เปิดตัวแก้ไขการครอบตัดแล้ว')
+  await dialog.getByRole('button', { name: 'เลื่อนขอบครอบตัดด้านขวา' }).press('ArrowLeft')
+  await expect(status).toHaveText(/ครอบตัดกว้าง \d+% สูง \d+%/)
+  await dialog.getByRole('button', { name: 'คืนค่าการครอบตัด' }).click()
+  await expect(status).toHaveText('คืนค่าการครอบตัดเป็นรูปเดิมทั้งรูปแล้ว')
+  await dialog.getByRole('button', { name: 'ยกเลิกครอบตัด' }).click()
+
+})
+
+test('Thai removal failures are visible after uploading an image', async ({ page }) => {
+  const { dialog, image, src, rawError } = await openThaiImageDraft(page)
+  const failedDelete = page.waitForResponse((response) => response.url().endsWith(src) && response.request().method() === 'DELETE')
+  await dialog.getByRole('button', { name: 'นำรูปภาพออก', exact: true }).click()
+  expect((await failedDelete).status()).toBe(500)
+  await expect(dialog.getByRole('alert')).toHaveText('นำรูปภาพออกไม่ได้ ลองอีกครั้ง')
+  await expect(dialog.getByText(rawError)).toHaveCount(0)
+  await expect(image).toBeVisible()
+
+  // Removing the selected image from TipTap also fails, restores the node and reports the same copy.
+  const failedTransaction = page.waitForResponse((response) => response.url().endsWith(src) && response.request().method() === 'DELETE')
+  await image.click()
+  await page.keyboard.press('Backspace')
+  expect((await failedTransaction).status()).toBe(500)
+  await expect(dialog.getByRole('alert')).toHaveText('นำรูปภาพออกไม่ได้ ลองอีกครั้ง')
+  await expect(dialog.getByText(rawError)).toHaveCount(0)
+  await expect(image).toBeVisible()
+})
+
+type EnglishApprovalFixture = {
+  createRequest: () => Promise<{ id: string; title: string }>
+  signInAs: (email: string, path?: string) => Promise<Page>
+}
+
+const englishApprovalTest = test.extend<{ approval: EnglishApprovalFixture }>({
+  approval: async ({ browser }, use) => {
+    const contexts: Awaited<ReturnType<typeof browser.newContext>>[] = []
+    const title = `English approval control ${crypto.randomUUID()}`
+    const signInAs = async (email: string, path = '/requests') => {
+      const context = await browser.newContext({ baseURL: BASE_URL })
+      contexts.push(context)
+      const page = await context.newPage()
+      await signIn(page, email, path)
+      await expect(page.locator('html')).toHaveAttribute('lang', 'en')
+      return page
+    }
+    const createRequest = async () => {
+      const page = await signInAs(ALICE)
+      await page.getByRole('button', { name: 'New Request', exact: true }).click()
+      const dialog = page.getByRole('dialog')
+      await dialog.locator('#title').fill(title)
+      await dialog.locator('[contenteditable="true"]').first().fill('English control for seeded approval routing')
+      await dialog.getByRole('button', { name: 'Submit Request', exact: true }).click()
+      await expect(page.getByText('Request created successfully', { exact: true })).toBeVisible({ timeout: 25_000 })
+      return prisma.requests.findFirstOrThrow({ where: { title }, select: { id: true, title: true } })
+    }
+    expect(await prisma.email_settings.count()).toBe(0)
+    await prisma.email_settings.create({ data: { id: 'default', enabled: false, host: 'localhost', fromAddress: 'fixture@example.com' } })
+    try {
+      await use({ createRequest, signInAs })
+    } finally {
+      try {
+        await prisma.requests.deleteMany({ where: { title } })
+      } finally {
+        await prisma.email_settings.delete({ where: { id: 'default' } })
+        await Promise.allSettled(contexts.map((context) => context.close()))
+      }
+    }
+  },
+})
+
+function englishActionRow(page: Page, title: string) {
+  return page.getByRole('row', { name: `Open request ${title}`, exact: true })
+}
+
+async function openEnglishReview(approval: EnglishApprovalFixture, email: string, title: string, path = '/requests/my-actions') {
+  const page = await approval.signInAs(email, path)
+  await englishActionRow(page, title).click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.getByRole('heading', { name: title, exact: true })).toBeVisible({ timeout: 25_000 })
+  return { page, dialog }
+}
+
+englishApprovalTest('English control: own-team leads can approve, reports-to and ancestor cannot', async ({ approval }) => {
+  const { title } = await approval.createRequest()
+  for (const email of [CASEY, 'quinn@example.com']) {
+    const { dialog } = await openEnglishReview(approval, email, title)
+    await expect(dialog.getByRole('button', { name: 'Approve', exact: true })).toBeVisible()
+  }
+  for (const email of ['riley@example.com', 'pat@example.com']) {
+    const page = await approval.signInAs(email, '/requests/my-actions')
+    await expect(englishActionRow(page, title)).toHaveCount(0)
+    await page.goto('/requests')
+    await englishActionRow(page, title).click()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog.getByRole('heading', { name: title, exact: true })).toBeVisible({ timeout: 25_000 })
+    await expect(dialog.getByRole('button', { name: 'Approve', exact: true })).toHaveCount(0)
+    await expect(dialog.getByRole('button', { name: 'Reject', exact: true })).toHaveCount(0)
+  }
+})
+
+englishApprovalTest('English control: competing candidates cannot settle the same step twice', async ({ approval }) => {
+  const { id, title } = await approval.createRequest()
+  const casey = await openEnglishReview(approval, CASEY, title)
+  const quinn = await openEnglishReview(approval, 'quinn@example.com', title)
+  for (const { dialog } of [casey, quinn]) {
+    await dialog.getByRole('button', { name: 'Approve', exact: true }).click()
+    await expect(dialog.getByRole('button', { name: 'Confirm Approval', exact: true })).toBeVisible()
+  }
+  await casey.dialog.getByRole('button', { name: 'Confirm Approval', exact: true }).click()
+  await expect(casey.page.getByText('Approved successfully', { exact: true })).toBeVisible({ timeout: 25_000 })
+  await quinn.dialog.getByRole('button', { name: 'Confirm Approval', exact: true }).click()
+  await expect(quinn.page.getByText('An error occurred while approving', { exact: true })).toBeVisible({ timeout: 25_000 })
+  const request = await prisma.requests.findUniqueOrThrow({ where: { id }, include: { approvals: true, activities: true } })
+  expect(request.status).toBe('ImprovementRequest')
+  expect(request.approvals.filter((row) => row.status === 'approved').map(({ order }) => order)).toEqual([1])
+  expect(request.activities.filter(({ action }) => action === 'approved')).toHaveLength(1)
+})
+
+englishApprovalTest('English control: rejection returns the request to its author for revision', async ({ approval }) => {
+  const { title } = await approval.createRequest()
+  const { page, dialog } = await openEnglishReview(approval, CASEY, title)
+  const reason = 'Please revise the engineering justification'
+  await dialog.getByRole('button', { name: 'Reject', exact: true }).click()
+  await dialog.getByPlaceholder('Please explain the reason for rejection...').fill(reason)
+  await dialog.getByRole('button', { name: 'Confirm Rejection', exact: true }).click()
+  await expect(page.getByText('Rejected successfully', { exact: true })).toBeVisible({ timeout: 25_000 })
+  const requester = await approval.signInAs(ALICE)
+  await englishActionRow(requester, title).click()
+  const revision = requester.getByRole('dialog')
+  await expect(revision.getByRole('heading', { name: 'Resubmit Request', exact: true })).toBeVisible({ timeout: 25_000 })
+  await expect(revision.locator('#title')).toHaveValue(title)
+  await expect(revision.getByText(`“${reason}”`, { exact: true })).toBeVisible()
+})
+
+englishApprovalTest('English control: admin restarts a stranded attempt with a reason and preserves decisions', async ({ approval }) => {
+  englishApprovalTest.setTimeout(240_000)
+  const { id, title } = await approval.createRequest()
+  const { page, dialog } = await openEnglishReview(approval, CASEY, title)
+  await dialog.getByRole('button', { name: 'Approve', exact: true }).click()
+  await dialog.locator('textarea').fill('First decision remains in history')
+  await dialog.getByRole('button', { name: 'Confirm Approval', exact: true }).click()
+  await expect(page.getByText('Approved successfully', { exact: true })).toBeVisible({ timeout: 25_000 })
+  const old = await prisma.approval_instances.findFirstOrThrow({
+    where: { requestId: id, phase: 'REQUEST', supersededAt: null },
+    include: { requestApprovals: { orderBy: { order: 'asc' } }, candidateGroups: { include: { members: true } } },
+  })
+  expect(old.requestApprovals.filter(({ status }) => status === 'approved')).toHaveLength(1)
+  const memberIds = [...new Set(old.candidateGroups.flatMap(({ members }) => members.map(({ userId }) => userId)))]
+  expect(memberIds.length).toBeGreaterThan(0)
+  const activeMembers = await prisma.user.findMany({ where: { id: { in: memberIds }, isActive: true }, select: { id: true } })
+  const activeMemberIds = activeMembers.map(({ id }) => id)
+  try {
+    await prisma.user.updateMany({ where: { id: { in: activeMemberIds } }, data: { isActive: false } })
+    const admin = await approval.signInAs('admin@example.com', '/admin/organization?panel=chains')
+    await admin.getByTestId(`chains-stranded-restart-${old.id}`).click()
+    const restart = admin.getByTestId('restart-attempt-dialog')
+    await expect(restart.getByTestId('restart-preview')).toBeVisible({ timeout: 30_000 })
+    const confirm = restart.getByTestId('restart-confirm')
+    await expect(confirm).toBeDisabled()
+    const reason = 'Original candidate snapshot is stranded'
+    await restart.getByTestId('restart-reason-input').fill(reason)
+    await confirm.click()
+    await expect(restart.getByText('Restarted. The old attempt is preserved as history.', { exact: true })).toBeVisible({ timeout: 30_000 })
+    const oldAfter = await prisma.approval_instances.findUniqueOrThrow({
+      where: { id: old.id }, include: { requestApprovals: { orderBy: { order: 'asc' } } },
+    })
+    expect(oldAfter.supersededAt).not.toBeNull()
+    expect(oldAfter.requestApprovals).toEqual(old.requestApprovals)
+    const next = await prisma.approval_instances.findFirstOrThrow({ where: { requestId: id, restartOfInstanceId: old.id } })
+    const adminUser = await prisma.user.findUniqueOrThrow({ where: { email: 'admin@example.com' }, select: { id: true } })
+    expect(next).toMatchObject({ restartReason: reason, restartedById: adminUser.id })
+  } finally {
+    await prisma.user.updateMany({ where: { id: { in: activeMemberIds } }, data: { isActive: true } })
+  }
+  await openEnglishReview(approval, ALICE, title, '/requests')
+})
+
+englishApprovalTest('Thai attachment download uses HTTP status and hides response text', async ({ approval }) => {
+  const { id, title } = await approval.createRequest()
+  const { requesterId } = await prisma.requests.findUniqueOrThrow({ where: { id }, select: { requesterId: true } })
+  const attachment = await prisma.file_attachments.create({ data: {
+    requestId: id, uploadedById: requesterId, fileName: 'Workflow fixture.pdf', fileType: 'application/pdf', fileSize: 1, filePath: 'unserved-workflow-fixture.pdf',
+  } })
+  const page = await approval.signInAs(ALICE)
+  await chooseLanguage(page, 'th')
+  await page.goto(`/requests?requestId=${id}`)
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.getByRole('heading', { name: title, exact: true })).toBeVisible({ timeout: 25_000 })
+  let status = 404
+  const rawError = 'Fixture: internal attachment download failure'
+  await page.route(`**/api/files/download?id=${attachment.id}&disposition=attachment`, (route) =>
+    route.fulfill({ status, json: { error: rawError } }))
+  for (const [code, copy] of [
+    [404, 'ไฟล์นี้ไม่พร้อมใช้งานแล้ว'],
+    [403, 'คุณไม่มีสิทธิ์ดาวน์โหลดไฟล์นี้'],
+    [500, 'ดาวน์โหลดไฟล์ไม่ได้ ลองอีกครั้ง'],
+  ] as const) {
+    status = code
+    await dialog.getByRole('button', { name: 'ดาวน์โหลด', exact: true }).click()
+    await expect(page.getByText(copy, { exact: true })).toBeVisible()
+    await expect(page.getByText(rawError)).toHaveCount(0)
+  }
+})

@@ -47,3 +47,25 @@ test('timeline translates known actions, not comments or opaque action text', ()
   assert.equal(created.details, common.comments)
   assert.equal(created.user, common.user.name)
 })
+
+test('transactional creation failures retain compatibility and return actionable keys by error class', () => {
+  const action = read('src/server-actions/requests.ts')
+  const catchBlock = action.slice(action.indexOf("console.error('Failed to create request atomically:'"), action.indexOf('if (pendingCandidateUserIds.length > 0)'))
+  for (const [failure, key] of [
+    ['SubmissionDeniedError', 'assignmentRequired'],
+    ['ApprovalRouteConfigurationError', 'approvalRouteUnavailable'],
+    ['ApprovalEnginePlanError', 'approvalRouteUnavailable'],
+    ['ApprovalEngineConflictError', 'createConflict'],
+  ] as const) {
+    assert.match(catchBlock, new RegExp(`error instanceof ${failure}[^{}]*\\{\\s*return \\{[^{}]*error: error\\.message,[^{}]*errorKey: 'requests\\.error\\.${key}'`))
+  }
+  assert.match(catchBlock, /return \{ success: false, error: 'Failed to create request — please try again' \}/)
+  assert.match(th('requests.error.approvalRouteUnavailable'), /ติดต่อผู้ดูแลระบบ/)
+  assert.match(th('requests.error.createConflict'), /รีเฟรช/)
+})
+
+test('both attachment download handlers use status-based copy instead of server response text', () => {
+  const router = read('src/components/requests/request-modal-router.tsx')
+  assert.equal(router.match(/t\(downloadFailureKey\(res\.status\)\)/g)?.length, 2)
+  assert.doesNotMatch(router, /data\.error\s*\|\|\s*t\('requests\.error\.fileUnavailable'\)/)
+})
