@@ -397,6 +397,7 @@ model User {
   role                                                            UserRole                       @default(general_dept)
   isActive                                                        Boolean                        @default(true)
   forcePasswordChange                                             Boolean                        @default(false)
+  preferredLocale                                                 String                         @default("en")
   createdAt                                                       DateTime                       @default(now())
   updatedAt                                                       DateTime                       @updatedAt
   fileAttachments                                                file_attachments[]
