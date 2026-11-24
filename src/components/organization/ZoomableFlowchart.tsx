@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useCallback, useLayoutEffect, useRef, useState } from 'react'
+import { useTranslations } from '@/lib/i18n/client'
 
 export const ZOOM_MIN = 0.25
 export const ZOOM_MAX = 2
@@ -62,6 +63,7 @@ export function ZoomableFlowchart({ children, toolbarExtras }: {
    *  while the canvas and page scroll. */
   toolbarExtras?: React.ReactNode
 }) {
+  const t = useTranslations()
   const frameRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLDivElement>(null)
   const [zoom, setZoom] = useState(1)
@@ -108,7 +110,7 @@ export function ZoomableFlowchart({ children, toolbarExtras }: {
       <div
         data-testid="flowchart-zoom-toolbar"
         role="group"
-        aria-label="Flowchart zoom"
+        aria-label={t('admin.flowchartZoom')}
         className="organization-zoom-toolbar sticky top-0 z-20 mb-2 flex flex-wrap items-center justify-between gap-1 rounded-lg border border-slate-200 bg-background/95 px-1.5 py-1 shadow-sm backdrop-blur"
       >
         <div className="flex min-w-0 items-center gap-1">
@@ -118,7 +120,7 @@ export function ZoomableFlowchart({ children, toolbarExtras }: {
         <button
           type="button"
           data-testid="flowchart-zoom-out"
-          aria-label="Zoom out"
+          aria-label={t('admin.zoomOut')}
           disabled={zoom <= ZOOM_MIN}
           onClick={() => setZoom((current) => stepZoom(current, -1))}
           className="inline-flex h-8 min-h-8 min-w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
@@ -135,7 +137,7 @@ export function ZoomableFlowchart({ children, toolbarExtras }: {
         <button
           type="button"
           data-testid="flowchart-zoom-in"
-          aria-label="Zoom in"
+          aria-label={t('admin.zoomIn')}
           disabled={zoom >= ZOOM_MAX}
           onClick={() => setZoom((current) => stepZoom(current, 1))}
           className="inline-flex h-8 min-h-8 min-w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
@@ -145,11 +147,11 @@ export function ZoomableFlowchart({ children, toolbarExtras }: {
         <button
           type="button"
           data-testid="flowchart-zoom-fit"
-          aria-label="Fit"
+          aria-label={t('admin.fit')}
           onClick={applyFit}
           className="inline-flex h-8 min-h-8 items-center justify-center rounded-md border border-slate-200 bg-white px-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          Fit
+          {t('admin.fit')}
         </button>
         </div>
       </div>

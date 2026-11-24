@@ -13,8 +13,10 @@ import {
 import { UserForm } from '@/components/admin/user-form'
 import { Plus } from 'lucide-react'
 import { useRouter } from 'next/navigation'
+import { useTranslations } from '@/lib/i18n/client'
 
 export function CreateUserDialog() {
+  const t = useTranslations()
   const [open, setOpen] = useState(false)
   const router = useRouter()
 
@@ -28,14 +30,14 @@ export function CreateUserDialog() {
       <DialogTrigger asChild>
         <Button>
           <Plus className="mr-2 h-4 w-4" />
-          Add User
+          {t('admin.addUser')}
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Create User</DialogTitle>
+          <DialogTitle>{t('admin.createUser')}</DialogTitle>
           <DialogDescription>
-            Create a new user account. Organization assignment is managed in Organization & Approvals.
+            {t('admin.createUserDescription')}
           </DialogDescription>
         </DialogHeader>
         <UserForm

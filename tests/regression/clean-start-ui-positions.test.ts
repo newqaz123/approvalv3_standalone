@@ -3,6 +3,7 @@
 // tests/regression/clean-start-ui-team.test.ts).
 // Action tests: in-memory fake OrganizationPositionMutationDb only.
 // NO Prisma, NO database, NO env, NO schema/server ops.
+import { createTranslator } from '@/lib/i18n/messages'
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -1193,7 +1194,8 @@ describe('C8 source contracts', () => {
     assert.match(page, /<OrganizationTabs/)
     // Positions tab label/testid/href live in OrganizationTabs.
     const tabs = read('src/components/organization/OrganizationTabs.tsx')
-    assert.match(tabs, /Positions/)
+    assert.match(tabs, /admin\.positions/)
+    assert.equal(createTranslator('en')('admin.positions'), 'Positions')
     assert.match(tabs, /panel=positions/)
     assert.match(tabs, /header-positions/)
     assert.ok(

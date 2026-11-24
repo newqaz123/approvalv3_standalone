@@ -24,15 +24,18 @@ import {
   type RankChangeImpact,
   type WorkspaceSnapshot,
 } from '@/server-actions/organization'
+import type { Translator } from '@/lib/i18n/messages'
+import { useTranslations } from '@/lib/i18n/client'
 
 export function formatRouteProblem(
+  t: Translator,
   row: { scopeUnitId: string; phase: string; problem: 'STEP_NOT_ASCENDING' | 'STEP_EXCEEDS_LIMIT' },
   unitNames: ReadonlyMap<string, string>,
 ): string {
   const scope = unitNames.get(row.scopeUnitId) ?? row.scopeUnitId
   const description = row.problem === 'STEP_NOT_ASCENDING'
-    ? 'required steps would no longer ascend'
-    : 'a required step would exceed the approval limit'
+    ? t('admin.rankStepsNotAscending')
+    : t('admin.rankStepAboveLimit')
   return `${scope} ${row.phase} — ${description} (${row.problem})`
 }
 
@@ -49,6 +52,7 @@ export function PositionRankImpactList({
   impact: RankChangeImpact
   unitNames: ReadonlyMap<string, string>
 }) {
+  const t = useTranslations()
   return (
     <div
       data-testid="position-rank-impact"
@@ -56,11 +60,11 @@ export function PositionRankImpactList({
       className="space-y-2 rounded-md border border-destructive/40 bg-destructive/5 p-3"
     >
       <p className="text-sm font-medium">
-        This rank change is blocked. Nothing was saved — correct the affected records first.
+        {t('admin.rankBlocked')}
       </p>
       {impact.affectedReportingRelationships.length > 0 ? (
         <section data-testid="position-rank-impact-teams" className="space-y-1">
-          <h4 className="text-sm font-medium">Reporting relationships</h4>
+          <h4 className="text-sm font-medium">{t('admin.reportingRelationships')}</h4>
           <ul className="list-disc space-y-1 pl-4 text-sm">
             {impact.affectedReportingRelationships.map((row) => (
               <li key={row.teamId} data-testid={`position-rank-impact-team-${row.teamId}`}>
@@ -72,11 +76,11 @@ export function PositionRankImpactList({
       ) : null}
       {impact.affectedPublishedRoutes.length > 0 ? (
         <section data-testid="position-rank-impact-routes" className="space-y-1">
-          <h4 className="text-sm font-medium">Published routes</h4>
+          <h4 className="text-sm font-medium">{t('admin.publishedRoutes')}</h4>
           <ul className="list-disc space-y-1 pl-4 text-sm">
             {impact.affectedPublishedRoutes.map((row) => (
               <li key={`${row.routeVersionId}-${row.problem}`} data-testid={`position-rank-impact-route-${row.routeVersionId}-${row.problem}`}>
-                {formatRouteProblem(row, unitNames)}
+                {formatRouteProblem(t, row, unitNames)}
               </li>
             ))}
           </ul>
@@ -178,19 +182,19 @@ export function PositionDeleteConfirmation({
   onConfirm: () => void
   onCancel: () => void
 }) {
+  const t = useTranslations()
   if (!confirming) return null
   return (
     <div
       data-testid="position-delete-confirmation"
       role="alertdialog"
-      aria-label={`Confirm permanent deletion of ${positionName}`}
+      aria-label={t('admin.confirmDeletePosition', { name: positionName })}
       className="basis-full space-y-3 rounded-md border border-destructive/40 bg-destructive/5 p-3"
     >
       <div className="space-y-1">
-        <p className="text-sm font-medium">{`Delete ${positionName} permanently?`}</p>
+        <p className="text-sm font-medium">{t('admin.deletePositionQuestion', { name: positionName })}</p>
         <p className="text-xs text-muted-foreground">
-          Only inactive positions with no assignments, route definitions, or approval-history references can
-          be deleted. Captured approval history remains protected and is never rewritten.
+          {t('admin.deletePositionHelp')}
         </p>
       </div>
       {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
@@ -203,7 +207,7 @@ export function PositionDeleteConfirmation({
           disabled={deleting}
           onClick={onConfirm}
         >
-          {deleting ? 'Deleting…' : 'Delete permanently'}
+          {deleting ? t('admin.deletingEllipsis') : t('admin.deletePermanentlySentence')}
         </Button>
         <Button
           type="button"
@@ -213,7 +217,7 @@ export function PositionDeleteConfirmation({
           disabled={deleting}
           onClick={onCancel}
         >
-          Cancel
+          {t('common.cancel')}
         </Button>
       </div>
     </div>
@@ -246,11 +250,12 @@ export function PositionRankEditor({
   onSave: () => void
   onCancel: () => void
 }) {
+  const t = useTranslations()
   return (
     <div data-testid={`position-rank-editor-${position.id}`} className="space-y-2 rounded-md border p-3">
       <div className="flex flex-wrap items-center gap-2">
         <Label htmlFor={`position-rank-input-${position.id}`} className="text-sm">
-          {`New rank for ${position.name}`}
+          {t('admin.newRankFor', { name: position.name })}
         </Label>
         <Input
           id={`position-rank-input-${position.id}`}
@@ -267,7 +272,7 @@ export function PositionRankEditor({
           disabled={saving || blockedImpact !== null || draftRank.trim().length === 0}
           onClick={onSave}
         >
-          Save rank
+          {t('admin.saveRank')}
         </Button>
         <Button
           type="button"
@@ -276,7 +281,7 @@ export function PositionRankEditor({
           data-testid={`position-rank-cancel-${position.id}`}
           onClick={onCancel}
         >
-          Cancel
+          {t('common.cancel')}
         </Button>
       </div>
       {error ? (
@@ -316,6 +321,7 @@ export function PositionAdminPanel({
 }: {
   snapshot: WorkspaceSnapshot
 }) {
+  const t = useTranslations()
   const [rows, setRows] = useState<PositionNode[]>(() => activePositionsSorted(snapshot.positions))
   const [inactiveRows, setInactiveRows] = useState<PositionNode[]>(
     () => inactivePositionsSorted(snapshot.positions),
@@ -385,7 +391,7 @@ export function PositionAdminPanel({
         ? { kind: 'blocked', impact: result.impact }
         : { kind: 'success' }
     } catch (err) {
-      outcome = { kind: 'error', message: err instanceof Error ? err.message : String(err) }
+      outcome = { kind: 'error', message: t('admin.positionRankSaveFailed') }
     }
     const current = sessionRef.current
     const fresh = current.pendingEpoch === epoch && current.epoch === epoch
@@ -424,7 +430,7 @@ export function PositionAdminPanel({
     } catch (err) {
       setRowErrors((current) => ({
         ...current,
-        [row.id]: err instanceof Error ? err.message : String(err),
+        [row.id]: t('admin.positionSaveFailed'),
       }))
     } finally {
       setPendingPositionId(null)
@@ -452,7 +458,7 @@ export function PositionAdminPanel({
     } catch (err) {
       setRowErrors((current) => ({
         ...current,
-        [`inactive-${row.id}`]: err instanceof Error ? err.message : String(err),
+        [`inactive-${row.id}`]: t('admin.positionStatusFailed'),
       }))
     } finally {
       setPendingPositionId(null)
@@ -475,7 +481,7 @@ export function PositionAdminPanel({
     } catch (err) {
       setRowErrors((current) => ({
         ...current,
-        [`delete-${row.id}`]: err instanceof Error ? err.message : String(err),
+        [`delete-${row.id}`]: t('admin.positionDeleteFailed'),
       }))
     } finally {
       setPendingPositionId(null)
@@ -498,7 +504,7 @@ export function PositionAdminPanel({
       setCreateRank('1')
       onDone?.()
     } catch (err) {
-      setCreateError(err instanceof Error ? err.message : String(err))
+      setCreateError(t('admin.positionSaveFailed'))
     } finally {
       setCreating(false)
     }
@@ -507,11 +513,11 @@ export function PositionAdminPanel({
   return (
     <section
       data-testid="position-admin-panel"
-      aria-label="Position administration"
+      aria-label={t('admin.positionAdministration')}
       className="space-y-6 rounded-lg border bg-card p-4"
     >
       <div className="flex items-center justify-between gap-4">
-        <h2 className="text-lg font-semibold">Positions</h2>
+        <h2 className="text-lg font-semibold">{t('admin.positions')}</h2>
         <div className="flex items-center gap-2">
           <Button
             type="button"
@@ -524,20 +530,18 @@ export function PositionAdminPanel({
               setCreateOpen(true)
             }}
           >
-            Add position
+            {t('admin.addPosition')}
           </Button>
         </div>
       </div>
       <p className="text-sm text-muted-foreground">
-        Company-wide job titles and approval ranks (1 is lowest). A rank change that would
-        invalidate a reporting relationship or a published approval chain is blocked and lists the
-        affected records. Existing approval snapshots keep their captured values.
+        {t('admin.positionsHelp')}
       </p>
 
       <div className="grid gap-6 lg:grid-cols-[13rem_minmax(0,1fr)]">
-      <aside className="rounded-md border px-3 py-3" aria-label="Rank ladder">
-        <h3 className="text-sm font-medium">Rank ladder</h3>
-        <p className="mb-3 text-xs text-muted-foreground">Higher number sits higher on the approval ceiling.</p>
+      <aside className="rounded-md border px-3 py-3" aria-label={t('admin.rankLadder')}>
+        <h3 className="text-sm font-medium">{t('admin.rankLadder')}</h3>
+        <p className="mb-3 text-xs text-muted-foreground">{t('admin.rankLadderHelp')}</p>
         <ol className="space-y-1">
           {rows.map((row) => (
             <li key={`ladder-${row.id}`} className="flex items-center gap-2 text-sm">
@@ -564,13 +568,13 @@ export function PositionAdminPanel({
                   onSave={(next) => handleRename(row, next)}
                 />
                 <span data-testid={`position-rank-${row.id}`} className="text-sm text-muted-foreground">
-                  {`Rank ${row.rank}`}
+                  {t('admin.rankValue', { rank: row.rank })}
                 </span>
                 <span
                   data-testid={`position-assignment-count-${row.id}`}
                   className="text-sm text-muted-foreground"
                 >
-                  {count === 1 ? '1 person holds this title' : `${count} people hold this title`}
+                  {count === 1 ? '1 person holds this title' : t('admin.positionHolders', { count })}
                 </span>
                 <span className="flex-1" />
                 {rankSession.positionId !== row.id ? (
@@ -581,7 +585,7 @@ export function PositionAdminPanel({
                     data-testid={`position-rank-edit-${row.id}`}
                     onClick={() => startRankEdit(row)}
                   >
-                    Edit rank
+                    {t('admin.editRank')}
                   </Button>
                 ) : null}
                 <Button
@@ -594,7 +598,7 @@ export function PositionAdminPanel({
                     void handleDeactivate(row)
                   }}
                 >
-                  Deactivate
+                  {t('admin.deactivate')}
                 </Button>
               </div>
               {rowErrors[row.id] ? (
@@ -614,10 +618,9 @@ export function PositionAdminPanel({
 
       {inactiveRows.length > 0 ? (
         <section data-testid="position-inactive" className="space-y-2">
-          <h3 className="text-sm font-medium">Inactive positions</h3>
+          <h3 className="text-sm font-medium">{t('admin.inactivePositions')}</h3>
           <p className="text-xs text-muted-foreground">
-            Hidden from new assignments and editors. Reactivate anytime — history and approval
-            snapshots keep their captured values.
+            {t('admin.inactivePositionsHelp')}
           </p>
           <ul className="space-y-2">
             {inactiveRows.map((row) => (
@@ -627,7 +630,7 @@ export function PositionAdminPanel({
                 className="flex flex-wrap items-center gap-3 rounded-md border border-dashed px-3 py-2"
               >
                 <span className="text-sm font-medium">{row.name}</span>
-                <span className="text-sm text-muted-foreground">{`Rank ${row.rank}`}</span>
+                <span className="text-sm text-muted-foreground">{t('admin.rankValue', { rank: row.rank })}</span>
                 <span className="flex-1" />
                 {rowErrors[`inactive-${row.id}`] ? (
                   <p role="alert" className="text-sm text-destructive">
@@ -651,7 +654,7 @@ export function PositionAdminPanel({
                         void handleReactivate(row)
                       }}
                     >
-                      Reactivate
+                      {t('admin.reactivate')}
                     </Button>
                     <Button
                       type="button"
@@ -669,7 +672,7 @@ export function PositionAdminPanel({
                         setDeleteTarget(row)
                       }}
                     >
-                      Delete
+                      {t('admin.delete')}
                     </Button>
                   </div>
                 ) : (
@@ -695,7 +698,7 @@ export function PositionAdminPanel({
           open
           onClose={cancelRankEdit}
           className="max-w-lg"
-          title="Edit position rank"
+          title={t('admin.editPositionRank')}
           ariaLabel="Edit position rank"
         >
           <div className="p-4">
@@ -726,16 +729,16 @@ export function PositionAdminPanel({
           open
           onClose={() => setCreateOpen(false)}
           className="max-w-sm"
-          title="Add position"
+          title={t('admin.addPosition')}
           ariaLabel="Add position"
         >
           <div className="space-y-4 p-4">
             <div>
-              <h3 className="text-base font-semibold">Add position</h3>
-              <p className="text-sm text-muted-foreground">Company-wide title and approval rank.</p>
+              <h3 className="text-base font-semibold">{t('admin.addPosition')}</h3>
+              <p className="text-sm text-muted-foreground">{t('admin.addPositionHelp')}</p>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="position-create-name">Name</Label>
+              <Label htmlFor="position-create-name">{t('admin.name')}</Label>
               <Input
                 id="position-create-name"
                 data-testid="position-create-name"
@@ -744,14 +747,14 @@ export function PositionAdminPanel({
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="position-create-rank">Rank</Label>
+              <Label htmlFor="position-create-rank">{t('admin.rank')}</Label>
               <div className="flex items-center gap-3">
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
                   data-testid="position-create-rank-decrease"
-                  aria-label="Decrease rank"
+                  aria-label={t('admin.decreaseRank')}
                   disabled={Number(createRank) <= 1}
                   onClick={() => setCreateRank(String(Math.max(1, Number(createRank) - 1)))}
                 >
@@ -770,15 +773,15 @@ export function PositionAdminPanel({
                   variant="outline"
                   size="sm"
                   data-testid="position-create-rank-increase"
-                  aria-label="Increase rank"
+                  aria-label={t('admin.increaseRank')}
                   disabled={Number(createRank) >= sliderMax}
                   onClick={() => setCreateRank(String(Math.min(sliderMax, Number(createRank) + 1)))}
                 >
                   +
                 </Button>
-                <span className="text-xs text-muted-foreground">max {sliderMax}</span>
+                <span className="text-xs text-muted-foreground">{t('admin.maxRank')} {sliderMax}</span>
               </div>
-              <p className="text-xs text-muted-foreground">1 is lowest; use + / − to set the rank.</p>
+              <p className="text-xs text-muted-foreground">{t('admin.rankControlHelp')}</p>
             </div>
             {createError ? (
               <p role="alert" data-testid="position-create-error" className="text-sm text-destructive">
@@ -794,14 +797,14 @@ export function PositionAdminPanel({
                   void handleCreate(() => setCreateOpen(false))
                 }}
               >
-                Create position
+                {t('admin.createPosition')}
               </Button>
               <Button
                 type="button"
                 variant="ghost"
                 onClick={() => setCreateOpen(false)}
               >
-                Cancel
+                {t('common.cancel')}
               </Button>
             </div>
           </div>

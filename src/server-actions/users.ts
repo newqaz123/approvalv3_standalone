@@ -7,6 +7,8 @@ import { revalidatePath } from 'next/cache'
 import { auth } from '@/lib/auth-config'
 import { adminChangeBlockedReason, isAdminRole, roleForAdminFlag, type UserRole } from '@/lib/user-role'
 
+import type { MessageKey } from '@/lib/i18n/messages'
+
 export type { UserRole } from '@/lib/user-role'
 
 export interface CreateUserInput {
@@ -38,6 +40,12 @@ export type UserWithDepartment = {
   } | null
 }
 
+class AdminUserMutationError extends Error {
+  constructor(message: string, readonly key: MessageKey) {
+    super(message)
+  }
+}
+
 export type CurrentUserProfile = {
   id: string
   name: string
@@ -62,11 +70,17 @@ async function requireAdminUser(): Promise<string> {
 /**
  * Get all users with their department information
  */
-export async function getUsers() {
+export async function getUsers(): Promise<UserWithDepartment[]> {
   await requireAdminUser()
 
   const users = await prisma.user.findMany({
-    include: {
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
+      isActive: true,
+      createdAt: true,
       organizationAssignments: {
         where: { isActive: true },
         include: {
@@ -144,7 +158,7 @@ export async function createUser(input: CreateUserInput) {
     where: { email: input.email },
   })
   if (existing) {
-    throw new Error('A user with this email already exists')
+    throw new AdminUserMutationError('A user with this email already exists', 'admin.userEmailAlreadyExists')
   }
 
   const finalRole = roleForAdminFlag(input.isAdmin)
@@ -185,7 +199,7 @@ export async function updateUser(input: UpdateUserInput) {
     })
 
     if (!existingUser) {
-      throw new Error('User not found')
+      throw new AdminUserMutationError('User not found', 'admin.userNotFound')
     }
 
     const finalRole = input.isAdmin === undefined
@@ -201,7 +215,10 @@ export async function updateUser(input: UpdateUserInput) {
       nextIsActiveAdmin: existingUser.isActive && isAdminRole(finalRole),
       otherActiveAdminCount,
     })
-    if (blockedReason) throw new Error(blockedReason)
+    if (blockedReason) {
+      const key = adminUserId === input.id ? 'admin.cannotRemoveOwnAdmin' : 'admin.lastActiveAdminRequired'
+      throw new AdminUserMutationError(blockedReason, key)
+    }
 
     const originalName = existingUser.name
     const originalEmail = existingUser.email
@@ -213,7 +230,7 @@ export async function updateUser(input: UpdateUserInput) {
         where: { email: input.email },
       })
       if (emailExists) {
-        throw new Error('A user with this email already exists')
+        throw new AdminUserMutationError('A user with this email already exists', 'admin.userEmailAlreadyExists')
       }
     }
 
@@ -256,6 +273,19 @@ export async function updateUser(input: UpdateUserInput) {
 
   revalidatePath('/admin/users')
   return user
+}
+
+export async function saveAdminUser(input: CreateUserInput | UpdateUserInput): Promise<
+  { success: true } | { success: false; errorKey: MessageKey }
+> {
+  // Preserve the existing actions' return/throw contracts for other callers.
+  try {
+    if ('id' in input) await updateUser(input)
+    else await createUser(input)
+    return { success: true }
+  } catch (error) {
+    return { success: false, errorKey: error instanceof AdminUserMutationError ? error.key : 'admin.saveUserFailed' }
+  }
 }
 
 /**

@@ -13,6 +13,7 @@ import {
 import { UserForm } from '@/components/admin/user-form'
 import { Pencil } from 'lucide-react'
 import { useRouter } from 'next/navigation'
+import { useTranslations } from '@/lib/i18n/client'
 
 interface EditUserDialogProps {
   user: {
@@ -26,6 +27,7 @@ interface EditUserDialogProps {
 }
 
 export function EditUserDialog({ user, open: externalOpen, onOpenChange: externalOnOpenChange }: EditUserDialogProps) {
+  const t = useTranslations()
   const [internalOpen, setInternalOpen] = useState(false)
   const open = externalOpen !== undefined ? externalOpen : internalOpen
   const setOpen = externalOnOpenChange || setInternalOpen
@@ -47,9 +49,9 @@ export function EditUserDialog({ user, open: externalOpen, onOpenChange: externa
       )}
       <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Edit User</DialogTitle>
+          <DialogTitle>{t('admin.editUser')}</DialogTitle>
           <DialogDescription>
-            Update user details. Organization assignment is managed in Organization & Approvals.
+            {t('admin.editUserDescription')}
           </DialogDescription>
         </DialogHeader>
         <UserForm

@@ -1,3 +1,4 @@
+import { createTranslator } from '@/lib/i18n/messages'
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, existsSync } from 'node:fs'
@@ -270,9 +271,11 @@ describe('storage alert wiring', () => {
     )
 
     const card = readFileSync('src/components/admin/storage-alert-card.tsx', 'utf8')
-    assert.match(card, /Email all admins/)
-    assert.match(card, /Checked every minute · at most one alert attempt per day\./)
-    assert.doesNotMatch(card, /Checked once a day|Checked regularly/)
+    const en = createTranslator('en')
+    assert.match(card, /admin\.diskAlertHelp/)
+    assert.match(en('admin.diskAlertHelp'), /Email all admins/)
+    assert.match(card, /admin\.checkDiskFrequency/)
+    assert.equal(en('admin.checkDiskFrequency'), 'Checked every minute · at most one alert attempt per day.')
     assert.match(card, /aria-live=["']polite["']/)
     assert.match(card, /<h2/)
     assert.match(card, /StorageAlertRail/)

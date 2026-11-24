@@ -26,6 +26,7 @@ import { findLimitConflicts } from '@/lib/approval-routes/definition'
 import type { PositionNode } from '@/lib/organization/model'
 import { publishRoute } from '@/server-actions/approval-routes'
 import { SubmitterTestDialog } from '@/components/organization/SubmitterTestDialog'
+import { useTranslations } from '@/lib/i18n/client'
 
 export interface EditorStep {
   order: number
@@ -122,6 +123,7 @@ export function RouteEditorPanel({
   readOnly?: boolean
   onPublished?: (result: RouteEditorPublishedResult) => void
 }) {
+  const t = useTranslations()
   const [approvalLimitPositionId, setApprovalLimitPositionId] = useState<string | null>(
     initial?.approvalLimitPositionId ?? null,
   )
@@ -149,12 +151,12 @@ export function RouteEditorPanel({
   )
   const complete = editorComplete(steps, approvalLimitPositionId)
   const headingVerb = readOnly
-    ? 'View'
+    ? t('admin.view')
     : editorMode === 'create'
-      ? 'Create exception for'
+      ? t('admin.createExceptionFor')
       : editorMode === 'customize'
-        ? 'Customize'
-        : 'Edit'
+        ? t('admin.customize')
+        : t('admin.edit')
 
   function addStep() {
     setSteps((current) => normalizeEditorSteps([...current, { order: current.length + 1, positionId: '' }], positions))
@@ -185,19 +187,18 @@ export function RouteEditorPanel({
       })
       if (!result.published) {
         setError(
-          `Publication refused: ${result.conflicts.length} step(s) exceed the approval limit. ` +
-          'Correct the flagged steps first.',
+          t('admin.routePublishConflictCount', { count: result.conflicts.length }),
         )
         return
       }
-      setNotice(`Published (version ${result.versionId})`)
+      setNotice(t('admin.routePublished', { version: result.versionId }))
       onPublished?.({
         versionId: result.versionId,
         approvalLimitPositionId: approvalLimitPositionId ?? '',
         steps: steps.map((step) => ({ ...step })),
       })
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(t('admin.publishFailed'))
     } finally {
       setSaving(false)
     }
@@ -209,28 +210,26 @@ export function RouteEditorPanel({
       data-editor-version={seedVersionId ?? ''}
       className="space-y-4 rounded-lg border bg-card p-4"
     >
-      <h3 className="text-base font-semibold">{`${headingVerb} ${scopeName} — ${phase}`}</h3>
+      <h3 className="text-base font-semibold">{t('admin.routeEditorHeading', { action: headingVerb, name: scopeName, phase })}</h3>
 
       {!readOnly && editorMode !== 'customize' ? (
         <p data-testid="route-editor-replacement-copy" className="text-sm text-muted-foreground">
-          A custom chain replaces the inherited chain for this unit and all of its descendants unless
-          overridden by their own exception; it does not append to the inherited chain. Publish affects
-          future attempts only.
+          {t('admin.publishReplacementHelp')}
         </p>
       ) : null}
       {editorMode === 'create' && seedScopeName ? (
         <p data-testid="route-editor-seed-copy" className="text-sm text-muted-foreground">
-          {`Seeded from the published ${phase} chain at ${seedScopeName}. Publishing creates an exception for ${scopeName}; the inherited source remains unchanged.`}
+          {t('admin.routeSeeded', { phase, ancestor: seedScopeName, name: scopeName })}
         </p>
       ) : null}
       {editorMode === 'create' && !seedScopeName ? (
         <p data-testid="route-editor-blank-seed" className="text-sm text-muted-foreground">
-          {`No inherited published ${phase} chain is available for ${scopeName}. This editor starts blank; no placeholder route is fabricated. Nothing is saved until Publish.`}
+          {t('admin.routeBlank', { phase, name: scopeName })}
         </p>
       ) : null}
 
       <div className="space-y-2">
-        <Label htmlFor={`route-editor-limit-select-${scopeUnitId}-${phase}`}>Approval limit</Label>
+        <Label htmlFor={`route-editor-limit-select-${scopeUnitId}-${phase}`}>{t('admin.approvalLimit')}</Label>
         <Select
           value={approvalLimitPositionId ?? ''}
           onValueChange={setApprovalLimitPositionId}
@@ -241,18 +240,18 @@ export function RouteEditorPanel({
             data-testid="route-editor-limit-select"
             className="w-64"
           >
-            <SelectValue placeholder="Select approval limit position" />
+            <SelectValue placeholder={t('admin.selectApprovalLimit')} />
           </SelectTrigger>
           <SelectContent>
             {activePositions.map((position) => (
               <SelectItem key={position.id} value={position.id}>
-                {`${position.name} (rank ${position.rank})`}
+                {t('admin.positionRank', { name: position.name, rank: position.rank })}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
         <p className="text-xs text-muted-foreground">
-          Steps above this position&apos;s rank exceed the limit.
+          {t('admin.aboveApprovalLimit')}
         </p>
       </div>
 
@@ -263,14 +262,14 @@ export function RouteEditorPanel({
           )
           return (
           <li key={step.order} className="flex flex-wrap items-center gap-2">
-            <span className="text-sm text-muted-foreground">{`Step ${step.order}`}</span>
+            <span className="text-sm text-muted-foreground">{t('admin.stepNumber', { order: step.order })}</span>
             <Select
               value={step.positionId}
               onValueChange={(value) => changeStep(step.order, value)}
               disabled={readOnly}
             >
               <SelectTrigger data-testid={`route-editor-step-${step.order}`} className="w-64">
-                <SelectValue placeholder="Select position" />
+                <SelectValue placeholder={t('admin.selectPosition')} />
               </SelectTrigger>
               <SelectContent>
                 {activePositions.map((position) => (
@@ -279,7 +278,7 @@ export function RouteEditorPanel({
                     value={position.id}
                     disabled={usedElsewhere.has(position.id)}
                   >
-                    {`${position.name} (rank ${position.rank})`}
+                    {t('admin.positionRank', { name: position.name, rank: position.rank })}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -292,7 +291,7 @@ export function RouteEditorPanel({
                 data-testid={`route-editor-remove-step-${step.order}`}
                 onClick={() => removeStep(step.order)}
               >
-                Remove
+                {t('admin.remove')}
               </Button>
             ) : null}
           </li>
@@ -302,7 +301,7 @@ export function RouteEditorPanel({
 
       {!readOnly ? (
         <Button type="button" variant="outline" size="sm" data-testid="route-editor-add-step" onClick={addStep}>
-          Add approval step
+          {t('admin.addApprovalStep')}
         </Button>
       ) : null}
 
@@ -313,8 +312,7 @@ export function RouteEditorPanel({
           className="space-y-1 rounded-md border border-destructive/40 bg-destructive/5 p-3"
         >
           <p className="text-sm font-medium">
-            Publication is blocked: the steps below exceed the lowered approval limit. Nothing was
-            saved — correct the flagged steps first.
+            {t('admin.publishBlocked')}
           </p>
           <ul className="list-disc space-y-1 pl-4 text-sm">
             {conflicts.map((conflict) => (
@@ -346,7 +344,7 @@ export function RouteEditorPanel({
               void handlePublish()
             }}
           >
-            Publish
+            {t('admin.publish')}
           </Button>
           <Button
             type="button"
@@ -355,13 +353,12 @@ export function RouteEditorPanel({
             disabled={!complete}
             onClick={() => setShowSubmitterTest(true)}
           >
-            Test with a submitter
+            {t('admin.testWithSubmitter')}
           </Button>
         </div>
       ) : null}
       <p className="text-xs text-muted-foreground">
-        Publish affects future attempts only. Existing approval attempts keep their captured
-        snapshots.
+        {t('admin.publishHelp')}
       </p>
 
       {showSubmitterTest ? (

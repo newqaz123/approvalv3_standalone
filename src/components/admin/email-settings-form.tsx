@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { Fragment, useState, useTransition, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   AlertTriangle,
@@ -39,6 +39,8 @@ import {
   saveEmailSettings,
   sendTestEmail,
 } from '@/server-actions/email-settings'
+import type { MessageKey } from '@/lib/i18n/messages'
+import { useLocale, useTranslations } from '@/lib/i18n/client'
 
 type CredentialIdentity = {
   host: string
@@ -47,18 +49,17 @@ type CredentialIdentity = {
   hasPassword: boolean
 }
 
-const SOURCE_LABELS: Record<EmailSettingsPublic['source'], string> = {
-  env: 'Environment',
-  admin: 'Admin settings',
-  none: 'Not configured',
+const SOURCE_LABELS: Record<EmailSettingsPublic['source'], MessageKey> = {
+  env: 'admin.emailSourceEnvironment',
+  admin: 'admin.emailSourceAdmin',
+  none: 'admin.emailNotConfigured',
 }
 
-const PROVIDER_LABELS: Record<EmailProvider, string> = {
+const PROVIDER_LABELS: Record<Exclude<EmailProvider, 'custom'>, string> = {
   resend: 'Resend',
   mailgun: 'Mailgun',
   gmail: 'Gmail',
   outlook: 'Outlook / Microsoft 365',
-  custom: 'Custom',
 }
 
 function normalizeCredentialIdentity({
@@ -73,104 +74,104 @@ function normalizeCredentialIdentity({
   }
 }
 
+function instructionText(template: string, parts: Record<string, ReactNode>) {
+  return template.split(/(\{\w+\})/g).map((part, index) => (
+    <Fragment key={index}>{parts[part.slice(1, -1)] ?? part}</Fragment>
+  ))
+}
+
 function ProviderInstructions({ provider }: { provider: EmailProvider }) {
+  const t = useTranslations()
   return (
     <div className="rounded-lg border bg-muted/40 p-4 text-sm">
-      <p className="font-medium">{PROVIDER_LABELS[provider]} setup</p>
+      <p className="font-medium">{t('admin.emailProviderSetup', { provider: provider === 'custom' ? t('admin.emailProviderCustom') : PROVIDER_LABELS[provider] })}</p>
       {provider === 'resend' && (
         <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
-          <li>Host/port/user fill automatically.</li>
+          <li>{t('admin.emailAutoFields')}</li>
           <li>
-            Password is an API key from{' '}
-            <a
-              className="font-medium text-primary underline underline-offset-4"
-              href="https://resend.com/api-keys"
-              target="_blank"
-              rel="noreferrer"
-            >
-              resend.com/api-keys
-            </a>{' '}
-            (<code>re_...</code>).
+            {instructionText(t('admin.emailResendApiKey'), { link: (
+              <a
+                className="font-medium text-primary underline underline-offset-4"
+                href="https://resend.com/api-keys"
+                target="_blank"
+                rel="noreferrer"
+              >
+                resend.com/api-keys
+              </a>
+            ), example: <code>re_...</code> })}
           </li>
-          <li>From must use a domain verified in Resend → Domains.</li>
+          <li>{t('admin.emailResendFrom')}</li>
           <li>
-            Resend will not deliver to <code>example.com</code>. Use a real
-            inbox in Send test to.
+            {instructionText(t('admin.emailResendTestInbox'), { example: <code>example.com</code> })}
           </li>
         </ul>
       )}
       {provider === 'mailgun' && (
         <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
-          <li>Host/port fill automatically: smtp.mailgun.org, 587.</li>
+          <li>{t('admin.emailMailgunDefaults')}</li>
           <li>
-            EU region: change host to <code>smtp.eu.mailgun.org</code>.
+            {instructionText(t('admin.emailMailgunEuHost'), { host: <code>smtp.eu.mailgun.org</code> })}
           </li>
           <li>
-            Username and password come from Mailgun → Sending → Domain
-            settings → SMTP credentials (often{' '}
-            <code>postmaster@your-domain</code>).
+            {instructionText(t('admin.emailMailgunCredentials'), { example: <code>postmaster@your-domain</code> })}
           </li>
           <li>
-            From must use a domain verified in{' '}
-            <a
-              className="font-medium text-primary underline underline-offset-4"
-              href="https://app.mailgun.com/app/sending/domains"
-              target="_blank"
-              rel="noreferrer"
-            >
-              Mailgun Domains
-            </a>
-            .
+            {instructionText(t('admin.emailMailgunFrom'), { link: (
+              <a
+                className="font-medium text-primary underline underline-offset-4"
+                href="https://app.mailgun.com/app/sending/domains"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Mailgun Domains
+              </a>
+            ) })}
           </li>
-          <li>Free plan is about 100 emails/day. Switch back to Resend the same way.</li>
+          <li>{t('admin.emailMailgunFree')}</li>
         </ul>
       )}
       {provider === 'gmail' && (
         <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
-          <li>Host/port fill automatically.</li>
-          <li>Username is the full Gmail address.</li>
+          <li>{t('admin.emailAutoHostPort')}</li>
+          <li>{t('admin.emailGmailUsername')}</li>
           <li>
-            Password is a Google App Password from{' '}
-            <a
-              className="font-medium text-primary underline underline-offset-4"
-              href="https://myaccount.google.com/apppasswords"
-              target="_blank"
-              rel="noreferrer"
-            >
-              myaccount.google.com/apppasswords
-            </a>
-            , not the Google account password. 2-Step Verification must be on.
+            {instructionText(t('admin.emailGmailPassword'), { link: (
+              <a
+                className="font-medium text-primary underline underline-offset-4"
+                href="https://myaccount.google.com/apppasswords"
+                target="_blank"
+                rel="noreferrer"
+              >
+                myaccount.google.com/apppasswords
+              </a>
+            ) })}
           </li>
-          <li>From is that same Gmail address.</li>
+          <li>{t('admin.emailGmailFrom')}</li>
         </ul>
       )}
       {provider === 'outlook' && (
         <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
-          <li>Host/port fill automatically.</li>
-          <li>Username is the full Microsoft 365 email.</li>
+          <li>{t('admin.emailAutoHostPort')}</li>
+          <li>{t('admin.emailOutlookUsername')}</li>
           <li>
-            Password is the mailbox password, or an app password if MFA is on.
+            {t('admin.emailOutlookPassword')}
           </li>
-          <li>From is that same mailbox.</li>
+          <li>{t('admin.emailOutlookFrom')}</li>
           <li>
-            SMTP AUTH must be enabled for the mailbox in the Microsoft 365
-            admin center.
+            {t('admin.emailOutlookAuth')}
           </li>
           <li>
-            Some tenants disable password SMTP or require OAuth. The UI must
-            not promise that a mailbox password always works.
+            {t('admin.emailOutlookWarning')}
           </li>
         </ul>
       )}
       {provider === 'custom' && (
         <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
           <li>
-            Copy host, port, username, password, and allowed From from the
-            provider&apos;s SMTP documentation.
+            {t('admin.emailCustomHelp')}
           </li>
           <li>
-            Use “No authentication” only for internal relays that do not
-            require a login.
+            {t('admin.emailCustomNoAuth')}
           </li>
         </ul>
       )}
@@ -187,6 +188,8 @@ export function EmailSettingsForm({
 }: {
   initial: EmailSettingsPublic
 }) {
+  const t = useTranslations()
+  const locale = useLocale()
   const router = useRouter()
   const [source, setSource] = useState(initial.source)
   const [enabled, setEnabled] = useState(initial.enabled)
@@ -256,7 +259,7 @@ export function EmailSettingsForm({
     startSaving(async () => {
       const result = await saveEmailSettings(input)
       if (!result.success) {
-        toast.error(result.error)
+        toast.error(locale === 'en' ? result.error : t(result.errorKey))
         return
       }
 
@@ -271,7 +274,7 @@ export function EmailSettingsForm({
       setSource('admin')
       setNeedsPasswordReset(false)
       setPassword('')
-      toast.success('Email settings saved')
+      toast.success(t('admin.emailSaved'))
       router.refresh()
     })
   }
@@ -281,10 +284,10 @@ export function EmailSettingsForm({
     startTesting(async () => {
       const result = await sendTestEmail(input)
       if (!result.success) {
-        toast.error(result.error)
+        toast.error(locale === 'en' ? result.error : t('admin.sendTestEmailFailed'))
         return
       }
-      toast.success(`Test email sent to ${testTo.trim() || initial.adminEmail}`)
+      toast.success(t('admin.emailTestSent', { recipient: testTo.trim() || initial.adminEmail }))
     })
   }
 
@@ -294,22 +297,22 @@ export function EmailSettingsForm({
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle>Current status</CardTitle>
+          <CardTitle>{t('admin.currentStatus')}</CardTitle>
           <CardDescription>
-            The admin toggle is the master switch for notification email.
+            {t('admin.emailMasterSwitch')}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap items-center gap-2">
-          <Badge variant="outline">Source: {SOURCE_LABELS[source]}</Badge>
+          <Badge variant="outline">{t('admin.sourceLabel')} {t(SOURCE_LABELS[source])}</Badge>
           <Badge variant={enabled ? 'success' : 'secondary'}>
             {enabled ? 'Enabled' : 'Disabled'}
           </Badge>
           <Badge variant="outline">
             {noAuth
-              ? 'No authentication'
+              ? t('admin.noAuthentication')
               : hasPassword
-                ? 'Password available'
-                : 'Password required'}
+                ? t('admin.passwordAvailable')
+                : t('admin.passwordRequired')}
           </Badge>
         </CardContent>
       </Card>
@@ -321,10 +324,9 @@ export function EmailSettingsForm({
         >
           <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
           <div>
-            <p className="font-medium">Re-enter the SMTP password</p>
+            <p className="font-medium">{t('admin.smtpPasswordReenter')}</p>
             <p className="mt-1 text-sm">
-              The stored password could not be decrypted. Notification email
-              remains stopped until a new password is saved.
+              {t('admin.smtpPasswordUnreadable')}
             </p>
           </div>
         </div>
@@ -332,19 +334,17 @@ export function EmailSettingsForm({
 
       <Card>
         <CardHeader>
-          <CardTitle>Email notification settings</CardTitle>
+          <CardTitle>{t('admin.emailSettings')}</CardTitle>
           <CardDescription>
-            Saved admin settings take effect on the next email without a
-            restart.
+            {t('admin.emailSettingsApply')}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="flex items-center justify-between gap-6 rounded-lg border p-4">
             <div className="space-y-1">
-              <Label htmlFor="email-enabled">Email notifications</Label>
+              <Label htmlFor="email-enabled">{t('admin.emailNotifications')}</Label>
               <p className="text-sm text-muted-foreground">
-                Turn off to stop notification email. In-app notifications are
-                unchanged.
+                {t('admin.emailToggleHelp')}
               </p>
             </div>
             <Switch
@@ -352,12 +352,12 @@ export function EmailSettingsForm({
               checked={enabled}
               onCheckedChange={setEnabled}
               disabled={busy}
-              aria-label="Email notifications"
+              aria-label={t('admin.emailNotifications')}
             />
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="email-provider">Provider preset</Label>
+            <Label htmlFor="email-provider">{t('admin.emailPreset')}</Label>
             <Select
               value={provider}
               onValueChange={(value) =>
@@ -366,7 +366,7 @@ export function EmailSettingsForm({
               disabled={busy}
             >
               <SelectTrigger id="email-provider">
-                <SelectValue placeholder="Choose a provider" />
+                <SelectValue placeholder={t('admin.chooseEmailProvider')} />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="resend">Resend</SelectItem>
@@ -375,7 +375,7 @@ export function EmailSettingsForm({
                 <SelectItem value="outlook">
                   Outlook / Microsoft 365
                 </SelectItem>
-                <SelectItem value="custom">Custom</SelectItem>
+                <SelectItem value="custom">{t('admin.emailProviderCustom')}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -384,7 +384,7 @@ export function EmailSettingsForm({
 
           <div className="grid gap-5 md:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor="smtp-host">Host</Label>
+              <Label htmlFor="smtp-host">{t('admin.smtpHost')}</Label>
               <Input
                 id="smtp-host"
                 value={host}
@@ -394,11 +394,11 @@ export function EmailSettingsForm({
                 disabled={busy}
                 required
               />
-              <FieldHint>SMTP server hostname from the email provider</FieldHint>
+              <FieldHint>{t('admin.smtpHostHelp')}</FieldHint>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="smtp-port">Port</Label>
+              <Label htmlFor="smtp-port">{t('admin.smtpPort')}</Label>
               <Input
                 id="smtp-port"
                 type="number"
@@ -411,13 +411,12 @@ export function EmailSettingsForm({
                 required
               />
               <FieldHint>
-                Usually 587 (STARTTLS). Use 465 only if the provider requires
-                SSL
+                {t('admin.smtpPortHelp')}
               </FieldHint>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="smtp-username">Username</Label>
+              <Label htmlFor="smtp-username">{t('admin.smtpUsername')}</Label>
               <Input
                 id="smtp-username"
                 value={username}
@@ -427,13 +426,12 @@ export function EmailSettingsForm({
                 disabled={busy || noAuth}
               />
               <FieldHint>
-                SMTP login. Often the mailbox, sometimes a fixed value such as
-                resend
+                {t('admin.smtpUsernameHelp')}
               </FieldHint>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="smtp-password">Password</Label>
+              <Label htmlFor="smtp-password">{t('admin.password')}</Label>
               <Input
                 id="smtp-password"
                 type="password"
@@ -444,13 +442,12 @@ export function EmailSettingsForm({
                 disabled={busy || noAuth}
               />
               <FieldHint>
-                SMTP secret or API key. Not the app login password unless the
-                provider says so
+                {t('admin.smtpPasswordHelp')}
               </FieldHint>
             </div>
 
             <div className="space-y-2 md:col-span-2">
-              <Label htmlFor="smtp-from">From</Label>
+              <Label htmlFor="smtp-from">{t('admin.smtpFrom')}</Label>
               <Input
                 id="smtp-from"
                 value={fromAddress}
@@ -461,14 +458,13 @@ export function EmailSettingsForm({
                 required
               />
               <FieldHint>
-                Visible sender, e.g. Approval App &lt;no-reply@your-domain.com&gt;.
-                Must be allowed by the provider
+                {t('admin.smtpFromHelp')}
               </FieldHint>
             </div>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="smtp-test-to">Send test to</Label>
+            <Label htmlFor="smtp-test-to">{t('admin.emailTestRecipient')}</Label>
             <Input
               id="smtp-test-to"
               type="email"
@@ -479,10 +475,7 @@ export function EmailSettingsForm({
               autoComplete="email"
             />
             <FieldHint>
-              Defaults to your admin login email. Resend rejects
-              example.com addresses such as admin@example.com — use the
-              inbox you registered with Resend, or one on your verified
-              domain.
+              {t('admin.emailTestRecipientHelp')}
             </FieldHint>
           </div>
 
@@ -497,10 +490,9 @@ export function EmailSettingsForm({
                 disabled={busy}
               />
               <div className="space-y-1">
-                <Label htmlFor="smtp-no-auth">No authentication</Label>
+                <Label htmlFor="smtp-no-auth">{t('admin.noAuthentication')}</Label>
                 <p className="text-sm text-muted-foreground">
-                  Use only for an internal SMTP relay that does not require a
-                  username or password.
+                  {t('admin.smtpNoAuthHelp')}
                 </p>
               </div>
             </div>
@@ -518,18 +510,18 @@ export function EmailSettingsForm({
               ) : (
                 <MailCheck />
               )}
-              Send test email
+              {t('admin.sendTestEmail')}
             </Button>
             <Button type="button" onClick={handleSave} disabled={busy}>
               {isSaving ? <Loader2 className="animate-spin" /> : <Save />}
-              Save settings
+              {t('admin.saveEmailSettings')}
             </Button>
           </div>
 
           {!enabled && (
             <p className="flex items-center gap-2 text-sm text-muted-foreground">
               <CheckCircle2 className="h-4 w-4" />
-              Test email remains available while notifications are disabled.
+              {t('admin.emailTestStillAvailable')}
             </p>
           )}
         </CardContent>

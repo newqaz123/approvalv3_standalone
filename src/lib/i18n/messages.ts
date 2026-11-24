@@ -1,15 +1,20 @@
 import { account } from './catalogs/account'
+import { admin } from './catalogs/admin'
 import { common } from './catalogs/common'
 import { insights } from './catalogs/insights'
 import { requests } from './catalogs/requests'
 import type { Locale } from './locale'
 
 const messages = {
-  en: { ...common.en, ...account.en, ...requests.en, ...insights.en },
-  th: { ...common.th, ...account.th, ...requests.th, ...insights.th },
+  en: { ...common.en, ...account.en, ...requests.en, ...insights.en, ...admin.en },
+  th: { ...common.th, ...account.th, ...requests.th, ...insights.th, ...admin.th },
 }
 
 export type MessageKey = keyof typeof messages.en
+
+export function isMessageKey(value: unknown): value is MessageKey {
+  return typeof value === 'string' && Object.hasOwn(messages.en, value)
+}
 
 type InterpolationValues = Readonly<Record<string, string | number>>
 export type Translator = (key: MessageKey, values?: InterpolationValues) => string

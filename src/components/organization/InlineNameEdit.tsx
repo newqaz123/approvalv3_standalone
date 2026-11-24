@@ -4,6 +4,7 @@ import React, { useEffect, useId, useRef, useState } from 'react'
 import { Pencil } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { useTranslations } from '@/lib/i18n/client'
 
 /**
  * epoch is the current editor identity. pendingEpoch is the in-flight save's
@@ -153,6 +154,7 @@ export function InlineNameEditView({
   onKeyDown: (event: React.KeyboardEvent<HTMLInputElement>) => void
   onBlur: () => void
 }) {
+  const t = useTranslations()
   if (!session.editing) {
     return (
       <span data-testid="inline-name-edit" className="inline-flex items-center gap-1">
@@ -162,7 +164,7 @@ export function InlineNameEditView({
           variant="ghost"
           size="icon"
           className="h-7 w-7 min-h-7 min-w-7"
-          aria-label="Rename"
+          aria-label={t('admin.rename')}
           data-testid="inline-name-edit-pencil"
           disabled={disabled}
           onClick={onStart}
@@ -193,7 +195,7 @@ export function InlineNameEditView({
           data-testid="inline-name-edit-error"
           className="text-sm text-destructive"
         >
-          {session.error}
+          {t('admin.renameFailed')}
         </span>
       ) : null}
     </span>

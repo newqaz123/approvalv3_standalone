@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/dialog'
 import { restoreRequest } from '@/server-actions/requests'
 import { useRouter } from 'next/navigation'
+import { useTranslations } from '@/lib/i18n/client'
 
 interface RestoreRequestModalProps {
   requestId: string
@@ -24,6 +25,7 @@ export function RestoreRequestModal({
   requestId,
   requestTitle,
 }: RestoreRequestModalProps) {
+  const t = useTranslations()
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -42,10 +44,10 @@ export function RestoreRequestModal({
         setOpen(false)
         router.refresh()
       } else {
-        setError(result.error || 'Failed to restore request')
+        setError(t('admin.restoreFailed'))
       }
     } catch (err) {
-      setError('An error occurred while restoring the request')
+      setError(t('admin.restoreError'))
     } finally {
       setIsSubmitting(false)
     }
@@ -56,24 +58,24 @@ export function RestoreRequestModal({
       <DialogTrigger asChild>
         <Button variant="outline" size="sm">
           <RotateCcw className="h-4 w-4 mr-1" />
-          Restore
+          {t('admin.restore')}
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <RotateCcw className="h-5 w-5 text-green-600" />
-            Restore Request
+            {t('admin.restoreRequest')}
           </DialogTitle>
           <DialogDescription className="space-y-2">
             <span className="block">
-              Are you sure you want to restore this request?
+              {t('admin.restoreQuestion')}
             </span>
             <span className="block font-semibold">
               {requestTitle}
             </span>
             <span className="block text-sm text-muted-foreground">
-              The request will be visible again in the main requests list.
+              {t('admin.restoreHelp')}
             </span>
           </DialogDescription>
         </DialogHeader>
@@ -92,13 +94,13 @@ export function RestoreRequestModal({
               onClick={() => setOpen(false)}
               disabled={isSubmitting}
             >
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button
               type="submit"
               disabled={isSubmitting}
             >
-              {isSubmitting ? 'Restoring...' : 'Restore Request'}
+              {isSubmitting ? t('admin.restoring') : t('admin.restoreRequest')}
             </Button>
           </DialogFooter>
         </form>

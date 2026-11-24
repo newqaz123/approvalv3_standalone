@@ -14,6 +14,7 @@
 //   draft after the in-flight save settles — success OR failure; a success
 //   reconciles the persisted baseline even when the draft is newer, so a
 //   draft returned to the original still writes; Escape clears the queue
+import { createTranslator } from '@/lib/i18n/messages'
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -156,7 +157,8 @@ describe('InlineNameEdit blur/Enter/Escape session machine', () => {
     }))
     assert.match(html, /value="Section A"/)
     assert.match(html, /aria-describedby="inline-name-error"/)
-    assert.match(html, /Name must be unique among sibling units/)
+    assert.ok(html.includes(createTranslator('en')('admin.renameFailed')))
+    assert.doesNotMatch(html, /Name must be unique among sibling units/)
   })
 
   it('a late blur-save success after Escape is dropped so the canceled editor stays canceled', async () => {
@@ -337,7 +339,8 @@ describe('serialized queued follow-up after an in-flight save settles (review P1
     }))
     assert.match(html, /value="Section C"/)
     assert.match(html, /aria-describedby="inline-name-error"/)
-    assert.match(html, /Name must be unique among sibling units/)
+    assert.ok(html.includes(createTranslator('en')('admin.renameFailed')))
+    assert.doesNotMatch(html, /Name must be unique among sibling units/)
   })
 
   it('Escape cancels the queued follow-up: no second write, the canceled name stays', async () => {

@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { createOrganizationUnit } from '@/server-actions/organization'
+import { useTranslations } from '@/lib/i18n/client'
 
 /** Presentational form body so pending/error states stay SSR-testable. */
 export function AddChildUnitFormView({
@@ -32,6 +33,7 @@ export function AddChildUnitFormView({
   onSave?: () => void
   onCancel?: () => void
 }): React.JSX.Element {
+  const t = useTranslations()
   const inputId = useId()
   const ready = name.trim().length > 0
   return (
@@ -44,9 +46,9 @@ export function AddChildUnitFormView({
         onSave?.()
       }}
     >
-      <p className="break-words text-sm font-medium">New unit under {parentName}</p>
+      <p className="break-words text-sm font-medium">{t('admin.newChildUnder')} {parentName}</p>
       <div className="space-y-2">
-        <Label htmlFor={inputId}>Unit name</Label>
+        <Label htmlFor={inputId}>{t('admin.unitName')}</Label>
         <Input
           id={inputId}
           data-testid="add-child-unit-name-input"
@@ -62,7 +64,7 @@ export function AddChildUnitFormView({
       ) : null}
       <div className="flex flex-wrap gap-2">
         <Button type="submit" size="sm" data-testid="add-child-unit-save" disabled={saving || !ready}>
-          Create
+          {t('admin.create')}
         </Button>
         <Button
           type="button"
@@ -72,7 +74,7 @@ export function AddChildUnitFormView({
           disabled={saving}
           onClick={onCancel}
         >
-          Cancel
+          {t('common.cancel')}
         </Button>
       </div>
     </form>
@@ -93,6 +95,7 @@ export function AddChildUnitPopover({
   /** A visible, focusable element on the unit card (its header). */
   restoreFocusRef?: React.RefObject<HTMLElement | null>
 }): React.JSX.Element {
+  const t = useTranslations()
   const [name, setName] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -133,7 +136,7 @@ export function AddChildUnitPopover({
       // Failure keeps the typed name so the admin can correct it.
       savingRef.current = false
       setSaving(false)
-      setError(err instanceof Error ? err.message : String(err))
+      setError(t('admin.createUnitFailed'))
       return
     }
     // The unit exists even if the admin dismissed the popover meanwhile.
@@ -159,7 +162,7 @@ export function AddChildUnitPopover({
             data-testid={`unit-add-child-${unit.id}`}
             className="h-6 min-h-6 rounded-full bg-background px-2.5 text-xs"
           >
-            + Add unit
+            {t('admin.addUnitPlus')}
           </Button>
         </PopoverTrigger>
       </div>

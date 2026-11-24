@@ -19,7 +19,7 @@ import {
   updateTeam,
   type WorkspaceSnapshot,
 } from '@/server-actions/organization'
-import { formatOrganizationErrorForUser } from '@/lib/organization/error-formatting'
+import { useTranslations } from '@/lib/i18n/client'
 
 function assignmentLabel(
   assignment: AssignmentNode,
@@ -53,6 +53,7 @@ export function TeamDeactivationSection({
   onConfirm: () => void
   onCancel: () => void
 }) {
+  const t = useTranslations()
   return (
     <div data-testid="team-deactivation-section" className="space-y-2 rounded-md border border-destructive/40 p-3">
       {error ? (
@@ -63,7 +64,7 @@ export function TeamDeactivationSection({
       {confirming ? (
         <div data-testid="team-deactivate-confirmation" className="space-y-2">
           <p className="text-sm">
-            {`Deactivate "${teamName}"? The team disappears from the tree. Members must be moved or removed first; history is preserved and the reports-to person is never reassigned.`}
+            {t('admin.deactivateTeamQuestion', { name: teamName })}
           </p>
           <div className="flex gap-2">
             <Button
@@ -73,7 +74,7 @@ export function TeamDeactivationSection({
               onClick={onConfirm}
               disabled={saving}
             >
-              Deactivate team
+              {t('admin.deactivateTeam')}
             </Button>
             <Button
               type="button"
@@ -82,7 +83,7 @@ export function TeamDeactivationSection({
               onClick={onCancel}
               disabled={saving}
             >
-              Cancel
+              {t('common.cancel')}
             </Button>
           </div>
         </div>
@@ -94,7 +95,7 @@ export function TeamDeactivationSection({
           onClick={onStart}
           disabled={saving}
         >
-          Deactivate team
+          {t('admin.deactivateTeam')}
         </Button>
       )}
     </div>
@@ -127,6 +128,7 @@ export function TeamPanel({
   }) => void
   onDeactivated?: (teamId: string) => void
 }) {
+  const t = useTranslations()
   const team = teamId ? snapshot.teams.find((row) => row.id === teamId) ?? null : null
   const [name, setName] = useState(team?.name ?? '')
   const [reportsToAssignmentId, setReportsToAssignmentId] = useState(team?.reportsToAssignmentId ?? '')
@@ -141,19 +143,20 @@ export function TeamPanel({
   const [deactivating, setDeactivating] = useState(false)
   const [deactivateError, setDeactivateError] = useState<string | null>(null)
 
+  // Refreshes with the same persisted team (including language changes) must keep the open draft.
+  const storedName = team?.name ?? ''
+  const storedReportsTo = team?.reportsToAssignmentId ?? ''
+  const storedMembership = JSON.stringify(team
+    ? snapshot.assignments.filter(row => row.isActive && row.teamId === team.id).map(row => row.id)
+    : [])
   useEffect(() => {
-    const current = teamId ? snapshot.teams.find((row) => row.id === teamId) ?? null : null
-    setName(current?.name ?? '')
-    setReportsToAssignmentId(current?.reportsToAssignmentId ?? '')
-    setMemberIds(
-      current
-        ? snapshot.assignments.filter((row) => row.isActive && row.teamId === current.id).map((row) => row.id)
-        : [],
-    )
+    setName(storedName)
+    setReportsToAssignmentId(storedReportsTo)
+    setMemberIds(JSON.parse(storedMembership))
     setError(null)
     setConfirmingDeactivate(false)
     setDeactivateError(null)
-  }, [teamId, unitId, snapshot.teams, snapshot.assignments])
+  }, [teamId, unitId, storedName, storedReportsTo, storedMembership])
 
   const unitAssignments = useMemo(
     () => snapshot.assignments.filter((row) => row.isActive && row.unitId === unitId),
@@ -185,7 +188,13 @@ export function TeamPanel({
       onDeactivated?.(team.id)
     } catch (err) {
       // Adjacent error with the confirmation step retained (panel error pattern).
-      setDeactivateError(err instanceof Error ? formatOrganizationErrorForUser(err.message, snapshot) : formatOrganizationErrorForUser(String(err), snapshot))
+      const names = unitAssignments
+        .filter(row => row.teamId === team.id)
+        .map(row => snapshot.users.find(user => user.id === row.userId)?.name)
+        .filter(Boolean)
+      setDeactivateError(names.length
+        ? `${t('admin.teamDeactivateFailed')} ${t('admin.teamDeactivateMembers', { names: names.join(', ') })}`
+        : t('admin.teamDeactivateFailed'))
     } finally {
       setDeactivating(false)
     }
@@ -225,7 +234,7 @@ export function TeamPanel({
         }, memberIds)
       }
     } catch (err) {
-      setError(err instanceof Error ? formatOrganizationErrorForUser(err.message, snapshot) : formatOrganizationErrorForUser(String(err), snapshot))
+      setError(t('admin.teamSaveFailed'))
     } finally {
       setSaving(false)
     }
@@ -236,10 +245,10 @@ export function TeamPanel({
       data-testid="team-panel"
       className="max-h-[calc(100vh-2rem)] w-full shrink-0 space-y-6 overflow-y-auto overscroll-contain rounded-lg border bg-card p-4 lg:sticky lg:top-4"
     >
-      <h2 className="text-lg font-semibold">{team ? 'Manage team' : 'Create team'}</h2>
+      <h2 className="text-lg font-semibold">{team ? t('admin.manageTeam') : t('admin.createTeam')}</h2>
 
       <div className="space-y-2">
-        <Label htmlFor="team-name-input">Name</Label>
+        <Label htmlFor="team-name-input">{t('admin.name')}</Label>
         <Input
           id="team-name-input"
           data-testid="team-name-input"
@@ -249,13 +258,13 @@ export function TeamPanel({
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="team-reports-to-select">Reports-to</Label>
+        <Label htmlFor="team-reports-to-select">{t('admin.reportsTo')}</Label>
         <Select
           value={reportsToAssignmentId || undefined}
           onValueChange={handleReportsToChange}
         >
           <SelectTrigger id="team-reports-to-select" data-testid="team-reports-to-select">
-            <SelectValue placeholder="Select reports-to" />
+            <SelectValue placeholder={t('admin.selectReportsTo')} />
           </SelectTrigger>
           <SelectContent>
             {reportsToOptions.map((row) => (
@@ -268,7 +277,7 @@ export function TeamPanel({
       </div>
 
       <div className="space-y-2">
-        <p className="text-sm font-medium">Members</p>
+        <p className="text-sm font-medium">{t('admin.members')}</p>
         <div className="space-y-2">
           {memberOptions.map((row) => {
             const label = assignmentLabel(row, snapshot)
@@ -329,7 +338,7 @@ export function TeamPanel({
         }}
         disabled={saving || !name.trim() || !reportsToAssignmentId}
       >
-        Save
+        {t('admin.save')}
       </Button>
     </aside>
   )

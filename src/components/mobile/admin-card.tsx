@@ -12,6 +12,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Badge, badgeVariants } from '@/components/ui/badge'
 import type { VariantProps } from 'class-variance-authority'
+import { useTranslations } from '@/lib/i18n/client'
 
 type BadgeVariant = VariantProps<typeof badgeVariants>['variant']
 
@@ -75,6 +76,7 @@ export function AdminCard({
   showChevron = false,
   className = '',
 }: AdminCardProps) {
+  const t = useTranslations()
   const cardContent = (
     <>
       {/* Header: Title + Status/Actions */}
@@ -95,7 +97,7 @@ export function AdminCard({
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="sm" className="h-9 w-9 p-0 flex-shrink-0">
-                <span className="sr-only">Open menu</span>
+                <span className="sr-only">{t('admin.openMenu')}</span>
                 <MoreVertical className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
@@ -183,12 +185,13 @@ interface AdminCardsEmptyStateProps {
 }
 
 export function AdminCardsEmptyState({
-  message = 'No items found',
+  message,
   submessage,
 }: AdminCardsEmptyStateProps) {
+  const t = useTranslations()
   return (
     <div className="flex flex-col items-center justify-center py-12 px-4 text-gray-500">
-      <p className="font-medium text-gray-700">{message}</p>
+      <p className="font-medium text-gray-700">{message ?? t('admin.noItems')}</p>
       {submessage && <p className="text-sm mt-1">{submessage}</p>}
     </div>
   )

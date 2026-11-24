@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button"
 import { Check, Search } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
+import { useTranslations } from '@/lib/i18n/client'
 
 interface Request {
   id: string
@@ -37,6 +38,7 @@ interface Request {
 }
 
 export function RequestExportCard() {
+  const t = useTranslations()
   const [selectedRequest, setSelectedRequest] = useState<Request | null>(null)
   const [requests, setRequests] = useState<Request[]>([])
   const [isLoading, setIsLoading] = useState(false)
@@ -62,7 +64,7 @@ export function RequestExportCard() {
       setRequests(data || [])
     } catch (error) {
       console.error('Error fetching requests:', error)
-      toast.error('Failed to fetch requests')
+      toast.error(t('admin.fetchRequestsFailed'))
     } finally {
       setIsLoading(false)
     }
@@ -82,14 +84,14 @@ export function RequestExportCard() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Export by Request</CardTitle>
+        <CardTitle>{t('admin.exportByRequest')}</CardTitle>
         <CardDescription>
-          Search and select a request to export its audit trail
+          {t('admin.exportByRequestHelp')}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="requestSearch">Search Request</Label>
+          <Label htmlFor="requestSearch">{t('admin.searchRequest')}</Label>
           <Popover open={open} onOpenChange={setOpen}>
             <PopoverTrigger asChild>
               <Button
@@ -114,7 +116,7 @@ export function RequestExportCard() {
                 ) : (
                   <div className="flex items-center text-muted-foreground">
                     <Search className="mr-2 h-4 w-4" />
-                    Search by title, ID, or requester name...
+                    {t('admin.searchRequestTrigger')}
                   </div>
                 )}
               </Button>
@@ -127,19 +129,19 @@ export function RequestExportCard() {
   }}>
               <Command shouldFilter={false}>
                 <CommandInput
-                  placeholder="Type to search requests..."
+                  placeholder={t('admin.searchRequestInput')}
                   value={searchQuery}
                   onValueChange={setSearchQuery}
                   className="border-0 focus:ring-0"
                 />
                 <CommandList>
                   {isLoading ? (
-                    <div className="p-4 text-sm text-muted-foreground">Loading...</div>
+                    <div className="p-4 text-sm text-muted-foreground">{t('admin.loading')}</div>
                   ) : requests.length === 0 && searchQuery.length >= 2 ? (
-                    <CommandEmpty>No requests found.</CommandEmpty>
+                    <CommandEmpty>{t('admin.noRequestsFound')}</CommandEmpty>
                   ) : searchQuery.length < 2 ? (
                     <div className="p-4 text-sm text-muted-foreground">
-                      Type at least 2 characters to search...
+                      {t('admin.searchRequestMinimum')}
                     </div>
                   ) : (
                     <CommandGroup>
@@ -191,7 +193,7 @@ export function RequestExportCard() {
               size="sm"
               onClick={handleClearSelection}
             >
-              Clear
+              {t('admin.clear')}
             </Button>
           </div>
         )}

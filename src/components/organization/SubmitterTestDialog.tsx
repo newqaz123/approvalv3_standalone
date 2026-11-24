@@ -20,18 +20,21 @@ import {
 import type { ApprovalPhase } from '@/lib/approval-routes/definition'
 import { testWithSubmitter } from '@/server-actions/approval-routes'
 import type { SubmitterTestResult } from '@/server-actions/approval-routes'
+import type { Translator } from '@/lib/i18n/messages'
+import { useTranslations } from '@/lib/i18n/client'
 
-export function submitterSourceLabel(
+function submitterSourceLabel(
+  t: Translator,
   source: SubmitterTestResult['source'],
   unitNames: ReadonlyMap<string, string>,
   scopeUnitId: string,
 ): string {
-  if (source === 'ROOT_DEFAULT') return 'Uses company default'
-  if (source === 'CUSTOM') return 'Custom at this unit'
+  if (source === 'ROOT_DEFAULT') return t('admin.usesCompanyDefault')
+  if (source === 'CUSTOM') return t('admin.customAtUnit')
   if (source === 'DRAFT') {
-    return `Draft (would substitute at ${unitNames.get(scopeUnitId) ?? scopeUnitId})`
+    return t('admin.submitterDraftSource', { name: unitNames.get(scopeUnitId) ?? scopeUnitId })
   }
-  return `Inherited from ${unitNames.get(scopeUnitId) ?? scopeUnitId}`
+  return t('admin.inheritedFrom', { name: unitNames.get(scopeUnitId) ?? scopeUnitId })
 }
 
 /**
@@ -45,21 +48,21 @@ export function SubmitterTestResultView({
   result: SubmitterTestResult
   unitNames: ReadonlyMap<string, string>
 }) {
+  const t = useTranslations()
   return (
     <div data-testid="submitter-test-result" className="space-y-3 rounded-md border p-3">
       <p data-testid="submitter-test-source" className="text-sm">
-        {submitterSourceLabel(result.source, unitNames, result.scopeUnitId)}
-        {result.routeVersionId === 'DRAFT' ? ' — unsaved draft' : ''}
+        {submitterSourceLabel(t, result.source, unitNames, result.scopeUnitId)}
+        {result.routeVersionId === 'DRAFT' ? t('admin.unsavedDraft') : ''}
       </p>
       {result.autoApproved ? (
         <p data-testid="submitter-test-auto-approved" className="text-sm">
-          This submitter sits at or above the approval limit: the request would be auto-approved
-          with no approval steps.
+          {t('admin.submitterAutoApproved')}
         </p>
       ) : null}
       {result.noEligibleSteps ? (
         <p data-testid="submitter-test-no-eligible" className="text-sm">
-          No eligible steps: every step is vacant, so the attempt would complete without approvals.
+          {t('admin.submitterVacantSteps')}
         </p>
       ) : null}
       <ol className="space-y-2">
@@ -69,10 +72,10 @@ export function SubmitterTestResultView({
             data-testid={`submitter-test-step-${step.order}`}
             className="space-y-1 rounded-md border px-3 py-2"
           >
-            <p className="text-sm font-medium">{`Step ${step.order} — ${step.positionName}`}</p>
+            <p className="text-sm font-medium">{t('admin.stepPosition', { order: step.order, name: step.positionName })}</p>
             {step.skipped ? (
               <p className="text-sm text-muted-foreground" data-testid={`submitter-test-skip-${step.order}`}>
-                {`Skipped: ${step.skipReason ?? 'VACANT_POSITION'} (no active candidate holds this position on the submitter's path or team)`}
+                {t('admin.submitterSkippedStep', { reason: step.skipReason ?? 'VACANT_POSITION' })}
               </p>
             ) : (
               <ul className="list-disc space-y-1 pl-4 text-sm">
@@ -109,6 +112,7 @@ export function SubmitterTestDialog({
   unitNames?: ReadonlyMap<string, string>
   onClose?: () => void
 }) {
+  const t = useTranslations()
   const [submitterUserId, setSubmitterUserId] = useState('')
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState<SubmitterTestResult | null>(null)
@@ -125,7 +129,7 @@ export function SubmitterTestDialog({
         ...(draft ? { draft } : {}),
       }))
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(t('admin.submitterTestFailed'))
     } finally {
       setRunning(false)
     }
@@ -136,16 +140,15 @@ export function SubmitterTestDialog({
       data-testid="submitter-test-dialog"
       className="space-y-3 rounded-lg border bg-card p-4"
     >
-      <h3 className="text-base font-semibold">Test with a submitter</h3>
+      <h3 className="text-base font-semibold">{t('admin.testWithSubmitter')}</h3>
       <p className="text-sm text-muted-foreground">
-        Resolves the actual candidate people for this route without creating requests, saving
-        snapshots, or publishing.
+        {t('admin.testWithSubmitterHelp')}
       </p>
       <div className="space-y-2">
-        <Label htmlFor="submitter-test-user-select">Submitter</Label>
+        <Label htmlFor="submitter-test-user-select">{t('admin.submitter')}</Label>
         <Select value={submitterUserId} onValueChange={setSubmitterUserId}>
           <SelectTrigger id="submitter-test-user-select" data-testid="submitter-test-user-select" className="w-64">
-            <SelectValue placeholder="Select a submitter" />
+            <SelectValue placeholder={t('admin.selectSubmitter')} />
           </SelectTrigger>
           <SelectContent>
             {users.map((user) => (
@@ -165,7 +168,7 @@ export function SubmitterTestDialog({
             void run()
           }}
         >
-          Run test
+          {t('admin.runTest')}
         </Button>
         {onClose ? (
           <Button
@@ -174,7 +177,7 @@ export function SubmitterTestDialog({
             data-testid="submitter-test-close"
             onClick={onClose}
           >
-            Close
+            {t('admin.close')}
           </Button>
         ) : null}
       </div>

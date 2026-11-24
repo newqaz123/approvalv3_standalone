@@ -1,5 +1,6 @@
 'use server'
 
+import type { MessageKey } from '@/lib/i18n/messages'
 import { revalidatePath } from 'next/cache'
 import { requireAdmin } from '@/lib/auth'
 import prisma from '@/lib/prisma'
@@ -31,7 +32,7 @@ export type StorageDashboardData = StorageUsageTotals &
 
 export type StoragePlanEventResult =
   | { success: true }
-  | { success: false; error: string }
+  | { success: false; error: string; errorKey: MessageKey; errorValues?: { max: number } }
 
 const LABEL_MAX = 80
 const DEFAULT_MONTHS_AHEAD = 12
@@ -154,11 +155,11 @@ export async function getStorageDashboardData(): Promise<StorageDashboardData> {
 }
 
 export async function saveStorageAlertThreshold(thresholdPct: number): Promise<
-  { success: true; thresholdPct: number } | { success: false; error: string }
+  { success: true; thresholdPct: number } | { success: false; error: string; errorKey: MessageKey; errorValues?: { max: number } }
 > {
   const adminId = await requireAdmin()
   if (!adminId) {
-    return { success: false, error: 'Unauthorized - Admin access required' }
+    return { success: false, error: 'Unauthorized - Admin access required', errorKey: 'admin.adminRequired' }
   }
 
   const normalized = parseStorageAlertThreshold(thresholdPct)
@@ -180,7 +181,7 @@ export async function saveStorageAlertThreshold(thresholdPct: number): Promise<
       },
     })
   } catch {
-    return { success: false, error: 'Could not save the alert threshold' }
+    return { success: false, error: 'Could not save the alert threshold', errorKey: 'admin.saveThresholdFailed' }
   }
 
   revalidatePath('/admin/storage')
@@ -193,20 +194,20 @@ export async function createStoragePlanEvent(input: {
 }): Promise<StoragePlanEventResult> {
   const adminId = await requireAdmin()
   if (!adminId) {
-    return { success: false, error: 'Unauthorized - Admin access required' }
+    return { success: false, error: 'Unauthorized - Admin access required', errorKey: 'admin.adminRequired' }
   }
 
   const label = input.label.trim()
   if (!label) {
-    return { success: false, error: 'Enter a label for this date' }
+    return { success: false, error: 'Enter a label for this date', errorKey: 'admin.storagePlanLabelRequired' }
   }
   if (label.length > LABEL_MAX) {
-    return { success: false, error: `Label must be ${LABEL_MAX} characters or fewer` }
+    return { success: false, error: `Label must be ${LABEL_MAX} characters or fewer`, errorKey: 'admin.storagePlanLabelMax', errorValues: { max: LABEL_MAX } }
   }
 
   const plannedDate = parsePlanDate(input.plannedDate)
   if (!plannedDate) {
-    return { success: false, error: 'Enter a valid date' }
+    return { success: false, error: 'Enter a valid date', errorKey: 'admin.storagePlanDateInvalid' }
   }
 
   try {
@@ -219,7 +220,7 @@ export async function createStoragePlanEvent(input: {
     })
   } catch (error) {
     if (isMissingStoragePlanTable(error)) {
-      return { success: false, error: 'Plan dates are not available until the storage migration is applied' }
+      return { success: false, error: 'Plan dates are not available until the storage migration is applied', errorKey: 'admin.storagePlanDateUnavailable' }
     }
     throw error
   }
@@ -230,18 +231,18 @@ export async function createStoragePlanEvent(input: {
 export async function deleteStoragePlanEvent(id: string): Promise<StoragePlanEventResult> {
   const adminId = await requireAdmin()
   if (!adminId) {
-    return { success: false, error: 'Unauthorized - Admin access required' }
+    return { success: false, error: 'Unauthorized - Admin access required', errorKey: 'admin.adminRequired' }
   }
 
   if (!id) {
-    return { success: false, error: 'Missing plan date' }
+    return { success: false, error: 'Missing plan date', errorKey: 'admin.storagePlanDateMissing' }
   }
 
   try {
     await prisma.storage_plan_events.delete({ where: { id } })
   } catch (error) {
     if (isMissingStoragePlanTable(error)) {
-      return { success: false, error: 'Plan dates are not available until the storage migration is applied' }
+      return { success: false, error: 'Plan dates are not available until the storage migration is applied', errorKey: 'admin.storagePlanDateUnavailable' }
     }
     throw error
   }

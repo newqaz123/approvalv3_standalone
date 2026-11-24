@@ -1,6 +1,7 @@
 // Add sub-unit from the organization tree: real React/Radix browser
 // interaction with the compiled application CSS. The create action is stubbed
 // in the bundle, so there are no server or database writes.
+import { createTranslator } from '@/lib/i18n/messages'
 import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -219,7 +220,7 @@ describe('organization tree + Add unit (browser)', () => {
       const form = page.getByTestId('add-child-unit-form')
       await input.fill('Dup')
       await input.press('Enter')
-      await expect(page.getByTestId('add-child-unit-error')).toHaveText('Name must be unique among sibling units')
+      await expect(page.getByTestId('add-child-unit-error')).toHaveText(createTranslator('en')('admin.createUnitFailed'))
       await expect(page.getByTestId('add-child-unit-error')).toHaveAttribute('role', 'alert')
       await expect(input).toHaveValue('Dup')
       await expect(form).toBeVisible()

@@ -19,6 +19,7 @@ import {
   unitDepthIndent,
   unitPathRows,
 } from '@/lib/organization/unit-tree'
+import { useTranslations } from '@/lib/i18n/client'
 
 /**
  * Searchable, depth-indented unit tree select for the assign-person panel
@@ -37,7 +38,7 @@ export function UnitTreeSelect({
   triggerId,
   triggerTestId = 'assignment-unit-select',
   searchTestId = 'assignment-unit-search',
-  placeholder = 'Select unit',
+  placeholder,
 }: {
   units: ReadonlyArray<OrganizationUnitNode>
   value: string | null
@@ -47,6 +48,7 @@ export function UnitTreeSelect({
   searchTestId?: string
   placeholder?: string
 }) {
+  const t = useTranslations()
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
 
@@ -67,7 +69,7 @@ export function UnitTreeSelect({
           className="h-9 min-h-11 w-full justify-between px-3 py-2 text-left font-normal"
         >
           <span className="min-w-0 truncate">
-            {selected ? selected.path : <span className="text-muted-foreground">{placeholder}</span>}
+            {selected ? selected.path : <span className="text-muted-foreground">{placeholder ?? t('admin.selectUnit')}</span>}
           </span>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" aria-hidden="true" />
         </Button>
@@ -76,12 +78,12 @@ export function UnitTreeSelect({
         <Command shouldFilter={false}>
           <CommandInput
             data-testid={searchTestId}
-            placeholder="Search units…"
+            placeholder={t('admin.searchUnits')}
             value={search}
             onValueChange={setSearch}
           />
           <CommandList>
-            <CommandEmpty>No unit found</CommandEmpty>
+            <CommandEmpty>{t('admin.noUnitFound')}</CommandEmpty>
             <CommandGroup>
               {filtered.map((row) => (
                 <CommandItem

@@ -1,3 +1,4 @@
+import { createTranslator } from '@/lib/i18n/messages'
 import { it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
@@ -11,8 +12,10 @@ const table = readFileSync('src/components/admin/user-table.tsx', 'utf8')
 const editDialog = readFileSync('src/components/admin/edit-user-dialog.tsx', 'utf8')
 
 it('user-form.tsx replaces the role dropdown with the approved Administrator copy and boolean schema', () => {
-  assert.match(form, /<FormLabel>Administrator<\/FormLabel>/)
-  assert.match(form, /<FormDescription>Can open the Admin area\.<\/FormDescription>/)
+  assert.match(form, /<FormLabel>\{t\('admin\.administrator'\)\}<\/FormLabel>/)
+  assert.equal(createTranslator('en')('admin.administrator'), 'Administrator')
+  assert.match(form, /<FormDescription>\{t\('admin\.adminAccessDescription'\)\}<\/FormDescription>/)
+  assert.equal(createTranslator('en')('admin.adminAccessDescription'), 'Can open the Admin area.')
   assert.match(form, /isAdmin: z\.boolean\(\)/)
   assert.doesNotMatch(form, /General Department User|Engineering User|SelectItem|role:|name="role"/)
 })
@@ -31,8 +34,8 @@ it('user-form.tsx subscribes to dirtyFields during render so untouched legacy ro
 it('user-table.tsx shows Admin or empty for both desktop and mobile, using isAdminRole', () => {
   assert.doesNotMatch(table, /General Dept|Engineering/)
   assert.match(table, /import \{ isAdminRole \} from '@\/lib\/user-role'/)
-  assert.match(table, /cell: \(\{ row \}\) => isAdminRole\(row\.original\.role\) \? 'Admin' : ''/)
-  assert.match(table, /value: isAdminRole\(user\.role\) \? 'Admin' : ''/)
+  assert.match(table, /cell: \(\{ row \}\) => isAdminRole\(row\.original\.role\) \? t\('admin\.admin'\) : ''/)
+  assert.match(table, /value: isAdminRole\(user\.role\) \? t\('admin\.admin'\) : ''/)
 })
 
 it('edit-user-dialog.tsx accepts isAdmin and user-table.tsx derives it from the stored role', () => {
@@ -58,7 +61,7 @@ it('the three-value UserRole union appears only in src/lib/user-role.ts under sr
 type FormData = { name: string; email: string; isAdmin: boolean; password?: string }
 
 // Run the real submit handler with only its external boundaries stubbed.
-function loadSubmit(initialData?: FormData & { id: string }, dirtyIsAdmin = false, failure?: Error) {
+function loadSubmit(initialData?: FormData & { id: string }, dirtyIsAdmin = false, failureKey?: string) {
   const source = ts.createSourceFile(formPath, form, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
   let handler: ts.FunctionDeclaration | undefined
   function visit(node: ts.Node) {
@@ -73,15 +76,14 @@ function loadSubmit(initialData?: FormData & { id: string }, dirtyIsAdmin = fals
   const calls: Array<{ action: string; input: Record<string, unknown> }> = []
   const errors: Array<string | null> = []
   let successes = 0
-  const action = (name: string) => async (input: Record<string, unknown>) => {
-    calls.push({ action: name, input: { ...input } })
-    if (failure) throw failure
+  const saveAdminUser = async (input: Record<string, unknown>) => {
+    calls.push({ action: 'id' in input ? 'update' : 'create', input: { ...input } })
+    return failureKey ? { success: false, errorKey: failureKey } : { success: true }
   }
   const submit: (data: FormData) => Promise<void> = runInNewContext(`${compiled}\nonSubmit`, {
     initialData,
     dirtyFields: { isAdmin: dirtyIsAdmin },
-    createUser: action('create'),
-    updateUser: action('update'),
+    saveAdminUser,
     setIsSubmitting: () => {},
     setError: (error: string | null) => errors.push(error),
     onSuccess: () => successes++,
@@ -123,15 +125,16 @@ for (const isAdmin of [false, true]) {
   })
 }
 
-for (const message of [
-  'You cannot remove your own administrator access',
-  'At least one active administrator is required',
-]) {
+for (const [key, message] of [
+  ['admin.cannotRemoveOwnAdmin', 'You cannot remove your own administrator access'],
+  ['admin.lastActiveAdminRequired', 'At least one active administrator is required'],
+] as const) {
   it(`user-form.tsx displays the server guard message: ${message}`, async () => {
-    const state = loadSubmit({ ...user, id: 'target', isAdmin: true }, true, new Error(message))
+    const state = loadSubmit({ ...user, id: 'target', isAdmin: true }, true, key)
     await state.submit(user)
-    assert.equal(state.errors.at(-1), message)
+    assert.equal(state.errors.at(-1), key)
+    assert.equal(createTranslator('en')(key), message)
     assert.equal(state.successes(), 0)
-    assert.match(form, /\{error && \([\s\S]*?\{error\}/)
+    assert.match(form, /\{error && \([\s\S]*?\{t\(error\)\}/)
   })
 }

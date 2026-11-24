@@ -9,8 +9,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Download, Loader2 } from "lucide-react"
 import { differenceInDays } from "date-fns"
 import { toast } from "sonner"
+import { useTranslations } from '@/lib/i18n/client'
 
 export function DateRangeExportCard() {
+  const t = useTranslations()
   const [startDate, setStartDate] = useState("")
   const [endDate, setEndDate] = useState("")
   const [format, setFormat] = useState<"csv" | "json">("csv")
@@ -50,9 +52,9 @@ export function DateRangeExportCard() {
       a.click()
       window.URL.revokeObjectURL(url)
 
-      toast.success(`Exported as ${format.toUpperCase()}`)
+      toast.success(t('admin.exportedAs', { format: format.toUpperCase() }))
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to export audit trail")
+      toast.error(t('admin.exportAuditFailed'))
     } finally {
       setIsExporting(false)
     }
@@ -61,15 +63,15 @@ export function DateRangeExportCard() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Export by Date Range</CardTitle>
+        <CardTitle>{t('admin.exportDateRange')}</CardTitle>
         <CardDescription>
-          Export audit trail for a date range (maximum 90 days)
+          {t('admin.exportDateRangeHelp')}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
-            <Label htmlFor="startDate">Start Date</Label>
+            <Label htmlFor="startDate">{t('admin.startDate')}</Label>
             <Input
               id="startDate"
               type="date"
@@ -78,7 +80,7 @@ export function DateRangeExportCard() {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="endDate">End Date</Label>
+            <Label htmlFor="endDate">{t('admin.endDate')}</Label>
             <Input
               id="endDate"
               type="date"
@@ -89,7 +91,7 @@ export function DateRangeExportCard() {
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="format">Format</Label>
+          <Label htmlFor="format">{t('admin.format')}</Label>
           <Select value={format} onValueChange={(value) => setFormat(value as "csv" | "json")}>
             <SelectTrigger id="format">
               <SelectValue />
@@ -103,7 +105,7 @@ export function DateRangeExportCard() {
 
         {dateRangeDays > 90 && (
           <p className="text-sm text-destructive">
-            Date range cannot exceed 90 days. Current: {dateRangeDays} days
+            {t('admin.exportMaxDays', { days: dateRangeDays })}
           </p>
         )}
 
@@ -115,12 +117,12 @@ export function DateRangeExportCard() {
           {isExporting ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Exporting...
+              {t('admin.exporting')}
             </>
           ) : (
             <>
               <Download className="mr-2 h-4 w-4" />
-              Export
+              {t('admin.export')}
             </>
           )}
         </Button>

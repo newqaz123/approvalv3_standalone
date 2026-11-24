@@ -3,6 +3,7 @@
 // tests/regression/formatted-text-ui.test.ts, clean-start-ui-tree.test.ts).
 // Action tests: in-memory fake OrganizationMutationDb only.
 // NO Prisma, NO database, NO env, NO schema/server ops.
+import { createTranslator } from '@/lib/i18n/messages'
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -165,7 +166,8 @@ describe('InlineNameEdit component harness', () => {
     assert.match(html, /value="Section A"/)
     assert.match(html, /aria-describedby="inline-name-error"/)
     assert.match(html, /id="inline-name-error"/)
-    assert.match(html, /Name must be unique among sibling units/)
+    assert.ok(html.includes(createTranslator('en')('admin.renameFailed')))
+    assert.doesNotMatch(html, /Name must be unique among sibling units/)
   })
 
   it('Escape restores the original without persisting', async () => {

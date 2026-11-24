@@ -1,3 +1,4 @@
+import { createTranslator } from '@/lib/i18n/messages'
 import { it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -43,7 +44,8 @@ it('treats archive as hide and hard-deletes only archived selections', () => {
   assert.doesNotMatch(list, /server-actions\/retention/)
   assert.doesNotMatch(controls, /server-actions\/retention/)
   assert.match(list, /\/api\/admin\/retention\/hard-delete/)
-  assert.match(list, /Hard-delete selected/)
+  assert.match(list, /admin\.hardDeleteSelectedCount/)
+  assert.equal(createTranslator('en')('admin.hardDeleteSelectedCount', { count: 2 }), 'Hard-delete selected (2)')
   assert.match(controls, /isArchived/)
   assert.match(retention, /export async function runArchiveNow/)
   const hardDelete = readFileSync('src/lib/retention-hard-delete.ts', 'utf8')

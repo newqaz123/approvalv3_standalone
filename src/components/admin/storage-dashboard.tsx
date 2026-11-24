@@ -27,12 +27,13 @@ import type { StorageDashboardData } from '@/server-actions/storage-dashboard'
 import { StorageTrendChart } from '@/components/admin/storage-trend-chart'
 import { StorageAlertCard } from '@/components/admin/storage-alert-card'
 import { cn } from '@/lib/utils'
+import type { MessageKey, Translator } from '@/lib/i18n/messages'
 
-const OWNER_LABEL: Record<StorageOwner, string> = {
-  request: 'Request',
-  solution: 'Solution',
-  other: 'Other',
-  inline: 'Inline image',
+const OWNER_LABEL: Record<StorageOwner, MessageKey> = {
+  request: 'admin.ownerRequest',
+  solution: 'admin.ownerSolution',
+  other: 'admin.ownerOther',
+  inline: 'admin.ownerInline',
 }
 
 function MetricCard({
@@ -60,7 +61,7 @@ function MetricCard({
   )
 }
 
-function VolumeStrip({ data }: { data: StorageDashboardData }) {
+function VolumeStrip({ data, t }: { data: StorageDashboardData; t: Translator }) {
   const usedBytes = data.uploadDirBytes
   const recorded = data.recordedStorageBytes
   const otherOnDisk =
@@ -80,22 +81,22 @@ function VolumeStrip({ data }: { data: StorageDashboardData }) {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-            Upload volume
+            {t('admin.uploadVolume')}
           </p>
           <h2 className="mt-1 text-xl font-semibold tracking-tight">
-            {usedBytes == null ? 'Folder unread' : `${formatStorageBytes(usedBytes)} on disk`}
+            {usedBytes == null ? t('admin.folderUnread') : t('admin.volumeOnDisk', { size: formatStorageBytes(usedBytes) })}
           </h2>
         </div>
         {showCapacity ? (
           <p className="font-mono text-sm tabular-nums text-muted-foreground">
-            {usedPercent ?? 0}% of {formatStorageBytes(capacity ?? 0)} · {formatStorageBytes(data.diskFreeBytes ?? 0)} free
+            {t('admin.volumeCapacity', { percent: usedPercent ?? 0, capacity: formatStorageBytes(capacity ?? 0), free: formatStorageBytes(data.diskFreeBytes ?? 0) })}
           </p>
         ) : null}
       </div>
 
       {data.uploadDirError ? (
         <p className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          {data.uploadDirError}. Showing recorded file sizes from the database.
+          {t('admin.volumeFileSizesFallback')}
         </p>
       ) : (
         <div className="mt-5 space-y-3">
@@ -104,8 +105,8 @@ function VolumeStrip({ data }: { data: StorageDashboardData }) {
             role="img"
             aria-label={
               showCapacity
-                ? `Upload volume ${usedPercent} percent full`
-                : 'Share of files on the upload disk'
+                ? t('admin.volumePercent', { percent: usedPercent ?? 0 })
+                : t('admin.uploadVolumeHelp')
             }
           >
             <span className="bg-slate-800" style={{ width: `${shares.recordedPct}%` }} />
@@ -113,25 +114,24 @@ function VolumeStrip({ data }: { data: StorageDashboardData }) {
           </div>
           {!showCapacity ? (
             <p className="text-xs text-muted-foreground">
-              Uploads use {usedPercent == null ? 'an unknown share' : `${usedPercent}%`} of this disk —
-              the bar above shows the split inside the uploads folder so it stays visible.
+              {t('admin.volumeShare', { share: usedPercent == null ? t('admin.unknownVolumeShare') : `${usedPercent}%` })}
             </p>
           ) : null}
           <dl className="grid gap-2 text-sm sm:grid-cols-3">
             <div className="flex items-center gap-2">
               <span className="h-2.5 w-2.5 rounded-[2px] bg-slate-800" />
-              <dt className="text-muted-foreground">Recorded files</dt>
+              <dt className="text-muted-foreground">{t('admin.recordedFiles')}</dt>
               <dd className="font-mono tabular-nums">{formatStorageBytes(recorded)}</dd>
             </div>
             <div className="flex items-center gap-2">
               <span className="h-2.5 w-2.5 rounded-[2px] bg-amber-500" />
-              <dt className="text-muted-foreground">Other on disk</dt>
+              <dt className="text-muted-foreground">{t('admin.otherOnDisk')}</dt>
               <dd className="font-mono tabular-nums">{formatStorageBytes(otherOnDisk)}</dd>
             </div>
             {showCapacity ? (
               <div className="flex items-center gap-2">
                 <span className="h-2.5 w-2.5 rounded-[2px] bg-stone-200" />
-                <dt className="text-muted-foreground">Free</dt>
+                <dt className="text-muted-foreground">{t('admin.freeSpace')}</dt>
                 <dd className="font-mono tabular-nums">
                   {data.diskFreeBytes == null ? '—' : formatStorageBytes(data.diskFreeBytes)}
                 </dd>
@@ -150,11 +150,13 @@ function ShareBar({
   count,
   totalBytes,
   tone,
+  t,
 }: {
   label: string
   bytes: number
   count: number
   totalBytes: number
+  t: Translator
   tone: 'slate' | 'amber' | 'emerald'
 }) {
   const percent = totalBytes > 0 ? Math.round((bytes / totalBytes) * 100) : 0
@@ -164,7 +166,7 @@ function ShareBar({
       <div className="flex items-baseline justify-between gap-3 text-sm">
         <p className="font-medium">{label}</p>
         <p className="font-mono text-xs tabular-nums text-muted-foreground">
-          {formatStorageBytes(bytes)} · {count} files · {percent}%
+          {t('admin.fileShare', { size: formatStorageBytes(bytes), count, percent })}
         </p>
       </div>
       <div className="h-2 overflow-hidden rounded-sm bg-stone-100">
@@ -184,13 +186,13 @@ function ShareBar({
   )
 }
 
-export function StorageDashboard({ data }: { data: StorageDashboardData }) {
+export function StorageDashboard({ data, t }: { data: StorageDashboardData; t: Translator }) {
   const splitTotal =
     data.requestAttachmentBytes + data.solutionAttachmentBytes + data.inlineImageBytes
 
   return (
     <div className="space-y-6">
-      <VolumeStrip data={data} />
+      <VolumeStrip data={data} t={t} />
 
       <StorageAlertCard
         thresholdPct={data.alertThresholdPct}
@@ -207,33 +209,33 @@ export function StorageDashboard({ data }: { data: StorageDashboardData }) {
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard
-          label="Uploads on disk"
+          label={t('admin.uploadsOnDisk')}
           value={data.uploadDirBytes == null ? '—' : formatStorageBytes(data.uploadDirBytes)}
-          hint="Actual files in the private uploads folder"
+          hint={t('admin.actualPrivateFiles')}
           icon={HardDrive}
         />
         <MetricCard
-          label="Recorded files"
+          label={t('admin.recordedFiles')}
           value={formatStorageBytes(data.recordedStorageBytes)}
-          hint="Sum of attachment and inline image sizes in the database"
+          hint={t('admin.recordedFileSizes')}
           icon={HardDriveDownload}
         />
         <MetricCard
-          label="Database"
+          label={t('admin.database')}
           value={data.databaseBytes == null ? '—' : formatStorageBytes(data.databaseBytes)}
-          hint="PostgreSQL database size"
+          hint={t('admin.postgresSize')}
           icon={Database}
         />
         <MetricCard
-          label="Attachments"
+          label={t('admin.attachments')}
           value={String(data.attachmentCount)}
-          hint="Request and solution files combined"
+          hint={t('admin.combinedAttachments')}
           icon={Files}
         />
         <MetricCard
-          label="Inline images"
+          label={t('admin.inlineImages')}
           value={formatStorageBytes(data.inlineImageBytes)}
-          hint={`${data.inlineImageCount} description image${data.inlineImageCount === 1 ? '' : 's'} · counted once when shared`}
+          hint={t(data.inlineImageCount === 1 ? 'admin.inlineImageHintOne' : 'admin.inlineImageHintMany', { count: data.inlineImageCount })}
           icon={FileImage}
         />
       </div>
@@ -242,49 +244,52 @@ export function StorageDashboard({ data }: { data: StorageDashboardData }) {
         <section className="rounded-lg border bg-card p-6">
           <div className="flex items-center gap-2 text-muted-foreground">
             <FileStack className="h-4 w-4" />
-            <h2 className="text-sm font-semibold text-foreground">Where files live</h2>
+            <h2 className="text-sm font-semibold text-foreground">{t('admin.whereFilesLive')}</h2>
           </div>
           <div className="mt-5 space-y-4">
             <ShareBar
-              label="Request files"
+              label={t('admin.requestFiles')}
               bytes={data.requestAttachmentBytes}
               count={data.requestAttachmentCount}
               totalBytes={splitTotal}
+              t={t}
               tone="slate"
             />
             <ShareBar
-              label="Solution files"
+              label={t('admin.solutionFiles')}
               bytes={data.solutionAttachmentBytes}
               count={data.solutionAttachmentCount}
               totalBytes={splitTotal}
+              t={t}
               tone="amber"
             />
             <ShareBar
-              label="Inline images"
+              label={t('admin.inlineImages')}
               bytes={data.inlineImageBytes}
               count={data.inlineImageCount}
               totalBytes={splitTotal}
+              t={t}
               tone="emerald"
             />
           </div>
         </section>
 
         <section className="rounded-lg border bg-card p-6">
-          <h2 className="text-sm font-semibold">Largest files</h2>
+          <h2 className="text-sm font-semibold">{t('admin.largestFiles')}</h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            Top 10 by recorded size. Nothing here can be deleted.
+            {t('admin.largestFilesHelp')}
           </p>
           {data.largestFiles.length === 0 ? (
-            <p className="mt-6 text-sm text-muted-foreground">No files stored yet.</p>
+            <p className="mt-6 text-sm text-muted-foreground">{t('admin.noStoredFiles')}</p>
           ) : (
             <div className="mt-4">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>File</TableHead>
-                    <TableHead>Kind</TableHead>
-                    <TableHead className="text-right">Size</TableHead>
-                    <TableHead className="text-right">Added</TableHead>
+                    <TableHead>{t('admin.file')}</TableHead>
+                    <TableHead>{t('admin.fileKind')}</TableHead>
+                    <TableHead className="text-right">{t('admin.fileSize')}</TableHead>
+                    <TableHead className="text-right">{t('admin.added')}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -294,7 +299,7 @@ export function StorageDashboard({ data }: { data: StorageDashboardData }) {
                         {file.fileName}
                       </TableCell>
                       <TableCell>
-                        <Badge variant="secondary">{OWNER_LABEL[file.owner]}</Badge>
+                        <Badge variant="secondary">{t(OWNER_LABEL[file.owner])}</Badge>
                       </TableCell>
                       <TableCell className="text-right font-mono tabular-nums">
                         {formatStorageBytes(file.fileSize)}
@@ -316,11 +321,11 @@ export function StorageDashboard({ data }: { data: StorageDashboardData }) {
       </div>
 
       <p className="text-sm text-muted-foreground">
-        Need to free space?{' '}
+        {t('admin.freeSpaceQuestion')}{' '}
         <Link href="/admin/retention" className="font-medium text-foreground underline underline-offset-4">
-          Request Retention
+          {t('admin.retention')}
         </Link>{' '}
-        can archive or permanently delete old requests.
+        {t('admin.canArchiveOldRequests')}
       </p>
     </div>
   )

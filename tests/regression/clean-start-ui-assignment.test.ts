@@ -3,6 +3,7 @@
 // tests/regression/clean-start-ui-unit-panel.test.ts).
 // Action tests: in-memory fake OrganizationAssignmentMutationDb only.
 // NO Prisma, NO database, NO env, NO schema/server ops.
+import { createTranslator } from '@/lib/i18n/messages'
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -738,8 +739,10 @@ describe('C6 source contracts', () => {
     const panel = read('src/components/organization/PersonAssignmentPanel.tsx')
     assert.match(panel, /AssignmentChangeSummary/)
     assert.match(panel, /assignment-move-confirmation/)
-    assert.match(panel, /explicit correction/i)
-    assert.match(panel, /Remove assignment/)
+    assert.match(panel, /admin\.correctReportsTo/)
+    assert.match(createTranslator('en')('admin.correctReportsTo'), /explicit correction/i)
+    assert.match(panel, /admin\.removeAssignment/)
+    assert.equal(createTranslator('en')('admin.removeAssignment'), 'Remove assignment')
     assert.doesNotMatch(panel, /users\.role/)
 
     const actions = read('src/lib/organization/workspace-admin.ts')

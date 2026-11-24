@@ -17,6 +17,7 @@ import { Label } from '@/components/ui/label'
 import { UnitTreeSelect } from '@/components/organization/UnitTreeSelect'
 import type { OrganizationUnitNode } from '@/lib/organization/model'
 import { createOrganizationUnit } from '@/server-actions/organization'
+import { useTranslations } from '@/lib/i18n/client'
 
 /** Every active unit is a legal parent; sorted by name for a stable list. */
 export function createUnitParentOptions(
@@ -50,11 +51,12 @@ export function CreateUnitDialogView({
   onSave?: () => void
   onCancel?: () => void
 }): React.JSX.Element {
+  const t = useTranslations()
   const ready = name.trim().length > 0 && parentId.length > 0
   return (
     <div data-testid="create-unit-dialog" className="space-y-4">
       <div className="space-y-2">
-        <Label htmlFor="create-unit-name-input">Unit name</Label>
+        <Label htmlFor="create-unit-name-input">{t('admin.unitName')}</Label>
         <Input
           id="create-unit-name-input"
           data-testid="create-unit-name-input"
@@ -63,7 +65,7 @@ export function CreateUnitDialogView({
         />
       </div>
       <div className="space-y-2">
-        <Label htmlFor="create-unit-parent-select">Parent unit</Label>
+        <Label htmlFor="create-unit-parent-select">{t('admin.parentUnit')}</Label>
         <UnitTreeSelect
           units={units}
           value={parentId || null}
@@ -71,7 +73,7 @@ export function CreateUnitDialogView({
           triggerId="create-unit-parent-select"
           triggerTestId="create-unit-parent-select"
           searchTestId="create-unit-parent-search"
-          placeholder="Select parent unit"
+          placeholder={t('admin.selectParentUnit')}
         />
       </div>
       {error ? (
@@ -86,7 +88,7 @@ export function CreateUnitDialogView({
           disabled={saving || !ready}
           onClick={onSave}
         >
-          Create unit
+          {t('admin.createUnit')}
         </Button>
         <Button
           type="button"
@@ -95,7 +97,7 @@ export function CreateUnitDialogView({
           disabled={saving}
           onClick={onCancel}
         >
-          Cancel
+          {t('common.cancel')}
         </Button>
       </div>
     </div>
@@ -103,6 +105,7 @@ export function CreateUnitDialogView({
 }
 
 export function CreateUnitDialog({ units }: { units: readonly OrganizationUnitNode[] }): React.JSX.Element {
+  const t = useTranslations()
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
@@ -130,7 +133,7 @@ export function CreateUnitDialog({ units }: { units: readonly OrganizationUnitNo
       router.refresh()
     } catch (err) {
       // Failure keeps the typed name/parent so the user can correct them.
-      setError(err instanceof Error ? err.message : String(err))
+      setError(t('admin.createUnitFailed'))
     } finally {
       setSaving(false)
     }
@@ -145,13 +148,13 @@ export function CreateUnitDialog({ units }: { units: readonly OrganizationUnitNo
       }}
     >
       <DialogTrigger asChild>
-        <Button type="button" data-testid="create-unit-open">Create unit</Button>
+        <Button type="button" data-testid="create-unit-open">{t('admin.createUnit')}</Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Create unit</DialogTitle>
+          <DialogTitle>{t('admin.createUnit')}</DialogTitle>
           <DialogDescription>
-            Create a unit under an existing parent. The company root exists from setup only.
+            {t('admin.createUnitHelp')}
           </DialogDescription>
         </DialogHeader>
         <CreateUnitDialogView

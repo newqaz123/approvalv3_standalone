@@ -4,6 +4,8 @@ import React from 'react'
 import type { ApprovalPhase } from '@/lib/approval-routes/definition'
 import type { WorkspaceSnapshot } from '@/server-actions/organization'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import type { Translator } from '@/lib/i18n/messages'
+import { useTranslations } from '@/lib/i18n/client'
 
 const PHASE_ORDER: readonly ApprovalPhase[] = ['REQUEST', 'SOLUTION', 'FINAL']
 const PHASE_LABEL: Record<ApprovalPhase, string> = {
@@ -29,12 +31,13 @@ export function exceptionSourcesForUnit(
 }
 
 function sourceLabel(
+  t: Translator,
   source: RouteSource,
   unitsById: ReadonlyMap<string, OrganizationSnapshotUnit>,
 ): string {
-  if (source.source === 'CUSTOM') return 'Custom at this unit'
+  if (source.source === 'CUSTOM') return t('admin.customAtUnit')
   const ancestorName = source.sourceUnitId ? unitsById.get(source.sourceUnitId)?.name : undefined
-  return `Inherited from ${ancestorName ?? 'ancestor'}`
+  return t('admin.inheritedFrom', { name: ancestorName ?? t('admin.ancestor') })
 }
 
 type OrganizationSnapshotUnit = WorkspaceSnapshot['units'][number]
@@ -110,6 +113,7 @@ export function ExceptionBranchBadges({
   unitName: string
   compact?: boolean
 }): React.JSX.Element | null {
+  const t = useTranslations()
   const sources = exceptionSourcesForUnit(snapshot.routeSources, unitId)
   if (sources.length === 0) return null
   const unitsById = new Map(snapshot.units.map((unit) => [unit.id, unit]))
@@ -123,13 +127,13 @@ export function ExceptionBranchBadges({
       <span
         data-testid={`unit-exception-badges-${unitId}`}
         className="inline-flex shrink-0 items-center gap-1"
-        aria-label={`${unitName} approval-chain exceptions`}
+        aria-label={t('admin.chainExceptionsFor', { name: unitName })}
       >
         {(['local', 'inherited'] as const).map((kind) => {
         const rows = grouped[kind]
         if (rows.length === 0) return null
         const label = rows
-          .map((source) => `${PHASE_LABEL[source.phase]} · ${sourceLabel(source, unitsById)}`)
+          .map((source) => `${PHASE_LABEL[source.phase]} · ${sourceLabel(t, source, unitsById)}`)
           .join('; ')
           return (
             <ExceptionBadge

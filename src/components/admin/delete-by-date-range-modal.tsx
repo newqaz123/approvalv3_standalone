@@ -15,12 +15,14 @@ import {
 } from '@/components/ui/dialog'
 import { permanentlyDeleteRequests, previewDeleteByDateRange } from '@/server-actions/requests'
 import { useRouter } from 'next/navigation'
+import { useTranslations } from '@/lib/i18n/client'
 
 interface DeleteByDateRangeModalProps {
   count: number
 }
 
 export function DeleteByDateRangeModal({ count }: DeleteByDateRangeModalProps) {
+  const t = useTranslations()
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -48,7 +50,7 @@ export function DeleteByDateRangeModal({ count }: DeleteByDateRangeModalProps) {
     setPreview(null)
 
     if (!dateFrom || !dateTo) {
-      setError('Please select both from and to dates')
+      setError(t('admin.selectDateRange'))
       return
     }
 
@@ -64,10 +66,10 @@ export function DeleteByDateRangeModal({ count }: DeleteByDateRangeModalProps) {
         })
         setShowConfirm(true)
       } else {
-        setError(result.error || 'Failed to preview requests')
+        setError(t('admin.previewRequestsFailed'))
       }
     } catch (err) {
-      setError('An error occurred while previewing requests')
+      setError(t('admin.previewRequestsError'))
     } finally {
       setIsPreviewing(false)
     }
@@ -78,7 +80,7 @@ export function DeleteByDateRangeModal({ count }: DeleteByDateRangeModalProps) {
     setError(null)
 
     if (confirmText !== 'PERMANENTLY DELETE') {
-      setError('Please type "PERMANENTLY DELETE" to confirm')
+      setError(t('admin.permanentTokenError'))
       return
     }
 
@@ -95,10 +97,10 @@ export function DeleteByDateRangeModal({ count }: DeleteByDateRangeModalProps) {
         setOpen(false)
         router.refresh()
       } else {
-        setError(result.error || 'Failed to delete requests')
+        setError(t('admin.deleteRequestsFailed'))
       }
     } catch (err) {
-      setError('An error occurred while deleting requests')
+      setError(t('admin.deleteRequestsError'))
     } finally {
       setIsSubmitting(false)
     }
@@ -109,21 +111,21 @@ export function DeleteByDateRangeModal({ count }: DeleteByDateRangeModalProps) {
       <DialogTrigger asChild>
         <Button variant="destructive" size="sm">
           <Filter className="h-4 w-4 mr-1" />
-          Delete by Date Range
+          {t('admin.deleteByDateRange')}
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-destructive">
             <AlertTriangle className="h-5 w-5" />
-            Delete by Date Range
+            {t('admin.deleteByDateRange')}
           </DialogTitle>
           <DialogDescription className="space-y-2">
             <span className="block">
-              Permanently delete requests that were deleted within a specific date range.
+              {t('admin.deleteByDateRangeHelp')}
             </span>
             <span className="block font-semibold text-destructive">
-              ⚠️ This action CANNOT be undone!
+              {t('admin.irreversibleWarning')}
             </span>
           </DialogDescription>
         </DialogHeader>
@@ -133,7 +135,7 @@ export function DeleteByDateRangeModal({ count }: DeleteByDateRangeModalProps) {
           <form onSubmit={handlePreview} className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="dateFrom">From Date</Label>
+                <Label htmlFor="dateFrom">{t('admin.fromDate')}</Label>
                 <input
                   id="dateFrom"
                   type="date"
@@ -145,7 +147,7 @@ export function DeleteByDateRangeModal({ count }: DeleteByDateRangeModalProps) {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="dateTo">To Date</Label>
+                <Label htmlFor="dateTo">{t('admin.toDate')}</Label>
                 <input
                   id="dateTo"
                   type="date"
@@ -170,7 +172,7 @@ export function DeleteByDateRangeModal({ count }: DeleteByDateRangeModalProps) {
                 onClick={() => setOpen(false)}
                 disabled={isPreviewing}
               >
-                Cancel
+                {t('common.cancel')}
               </Button>
               <Button
                 type="submit"
@@ -180,12 +182,12 @@ export function DeleteByDateRangeModal({ count }: DeleteByDateRangeModalProps) {
                 {isPreviewing ? (
                   <>
                     <Search className="h-4 w-4 mr-2 animate-spin" />
-                    Previewing...
+                    {t('admin.previewing')}
                   </>
                 ) : (
                   <>
                     <Search className="h-4 w-4 mr-2" />
-                    Preview
+                    {t('admin.preview')}
                   </>
                 )}
               </Button>
@@ -196,17 +198,17 @@ export function DeleteByDateRangeModal({ count }: DeleteByDateRangeModalProps) {
           <form onSubmit={handleDelete} className="space-y-4">
             <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
               <h3 className="font-semibold text-blue-900 mb-2">
-                Found {preview?.count || 0} requests to permanently delete:
+                {t('admin.foundToDelete', { count: preview?.count || 0 })}
               </h3>
               <div className="max-h-60 overflow-y-auto space-y-2">
                 {preview?.requests.map((request, index) => (
                   <div key={request.id} className="text-sm bg-white p-2 rounded border">
                     <p className="font-medium">{index + 1}. {request.title}</p>
                     <p className="text-xs text-gray-600">
-                      Requester: {request.requester.name} ({request.requester.email})
+                      {t('admin.requesterLabel')} {request.requester.name} ({request.requester.email})
                     </p>
                     <p className="text-xs text-gray-600">
-                      Deleted at: {new Date(request.deletedAt).toLocaleString()}
+                      {t('admin.deletedAtLabel')} {new Date(request.deletedAt).toLocaleString()}
                     </p>
                   </div>
                 ))}
@@ -215,16 +217,16 @@ export function DeleteByDateRangeModal({ count }: DeleteByDateRangeModalProps) {
 
             <div className="bg-destructive/10 border border-destructive/20 rounded-md p-3">
               <p className="text-sm font-semibold text-destructive">
-                ⚠️ Warning: This will permanently delete {preview?.count || 0} requests!
+                {t('admin.warningDeleteCount', { count: preview?.count || 0 })}
               </p>
               <p className="text-xs text-destructive mt-1">
-                This action cannot be undone. All data will be removed from the database.
+                {t('admin.deleteDataWarning')}
               </p>
             </div>
 
             <div className="space-y-2">
               <Label>
-                Type &ldquo;PERMANENTLY DELETE&rdquo; to confirm
+                {t('admin.permanentTokenLabel')}
               </Label>
               <input
                 type="text"
@@ -249,14 +251,14 @@ export function DeleteByDateRangeModal({ count }: DeleteByDateRangeModalProps) {
                 onClick={() => setShowConfirm(false)}
                 disabled={isSubmitting}
               >
-                Back
+                {t('admin.back')}
               </Button>
               <Button
                 type="submit"
                 variant="destructive"
                 disabled={isSubmitting || confirmText !== 'PERMANENTLY DELETE'}
               >
-                {isSubmitting ? 'Deleting...' : `Permanently Delete ${preview?.count || 0} Requests`}
+                {isSubmitting ? t('admin.deleting') : t('admin.deleteRangeCount', { count: preview?.count || 0 })}
               </Button>
             </DialogFooter>
           </form>

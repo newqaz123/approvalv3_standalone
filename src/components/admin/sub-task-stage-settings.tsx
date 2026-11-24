@@ -28,6 +28,7 @@ import {
   deleteSubTaskStage,
   updateSubTaskStage,
 } from '@/server-actions/sub-task-stages'
+import { useTranslations } from '@/lib/i18n/client'
 
 interface SubTaskStage {
   id: string
@@ -43,8 +44,10 @@ interface SubTaskStageSettingsProps {
 }
 
 export function SubTaskStageSettings({ initialStages }: SubTaskStageSettingsProps) {
+  const t = useTranslations()
   const router = useRouter()
   const [stages, setStages] = useState(initialStages)
+  const [draftNames, setDraftNames] = useState<Record<string, string>>({})
   const [newName, setNewName] = useState('')
   const [pendingId, setPendingId] = useState<string | null>(null)
   const [isCreating, startCreating] = useTransition()
@@ -59,21 +62,28 @@ export function SubTaskStageSettings({ initialStages }: SubTaskStageSettingsProp
     )))
   }
 
-  const handleSave = async (stage: SubTaskStage) => {
+  const handleSave = async (stage: SubTaskStage, name: string) => {
     setPendingId(stage.id)
     const result = await updateSubTaskStage({
       id: stage.id,
-      name: stage.name,
+      name,
       isActive: stage.isActive,
     })
     setPendingId(null)
 
     if (!result.success) {
-      toast.error(result.error)
+      toast.error(t(result.errorKey))
       return
     }
 
-    toast.success('Sub-task stage updated')
+    updateLocalStage(stage.id, { name: name.trim() })
+    setDraftNames(current => {
+      if (current[stage.id] !== name) return current
+      const next = { ...current }
+      delete next[stage.id]
+      return next
+    })
+    toast.success(t('admin.stageUpdated'))
     router.refresh()
   }
 
@@ -83,12 +93,12 @@ export function SubTaskStageSettings({ initialStages }: SubTaskStageSettingsProp
     setPendingId(null)
 
     if (!result.success) {
-      toast.error(result.error)
+      toast.error(t(result.errorKey))
       return
     }
 
     updateLocalStage(stage.id, { isActive: true })
-    toast.success('Sub-task stage activated')
+    toast.success(t('admin.stageActivated'))
     router.refresh()
   }
 
@@ -98,12 +108,12 @@ export function SubTaskStageSettings({ initialStages }: SubTaskStageSettingsProp
     setPendingId(null)
 
     if (!result.success) {
-      toast.error(result.error)
+      toast.error(t(result.errorKey))
       return
     }
 
     updateLocalStage(stage.id, { isActive: false })
-    toast.success('Sub-task stage deactivated')
+    toast.success(t('admin.stageDeactivated'))
     router.refresh()
   }
 
@@ -113,12 +123,12 @@ export function SubTaskStageSettings({ initialStages }: SubTaskStageSettingsProp
     setPendingId(null)
 
     if (!result.success) {
-      toast.error(result.error)
+      toast.error(t(result.errorKey))
       return
     }
 
     setStages((current) => current.filter((item) => item.id !== stage.id))
-    toast.success('Sub-task stage deleted')
+    toast.success(t('admin.stageDeleted'))
     router.refresh()
   }
 
@@ -129,29 +139,29 @@ export function SubTaskStageSettings({ initialStages }: SubTaskStageSettingsProp
       })
 
       if (!result.success) {
-        toast.error(result.error)
+        toast.error(t(result.errorKey))
         return
       }
 
       setNewName('')
-      toast.success('Sub-task stage created')
+      toast.success(t('admin.stageCreated'))
       router.refresh()
     })
   }
 
   return (
     <div className="space-y-6">
-      <Card role="region" aria-label="Add stage card">
+      <Card role="region" aria-label={t('admin.addStageCard')}>
         <CardHeader className="p-6 pb-3">
-          <CardTitle className="text-base">Add stage</CardTitle>
-          <CardDescription>Create a stage for engineering sub-task follow-up.</CardDescription>
+          <CardTitle className="text-base">{t('admin.addStage')}</CardTitle>
+          <CardDescription>{t('admin.addStageHelp')}</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 p-6 pt-0 md:grid-cols-[1fr_auto]">
           <Input
             value={newName}
             onChange={(event) => setNewName(event.target.value)}
-            placeholder="New stage name"
-            aria-label="New sub-task stage name"
+            placeholder={t('admin.newStageName')}
+            aria-label={t('admin.newSubTaskStageName')}
             className="h-11"
           />
           <Button
@@ -161,17 +171,18 @@ export function SubTaskStageSettings({ initialStages }: SubTaskStageSettingsProp
             className="h-10 gap-2"
           >
             <Plus className="h-4 w-4" />
-            Add stage
+            {t('admin.addStage')}
           </Button>
         </CardContent>
       </Card>
 
-      <Card role="region" aria-label="Stage list card">
+      <Card role="region" aria-label={t('admin.stageListCard')}>
         <CardHeader className="p-6 pb-3">
-          <CardTitle className="text-base">Stage list</CardTitle>
+          <CardTitle className="text-base">{t('admin.stageList')}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 p-6 pt-0">
           {stages.map((stage) => {
+            const draftName = draftNames[stage.id] ?? stage.name
             const isPending = pendingId === stage.id
             const isCompletedDefaultStage = stage.name === 'Completed'
 
@@ -182,22 +193,25 @@ export function SubTaskStageSettings({ initialStages }: SubTaskStageSettingsProp
               >
                 <div
                   className="flex h-10 w-8 items-center justify-center text-muted-foreground"
-                  aria-label="Drag handle"
-                  title="Drag handle"
+                  aria-label={t('admin.dragHandle')}
+                  title={t('admin.dragHandle')}
                 >
                   <GripVertical className="h-5 w-5" />
                 </div>
 
                 <div className="flex min-w-0 flex-col gap-2 md:flex-row md:items-center">
                   <Input
-                    value={stage.name}
+                    value={draftName}
                     disabled={stage.isOthers}
-                    onChange={(event) => updateLocalStage(stage.id, { name: event.target.value })}
-                    aria-label={`Name for ${stage.name}`}
+                    onChange={(event) => {
+                      const name = event.target.value
+                      setDraftNames(current => ({ ...current, [stage.id]: name }))
+                    }}
+                    aria-label={t('admin.stageNameFor', { name: stage.name })}
                     className="h-11 md:max-w-xl"
                   />
                   {isCompletedDefaultStage && (
-                    <Badge variant="outline" className="w-fit">Default</Badge>
+                    <Badge variant="outline" className="w-fit">{t('admin.default')}</Badge>
                   )}
                   {stage.isOthers && (
                     <Badge variant="secondary" className="w-fit">Others</Badge>
@@ -214,12 +228,12 @@ export function SubTaskStageSettings({ initialStages }: SubTaskStageSettingsProp
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => handleSave(stage)}
-                  disabled={isPending || !stage.name.trim()}
+                  onClick={() => handleSave(stage, draftName)}
+                  disabled={isPending || !draftName.trim()}
                   className="h-10 gap-2"
                 >
                   <Save className="h-4 w-4" />
-                  Save changes
+                  {t('admin.saveChanges')}
                 </Button>
 
                 <DropdownMenu>
@@ -229,7 +243,7 @@ export function SubTaskStageSettings({ initialStages }: SubTaskStageSettingsProp
                       variant="ghost"
                       size="icon"
                       className="h-10 w-10"
-                      aria-label={`More actions for ${stage.name}`}
+                      aria-label={t('admin.stageActionsFor', { name: stage.name })}
                       disabled={isPending}
                     >
                       <MoreHorizontal className="h-4 w-4" />
@@ -241,14 +255,14 @@ export function SubTaskStageSettings({ initialStages }: SubTaskStageSettingsProp
                       disabled={isPending || stage.isActive}
                     >
                       <RotateCcw className="mr-2 h-4 w-4" />
-                      Activate
+                      {t('admin.activate')}
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onClick={() => handleDeactivate(stage)}
                       disabled={isPending || stage.isOthers || isCompletedDefaultStage || !stage.isActive}
                     >
                       <Power className="mr-2 h-4 w-4" />
-                      Deactivate
+                      {t('admin.deactivate')}
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
@@ -257,7 +271,7 @@ export function SubTaskStageSettings({ initialStages }: SubTaskStageSettingsProp
                       className="text-red-600 focus:text-red-600"
                     >
                       <Trash2 className="mr-2 h-4 w-4" />
-                      Delete
+                      {t('admin.delete')}
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>

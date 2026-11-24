@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label'
 import { StorageAlertRail } from '@/components/admin/storage-alert-rail'
 import { resolveStorageAlertVisualState } from '@/lib/storage-alert-visual'
 import { saveStorageAlertThreshold } from '@/server-actions/storage-dashboard'
+import { useTranslations } from '@/lib/i18n/client'
 
 /**
  * Compact disk-alert control. The rail makes the relationship between current
@@ -25,6 +26,7 @@ export function StorageAlertCard({
   usedPercent: number | null
   lastAlertOn: string | null
 }) {
+  const t = useTranslations()
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [draft, setDraft] = useState(String(thresholdPct))
@@ -42,13 +44,13 @@ export function StorageAlertCard({
     startTransition(async () => {
       const result = await saveStorageAlertThreshold(draftValue)
       if (!result.success) {
-        toast.error(result.error)
+        toast.error(t(result.errorKey, result.errorValues))
         return
       }
       toast.success(
         result.thresholdPct === 0
-          ? 'Disk alert turned off'
-          : `Admins will be emailed when the disk is ${result.thresholdPct}% full`
+          ? t('admin.alertDisabled')
+          : t('admin.diskThresholdSaved', { percent: result.thresholdPct })
       )
       router.refresh()
     })
@@ -59,20 +61,20 @@ export function StorageAlertCard({
       <div className="flex flex-wrap items-center gap-2 text-muted-foreground">
         <BellRing className="h-4 w-4" />
         <h2 className="text-xs font-medium uppercase tracking-[0.14em]">
-          Disk alert
+          {t('admin.diskAlert')}
         </h2>
         <span role="status" aria-live="polite">
           {visualState.alertsOff ? (
-            <Badge variant="secondary">Off</Badge>
+            <Badge variant="secondary">{t('admin.off')}</Badge>
           ) : (
             <Badge variant={visualState.wouldAlertNow ? 'destructive' : 'default'}>
-              {visualState.wouldAlertNow ? 'Would alert now' : `Alert at ${draftValue}%`}
+              {visualState.wouldAlertNow ? t('admin.wouldAlertNow') : t('admin.diskAlertAt', { percent: draftValue })}
             </Badge>
           )}
         </span>
       </div>
       <p className="mt-2 text-sm text-muted-foreground">
-        Email all admins when this disk reaches the saved threshold.
+        {t('admin.diskAlertHelp')}
       </p>
 
       <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
@@ -83,7 +85,7 @@ export function StorageAlertCard({
 
         <div className="flex flex-wrap items-end gap-2">
           <div className="space-y-1.5">
-            <Label htmlFor="alert-threshold">Threshold (%)</Label>
+            <Label htmlFor="alert-threshold">{t('admin.thresholdPercent')}</Label>
             <Input
               id="alert-threshold"
               type="number"
@@ -100,19 +102,19 @@ export function StorageAlertCard({
             onClick={handleSave}
             disabled={pending || !dirty}
           >
-            {pending ? 'Saving…' : dirty ? 'Save threshold' : 'Saved'}
+            {pending ? t('admin.savingEllipsis') : dirty ? t('admin.saveThreshold') : t('admin.saved')}
           </Button>
         </div>
       </div>
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t pt-3 text-xs text-muted-foreground">
         <span>
-          0 turns alerts off · allowed 50–95
-          {rawDraftValue > 0 && rawDraftValue < 50 ? ' · saves as 50' : ''}
+          {t('admin.thresholdRange')}
+          {rawDraftValue > 0 && rawDraftValue < 50 ? t('admin.thresholdClamp') : ''}
         </span>
         <span>
-          Checked every minute · at most one alert attempt per day.
-          {lastAlertOn ? ` Last attempt: ${lastAlertOn}.` : ' No alert attempted yet.'}
+          {t('admin.checkDiskFrequency')}
+          {lastAlertOn ? t('admin.lastDiskAlertAttempt', { date: lastAlertOn }) : t('admin.noAlertAttempt')}
         </span>
       </div>
     </section>

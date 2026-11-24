@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Download, Loader2 } from "lucide-react"
 import { toast } from "sonner"
+import { useTranslations } from '@/lib/i18n/client'
 
 interface AuditExportButtonProps {
   requestId: string
@@ -22,11 +23,12 @@ export function AuditExportButton({
   variant = "default",
   disabled = false,
 }: AuditExportButtonProps) {
+  const t = useTranslations()
   const [isLoading, setIsLoading] = useState(false)
 
   async function handleExport(format: "csv" | "json") {
     if (!requestId.trim()) {
-      toast.error("Request ID is required")
+      toast.error(t('admin.requestIdRequired'))
       return
     }
 
@@ -49,10 +51,10 @@ export function AuditExportButton({
       a.click()
       window.URL.revokeObjectURL(url)
 
-      toast.success(`Exported as ${format.toUpperCase()}`)
+      toast.success(t('admin.exportedAs', { format: format.toUpperCase() }))
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Failed to export audit trail"
+        t('admin.exportAuditFailed')
       )
     } finally {
       setIsLoading(false)
@@ -66,22 +68,22 @@ export function AuditExportButton({
           {isLoading ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Exporting...
+              {t('admin.exporting')}
             </>
           ) : (
             <>
               <Download className="mr-2 h-4 w-4" />
-              Export Audit Trail
+              {t('admin.exportAudit')}
             </>
           )}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuItem onClick={() => handleExport("csv")}>
-          Export as CSV
+          {t('admin.exportCsv')}
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => handleExport("json")}>
-          Export as JSON
+          {t('admin.exportJson')}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

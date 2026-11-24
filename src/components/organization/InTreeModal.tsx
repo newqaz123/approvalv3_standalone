@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef } from 'react'
 import { X } from 'lucide-react'
+import { useTranslations } from '@/lib/i18n/client'
 
 const FOCUSABLE = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
 
@@ -40,6 +41,7 @@ export function InTreeModal({
   className?: string
   overlayZ?: string
 }) {
+  const t = useTranslations()
   const cardRef = useRef<HTMLDivElement>(null)
   const restoreFocusRef = useRef<HTMLElement | null>(null)
   const onCloseRef = useRef(onClose)
@@ -122,11 +124,11 @@ export function InTreeModal({
               {title}
             </h2>
           ) : labelledBy ? null : (
-            <h2 className="sr-only">{ariaLabel ?? 'Dialog'}</h2>
+            <h2 className="sr-only">{ariaLabel ?? t('admin.dialog')}</h2>
           )}
           <button
             type="button"
-            aria-label="Close"
+            aria-label={t('admin.close')}
             onClick={onClose}
             className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >

@@ -1,6 +1,8 @@
 import Link from 'next/link'
 import { Users, Building2, FileText, Trash2, Archive, ClipboardList, LayoutTemplate, ListChecks, Mail, HardDrive } from 'lucide-react'
 import prisma from '@/lib/prisma'
+import { createTranslator } from '@/lib/i18n/messages'
+import { getRequestLocale } from '@/lib/i18n/server'
 
 async function getStats() {
   const [userCount, unitCount, requestCount, deletedCount] = await Promise.all([
@@ -14,14 +16,15 @@ async function getStats() {
 }
 
 export default async function AdminPage() {
+  const t = createTranslator(await getRequestLocale())
   const stats = await getStats()
 
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-3xl font-bold">Admin Dashboard</h1>
+        <h1 className="text-3xl font-bold">{t('admin.dashboard')}</h1>
         <p className="text-muted-foreground mt-2">
-          Manage users, organization, and system settings
+          {t('admin.dashboardDescription')}
         </p>
       </div>
 
@@ -29,7 +32,7 @@ export default async function AdminPage() {
         <div className="rounded-lg border bg-card p-6">
           <div className="flex items-center gap-2">
             <Users className="h-5 w-5 text-muted-foreground" />
-            <h3 className="text-sm font-medium text-muted-foreground">Total Users</h3>
+            <h3 className="text-sm font-medium text-muted-foreground">{t('admin.totalUsers')}</h3>
           </div>
           <p className="text-3xl font-bold mt-2">{stats.userCount}</p>
         </div>
@@ -37,7 +40,7 @@ export default async function AdminPage() {
         <div className="rounded-lg border bg-card p-6">
           <div className="flex items-center gap-2">
             <Building2 className="h-5 w-5 text-muted-foreground" />
-            <h3 className="text-sm font-medium text-muted-foreground">Organization units</h3>
+            <h3 className="text-sm font-medium text-muted-foreground">{t('admin.organizationUnits')}</h3>
           </div>
           <p className="text-3xl font-bold mt-2">{stats.unitCount}</p>
         </div>
@@ -45,7 +48,7 @@ export default async function AdminPage() {
         <div className="rounded-lg border bg-card p-6">
           <div className="flex items-center gap-2">
             <FileText className="h-5 w-5 text-muted-foreground" />
-            <h3 className="text-sm font-medium text-muted-foreground">Active Requests</h3>
+            <h3 className="text-sm font-medium text-muted-foreground">{t('admin.activeRequests')}</h3>
           </div>
           <p className="text-3xl font-bold mt-2">{stats.requestCount}</p>
         </div>
@@ -53,14 +56,14 @@ export default async function AdminPage() {
         <div className="rounded-lg border bg-card p-6">
           <div className="flex items-center gap-2">
             <Trash2 className="h-5 w-5 text-muted-foreground" />
-            <h3 className="text-sm font-medium text-muted-foreground">Deleted Requests</h3>
+            <h3 className="text-sm font-medium text-muted-foreground">{t('admin.deletedRequests')}</h3>
           </div>
           <p className="text-3xl font-bold mt-2">{stats.deletedCount}</p>
         </div>
       </div>
 
       <div>
-        <h2 className="text-xl font-semibold mb-4">Quick Actions</h2>
+        <h2 className="text-xl font-semibold mb-4">{t('admin.quickActions')}</h2>
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           <Link
             href="/admin/users"
@@ -71,9 +74,9 @@ export default async function AdminPage() {
                 <Users className="h-6 w-6 text-primary" />
               </div>
               <div>
-                <h3 className="font-semibold">Manage Users</h3>
+                <h3 className="font-semibold">{t('admin.manageUsers')}</h3>
                 <p className="text-sm text-muted-foreground">
-                  Create, edit, and manage user accounts
+                  {t('admin.manageUsersDescription')}
                 </p>
               </div>
             </div>
@@ -88,9 +91,9 @@ export default async function AdminPage() {
                 <Building2 className="h-6 w-6 text-primary" />
               </div>
               <div>
-                <h3 className="font-semibold">Organization</h3>
+                <h3 className="font-semibold">{t('admin.organization')}</h3>
                 <p className="text-sm text-muted-foreground">
-                  Tree workspace, assignments, and approval chains
+                  {t('admin.organizationTile')}
                 </p>
               </div>
             </div>
@@ -105,9 +108,9 @@ export default async function AdminPage() {
                 <Archive className="h-6 w-6 text-primary" />
               </div>
               <div>
-                <h3 className="font-semibold">Request Retention</h3>
+                <h3 className="font-semibold">{t('admin.retention')}</h3>
                 <p className="text-sm text-muted-foreground">
-                  Archive policy, backup zip, and hard-delete archived requests
+                  {t('admin.retentionTile')}
                 </p>
               </div>
             </div>
@@ -122,9 +125,9 @@ export default async function AdminPage() {
                 <ClipboardList className="h-6 w-6 text-primary" />
               </div>
               <div>
-                <h3 className="font-semibold">Audit Trail Export</h3>
+                <h3 className="font-semibold">{t('admin.auditExport')}</h3>
                 <p className="text-sm text-muted-foreground">
-                  Export audit logs in CSV or JSON format
+                  {t('admin.auditTile')}
                 </p>
               </div>
             </div>
@@ -139,9 +142,9 @@ export default async function AdminPage() {
                 <LayoutTemplate className="h-6 w-6 text-primary" />
               </div>
               <div>
-                <h3 className="font-semibold">Request Templates</h3>
+                <h3 className="font-semibold">{t('admin.templates')}</h3>
                 <p className="text-sm text-muted-foreground">
-                  Create and manage request templates
+                  {t('admin.templatesTile')}
                 </p>
               </div>
             </div>
@@ -156,9 +159,9 @@ export default async function AdminPage() {
                 <ListChecks className="h-6 w-6 text-primary" />
               </div>
               <div>
-                <h3 className="font-semibold">Sub-task Stages</h3>
+                <h3 className="font-semibold">{t('admin.stagesTileTitle')}</h3>
                 <p className="text-sm text-muted-foreground">
-                  Manage engineering follow-up stage options
+                  {t('admin.stagesTile')}
                 </p>
               </div>
             </div>
@@ -173,9 +176,9 @@ export default async function AdminPage() {
                 <Mail className="h-6 w-6 text-primary" />
               </div>
               <div>
-                <h3 className="font-semibold">Email notifications</h3>
+                <h3 className="font-semibold">{t('admin.emailNotifications')}</h3>
                 <p className="text-sm text-muted-foreground">
-                  Configure SMTP and switch email providers
+                  {t('admin.emailTile')}
                 </p>
               </div>
             </div>
@@ -190,9 +193,9 @@ export default async function AdminPage() {
                 <HardDrive className="h-6 w-6 text-primary" />
               </div>
               <div>
-                <h3 className="font-semibold">Data storage</h3>
+                <h3 className="font-semibold">{t('admin.storage')}</h3>
                 <p className="text-sm text-muted-foreground">
-                  See disk, uploads, and database size
+                  {t('admin.storageTile')}
                 </p>
               </div>
             </div>

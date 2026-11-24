@@ -4,8 +4,11 @@ import { UserTable } from '@/components/admin/user-table'
 import { CreateUserDialog } from '@/components/admin/create-user-dialog'
 import { AdminPageSkeleton } from '@/components/admin/admin-skeleton'
 import { BackButton } from '@/components/admin/back-button'
+import { createTranslator } from '@/lib/i18n/messages'
+import { getRequestLocale } from '@/lib/i18n/server'
 
 async function UsersList() {
+  const t = createTranslator(await getRequestLocale())
   const users = await getUsers()
 
   return (
@@ -15,15 +18,15 @@ async function UsersList() {
         <div className="space-y-6">
         <div className="flex justify-between items-center">
           <div>
-            <h1 className="text-2xl font-bold">Users</h1>
+            <h1 className="text-2xl font-bold">{t('admin.users')}</h1>
             <p className="text-muted-foreground">
-              Manage user accounts and permissions. Organization assignment is edited in Organization & Approvals.
+              {t('admin.usersDescription')}
             </p>
           </div>
           <CreateUserDialog />
         </div>
 
-        <UserTable data={users as any} />
+        <UserTable data={users} />
         </div>
       </div>
     </div>

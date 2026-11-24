@@ -9,14 +9,20 @@ import { PositionAdminPanel } from '@/components/organization/PositionAdminPanel
 import { getApprovalChainsData } from '@/server-actions/approval-routes'
 import { getOrganizationWorkspaceData } from '@/server-actions/organization'
 import type { ApprovalPhase } from '@/lib/approval-routes/definition'
+import { createTranslator } from '@/lib/i18n/messages'
+import { getRequestLocale } from '@/lib/i18n/server'
 
-export const metadata = { title: 'Organization | Admin' }
+export async function generateMetadata() {
+  const t = createTranslator(await getRequestLocale())
+  return { title: `${t('admin.organization')} | ${t('admin.admin')}` }
+}
 
 export default async function OrganizationPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
+  const t = createTranslator(await getRequestLocale())
   await requireAdmin()
   const params = await searchParams
   const snapshot = await getOrganizationWorkspaceData()
@@ -38,10 +44,10 @@ export default async function OrganizationPage({
         <BackButton />
         <h1 className="flex items-center gap-2 text-3xl font-bold">
           <Network className="h-8 w-8 text-muted-foreground" />
-          Organization & Approvals
+          {t('admin.organizationTitle')}
         </h1>
         <p className="mt-2 text-muted-foreground">
-          Administer the organization tree, assignments, and approval chains from one workspace.
+          {t('admin.organizationDescription')}
         </p>
       </div>
 

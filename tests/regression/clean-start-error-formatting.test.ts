@@ -155,21 +155,18 @@ test('bare seeded slugs never leak either', () => {
   assert.ok(friendly.includes('"Line A"'), friendly)
 })
 
-test('panels route server-action errors through the formatter (source contract)', () => {
+test('panels use contextual errors instead of leaking raw action diagnostics (source contract)', () => {
   const { readFileSync } = require('node:fs') as typeof import('node:fs')
   const panels = [
-    'src/components/organization/PersonAssignmentPanel.tsx',
-    'src/components/organization/UnitSidePanel.tsx',
-    'src/components/organization/TeamPanel.tsx',
-  ]
-  for (const path of panels) {
+    ['PersonAssignmentPanel', 'assignmentSaveFailed'],
+    ['UnitSidePanel', 'unitDeactivateFailed'],
+    ['TeamPanel', 'teamDeactivateFailed'],
+  ] as const
+  for (const [panel, key] of panels) {
+    const path = `src/components/organization/${panel}.tsx`
     const source = readFileSync(path, 'utf8')
-    const raw = (source.match(/err instanceof Error \? err\.message : String\(err\)/g) ?? []).length
-    const formatted = (source.match(/formatOrganizationErrorForUser\(/g) ?? []).length
-    assert.ok(
-      raw === 0 && formatted >= 1,
-      `${path}: ${raw} raw err.message sites remain; ${formatted} formatted sites`,
-    )
+    assert.doesNotMatch(source, /(?:err|error)\.message/)
+    assert.ok(source.includes(`t('admin.${key}')`), `${path} must supply localized contextual feedback`)
   }
 })
 

@@ -1,3 +1,4 @@
+import { createTranslator } from '@/lib/i18n/messages'
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -208,13 +209,18 @@ describe('email-settings server actions', () => {
       resolve(process.cwd(), 'src/components/admin/email-settings-form.tsx'),
       'utf8',
     )
-    assert.match(form, /Send test to/)
+    const en = createTranslator('en')
+    assert.match(form, /admin\.emailTestRecipient/)
+    assert.equal(en('admin.emailTestRecipient'), 'Send test to')
     assert.match(form, /resend.com\/api-keys/)
-    assert.match(form, /smtp.mailgun.org/)
+    assert.match(form, /admin\.emailMailgunDefaults/)
+    assert.match(en('admin.emailMailgunDefaults'), /smtp\.mailgun\.org/)
     assert.match(form, /Mailgun Domains/)
     assert.match(form, /myaccount.google.com\/apppasswords/)
-    assert.match(form, /SMTP AUTH/)
-    assert.match(form, /OAuth/)
+    assert.match(form, /admin\.emailOutlookAuth/)
+    assert.match(en('admin.emailOutlookAuth'), /SMTP AUTH/)
+    assert.match(form, /admin\.emailOutlookWarning/)
+    assert.match(en('admin.emailOutlookWarning'), /OAuth/)
     assert.match(form, /placeholder=\{.*hasPassword/)
     assert.doesNotMatch(form, /value=\{['"]••••/)
     assert.match(

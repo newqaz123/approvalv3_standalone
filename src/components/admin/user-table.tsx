@@ -39,20 +39,23 @@ import { EditUserDialog } from '@/components/admin/edit-user-dialog'
 import { ResetPasswordDialog } from '@/components/admin/reset-password-dialog'
 import { isAdminRole } from '@/lib/user-role'
 import { AdminCard, AdminCardsEmptyState } from '@/components/mobile/admin-card'
+import { toast } from 'sonner'
 import { Mail, Building, Shield } from 'lucide-react'
+import { useTranslations } from '@/lib/i18n/client'
 
 interface UserTableProps {
   data: UserWithDepartment[]
 }
 
-function organizationLabel(user: UserWithDepartment): string {
+function organizationLabel(user: UserWithDepartment, unassigned: string): string {
   if (user.organizationAssignment) {
     return `${user.organizationAssignment.unitName} · ${user.organizationAssignment.positionName}`
   }
-  return 'Unassigned'
+  return unassigned
 }
 
 export function UserTable({ data }: UserTableProps) {
+  const t = useTranslations()
   const router = useRouter()
   const [processingId, setProcessingId] = useState<string | null>(null)
   const [userToDeactivate, setUserToDeactivate] = useState<{ id: string; name: string } | null>(null)
@@ -68,6 +71,8 @@ export function UserTable({ data }: UserTableProps) {
         await activateUser(userId)
       }
       router.refresh()
+    } catch {
+      toast.error(t('admin.userStatusFailed'))
     } finally {
       setProcessingId(null)
     }
@@ -76,27 +81,27 @@ export function UserTable({ data }: UserTableProps) {
   const columns: ColumnDef<UserWithDepartment>[] = [
     {
       accessorKey: 'name',
-      header: 'Name',
+      header: t('admin.name'),
       cell: ({ row }) => row.getValue('name'),
     },
     {
       accessorKey: 'email',
-      header: 'Email',
+      header: t('admin.email'),
       cell: ({ row }) => row.getValue('email'),
     },
     {
       accessorKey: 'department',
-      header: 'Unit / Position',
-      cell: ({ row }) => organizationLabel(row.original),
+      header: t('admin.unitAndPosition'),
+      cell: ({ row }) => organizationLabel(row.original, t('admin.unassigned')),
     },
     {
       accessorKey: 'role',
-      header: 'Role',
-      cell: ({ row }) => isAdminRole(row.original.role) ? 'Admin' : '',
+      header: t('admin.role'),
+      cell: ({ row }) => isAdminRole(row.original.role) ? t('admin.admin') : '',
     },
     {
       accessorKey: 'isActive',
-      header: 'Status',
+      header: t('common.status'),
       cell: ({ row }) => {
         const isActive = row.getValue('isActive') as boolean
         return (
@@ -120,7 +125,7 @@ export function UserTable({ data }: UserTableProps) {
                 size="sm"
                 className="h-8 w-8 p-0 hover:bg-muted/50 transition-colors"
               >
-                <span className="sr-only">Open menu</span>
+                <span className="sr-only">{t('admin.openMenu')}</span>
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
                 </svg>
@@ -134,27 +139,27 @@ export function UserTable({ data }: UserTableProps) {
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                 </svg>
-                Edit User
+                {t('admin.editUser')}
               </DropdownMenuItem>
               <DropdownMenuItem
-                onClick={() => setResetPasswordUser({ id: user.id, name: user.name || 'this user' })}
+                onClick={() => setResetPasswordUser({ id: user.id, name: user.name || t('admin.thisUser') })}
                 className="flex items-center gap-2"
               >
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                 </svg>
-                Reset Password
+                {t('admin.resetPassword')}
               </DropdownMenuItem>
               {user.isActive ? (
                 <DropdownMenuItem
-                  onClick={() => setUserToDeactivate({ id: user.id, name: user.name || 'this user' })}
+                  onClick={() => setUserToDeactivate({ id: user.id, name: user.name || t('admin.thisUser') })}
                   disabled={processingId === user.id}
                   className="text-destructive focus:text-destructive flex items-center gap-2"
                 >
                   <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
                   </svg>
-                  Deactivate
+                  {t('admin.deactivate')}
                 </DropdownMenuItem>
               ) : (
                 <DropdownMenuItem
@@ -165,7 +170,7 @@ export function UserTable({ data }: UserTableProps) {
                   <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
-                  Activate
+                  {t('admin.activate')}
                 </DropdownMenuItem>
               )}
             </DropdownMenuContent>
@@ -188,42 +193,42 @@ export function UserTable({ data }: UserTableProps) {
           data.map((user) => (
             <AdminCard
               key={user.id}
-              title={user.name || 'Unnamed User'}
+              title={user.name || t('admin.unnamedUser')}
               status={{
                 label: user.isActive ? 'Active' : 'Inactive',
                 variant: user.isActive ? 'success' : 'secondary',
               }}
               details={[
                 {
-                  label: 'Email',
+                  label: t('admin.email'),
                   value: user.email,
                   icon: <Mail className="h-3.5 w-3.5" />,
                 },
                 {
-                  label: 'Unit / Position',
-                  value: organizationLabel(user),
+                  label: t('admin.unitAndPosition'),
+                  value: organizationLabel(user, t('admin.unassigned')),
                   icon: <Building className="h-3.5 w-3.5" />,
                 },
                 {
-                  label: 'Role',
-                  value: isAdminRole(user.role) ? 'Admin' : '',
+                  label: t('admin.role'),
+                  value: isAdminRole(user.role) ? t('admin.admin') : '',
                   icon: <Shield className="h-3.5 w-3.5" />,
                 },
               ]}
               badges={[]}
               actions={[
                 {
-                  label: 'Edit',
+                  label: t('admin.edit'),
                   onClick: () => setEditingUserId(user.id),
                 },
                 {
-                  label: 'Reset Password',
-                  onClick: () => setResetPasswordUser({ id: user.id, name: user.name || 'this user' }),
+                  label: t('admin.resetPassword'),
+                  onClick: () => setResetPasswordUser({ id: user.id, name: user.name || t('admin.thisUser') }),
                 },
                 {
-                  label: user.isActive ? 'Deactivate' : 'Activate',
+                  label: user.isActive ? t('admin.deactivate') : t('admin.activate'),
                   onClick: user.isActive
-                    ? () => setUserToDeactivate({ id: user.id, name: user.name || 'this user' })
+                    ? () => setUserToDeactivate({ id: user.id, name: user.name || t('admin.thisUser') })
                     : () => handleToggleActive(user.id, false),
                   destructive: user.isActive,
                   disabled: processingId === user.id,
@@ -232,7 +237,7 @@ export function UserTable({ data }: UserTableProps) {
             />
           ))
         ) : (
-          <AdminCardsEmptyState message="No users found" />
+          <AdminCardsEmptyState message={t('admin.noUsers')} />
         )}
       </div>
 
@@ -268,7 +273,7 @@ export function UserTable({ data }: UserTableProps) {
             ) : (
               <TableRow>
                 <TableCell colSpan={columns.length} className="h-24 text-center">
-                  No users found.
+                  {t('admin.noUsersPeriod')}
                 </TableCell>
               </TableRow>
             )}
@@ -292,14 +297,13 @@ export function UserTable({ data }: UserTableProps) {
       <AlertDialog open={!!userToDeactivate} onOpenChange={(open) => !open && setUserToDeactivate(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Deactivate User</AlertDialogTitle>
+            <AlertDialogTitle>{t('admin.deactivateUser')}</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to deactivate {userToDeactivate?.name}?
-              They will no longer be able to log in or perform actions in the system.
+              {t('admin.deactivateUserConfirm', { name: userToDeactivate?.name ?? '' })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
                 if (userToDeactivate) {
@@ -310,7 +314,7 @@ export function UserTable({ data }: UserTableProps) {
               disabled={processingId !== null}
               className="bg-destructive text-white hover:bg-destructive/90"
             >
-              {processingId === userToDeactivate?.id ? 'Deactivating...' : 'Deactivate'}
+              {processingId === userToDeactivate?.id ? t('admin.deactivating') : t('admin.deactivate')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

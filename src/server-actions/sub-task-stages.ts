@@ -3,8 +3,9 @@
 import { revalidatePath } from 'next/cache'
 import prisma from '@/lib/prisma'
 import { requireAdmin } from '@/lib/auth'
+import type { MessageKey } from '@/lib/i18n/messages'
 
-type StageActionResult = { success: true } | { success: false; error: string }
+type StageActionResult = { success: true } | { success: false; error: string; errorKey: MessageKey }
 
 async function requireAdminUser() {
   const adminId = await requireAdmin()
@@ -56,7 +57,7 @@ export async function updateSubTaskStage(input: {
   try {
     await requireAdminUser()
     const trimmed = input.name.trim()
-    if (!trimmed) return { success: false, error: 'Stage name is required' }
+    if (!trimmed) return { success: false, error: 'Stage name is required', errorKey: 'admin.stageNameRequired' }
 
     const existing = await prisma.sub_task_stages.findUnique({
       where: { id: input.id },
@@ -64,15 +65,15 @@ export async function updateSubTaskStage(input: {
     })
 
     if (existing?.isOthers && trimmed !== existing.name) {
-      return { success: false, error: 'Others stage cannot be renamed' }
+      return { success: false, error: 'Others stage cannot be renamed', errorKey: 'admin.stageOthersCannotRename' }
     }
 
     if (existing?.isOthers && !input.isActive) {
-      return { success: false, error: 'Others stage cannot be deactivated' }
+      return { success: false, error: 'Others stage cannot be deactivated', errorKey: 'admin.stageOthersCannotDeactivate' }
     }
 
     if (await stageNameExists(trimmed, input.id)) {
-      return { success: false, error: 'Stage name already exists' }
+      return { success: false, error: 'Stage name already exists', errorKey: 'admin.stageNameDuplicate' }
     }
 
     await prisma.sub_task_stages.update({
@@ -90,6 +91,7 @@ export async function updateSubTaskStage(input: {
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Failed to update stage',
+      errorKey: 'admin.stageUpdateFailed',
     }
   }
 }
@@ -100,10 +102,10 @@ export async function createSubTaskStage(input: {
   try {
     await requireAdminUser()
     const trimmed = input.name.trim()
-    if (!trimmed) return { success: false, error: 'Stage name is required' }
+    if (!trimmed) return { success: false, error: 'Stage name is required', errorKey: 'admin.stageNameRequired' }
 
     if (await stageNameExists(trimmed)) {
-      return { success: false, error: 'Stage name already exists' }
+      return { success: false, error: 'Stage name already exists', errorKey: 'admin.stageNameDuplicate' }
     }
 
     await prisma.sub_task_stages.create({
@@ -123,6 +125,7 @@ export async function createSubTaskStage(input: {
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Failed to create stage',
+      errorKey: 'admin.stageCreateFailed',
     }
   }
 }
@@ -135,12 +138,12 @@ export async function deactivateSubTaskStage(id: string): Promise<StageActionRes
       select: { isOthers: true, name: true },
     })
 
-    if (!stage) return { success: false, error: 'Stage not found' }
+    if (!stage) return { success: false, error: 'Stage not found', errorKey: 'admin.stageNotFound' }
     if (stage.name === 'Completed') {
-      return { success: false, error: 'Completed stage cannot be deactivated' }
+      return { success: false, error: 'Completed stage cannot be deactivated', errorKey: 'admin.stageCompletedCannotDeactivate' }
     }
     if (stage?.isOthers) {
-      return { success: false, error: 'Others stage cannot be deactivated' }
+      return { success: false, error: 'Others stage cannot be deactivated', errorKey: 'admin.stageOthersCannotDeactivate' }
     }
 
     await prisma.sub_task_stages.update({
@@ -155,6 +158,7 @@ export async function deactivateSubTaskStage(id: string): Promise<StageActionRes
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Failed to deactivate stage',
+      errorKey: 'admin.stageDeactivateFailed',
     }
   }
 }
@@ -175,6 +179,7 @@ export async function activateSubTaskStage(id: string): Promise<StageActionResul
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Failed to activate stage',
+      errorKey: 'admin.stageActivateFailed',
     }
   }
 }
@@ -192,15 +197,15 @@ export async function deleteSubTaskStage(id: string): Promise<StageActionResult>
       },
     })
 
-    if (!stage) return { success: false, error: 'Stage not found' }
+    if (!stage) return { success: false, error: 'Stage not found', errorKey: 'admin.stageNotFound' }
     if (stage.name === 'Completed') {
-      return { success: false, error: 'Completed stage cannot be deleted' }
+      return { success: false, error: 'Completed stage cannot be deleted', errorKey: 'admin.stageCompletedCannotDelete' }
     }
     if (stage.isOthers) {
-      return { success: false, error: 'Others stage cannot be deleted' }
+      return { success: false, error: 'Others stage cannot be deleted', errorKey: 'admin.stageOthersCannotDelete' }
     }
     if (stage._count.subTasks > 0) {
-      return { success: false, error: 'Stage is used by sub-tasks and cannot be deleted' }
+      return { success: false, error: 'Stage is used by sub-tasks and cannot be deleted', errorKey: 'admin.stageInUse' }
     }
 
     await prisma.sub_task_stages.delete({ where: { id } })
@@ -212,6 +217,7 @@ export async function deleteSubTaskStage(id: string): Promise<StageActionResult>
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Failed to delete stage',
+      errorKey: 'admin.stageDeleteFailed',
     }
   }
 }

@@ -1,6 +1,9 @@
+'use client'
+
 import React from 'react'
 import { cn } from '@/lib/utils'
 import { resolveStorageAlertVisualState } from '@/lib/storage-alert-visual'
+import { useTranslations } from '@/lib/i18n/client'
 
 export function StorageAlertRail({
   usedPercent,
@@ -9,6 +12,7 @@ export function StorageAlertRail({
   usedPercent: number | null
   thresholdPct: number
 }) {
+  const t = useTranslations()
   const visualState = resolveStorageAlertVisualState({
     usedPercent,
     thresholdPct,
@@ -16,11 +20,15 @@ export function StorageAlertRail({
   const meterAttributes = visualState.meterRole
     ? {
         role: visualState.meterRole,
-        'aria-label': 'Current disk usage',
+        'aria-label': t('admin.currentDiskUsage'),
         'aria-valuemin': 0,
         'aria-valuemax': 100,
         'aria-valuenow': visualState.meterValue,
-        'aria-valuetext': visualState.ariaValueText,
+        'aria-valuetext': visualState.alertsOff
+          ? t('admin.diskFullAlertsOff', { percent: visualState.currentPct! })
+          : t(visualState.wouldAlertNow ? 'admin.diskFullWouldAlert' : 'admin.diskFullThreshold', {
+              percent: visualState.currentPct!, threshold: visualState.markerPct!,
+            }),
       }
     : {}
 
@@ -53,17 +61,17 @@ export function StorageAlertRail({
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-muted-foreground">
         <span>
-          Current disk{' '}
+          {t('admin.currentDisk')}{' '}
           <strong className="font-mono font-semibold tabular-nums text-foreground">
             {visualState.currentPct == null
-              ? 'unknown'
+              ? t('admin.unknownLower')
               : `${visualState.currentPct}%`}
           </strong>
         </span>
         <span>
-          Alert threshold{' '}
+          {t('admin.alertThreshold')}{' '}
           <strong className="font-mono font-semibold tabular-nums text-foreground">
-            {visualState.alertsOff ? 'off' : `${visualState.markerPct}%`}
+            {visualState.alertsOff ? t('admin.offLower') : `${visualState.markerPct}%`}
           </strong>
         </span>
       </div>

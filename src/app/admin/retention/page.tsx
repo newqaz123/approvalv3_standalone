@@ -6,10 +6,16 @@ import { isEligibleForAutoArchive } from '@/lib/retention-policy'
 import { RetentionPolicyForm } from '@/components/admin/retention-policy-form'
 import { RetentionRequestList } from '@/components/admin/retention-request-list'
 import { BackButton } from '@/components/admin/back-button'
+import { createTranslator } from '@/lib/i18n/messages'
+import { getRequestLocale } from '@/lib/i18n/server'
 
-export const metadata = { title: 'Request Retention | Admin' }
+export async function generateMetadata() {
+  const t = createTranslator(await getRequestLocale())
+  return { title: `${t('admin.retention')} | ${t('admin.admin')}` }
+}
 
 export default async function RetentionPage() {
+  const t = createTranslator(await getRequestLocale())
   await requireAdmin()
   const [settings, requests] = await Promise.all([
     getRetentionSettings(),
@@ -40,10 +46,10 @@ export default async function RetentionPage() {
         <BackButton />
         <h1 className="flex items-center gap-2 text-3xl font-bold">
           <Archive className="h-8 w-8 text-muted-foreground" />
-          Request Retention
+          {t('admin.retention')}
         </h1>
         <p className="mt-2 text-muted-foreground">
-          Archive hides a request. Unarchive brings it back. Hard-delete is only for archived rows and cannot be undone.
+          {t('admin.retentionDescription')}
         </p>
       </div>
 
@@ -51,17 +57,17 @@ export default async function RetentionPage() {
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <div className="rounded-lg border bg-card p-4">
-          <p className="text-sm font-medium text-muted-foreground">Active</p>
+          <p className="text-sm font-medium text-muted-foreground">{t('admin.activeRequestsCountLabel')}</p>
           <p className="mt-1 text-2xl font-bold">{requests.filter((request) => !request.isArchived).length}</p>
         </div>
         <div className="rounded-lg border bg-card p-4">
-          <p className="text-sm font-medium text-muted-foreground">Archived</p>
+          <p className="text-sm font-medium text-muted-foreground">{t('admin.archivedRequestsCountLabel')}</p>
           <p className="mt-1 text-2xl font-bold text-amber-600">
             {requests.filter((request) => request.isArchived).length}
           </p>
         </div>
         <div className="rounded-lg border bg-card p-4">
-          <p className="text-sm font-medium text-muted-foreground">Ready to auto-archive</p>
+          <p className="text-sm font-medium text-muted-foreground">{t('admin.readyToAutoArchive')}</p>
           <p className="mt-1 text-2xl font-bold">{settings.eligibleCount}</p>
         </div>
       </div>

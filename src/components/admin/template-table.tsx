@@ -26,6 +26,7 @@ import {
 import { setTemplateDefault, toggleTemplateStatus, deleteTemplate } from '@/server-actions/templates'
 import { AdminCard, AdminCardsEmptyState } from '@/components/mobile/admin-card'
 import { FileText, CheckCircle2, XCircle, Power, Calendar, MoreVertical } from 'lucide-react'
+import { useTranslations } from '@/lib/i18n/client'
 
 interface Template {
   id: string
@@ -43,6 +44,7 @@ interface TemplatesTableProps {
 }
 
 export function TemplatesTable({ data }: TemplatesTableProps) {
+  const t = useTranslations()
   const [actioningId, setActioningId] = useState<string | null>(null)
 
   const handleSetDefault = async (id: string) => {
@@ -51,7 +53,7 @@ export function TemplatesTable({ data }: TemplatesTableProps) {
       await setTemplateDefault(id)
       window.location.reload()
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to set as default')
+      alert(t('admin.setDefaultFailed'))
     } finally {
       setActioningId(null)
     }
@@ -63,14 +65,14 @@ export function TemplatesTable({ data }: TemplatesTableProps) {
       await toggleTemplateStatus(id)
       window.location.reload()
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to toggle status')
+      alert(t('admin.setStatusFailed'))
     } finally {
       setActioningId(null)
     }
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Permanently delete this template? This cannot be undone. Existing requests will not be affected.')) {
+    if (!confirm(t('admin.confirmDeleteTemplate'))) {
       return
     }
 
@@ -79,7 +81,7 @@ export function TemplatesTable({ data }: TemplatesTableProps) {
       await deleteTemplate(id)
       window.location.reload()
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to delete template')
+      alert(t('admin.deleteTemplateFailed'))
     } finally {
       setActioningId(null)
     }
@@ -88,17 +90,17 @@ export function TemplatesTable({ data }: TemplatesTableProps) {
   const columns: ColumnDef<Template>[] = [
     {
       accessorKey: 'name',
-      header: 'Internal Name',
+      header: t('admin.internalName'),
       cell: ({ row }) => row.getValue('name'),
     },
     {
       accessorKey: 'title',
-      header: 'Title',
+      header: t('admin.title'),
       cell: ({ row }) => row.getValue('title'),
     },
     {
       accessorKey: 'description',
-      header: 'Description',
+      header: t('admin.description'),
       cell: ({ row }) => {
         const desc = row.getValue('description') as string
         return (
@@ -110,13 +112,13 @@ export function TemplatesTable({ data }: TemplatesTableProps) {
     },
     {
       accessorKey: 'isDefault',
-      header: 'Default',
+      header: t('admin.default'),
       cell: ({ row }) => {
         const isDefault = row.getValue('isDefault') as boolean
         return isDefault ? (
           <span className="flex items-center gap-1 text-green-600 font-medium">
             <CheckCircle2 className="h-4 w-4" />
-            Yes
+            {t('admin.yes')}
           </span>
         ) : (
           <Button
@@ -126,14 +128,14 @@ export function TemplatesTable({ data }: TemplatesTableProps) {
             disabled={actioningId === row.original.id}
             className="h-7 px-2 text-xs"
           >
-            Set as Default
+            {t('admin.setDefault')}
           </Button>
         )
       },
     },
     {
       accessorKey: 'isActive',
-      header: 'Status',
+      header: t('common.status'),
       cell: ({ row }) => {
         const isActive = row.getValue('isActive') as boolean
         const isDefault = row.getValue('isDefault') as boolean
@@ -149,7 +151,7 @@ export function TemplatesTable({ data }: TemplatesTableProps) {
                 size="sm"
                 onClick={() => handleToggleStatus(row.original.id)}
                 disabled={actioningId === row.original.id}
-                title={isActive ? 'Deactivate' : 'Activate'}
+                title={isActive ? t('admin.deactivate') : t('admin.activate')}
               >
                 <Power className={`h-4 w-4 ${isActive ? 'text-yellow-600' : ''}`} />
               </Button>
@@ -160,7 +162,7 @@ export function TemplatesTable({ data }: TemplatesTableProps) {
     },
     {
       accessorKey: 'createdAt',
-      header: 'Created',
+      header: t('admin.created'),
       cell: ({ row }) => {
         const date = new Date(row.getValue('createdAt') as string)
         return date.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })
@@ -168,19 +170,19 @@ export function TemplatesTable({ data }: TemplatesTableProps) {
     },
     {
       id: 'actions',
-      header: 'Actions',
+      header: t('admin.actions'),
       cell: ({ row }) => (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" className="h-11 w-11 p-0">
-              <span className="sr-only">Open menu</span>
+              <span className="sr-only">{t('admin.openMenu')}</span>
               <MoreVertical className="h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem asChild>
               <Link href={`/admin/templates/${row.original.id}`}>
-                Edit
+                {t('admin.edit')}
               </Link>
             </DropdownMenuItem>
             <DropdownMenuItem
@@ -188,7 +190,7 @@ export function TemplatesTable({ data }: TemplatesTableProps) {
               disabled={actioningId === row.original.id || row.original.isDefault}
               className="text-destructive focus:text-destructive"
             >
-              Delete
+              {t('admin.delete')}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -220,41 +222,41 @@ export function TemplatesTable({ data }: TemplatesTableProps) {
                 }}
                 details={[
                   {
-                    label: 'Name',
+                    label: t('admin.name'),
                     value: template.name,
                     icon: <FileText className="h-3.5 w-3.5" />,
                   },
                   {
-                    label: 'Description',
+                    label: t('admin.description'),
                     value: template.description,
                   },
                   {
-                    label: 'Created',
+                    label: t('admin.created'),
                     value: new Date(template.createdAt).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }),
                     icon: <Calendar className="h-3.5 w-3.5" />,
                   },
                 ].filter(Boolean)}
                 badges={[
-                  ...(isDefault ? [{ label: 'Default', variant: 'success' as const }] : []),
+                  ...(isDefault ? [{ label: t('admin.default'), variant: 'success' as const }] : []),
                 ]}
                 actions={[
                   ...(!isDefault ? [{
-                    label: 'Set as Default',
+                    label: t('admin.setDefault'),
                     onClick: () => handleSetDefault(template.id),
                     disabled: actioningId === template.id,
                   }] : []),
                   ...(!isDefault ? [{
-                    label: isActive ? 'Deactivate' : 'Activate',
+                    label: isActive ? t('admin.deactivate') : t('admin.activate'),
                     onClick: () => handleToggleStatus(template.id),
                     disabled: actioningId === template.id,
                   }] : []),
                   {
-                    label: 'Edit',
+                    label: t('admin.edit'),
                     asChild: true,
                     href: `/admin/templates/${template.id}`,
                   },
                   {
-                    label: 'Delete',
+                    label: t('admin.delete'),
                     onClick: () => handleDelete(template.id),
                     destructive: true,
                     disabled: actioningId === template.id || isDefault,
@@ -265,8 +267,8 @@ export function TemplatesTable({ data }: TemplatesTableProps) {
           })
         ) : (
           <AdminCardsEmptyState
-            message="No templates found"
-            submessage="Create one to get started"
+            message={t('admin.noTemplates')}
+            submessage={t('admin.createTemplateToStart')}
           />
         )}
       </div>
@@ -304,7 +306,7 @@ export function TemplatesTable({ data }: TemplatesTableProps) {
             ) : (
               <TableRow>
                 <TableCell colSpan={columns.length} className="h-24 text-center">
-                  No templates found. Create one to get started.
+                  {t('admin.noTemplatesDescription')}
                 </TableCell>
               </TableRow>
             )}

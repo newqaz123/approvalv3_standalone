@@ -1,3 +1,4 @@
+import { createTranslator } from '@/lib/i18n/messages'
 // Clean-start tree flag icons follow-up (owner-approved bounded UI).
 // Render harness: react-dom/server renderToStaticMarkup (sibling UI pattern:
 // tests/regression/clean-start-ui-tree.test.ts). Pure props snapshot only:
@@ -15,7 +16,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import type { AssignmentNode, OrganizationUnitNode, PositionNode, TeamNode } from '@/lib/organization/model'
 import type { WorkspaceSnapshot } from '@/lib/organization/workspace-admin'
 import { OrganizationWorkspace } from '@/components/organization/OrganizationWorkspace'
-import { SHARE_REQUESTS_LABEL, UnitSidePanel } from '@/components/organization/UnitSidePanel'
+import { UnitSidePanel } from '@/components/organization/UnitSidePanel'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 
@@ -170,7 +171,7 @@ describe('settings labels preserved', () => {
 
   it('the exported sharing label stays the full sentence', () => {
     assert.equal(
-      SHARE_REQUESTS_LABEL,
+      createTranslator('en')('admin.requestSharingLabel'),
       'Share this unit’s requests with the rest of the department',
     )
   })

@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { previewReplacementChain, restartStrandedAttempt } from '@/server-actions/approvals'
 import type { ReplacementChainPreview } from '@/server-actions/approvals'
+import { useTranslations } from '@/lib/i18n/client'
 
 /** The restart reason is required: trimmed non-empty text. */
 export function restartReasonValid(reason: string): boolean {
@@ -81,15 +82,16 @@ export function ReplacementChainPreviewView({
 }: {
   preview: ReplacementChainPreview
 }) {
+  const t = useTranslations()
   return (
     <div data-testid="restart-preview" className="space-y-2 rounded-md border p-3">
-      <p className="text-sm font-medium">Replacement chain preview</p>
+      <p className="text-sm font-medium">{t('admin.replacementPreview')}</p>
       <p className="text-sm text-muted-foreground">
-        {`Built from current organization settings (attempt phase ${preview.phase}). Restart creates a new attempt; it grants no approval.`}
+        {t('admin.restartPreviewHelp', { phase: preview.phase })}
       </p>
       {preview.autoApproved ? (
         <p className="text-sm" data-testid="restart-preview-auto-approved">
-          The new attempt would be auto-approved (origin at or above the limit).
+          {t('admin.restartAutoApproved')}
         </p>
       ) : null}
       <ol className="space-y-1">
@@ -100,8 +102,8 @@ export function ReplacementChainPreviewView({
             className="text-sm"
           >
             {step.skipped
-              ? `Step ${step.order} — skipped (vacant)`
-              : `Step ${step.order} — ${step.candidates.map((candidate) => candidate.name).join(', ')}`}
+              ? t('admin.vacantStep', { order: step.order })
+              : t('admin.stepPosition', { order: step.order, name: step.candidates.map(candidate => candidate.name).join(', ') })}
           </li>
         ))}
       </ol>
@@ -134,6 +136,7 @@ export function RestartAttemptDialogView({
   onRestart?: () => void
   onClose?: () => void
 }) {
+  const t = useTranslations()
   const confirmEnabled = restartConfirmEnabled({
     reason,
     instanceId,
@@ -148,32 +151,30 @@ export function RestartAttemptDialogView({
       data-testid="restart-attempt-dialog"
       className="space-y-3 rounded-lg border bg-card p-4"
     >
-      <h3 className="text-base font-semibold">Restart stranded attempt</h3>
+      <h3 className="text-base font-semibold">{t('admin.restartStranded')}</h3>
       <p className="text-sm text-muted-foreground">
-        Only application admins may restart an attempt whose saved approvers are all inactive. A
-        reason is required; the old attempt and its decisions are preserved and a new attempt is
-        created from current organization settings. Restart itself grants no approval.
+        {t('admin.restartStrandedHelp')}
       </p>
       {loading ? (
-        <p className="text-sm text-muted-foreground">Loading replacement chain preview…</p>
+        <p className="text-sm text-muted-foreground">{t('admin.loadingReplacement')}</p>
       ) : null}
       {preview && previewInstanceId === instanceId ? (
         <ReplacementChainPreviewView preview={preview} />
       ) : null}
       <div className="space-y-2">
         <Label htmlFor="restart-reason-input">
-          Reason (required)
+          {t('admin.reasonRequired')}
         </Label>
         <Textarea
           id="restart-reason-input"
           data-testid="restart-reason-input"
           value={reason}
           onChange={(event) => onReasonChange?.(event.target.value)}
-          placeholder="Why this stranded attempt is being restarted"
+          placeholder={t('admin.restartReasonPlaceholder')}
           className="min-h-20"
         />
         {!restartReasonValid(reason) ? (
-          <p className="text-xs text-muted-foreground">A reason is required before restarting.</p>
+          <p className="text-xs text-muted-foreground">{t('admin.restartReasonRequired')}</p>
         ) : null}
       </div>
       {error ? (
@@ -181,7 +182,7 @@ export function RestartAttemptDialogView({
       ) : null}
       {restarted ? (
         <p role="status" className="text-sm text-muted-foreground">
-          Restarted. The old attempt is preserved as history.
+          {t('admin.restartSucceeded')}
         </p>
       ) : null}
       <div className="flex flex-wrap gap-2">
@@ -193,11 +194,11 @@ export function RestartAttemptDialogView({
             onRestart?.()
           }}
         >
-          Restart attempt
+          {t('admin.restartAttempt')}
         </Button>
         {onClose ? (
           <Button type="button" variant="outline" data-testid="restart-close" onClick={onClose}>
-            Close
+            {t('admin.close')}
           </Button>
         ) : null}
       </div>
@@ -227,6 +228,7 @@ export function RestartAttemptDialog({
   const [reason, setReason] = useState('')
   const [loading, setLoading] = useState(true)
   const [restarting, setRestarting] = useState(false)
+  const t = useTranslations()
   const [error, setError] = useState<string | null>(null)
   const [restarted, setRestarted] = useState(false)
 
@@ -249,7 +251,7 @@ export function RestartAttemptDialog({
         if (cancelled) return
         setPreview(null)
         setPreviewInstanceId(null)
-        setError(err instanceof Error ? err.message : String(err))
+        setError(t('admin.restartPreviewFailed'))
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -278,7 +280,7 @@ export function RestartAttemptDialog({
       setRestarted(true)
       onRestarted?.(result)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(t('admin.restartFailed'))
     } finally {
       setRestarting(false)
     }

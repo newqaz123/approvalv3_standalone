@@ -1,3 +1,4 @@
+import { createTranslator } from '@/lib/i18n/messages'
 // Clean-start unit side panel (Plan C Task 5).
 // Component harness: renderToStaticMarkup (sibling UI pattern:
 // tests/regression/clean-start-ui-tree.test.ts).
@@ -284,11 +285,15 @@ describe('UnitSidePanel component harness', () => {
     assert.match(html, /aria-label="Solution capability information"/)
 
     const panel = read('src/components/organization/UnitSidePanel.tsx')
-    assert.match(panel, /On: people in this unit and sister units in the same department can see these requests\./)
-    assert.match(panel, /Off: only this unit and managers above it/)
-    assert.match(panel, /Does not grant approval rights\./)
-    assert.match(panel, /Grants people in this unit permission to submit and work on solutions/)
-    assert.match(panel, /does not grant approval rights\./)
+    assert.match(panel, /admin\.requestSharingHelp/)
+    const sharingHelp = createTranslator('en')('admin.requestSharingHelp')
+    assert.match(sharingHelp, /On: people in this unit and sister units in the same department can see these requests\./)
+    assert.match(sharingHelp, /Off: only this unit and managers above it/)
+    assert.match(sharingHelp, /Does not grant approval rights\./)
+    assert.match(panel, /admin\.solutionWorkHelp/)
+    const solutionsHelp = createTranslator('en')('admin.solutionWorkHelp')
+    assert.match(solutionsHelp, /Grants people in this unit permission to submit and work on solutions/)
+    assert.match(solutionsHelp, /does not grant approval rights\./)
     assert.match(panel, /<TooltipTrigger asChild>/)
     assert.match(panel, /type="button"/)
   })
@@ -304,9 +309,9 @@ describe('UnitSidePanel component harness', () => {
   })
 
   it('formats effective route source labels per phase', () => {
-    assert.equal(formatRouteSourceLabel('ROOT_DEFAULT', 'Company'), 'Uses company default')
-    assert.equal(formatRouteSourceLabel('INHERITED', 'Operations'), 'Inherited from Operations')
-    assert.equal(formatRouteSourceLabel('CUSTOM', 'Operations'), 'Custom at this unit')
+    assert.equal(formatRouteSourceLabel(createTranslator('en'), 'ROOT_DEFAULT', 'Company'), 'Uses company default')
+    assert.equal(formatRouteSourceLabel(createTranslator('en'), 'INHERITED', 'Operations'), 'Inherited from Operations')
+    assert.equal(formatRouteSourceLabel(createTranslator('en'), 'CUSTOM', 'Operations'), 'Custom at this unit')
   })
 })
 
@@ -498,10 +503,11 @@ describe('createOrganizationUnit / updateUnitSettings / setUnitManager fake db',
 describe('C5 source contracts', () => {
   it('keeps exact toggle copy, leftover SECTION, Serializable uniqueness, and validateOrganization before manager write', () => {
     const panel = read('src/components/organization/UnitSidePanel.tsx')
-    assert.match(panel, /Request visibility/)
-    assert.match(panel, /Can work on solutions/)
-    assert.match(panel, /export const SHARE_REQUESTS_LABEL/)
-    assert.doesNotMatch(panel, /<span>\{SHARE_REQUESTS_LABEL\}<\/span>/)
+    assert.match(panel, /admin\.requestVisibility/)
+    assert.equal(createTranslator('en')('admin.requestVisibility'), 'Request visibility')
+    assert.match(panel, /admin\.canWorkOnSolutions/)
+    assert.equal(createTranslator('en')('admin.canWorkOnSolutions'), 'Can work on solutions')
+    assert.doesNotMatch(panel, /<span>.*admin\.requestSharingLabel.*<\/span>/)
     assert.doesNotMatch(panel, /Manage \$\{/, 'unit panel title must be the unit name alone')
     assert.doesNotMatch(panel, /ApprovalChainsPanel/)
 

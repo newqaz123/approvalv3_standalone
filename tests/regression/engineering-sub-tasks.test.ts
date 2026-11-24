@@ -1,3 +1,4 @@
+import { createTranslator } from '@/lib/i18n/messages'
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -908,12 +909,12 @@ describe("admin sub-task stage management wiring", () => {
 		assert.match(component, /'use client'/);
 		assert.match(component, /useEffect/);
 		assert.match(component, /setStages\(initialStages\)/);
-		assert.match(stagePage, /Sub-task stages/);
+		const en = createTranslator('en');
+		assert.match(stagePage, /admin\.stagesTitle/);
+		assert.equal(en('admin.stagesTitle'), 'Sub-task stages');
 		assert.match(stagePage, /p-8/);
-		assert.match(
-			stagePage,
-			/Manage stages used in engineering request sub-tasks/,
-		);
+		assert.match(stagePage, /admin\.stagesDescription/);
+		assert.equal(en('admin.stagesDescription'), 'Manage stages used in engineering request sub-tasks.');
 		assert.match(component, /initialStages/);
 		assert.match(component, /isActive/);
 		assert.match(component, /updateSubTaskStage/);
@@ -926,9 +927,12 @@ describe("admin sub-task stage management wiring", () => {
 		assert.match(component, /DropdownMenuItem/);
 		assert.match(component, /MoreHorizontal/);
 		assert.match(component, /GripVertical/);
-		assert.match(component, /Save changes/);
-		assert.match(component, /Add stage card/);
-		assert.match(component, /Stage list card/);
+		assert.match(component, /admin\.saveChanges/);
+		assert.equal(en('admin.saveChanges'), 'Save changes');
+		assert.match(component, /admin\.addStageCard/);
+		assert.equal(en('admin.addStageCard'), 'Add stage card');
+		assert.match(component, /admin\.stageListCard/);
+		assert.equal(en('admin.stageListCard'), 'Stage list card');
 		assert.match(component, /isCompletedDefaultStage/);
 		assert.match(component, /stage\.name === 'Completed'/);
 		assert.match(component, /h-11/);

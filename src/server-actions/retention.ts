@@ -1,5 +1,6 @@
 'use server'
 
+import type { MessageKey } from '@/lib/i18n/messages'
 import { revalidatePath } from 'next/cache'
 import { requireAdmin } from '@/lib/auth'
 import prisma from '@/lib/prisma'
@@ -80,9 +81,9 @@ export async function saveRetentionSettings(input: {
   archiveAfterDays: number
   archiveStatuses: string[]
   archiveClock: string
-}): Promise<{ success: true; settings: RetentionSettingsView } | { success: false; error: string }> {
+}): Promise<{ success: true; settings: RetentionSettingsView } | { success: false; error: string; errorKey: MessageKey }> {
   const adminId = await requireAdmin()
-  if (!adminId) return { success: false, error: 'Unauthorized - Admin access required' }
+  if (!adminId) return { success: false, error: 'Unauthorized - Admin access required', errorKey: 'admin.adminRequired' }
 
   const existing = await readRetentionSettingsRow()
   const clock = parseArchiveClock(input.archiveClock)
@@ -134,10 +135,10 @@ export async function saveRetentionSettings(input: {
 }
 
 export async function runArchiveNow(): Promise<
-  { success: true; archived: number } | { success: false; error: string }
+  { success: true; archived: number } | { success: false; error: string; errorKey: MessageKey }
 > {
   const adminId = await requireAdmin()
-  if (!adminId) return { success: false, error: 'Unauthorized - Admin access required' }
+  if (!adminId) return { success: false, error: 'Unauthorized - Admin access required', errorKey: 'admin.adminRequired' }
 
   try {
     const result = await applyRetentionArchive('manual')
@@ -145,6 +146,6 @@ export async function runArchiveNow(): Promise<
     return { success: true, archived: result.archived }
   } catch (error) {
     console.error('Error running archive now:', error)
-    return { success: false, error: 'Failed to run archive' }
+    return { success: false, error: 'Failed to run archive', errorKey: 'admin.runArchiveFailed' }
   }
 }

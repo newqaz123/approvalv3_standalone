@@ -3,12 +3,16 @@ import { ChevronLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { SubTaskStageSettings } from '@/components/admin/sub-task-stage-settings'
 import { getSubTaskStagesForAdmin } from '@/server-actions/sub-task-stages'
+import { createTranslator } from '@/lib/i18n/messages'
+import { getRequestLocale } from '@/lib/i18n/server'
 
-export const metadata = {
-  title: 'Sub-task Stages | Admin',
+export async function generateMetadata() {
+  const t = createTranslator(await getRequestLocale())
+  return { title: `${t('admin.stagesTileTitle')} | ${t('admin.admin')}` }
 }
 
 export default async function AdminSubTaskStagesPage() {
+  const t = createTranslator(await getRequestLocale())
   const subTaskStages = await getSubTaskStagesForAdmin()
 
   return (
@@ -17,13 +21,13 @@ export default async function AdminSubTaskStagesPage() {
         <Button asChild variant="ghost" className="w-fit gap-2 px-0">
           <Link href="/admin">
             <ChevronLeft className="h-4 w-4" />
-            Admin
+            {t('admin.admin')}
           </Link>
         </Button>
         <div>
-          <h1 className="text-3xl font-bold">Sub-task stages</h1>
+          <h1 className="text-3xl font-bold">{t('admin.stagesTitle')}</h1>
           <p className="mt-2 text-muted-foreground">
-            Manage stages used in engineering request sub-tasks.
+            {t('admin.stagesDescription')}
           </p>
         </div>
       </div>

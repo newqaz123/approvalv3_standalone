@@ -31,6 +31,7 @@ import {
 import { InTreeModal } from '@/components/organization/InTreeModal'
 import { RouteEditorPanel } from '@/components/organization/RouteEditorPanel'
 import { RestartAttemptDialog } from '@/components/organization/RestartAttemptDialog'
+import { useTranslations } from '@/lib/i18n/client'
 
 const PHASES: readonly ApprovalPhase[] = ['REQUEST', 'SOLUTION', 'FINAL']
 const PHASE_LABEL: Record<ApprovalPhase, string> = {
@@ -166,6 +167,7 @@ export function ChainsVersionSummary({
   version: ApprovalChainsData['versions'][number]
   positionNames: ReadonlyMap<string, string>
 }) {
+  const t = useTranslations()
   const stepNames = version.steps
     .map((step) => positionNames.get(step.positionId) ?? step.positionId)
     .join(' → ')
@@ -174,7 +176,7 @@ export function ChainsVersionSummary({
     : '—'
   return (
     <p className="text-sm">
-      {`Steps: ${version.steps.length === 0 ? '(none)' : stepNames} · Approval limit: ${limit}`}
+      {t('admin.chainVersionSummary', { steps: stepNames || t('admin.noRouteSteps'), limit })}
     </p>
   )
 }
@@ -196,19 +198,19 @@ export function RouteExceptionDeletionSection({
   onConfirm: () => void
   onCancel: () => void
 }) {
+  const t = useTranslations()
   if (!confirming) return null
   return (
     <div
       data-testid="chains-exception-delete-confirmation"
       role="alertdialog"
-      aria-label={`Confirm removal of ${unitName} ${PHASE_LABEL[phase]} exception`}
+      aria-label={t('admin.confirmRemoveException', { name: unitName, phase: PHASE_LABEL[phase] })}
       className="space-y-3 rounded-md border border-destructive/40 bg-destructive/5 p-3"
     >
       <div className="space-y-1">
-        <p className="text-sm font-medium">{`Remove ${unitName} ${PHASE_LABEL[phase]} exception?`}</p>
+        <p className="text-sm font-medium">{t('admin.removeExceptionQuestion', { name: unitName, phase: PHASE_LABEL[phase] })}</p>
         <p className="text-xs text-muted-foreground">
-          Future submissions will use the nearest inherited published route. Existing approval history and
-          captured route snapshots remain unchanged; only this unit&apos;s published exception is retired.
+          {t('admin.removeExceptionHelp')}
         </p>
       </div>
       {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
@@ -221,7 +223,7 @@ export function RouteExceptionDeletionSection({
           disabled={deleting}
           onClick={onConfirm}
         >
-          {deleting ? 'Removing…' : 'Remove exception'}
+          {deleting ? t('admin.removing') : t('admin.removeException')}
         </Button>
         <Button
           type="button"
@@ -231,7 +233,7 @@ export function RouteExceptionDeletionSection({
           disabled={deleting}
           onClick={onCancel}
         >
-          Cancel
+          {t('common.cancel')}
         </Button>
       </div>
     </div>
@@ -263,6 +265,7 @@ export function CreateExceptionDialog({
   onCreate,
   onEdit,
 }: CreateExceptionDialogProps) {
+  const t = useTranslations()
   const eligibleUnits = useMemo(
     () => units.filter((unit) => (
       unit.isActive
@@ -312,15 +315,13 @@ export function CreateExceptionDialog({
       open={open}
       onClose={onClose}
       testId="chains-create-exception-dialog"
-      title="Create unit exception"
+      title={t('admin.createUnitException')}
       titleId="chains-create-exception-title"
       className="max-w-xl"
     >
       <div className="space-y-5 p-6">
         <p className="text-sm text-muted-foreground">
-          A custom chain replaces the inherited chain for this unit and all of its descendants unless
-          overridden by their own exception; it does not append to the inherited chain. Nothing is saved
-          until you publish.
+          {t('admin.createExceptionHelp')}
         </p>
 
         {eligibleUnits.length === 0 ? (
@@ -328,16 +329,16 @@ export function CreateExceptionDialog({
             data-testid="chains-create-exception-no-units"
             className="rounded-md border bg-muted/20 px-3 py-3 text-sm text-muted-foreground"
           >
-            There are no active non-root units available for a unit exception.
+            {t('admin.noExceptionUnits')}
           </div>
         ) : (
           <>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="chains-create-exception-unit">Target unit</Label>
+                <Label htmlFor="chains-create-exception-unit">{t('admin.exceptionTargetUnit')}</Label>
                 <Select value={selectedUnitId} onValueChange={setSelectedUnitId}>
                   <SelectTrigger id="chains-create-exception-unit" data-testid="chains-create-exception-unit-select">
-                    <SelectValue placeholder="Select an active unit" />
+                    <SelectValue placeholder={t('admin.selectActiveUnit')} />
                   </SelectTrigger>
                   <SelectContent>
                     {eligibleUnits.map((unit) => (
@@ -347,7 +348,7 @@ export function CreateExceptionDialog({
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="chains-create-exception-phase">Phase</Label>
+                <Label htmlFor="chains-create-exception-phase">{t('admin.phase')}</Label>
                 <Select value={phase} onValueChange={(value) => setPhase(value as ApprovalPhase)}>
                   <SelectTrigger id="chains-create-exception-phase" data-testid="chains-create-exception-phase-select">
                     <SelectValue />
@@ -366,10 +367,9 @@ export function CreateExceptionDialog({
                 data-testid="chains-create-exception-existing"
                 className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-3"
               >
-                <p className="text-sm font-medium">{`${selectedUnit.name} already has a published ${PHASE_LABEL[phase]} exception.`}</p>
+                <p className="text-sm font-medium">{t('admin.existingPublishedException', { name: selectedUnit.name, phase: PHASE_LABEL[phase] })}</p>
                 <p className="text-sm text-muted-foreground">
-                  This unit/phase pair cannot be duplicated. Edit the existing chain instead; its
-                  published history remains intact until a replacement is published.
+                  {t('admin.exceptionAlreadyExists')}
                 </p>
                 <Button
                   type="button"
@@ -377,16 +377,16 @@ export function CreateExceptionDialog({
                   data-testid="chains-create-exception-edit"
                   onClick={handleEdit}
                 >
-                  Edit chain
+                  {t('admin.editChain')}
                 </Button>
               </div>
             ) : selectedUnit && inherited ? (
               <p data-testid="chains-create-exception-inherited" className="text-sm text-muted-foreground">
-                {`The new ${PHASE_LABEL[phase]} chain starts from the published chain inherited from ${inheritedUnit?.name ?? 'an ancestor'}. It will publish for ${selectedUnit.name}; the inherited source is unchanged.`}
+                {t('admin.newExceptionSeeded', { phase: PHASE_LABEL[phase], ancestor: inheritedUnit?.name ?? t('admin.anAncestor'), name: selectedUnit.name })}
               </p>
             ) : selectedUnit ? (
               <p data-testid="chains-create-exception-no-inherited" className="text-sm text-muted-foreground">
-                {`No inherited published ${PHASE_LABEL[phase]} chain is available for ${selectedUnit.name}. The editor will start blank; no placeholder route is fabricated.`}
+                {t('admin.newExceptionBlank', { phase: PHASE_LABEL[phase], name: selectedUnit.name })}
               </p>
             ) : null}
           </>
@@ -399,7 +399,7 @@ export function CreateExceptionDialog({
             data-testid="chains-create-exception-cancel"
             onClick={onClose}
           >
-            Cancel
+            {t('common.cancel')}
           </Button>
           {selectedUnit && localPublished.length === 0 ? (
             <Button
@@ -407,7 +407,7 @@ export function CreateExceptionDialog({
               data-testid="chains-create-exception-submit"
               onClick={handleCreate}
             >
-              Create exception
+              {t('admin.createException')}
             </Button>
           ) : null}
         </div>
@@ -423,6 +423,7 @@ export function ApprovalChainsPanel({
   data: ApprovalChainsData
   initialEditor?: ChainsEditorTarget | null
 }) {
+  const t = useTranslations()
   const [editor, setEditor] = useState(initialEditor)
   const [createExceptionOpen, setCreateExceptionOpen] = useState(false)
   const [strandedId, setStrandedId] = useState<string | null>(null)
@@ -480,12 +481,12 @@ export function ApprovalChainsPanel({
         ?? (editor.scopeUnitId === rootUnit?.id ? 'customize' : 'edit')
     : null
   const editorTitleVerb = editorMode === 'view'
-    ? 'View'
+    ? t('admin.view')
     : editorMode === 'create'
-      ? 'Create'
+      ? t('admin.create')
       : editorMode === 'customize'
-        ? 'Customize'
-        : 'Edit'
+        ? t('admin.customize')
+        : t('admin.edit')
   const seedScopeName = editor?.mode === 'create' && seed
     ? unitNames.get(seed.scopeUnitId) ?? null
     : null
@@ -522,7 +523,7 @@ export function ApprovalChainsPanel({
       )))
       setExceptionDeleteTarget(null)
     } catch (err) {
-      setExceptionDeleteError(err instanceof Error ? err.message : String(err))
+      setExceptionDeleteError(t('admin.removeExceptionFailed'))
     } finally {
       setDeletingException(false)
     }
@@ -573,19 +574,17 @@ export function ApprovalChainsPanel({
   return (
     <section data-testid="chains-panel" className="space-y-6 rounded-lg border bg-card p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-lg font-semibold">Approval chains</h2>
+        <h2 className="text-lg font-semibold">{t('admin.approvalChains')}</h2>
         <a
           href="/admin/organization"
           data-testid="chains-close"
           className="text-sm text-muted-foreground underline-offset-4 hover:underline"
         >
-          Close
+          {t('admin.close')}
         </a>
       </div>
       <p className="text-sm text-muted-foreground">
-        Live routes apply to the next submit. Publishing a root default affects future attempts
-        only — it is not a global on/off switch. Unit exceptions are explicit, versioned
-        overrides; the nearest configured ancestor route applies per phase.
+        {t('admin.chainsHelp')}
       </p>
 
       {rootUnit ? (
@@ -602,7 +601,7 @@ export function ApprovalChainsPanel({
                 className="space-y-2 rounded-md border p-3"
               >
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h3 className="text-sm font-medium">{`Root default — ${PHASE_LABEL[phase]}`}</h3>
+                  <h3 className="text-sm font-medium">{t('admin.rootDefaultPhase', { phase: PHASE_LABEL[phase] })}</h3>
                   <Button
                     type="button"
                     variant="outline"
@@ -610,12 +609,12 @@ export function ApprovalChainsPanel({
                     data-testid={`chains-root-customize-${phase}`}
                     onClick={() => setEditor({ scopeUnitId: rootUnit.id, phase })}
                   >
-                    Customize
+                    {t('admin.customize')}
                   </Button>
                 </div>
                 <ul data-testid={`chains-published-list-${phase}`} className="space-y-1">
                   {published.length === 0 ? (
-                    <li key="empty-published" className="text-sm text-muted-foreground">No published root default.</li>
+                    <li key="empty-published" className="text-sm text-muted-foreground">{t('admin.noRootDefault')}</li>
                   ) : null}
                   {published.map((version) => (
                     <li
@@ -624,7 +623,7 @@ export function ApprovalChainsPanel({
                       className="space-y-1 rounded-md border px-3 py-2"
                     >
                       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                        {`Published · version ${version.version}`}
+                        {t('admin.publishedVersion', { version: version.version })}
                       </p>
                       <ChainsVersionSummary version={version} positionNames={positionNames} />
                     </li>
@@ -638,7 +637,7 @@ export function ApprovalChainsPanel({
 
       <div className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-sm font-medium">Unit exceptions</h3>
+          <h3 className="text-sm font-medium">{t('admin.unitExceptions')}</h3>
           {exceptions.length > 0 ? (
             <Button
               type="button"
@@ -646,13 +645,12 @@ export function ApprovalChainsPanel({
               data-testid="chains-create-exception"
               onClick={() => setCreateExceptionOpen(true)}
             >
-              Create exception
+              {t('admin.createException')}
             </Button>
           ) : null}
         </div>
         <p className="text-sm text-muted-foreground">
-          A custom chain replaces the inherited chain for this unit and its descendants unless overridden
-          by their own exception; it does not append to the inherited chain.
+          {t('admin.exceptionsHelp')}
         </p>
         {exceptions.length === 0 ? (
           <div
@@ -660,8 +658,7 @@ export function ApprovalChainsPanel({
             className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/20 px-3 py-3"
           >
             <p className="text-sm text-muted-foreground">
-              No unit exceptions. Units without their own published route use the nearest configured
-              ancestor route.
+              {t('admin.noExceptions')}
             </p>
             <Button
               type="button"
@@ -669,7 +666,7 @@ export function ApprovalChainsPanel({
               data-testid="chains-create-exception"
               onClick={() => setCreateExceptionOpen(true)}
             >
-              Create exception
+              {t('admin.createException')}
             </Button>
           </div>
         ) : null}
@@ -681,7 +678,7 @@ export function ApprovalChainsPanel({
               className="space-y-1 rounded-md border px-3 py-2"
             >
               <p className="text-sm font-medium">{`${unit.name} — ${PHASE_LABEL[phase]}`}</p>
-              <p className="text-sm text-muted-foreground">Custom at this unit</p>
+              <p className="text-sm text-muted-foreground">{t('admin.customAtUnit')}</p>
               <ChainsVersionSummary version={version} positionNames={positionNames} />
               {exceptionDeleteTarget?.unitId === unit.id && exceptionDeleteTarget.phase === phase ? (
                 <RouteExceptionDeletionSection
@@ -707,7 +704,7 @@ export function ApprovalChainsPanel({
                     data-testid={`chains-exception-view-${unit.id}-${phase}`}
                     onClick={() => setEditor({ scopeUnitId: unit.id, phase, readOnly: true })}
                   >
-                    View
+                    {t('admin.view')}
                   </Button>
                   <Button
                     type="button"
@@ -717,7 +714,7 @@ export function ApprovalChainsPanel({
                     data-action="edit-chain"
                     onClick={() => setEditor({ scopeUnitId: unit.id, phase, mode: 'edit', versionId: version.versionId })}
                   >
-                    Edit chain
+                    {t('admin.editChain')}
                   </Button>
                   <Button
                     type="button"
@@ -731,7 +728,7 @@ export function ApprovalChainsPanel({
                       setExceptionDeleteTarget({ unitId: unit.id, phase })
                     }}
                   >
-                    Remove exception
+                    {t('admin.removeException')}
                   </Button>
                 </div>
               )}
@@ -741,15 +738,13 @@ export function ApprovalChainsPanel({
       </div>
 
       <div className="space-y-2">
-        <h3 className="text-sm font-medium">Stranded attempts</h3>
+        <h3 className="text-sm font-medium">{t('admin.strandedAttempts')}</h3>
         <p className="text-sm text-muted-foreground">
-          Attempts whose saved approvers are all inactive. Restarting requires a reason and
-          preserves the old attempt and its decisions; the new attempt is built from current
-          organization settings.
+          {t('admin.strandedAttemptsHelp')}
         </p>
         <ul data-testid="chains-stranded-list" className="space-y-2">
           {data.strandedAttempts.length === 0 ? (
-            <li key="empty-stranded" className="text-sm text-muted-foreground">No stranded attempts.</li>
+            <li key="empty-stranded" className="text-sm text-muted-foreground">{t('admin.noStrandedAttempts')}</li>
           ) : null}
           {data.strandedAttempts.map((attempt) => (
             <li
@@ -759,7 +754,7 @@ export function ApprovalChainsPanel({
               className="flex flex-wrap items-center gap-2 rounded-md border px-3 py-2"
             >
               <p className="text-sm">
-                {`${attempt.phase} · attempt ${attempt.attempt} · origin ${attempt.originUserId}`}
+                {t('admin.strandedAttemptEntry', { phase: attempt.phase, attempt: attempt.attempt, userId: attempt.originUserId })}
               </p>
               <Button
                 type="button"
@@ -768,7 +763,7 @@ export function ApprovalChainsPanel({
                 data-testid={`chains-stranded-restart-${attempt.instanceId}`}
                 onClick={() => setStrandedId(attempt.instanceId)}
               >
-                Restart…
+                {t('admin.restart')}
               </Button>
             </li>
           ))}
@@ -779,8 +774,8 @@ export function ApprovalChainsPanel({
         open={Boolean(editor && editorUnit)}
         onClose={() => setEditor(null)}
         className="max-w-3xl"
-        title={editor && editorUnit ? `${editorTitleVerb} ${PHASE_LABEL[editor.phase]} approval chain` : 'Approval chain editor'}
-        ariaLabel={editor && editorUnit ? `${editorTitleVerb} approval chain` : 'Approval chain editor'}
+        title={editor && editorUnit ? t('admin.chainEditorPhaseTitle', { action: editorTitleVerb, phase: PHASE_LABEL[editor.phase] }) : t('admin.chainEditor')}
+        ariaLabel={editor && editorUnit ? t('admin.chainEditorTitle', { action: editorTitleVerb }) : t('admin.chainEditor')}
       >
         {editor && editorUnit ? (
           <RouteEditorPanel

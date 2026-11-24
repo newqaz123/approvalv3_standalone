@@ -1,5 +1,8 @@
+'use client'
+
 import React from 'react'
 import Link from 'next/link'
+import { useTranslations } from '@/lib/i18n/client'
 
 /**
  * Header tabs for /admin/organization. Each tab targets exactly one canvas:
@@ -10,18 +13,19 @@ import Link from 'next/link'
  * pre-tab navigation contract used by the e2e specs.
  */
 const TABS = [
-  { key: 'organization', label: 'Organization', href: '/admin/organization', testId: 'header-organization' },
-  { key: 'positions', label: 'Positions', href: '/admin/organization?panel=positions', testId: 'header-positions' },
-  { key: 'chains', label: 'Approval chains', href: '/admin/organization?panel=chains', testId: 'header-approval-chains' },
+  { key: 'organization', label: 'admin.organization', href: '/admin/organization', testId: 'header-organization' },
+  { key: 'positions', label: 'admin.positions', href: '/admin/organization?panel=positions', testId: 'header-positions' },
+  { key: 'chains', label: 'admin.approvalChains', href: '/admin/organization?panel=chains', testId: 'header-approval-chains' },
 ] as const
 
 export type OrganizationTabKey = (typeof TABS)[number]['key']
 
 export function OrganizationTabs({ active }: { active: OrganizationTabKey }) {
+  const t = useTranslations()
   return (
     <nav
       data-testid="organization-tabs"
-      aria-label="Organization canvases"
+      aria-label={t('admin.organizationCanvases')}
       className="organization-tabs flex flex-wrap items-center gap-1 rounded-lg bg-muted p-1"
     >
       {TABS.map((tab) => {
@@ -39,7 +43,7 @@ export function OrganizationTabs({ active }: { active: OrganizationTabKey }) {
                 : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
             }`}
           >
-            {tab.label}
+            {t(tab.label)}
           </Link>
         )
       })}

@@ -12,17 +12,28 @@ import {
   FormField,
   FormItem,
   FormLabel,
-  FormMessage,
+  useFormField,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
-import { createUser, updateUser } from '@/server-actions/users'
+import { saveAdminUser } from '@/server-actions/users'
+import { isMessageKey, type MessageKey } from '@/lib/i18n/messages'
+import { useTranslations } from '@/lib/i18n/client'
+
+function LocalizedFormMessage() {
+  const t = useTranslations()
+  const { error, formMessageId } = useFormField()
+  if (!error) return null
+  return <p id={formMessageId} className="text-[0.8rem] font-medium text-destructive">
+    {t(isMessageKey(error.message) ? error.message : 'admin.invalidFormValue')}
+  </p>
+}
 
 const userFormSchema = z.object({
-  name: z.string().min(2, 'Name must be at least 2 characters'),
-  email: z.string().email('Invalid email address'),
+  name: z.string().min(2, 'admin.nameMinLength' satisfies MessageKey),
+  email: z.string().email('admin.invalidEmail' satisfies MessageKey),
   isAdmin: z.boolean(),
-  password: z.union([z.string().min(8, 'Password must be at least 8 characters'), z.literal('')]).optional(),
+  password: z.union([z.string().min(8, 'admin.passwordMinLength' satisfies MessageKey), z.literal('')]).optional(),
 })
 
 export type UserFormValues = z.infer<typeof userFormSchema>
@@ -34,8 +45,9 @@ interface UserFormProps {
 }
 
 export function UserForm({ initialData, onSuccess, onCancel }: UserFormProps) {
+  const t = useTranslations()
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<MessageKey | null>(null)
 
   const form = useForm<UserFormValues>({
     resolver: zodResolver(userFormSchema),
@@ -58,22 +70,24 @@ export function UserForm({ initialData, onSuccess, onCancel }: UserFormProps) {
         email: data.email,
       }
 
-      if (initialData?.id) {
-        await updateUser({
+      const result = initialData?.id
+        ? await saveAdminUser({
           ...submitData,
           id: initialData.id,
           ...(dirtyFields.isAdmin ? { isAdmin: data.isAdmin } : {}),
         })
-      } else {
-        await createUser({
+        : await saveAdminUser({
           ...submitData,
           isAdmin: data.isAdmin,
           password: data.password || undefined,
         })
+      if (!result.success) {
+        setError(result.errorKey)
+        return
       }
       onSuccess?.()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save user')
+      setError('admin.saveUserFailed')
     } finally {
       setIsSubmitting(false)
     }
@@ -84,7 +98,7 @@ export function UserForm({ initialData, onSuccess, onCancel }: UserFormProps) {
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
-            {error}
+            {t(error)}
           </div>
         )}
 
@@ -93,11 +107,11 @@ export function UserForm({ initialData, onSuccess, onCancel }: UserFormProps) {
           name="name"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Name</FormLabel>
+              <FormLabel>{t('admin.name')}</FormLabel>
               <FormControl>
                 <Input placeholder="John Doe" {...field} />
               </FormControl>
-              <FormMessage />
+              <LocalizedFormMessage />
             </FormItem>
           )}
         />
@@ -107,11 +121,11 @@ export function UserForm({ initialData, onSuccess, onCancel }: UserFormProps) {
           name="email"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Email</FormLabel>
+              <FormLabel>{t('admin.email')}</FormLabel>
               <FormControl>
                 <Input type="email" placeholder="john@example.com" {...field} />
               </FormControl>
-              <FormMessage />
+              <LocalizedFormMessage />
             </FormItem>
           )}
         />
@@ -131,9 +145,9 @@ export function UserForm({ initialData, onSuccess, onCancel }: UserFormProps) {
                 />
               </FormControl>
               <div className="space-y-1 leading-none">
-                <FormLabel>Administrator</FormLabel>
-                <FormDescription>Can open the Admin area.</FormDescription>
-                <FormMessage />
+                <FormLabel>{t('admin.administrator')}</FormLabel>
+                <FormDescription>{t('admin.adminAccessDescription')}</FormDescription>
+                <LocalizedFormMessage />
               </div>
             </FormItem>
           )}
@@ -145,18 +159,18 @@ export function UserForm({ initialData, onSuccess, onCancel }: UserFormProps) {
             name="password"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>Initial Password</FormLabel>
+                <FormLabel>{t('admin.initialPassword')}</FormLabel>
                 <FormControl>
                   <Input
                     type="password"
-                    placeholder="Min 8 characters (default: changeme)"
+                    placeholder={t('admin.initialPasswordPlaceholder')}
                     {...field}
                   />
                 </FormControl>
                 <p className="text-xs text-muted-foreground">
-                  User must change password on first login. Leave blank to use default &quot;changeme&quot;.
+                  {t('admin.initialPasswordHelp')}
                 </p>
-                <FormMessage />
+                <LocalizedFormMessage />
               </FormItem>
             )}
           />
@@ -165,11 +179,11 @@ export function UserForm({ initialData, onSuccess, onCancel }: UserFormProps) {
         <div className="flex justify-end gap-2">
           {onCancel && (
             <Button type="button" variant="outline" onClick={onCancel}>
-              Cancel
+              {t('common.cancel')}
             </Button>
           )}
           <Button type="submit" disabled={isSubmitting}>
-            {isSubmitting ? 'Saving...' : initialData?.id ? 'Update User' : 'Create User'}
+            {isSubmitting ? t('common.saving') : initialData?.id ? t('admin.updateUser') : t('admin.createUser')}
           </Button>
         </div>
       </form>

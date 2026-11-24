@@ -7,8 +7,11 @@ import Link from 'next/link'
 import { AdminPageSkeleton } from '@/components/admin/admin-skeleton'
 import { BackButton } from '@/components/admin/back-button'
 import { richTextToPlainText } from '@/lib/rich-text-sanitizer'
+import { createTranslator } from '@/lib/i18n/messages'
+import { getRequestLocale } from '@/lib/i18n/server'
 
 async function TemplatesList() {
+  const t = createTranslator(await getRequestLocale())
   const templates = await getTemplates({ includeInactive: true })
 
   return (
@@ -18,15 +21,15 @@ async function TemplatesList() {
         <div className="space-y-6">
         <div className="flex justify-between items-center">
           <div>
-            <h1 className="text-2xl font-bold">Request Templates</h1>
+            <h1 className="text-2xl font-bold">{t('admin.templates')}</h1>
             <p className="text-muted-foreground">
-              Manage standardized request templates for users
+              {t('admin.templatesDescription')}
             </p>
           </div>
           <Button asChild>
             <Link href="/admin/templates/new">
               <Plus className="mr-2 h-4 w-4" />
-              Create New
+              {t('admin.createNew')}
             </Link>
           </Button>
         </div>

@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/dialog'
 import { permanentlyDeleteRequests } from '@/server-actions/requests'
 import { useRouter } from 'next/navigation'
+import { useTranslations } from '@/lib/i18n/client'
 
 interface DeleteRequestModalProps {
   mode: 'single' | 'older_than_1_year' | 'all'
@@ -28,6 +29,7 @@ export function DeleteRequestModal({
   requestTitle,
   count,
 }: DeleteRequestModalProps) {
+  const t = useTranslations()
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -37,33 +39,33 @@ export function DeleteRequestModal({
   const getTitle = () => {
     switch (mode) {
       case 'single':
-        return 'Permanently Delete Request'
+        return t('admin.deletePermanentTitle')
       case 'older_than_1_year':
-        return 'Delete Old Requests'
+        return t('admin.deleteOldRequests')
       case 'all':
-        return 'Delete All Deleted Requests'
+        return t('admin.deleteAllDeleted')
     }
   }
 
   const getDescription = () => {
     switch (mode) {
       case 'single':
-        return `This will permanently delete "${requestTitle}" and all its data. This action CANNOT be undone.`
+        return t('admin.deleteSingleDescription', { title: requestTitle ?? '' })
       case 'older_than_1_year':
-        return `This will permanently delete ${count} requests deleted more than 1 year ago. This action CANNOT be undone.`
+        return t('admin.deleteOldDescription', { count: count ?? 0 })
       case 'all':
-        return `This will permanently delete all ${count} deleted requests. This action CANNOT be undone.`
+        return t('admin.deleteAllDescription', { count: count ?? 0 })
     }
   }
 
   const getButtonText = () => {
     switch (mode) {
       case 'single':
-        return 'Permanently Delete'
+        return t('admin.deletePermanently')
       case 'older_than_1_year':
-        return `Delete ${count} Old Requests`
+        return t('admin.deleteOldCount', { count: count ?? 0 })
       case 'all':
-        return `Delete All (${count})`
+        return t('admin.deleteAllCount', { count: count ?? 0 })
     }
   }
 
@@ -74,7 +76,7 @@ export function DeleteRequestModal({
 
     // For bulk operations, require confirmation text
     if (mode !== 'single' && confirmText !== 'PERMANENTLY DELETE') {
-      setError('Please type "PERMANENTLY DELETE" to confirm')
+      setError(t('admin.permanentTokenError'))
       return
     }
 
@@ -94,11 +96,11 @@ export function DeleteRequestModal({
         router.refresh()
       } else {
         console.log('[DeleteRequestModal] Error:', result.error)
-        setError(result.error || 'Failed to delete requests')
+        setError(t('admin.deleteRequestsFailed'))
       }
     } catch (err) {
       console.error('[DeleteRequestModal] Exception:', err)
-      setError('An error occurred while deleting requests')
+      setError(t('admin.deleteRequestsError'))
     } finally {
       setIsSubmitting(false)
     }
@@ -107,7 +109,7 @@ export function DeleteRequestModal({
   const defaultTrigger = (
     <Button variant="destructive" size="sm">
       <Trash2 className="h-4 w-4 mr-1" />
-      {mode === 'single' ? 'Delete' : getButtonText()}
+      {mode === 'single' ? t('admin.delete') : getButtonText()}
     </Button>
   )
 
@@ -125,7 +127,7 @@ export function DeleteRequestModal({
           <DialogDescription className="space-y-2">
             <span className="block">{getDescription()}</span>
             <span className="block font-semibold text-destructive">
-              ⚠️ This action CANNOT be undone!
+              {t('admin.irreversibleWarning')}
             </span>
           </DialogDescription>
         </DialogHeader>
@@ -134,7 +136,7 @@ export function DeleteRequestModal({
           {mode !== 'single' && (
             <div className="space-y-2">
               <label className="text-sm font-medium">
-                Type &ldquo;PERMANENTLY DELETE&rdquo; to confirm
+                {t('admin.permanentTokenLabel')}
               </label>
               <input
                 type="text"
@@ -160,14 +162,14 @@ export function DeleteRequestModal({
               onClick={() => setOpen(false)}
               disabled={isSubmitting}
             >
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button
               type="submit"
               variant="destructive"
               disabled={isSubmitting || (mode !== 'single' && confirmText !== 'PERMANENTLY DELETE')}
             >
-              {isSubmitting ? 'Deleting...' : getButtonText()}
+              {isSubmitting ? t('admin.deleting') : getButtonText()}
             </Button>
           </DialogFooter>
         </form>

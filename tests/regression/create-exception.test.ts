@@ -1,3 +1,4 @@
+import { createTranslator } from '@/lib/i18n/messages'
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -13,8 +14,6 @@ import {
   resolveInheritedPublishedSourceVersion,
 } from '@/components/organization/ApprovalChainsPanel'
 import {
-  APPROVAL_CHAIN_LABEL,
-  REQUEST_VISIBILITY_LABEL,
   UnitSidePanel,
 } from '@/components/organization/UnitSidePanel'
 import type { WorkspaceSnapshot } from '@/lib/organization/workspace-admin'
@@ -205,16 +204,18 @@ describe('organization dialog visibility and approval labels', () => {
       unit: units[1],
       snapshot,
     }))
-    assert.match(html, new RegExp(REQUEST_VISIBILITY_LABEL))
-    assert.match(html, new RegExp(APPROVAL_CHAIN_LABEL))
+    assert.match(html, new RegExp(createTranslator('en')('admin.requestVisibility')))
+    assert.match(html, new RegExp(createTranslator('en')('admin.whoMustApprove')))
     assert.match(html, /data-testid="unit-share-requests-info"/)
     assert.match(html, /data-testid="unit-can-work-on-solutions-info"/)
     assert.match(html, /independent of request visibility/i)
     assert.match(html, /data-testid="unit-can-work-on-solutions"/)
 
     const panel = readFileSync('src/components/organization/UnitSidePanel.tsx', 'utf8')
-    assert.match(panel, /Off: only this unit and managers above it/i)
-    assert.match(panel, /Does not grant approval rights/i)
+    assert.match(panel, /admin\.requestSharingHelp/)
+    const help = createTranslator('en')('admin.requestSharingHelp')
+    assert.match(help, /Off: only this unit and managers above it/i)
+    assert.match(help, /Does not grant approval rights/i)
   })
 })
 

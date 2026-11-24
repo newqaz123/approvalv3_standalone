@@ -24,6 +24,7 @@ import { RetentionControls } from '@/components/admin/retention-controls'
 import { AdminCard, AdminCardsEmptyState } from '@/components/mobile/admin-card'
 import { Calendar, FileText, Hash } from 'lucide-react'
 import { filterRetentionRowsByUpdatedDate } from '@/lib/storage-dashboard'
+import { useTranslations } from '@/lib/i18n/client'
 
 export type RetentionRequestRow = {
   id: string
@@ -68,6 +69,7 @@ async function downloadBackup(requestIds: string[]) {
 }
 
 export function RetentionRequestList({ requests }: { requests: RetentionRequestRow[] }) {
+  const t = useTranslations()
   const router = useRouter()
   const [selected, setSelected] = useState<string[]>([])
   const [downloading, setDownloading] = useState(false)
@@ -120,15 +122,15 @@ export function RetentionRequestList({ requests }: { requests: RetentionRequestR
 
   async function handleDownload(ids: string[]) {
     if (ids.length > MAX_BATCH_DOWNLOAD) {
-      toast.error(`Download up to ${MAX_BATCH_DOWNLOAD} requests at a time`)
+      toast.error(t('admin.retentionDownloadLimit', { count: MAX_BATCH_DOWNLOAD }))
       return
     }
     setDownloading(true)
     try {
       await downloadBackup(ids)
-      toast.success(ids.length === 1 ? 'Backup downloaded' : `Downloaded ${ids.length} requests`)
+      toast.success(ids.length === 1 ? t('admin.backupDownloaded') : t('admin.retentionDownloaded', { count: ids.length }))
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Could not download backup')
+      toast.error(t('admin.downloadBackupFailed'))
     } finally {
       setDownloading(false)
     }
@@ -144,17 +146,17 @@ export function RetentionRequestList({ requests }: { requests: RetentionRequestR
       })
       const result = await response.json()
       if (!response.ok || !result.success) {
-        toast.error(result.error || 'Failed to hard-delete')
+        toast.error(t('admin.hardDeleteFailed'))
         return
       }
-      toast.success(`Deleted ${result.deleted} archived request${result.deleted === 1 ? '' : 's'}`)
+      toast.success(t(result.deleted === 1 ? 'admin.retentionDeletedSingle' : 'admin.retentionDeletedMany', { count: result.deleted }))
       if (Array.isArray(result.fileWarnings) && result.fileWarnings.length > 0) {
-        toast.warning(`${result.fileWarnings.length} file(s) could not be removed from disk — see server logs`)
+        toast.warning(t('admin.retentionFileWarnings', { count: result.fileWarnings.length }))
       }
       setSelected([])
       router.refresh()
     } catch {
-      toast.error('Failed to hard-delete')
+      toast.error(t('admin.hardDeleteFailed'))
     } finally {
       setDeleting(false)
     }
@@ -165,7 +167,7 @@ export function RetentionRequestList({ requests }: { requests: RetentionRequestR
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="flex flex-wrap items-end gap-3">
           <div className="space-y-1.5">
-            <Label htmlFor="date-from">Updated from</Label>
+            <Label htmlFor="date-from">{t('admin.updatedFrom')}</Label>
             <Input
               id="date-from"
               type="date"
@@ -175,7 +177,7 @@ export function RetentionRequestList({ requests }: { requests: RetentionRequestR
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="date-to">Updated to</Label>
+            <Label htmlFor="date-to">{t('admin.updatedTo')}</Label>
             <Input
               id="date-to"
               type="date"
@@ -194,11 +196,11 @@ export function RetentionRequestList({ requests }: { requests: RetentionRequestR
                 setDateTo('')
               }}
             >
-              Clear dates
+              {t('admin.clearDates')}
             </Button>
           ) : null}
           <p className="text-sm text-muted-foreground pb-2">
-            {visible.length} of {requests.length} request{visible.length === 1 ? '' : 's'} shown
+            {t(visible.length === 1 ? 'admin.retentionCountOne' : 'admin.retentionCountMany', { shown: visible.length, total: requests.length })}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -208,36 +210,34 @@ export function RetentionRequestList({ requests }: { requests: RetentionRequestR
             disabled={downloading || selectedVisible.length === 0}
             title={
               selectedVisible.length > MAX_BATCH_DOWNLOAD
-                ? `Up to ${MAX_BATCH_DOWNLOAD} per download`
+                ? t('admin.retentionDownloadLimitShort', { count: MAX_BATCH_DOWNLOAD })
                 : undefined
             }
             onClick={() => handleDownload(selectedVisible)}
           >
             <Download className="mr-1 h-4 w-4" />
-            {downloading ? 'Preparing…' : `Download selected (${selectedVisible.length})`}
+            {downloading ? t('admin.preparing') : t('admin.retentionDownloadSelected', { count: selectedVisible.length })}
           </Button>
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <Button type="button" variant="destructive" disabled={deleting || selectedArchived.length === 0}>
-                Hard-delete selected ({selectedArchived.length})
+                {t('admin.hardDeleteSelectedCount', { count: selectedArchived.length })}
               </Button>
             </AlertDialogTrigger>
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>Hard-delete archived requests?</AlertDialogTitle>
+                <AlertDialogTitle>{t('admin.hardDeleteSelectionTitle')}</AlertDialogTitle>
                 <AlertDialogDescription>
-                  This permanently removes {selectedArchived.length} archived request
-                  {selectedArchived.length === 1 ? '' : 's'} and their files. Download a backup first. This cannot be undone.
-                  Active (not archived) rows in the selection are ignored.
+                  {t(selectedArchived.length === 1 ? 'admin.hardDeleteCountConfirmOne' : 'admin.hardDeleteCountConfirmMany', { count: selectedArchived.length })}
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
                 <AlertDialogAction
                   className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                   onClick={handleHardDelete}
                 >
-                  Hard-delete
+                  {t('admin.hardDelete')}
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
@@ -249,20 +249,20 @@ export function RetentionRequestList({ requests }: { requests: RetentionRequestR
         <div className="flex flex-wrap items-center gap-3 rounded-md border px-3 py-2">
           <label className="flex items-center gap-2 text-sm">
             <Checkbox
-              aria-label="Select all shown requests"
+              aria-label={t('admin.selectAllShownRequests')}
               checked={allVisibleSelected ? true : someVisibleSelected ? 'indeterminate' : false}
               onCheckedChange={() => toggleAllVisible()}
             />
-            Select all shown
+            {t('admin.selectAllShown')}
           </label>
           {selectedVisible.length > 0 ? (
             <Button type="button" variant="ghost" size="sm" onClick={clearVisibleSelection}>
-              Clear shown selection ({selectedVisible.length})
+              {t('admin.clearShownCount', { count: selectedVisible.length })}
             </Button>
           ) : null}
           {selected.length > selectedVisible.length ? (
             <Button type="button" variant="ghost" size="sm" onClick={clearAllSelection}>
-              Clear all selection ({selected.length})
+              {t('admin.clearAllCount', { count: selected.length })}
             </Button>
           ) : null}
         </div>
@@ -274,7 +274,7 @@ export function RetentionRequestList({ requests }: { requests: RetentionRequestR
                   checked={selectedSet.has(request.id)}
                   onCheckedChange={(value) => toggle(request.id, value === true)}
                 />
-                Include in zip
+                {t('admin.includeInZip')}
               </label>
               <AdminCard
                 title={request.title}
@@ -289,12 +289,12 @@ export function RetentionRequestList({ requests }: { requests: RetentionRequestR
                     icon: <Hash className="h-3.5 w-3.5" />,
                   },
                   {
-                    label: 'Status',
+                    label: t('common.status'),
                     value: request.status,
                     icon: <FileText className="h-3.5 w-3.5" />,
                   },
                   {
-                    label: 'Updated',
+                    label: t('admin.updated'),
                     value: new Date(request.updatedAt).toLocaleDateString('en-US', {
                       month: '2-digit',
                       day: '2-digit',
@@ -314,7 +314,7 @@ export function RetentionRequestList({ requests }: { requests: RetentionRequestR
                   onClick={() => handleDownload([request.id])}
                 >
                   <Download className="mr-1 h-4 w-4" />
-                  Download backup
+                  {t('admin.downloadBackup')}
                 </Button>
                 <RetentionControls requestId={request.id} isArchived={request.isArchived} />
               </div>
@@ -322,8 +322,8 @@ export function RetentionRequestList({ requests }: { requests: RetentionRequestR
           ))
         ) : (
           <AdminCardsEmptyState
-            message="No requests match the selected dates"
-            submessage="Clear the date filters to see everything."
+            message={t('admin.noRequestsInDates')}
+            submessage={t('admin.clearDatesHelp')}
           />
         )}
       </div>
@@ -334,26 +334,26 @@ export function RetentionRequestList({ requests }: { requests: RetentionRequestR
             <tr>
               <th className="px-4 py-3 w-10">
                 <Checkbox
-                  aria-label="Select all shown requests"
+                  aria-label={t('admin.selectAllShownRequests')}
                   checked={allVisibleSelected ? true : someVisibleSelected ? 'indeterminate' : false}
                   onCheckedChange={() => toggleAllVisible()}
                   disabled={visibleIds.length === 0}
                 />
               </th>
               <th className="text-left px-4 py-3 font-medium">ID</th>
-              <th className="text-left px-4 py-3 font-medium">Title</th>
-              <th className="text-left px-4 py-3 font-medium">Status</th>
-              <th className="text-left px-4 py-3 font-medium">Archived</th>
-              <th className="text-left px-4 py-3 font-medium">Department</th>
-              <th className="text-left px-4 py-3 font-medium">Updated</th>
-              <th className="text-left px-4 py-3 font-medium">Actions</th>
+              <th className="text-left px-4 py-3 font-medium">{t('admin.title')}</th>
+              <th className="text-left px-4 py-3 font-medium">{t('common.status')}</th>
+              <th className="text-left px-4 py-3 font-medium">{t('admin.archivedRequestsCountLabel')}</th>
+              <th className="text-left px-4 py-3 font-medium">{t('admin.department')}</th>
+              <th className="text-left px-4 py-3 font-medium">{t('admin.updated')}</th>
+              <th className="text-left px-4 py-3 font-medium">{t('admin.actions')}</th>
             </tr>
           </thead>
           <tbody className="divide-y">
             {visible.length === 0 ? (
               <tr>
                 <td colSpan={8} className="text-center py-8 text-muted-foreground">
-                  No requests match the selected dates
+                  {t('admin.noRequestsInDates')}
                 </td>
               </tr>
             ) : (
@@ -363,7 +363,7 @@ export function RetentionRequestList({ requests }: { requests: RetentionRequestR
                     <Checkbox
                       checked={selectedSet.has(request.id)}
                       onCheckedChange={(value) => toggle(request.id, value === true)}
-                      aria-label={`Select ${request.title}`}
+                      aria-label={t('admin.selectRequestTitle', { title: request.title })}
                     />
                   </td>
                   <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
@@ -404,7 +404,7 @@ export function RetentionRequestList({ requests }: { requests: RetentionRequestR
                         onClick={() => handleDownload([request.id])}
                       >
                         <Download className="mr-1 h-4 w-4" />
-                        Backup
+                        {t('admin.backup')}
                       </Button>
                       <RetentionControls requestId={request.id} isArchived={request.isArchived} />
                     </div>

@@ -29,6 +29,8 @@ import {
 } from '@/lib/email-presets'
 import prisma from '@/lib/prisma'
 
+import type { MessageKey } from '@/lib/i18n/messages'
+
 export type { EmailSettingsActionInput } from '@/lib/email-settings-action-core'
 
 const EMAIL_SETTINGS_ID = 'default'
@@ -110,12 +112,12 @@ export async function getEmailSettingsForAdmin(): Promise<EmailSettingsPublic> {
 
 export async function saveEmailSettings(
   input: EmailSettingsActionInput,
-): Promise<EmailSettingsActionResult> {
+): Promise<{ success: true } | { success: false; error: string; errorKey: MessageKey }> {
   await requireAdminUser()
 
   const validated = validateEmailSettingsInput(input)
   if (!validated.ok) {
-    return { success: false, error: validated.error }
+    return { success: false, error: validated.error, errorKey: 'admin.invalidEmailSettings' }
   }
 
   try {
@@ -147,7 +149,7 @@ export async function saveEmailSettings(
       },
     })
     if (!decision.ok) {
-      return { success: false, error: decision.error }
+      return { success: false, error: decision.error, errorKey: 'admin.invalidSmtpCredentials' }
     }
 
     const identity = normalizeEmailIdentity(value)
@@ -162,6 +164,7 @@ export async function saveEmailSettings(
           return {
             success: false,
             error: 'Re-enter the password for this SMTP server',
+            errorKey: 'admin.smtpReenterPassword',
           }
         }
         encryptedPassword = existing.passwordEncrypted
@@ -171,6 +174,7 @@ export async function saveEmailSettings(
           return {
             success: false,
             error: 'Re-enter the password for this SMTP server',
+            errorKey: 'admin.smtpReenterPassword',
           }
         }
         encryptedPassword = encryptEmailSecret(env.password, aad)
@@ -201,7 +205,7 @@ export async function saveEmailSettings(
   } catch {
     // Save errors may contain database fields, including ciphertext. Keep the
     // client response generic; SMTP diagnostics are returned only by test send.
-    return { success: false, error: 'Unable to save email settings' }
+    return { success: false, error: 'Unable to save email settings', errorKey: 'admin.saveEmailSettingsFailed' }
   }
 }
 

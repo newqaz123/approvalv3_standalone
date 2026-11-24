@@ -27,6 +27,7 @@ import {
   type StoragePlanEventView,
   type StorageTrendPoint,
 } from '@/lib/storage-dashboard'
+import { useTranslations } from '@/lib/i18n/client'
 
 export function StorageTrendChart({
   points,
@@ -35,6 +36,7 @@ export function StorageTrendChart({
   points: StorageTrendPoint[]
   planEvents: StoragePlanEventView[]
 }) {
+  const t = useTranslations()
   const headingId = useId()
   const router = useRouter()
   const [label, setLabel] = useState('')
@@ -47,15 +49,15 @@ export function StorageTrendChart({
       try {
         const result = await createStoragePlanEvent({ label, plannedDate })
         if (!result.success) {
-          toast.error(result.error)
+          toast.error(t(result.errorKey, result.errorValues))
           return
         }
-        toast.success('Plan date marked on the chart')
+        toast.success(t('admin.planDateAdded'))
         setLabel('')
         setPlannedDate('')
         router.refresh()
       } catch {
-        toast.error('Could not save the plan date')
+        toast.error(t('admin.savePlanDateFailed'))
       }
     })
   }
@@ -65,13 +67,13 @@ export function StorageTrendChart({
       try {
         const result = await deleteStoragePlanEvent(id)
         if (!result.success) {
-          toast.error(result.error)
+          toast.error(t(result.errorKey, result.errorValues))
           return
         }
-        toast.success('Plan date removed')
+        toast.success(t('admin.planDateRemoved'))
         router.refresh()
       } catch {
-        toast.error('Could not remove the plan date')
+        toast.error(t('admin.removePlanDateFailed'))
       }
     })
   }
@@ -81,22 +83,22 @@ export function StorageTrendChart({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 id={headingId} className="text-sm font-semibold">
-            Storage trend
+            {t('admin.storageTrend')}
           </h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            Recorded attachment growth and a 12-month estimate. Plan dates are markers only — the line does not drop until you actually delete data.
+            {t('admin.storageTrendHelp')}
           </p>
         </div>
       </div>
 
       {points.length === 0 ? (
         <p className="mt-8 text-sm text-muted-foreground">
-          No attachment history yet. The trend appears after files are uploaded.
+          {t('admin.noAttachmentHistory')}
         </p>
       ) : (
         <div className="mt-5">
           <p className="sr-only">
-            Solid line is recorded attachment size by month. Dashed line is a linear estimate. Vertical markers are planned backup or delete dates.
+            {t('admin.trendLegendHelp')}
           </p>
           <ResponsiveContainer width="100%" height={280}>
             <LineChart data={points} margin={{ top: 24, right: 12, left: -12, bottom: 0 }} accessibilityLayer>
@@ -127,7 +129,7 @@ export function StorageTrendChart({
               <Line
                 type="monotone"
                 dataKey="actualBytes"
-                name="Recorded"
+                name={t('admin.recorded')}
                 stroke="#1e293b"
                 strokeWidth={2}
                 connectNulls={false}
@@ -137,7 +139,7 @@ export function StorageTrendChart({
               <Line
                 type="monotone"
                 dataKey="estimatedBytes"
-                name="Estimate"
+                name={t('admin.estimate')}
                 stroke="#d97706"
                 strokeWidth={2}
                 strokeDasharray="8 4"
@@ -169,12 +171,12 @@ export function StorageTrendChart({
           </ResponsiveContainer>
           <div className="sr-only">
             <table>
-              <caption>Recorded and estimated attachment storage by month</caption>
+              <caption>{t('admin.trendTableCaption')}</caption>
               <thead>
                 <tr>
-                  <th scope="col">Month</th>
-                  <th scope="col">Recorded</th>
-                  <th scope="col">Estimate</th>
+                  <th scope="col">{t('admin.month')}</th>
+                  <th scope="col">{t('admin.recorded')}</th>
+                  <th scope="col">{t('admin.estimate')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -193,18 +195,18 @@ export function StorageTrendChart({
 
       <form onSubmit={handleCreate} className="mt-6 grid gap-3 sm:grid-cols-[1fr_10rem_auto] sm:items-end">
         <div className="space-y-1.5">
-          <Label htmlFor="plan-label">Plan label</Label>
+          <Label htmlFor="plan-label">{t('admin.planLabel')}</Label>
           <Input
             id="plan-label"
             value={label}
             onChange={(event) => setLabel(event.target.value)}
-            placeholder="End of fiscal year"
+            placeholder={t('admin.planLabelPlaceholder')}
             maxLength={80}
             required
           />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="plan-date">Date</Label>
+          <Label htmlFor="plan-date">{t('admin.date')}</Label>
           <Input
             id="plan-date"
             type="date"
@@ -214,7 +216,7 @@ export function StorageTrendChart({
           />
         </div>
         <Button type="submit" disabled={pending}>
-          {pending ? 'Saving…' : 'Add date'}
+          {pending ? t('admin.savingEllipsis') : t('admin.addDate')}
         </Button>
       </form>
 
@@ -228,7 +230,7 @@ export function StorageTrendChart({
                   <p className="font-medium">{event.label}</p>
                   <p className="font-mono text-xs tabular-nums text-muted-foreground">
                     {event.plannedDate}
-                    {estimated != null ? ` · about ${formatStorageBytes(estimated)} on the estimate line` : ''}
+                    {estimated != null ? t('admin.planEstimate', { size: formatStorageBytes(estimated) }) : ''}
                   </p>
                 </div>
                 <Button
@@ -238,7 +240,7 @@ export function StorageTrendChart({
                   disabled={pending}
                   onClick={() => handleDelete(event.id)}
                 >
-                  Remove
+                  {t('admin.remove')}
                 </Button>
               </li>
             )
@@ -246,7 +248,7 @@ export function StorageTrendChart({
         </ul>
       ) : (
         <p className="mt-3 text-xs text-muted-foreground">
-          Add a date to mark it on the chart. Nothing is backed up or deleted automatically.
+          {t('admin.planMarkerHelp')}
         </p>
       )}
     </section>

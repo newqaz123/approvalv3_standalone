@@ -1,3 +1,4 @@
+import { createTranslator } from '@/lib/i18n/messages'
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { join } from 'node:path'
@@ -484,23 +485,30 @@ describe('admin storage dashboard wiring', () => {
 
   it('adds an inline image metric and owner label without changing attachment labels', () => {
     const dashboard = readFileSync('src/components/admin/storage-dashboard.tsx', 'utf8')
-    assert.match(dashboard, /inline: 'Inline image'/)
-    assert.match(dashboard, /Inline images/)
+    assert.match(dashboard, /inline: 'admin\.ownerInline'/)
+    assert.equal(createTranslator('en')('admin.ownerInline'), 'Inline image')
+    assert.match(dashboard, /admin\.inlineImages/)
+    assert.equal(createTranslator('en')('admin.inlineImages'), 'Inline images')
     assert.match(dashboard, /inlineImageBytes/)
     assert.match(dashboard, /inlineImageCount/)
     // Existing attachment labels and volume-strip math remain unchanged.
-    assert.match(dashboard, /request: 'Request'/)
-    assert.match(dashboard, /solution: 'Solution'/)
-    assert.match(dashboard, /other: 'Other'/)
+    assert.match(dashboard, /request: 'admin\.ownerRequest'/)
+    assert.equal(createTranslator('en')('admin.ownerRequest'), 'Request')
+    assert.match(dashboard, /solution: 'admin\.ownerSolution'/)
+    assert.equal(createTranslator('en')('admin.ownerSolution'), 'Solution')
+    assert.match(dashboard, /other: 'admin\.ownerOther'/)
+    assert.equal(createTranslator('en')('admin.ownerOther'), 'Other')
     assert.match(dashboard, /resolveVolumeStripShares/)
   })
 
   it('links the admin hub to storage and retention management', () => {
     const hub = readFileSync('src/app/admin/page.tsx', 'utf8')
     assert.match(hub, /\/admin\/storage/)
-    assert.match(hub, /Data storage/)
+    assert.match(hub, /admin\.storage/)
+    assert.equal(createTranslator('en')('admin.storage'), 'Data storage')
     assert.match(hub, /\/admin\/retention/)
-    assert.match(hub, /Request Retention/)
+    assert.match(hub, /admin\.retention/)
+    assert.equal(createTranslator('en')('admin.retention'), 'Request Retention')
     assert.doesNotMatch(hub, /href="\/admin\/deleted-requests"/)
   })
 
@@ -547,11 +555,12 @@ describe('admin storage dashboard wiring', () => {
     assert.equal(rows.length, 3, 'three legend rows total')
     assert.equal(gated.length, 1, 'exactly one gated legend row')
     const gatedBlock = gated[0]
-    assert.match(gatedBlock, />Free</, 'the gated row is Free')
+    assert.match(gatedBlock, /admin\.freeSpace/, 'the gated row is Free')
+    assert.equal(createTranslator('en')('admin.freeSpace'), 'Free')
     assert.match(gatedBlock, /diskFreeBytes/, 'the gated row shows disk free bytes')
     // Ungated portion must not mention Free or disk free space
     const ungated = legend.replace(/\{showCapacity \? \([\s\S]*?\) : null\}/, '')
-    assert.doesNotMatch(ungated, /Free/)
+    assert.doesNotMatch(ungated, /admin\.freeSpace/)
     assert.doesNotMatch(ungated, /diskFreeBytes/)
   })
 
@@ -565,12 +574,13 @@ describe('admin storage dashboard wiring', () => {
   it('gives the retention list select-all and date filtering for batch actions', () => {
     const list = readFileSync('src/components/admin/retention-request-list.tsx', 'utf8')
     assert.match(list, /filterRetentionRowsByUpdatedDate/)
-    assert.match(list, /Select all/)
-    assert.match(list, /aria-label="Select all/)
+    assert.match(list, /admin\.selectAllShown/)
+    assert.match(list, /aria-label=\{t\('admin\.selectAllShownRequests'\)\}/)
+    assert.equal(createTranslator('en')('admin.selectAllShownRequests'), 'Select all shown requests')
     assert.match(list, /indeterminate/)
     assert.match(list, /date-from/)
     assert.match(list, /date-to/)
-    assert.match(list, /Download selected/)
-    assert.match(list, /Hard-delete selected/)
+    assert.match(list, /admin\.retentionDownloadSelected/)
+    assert.match(list, /admin\.hardDeleteSelectedCount/)
   })
 })

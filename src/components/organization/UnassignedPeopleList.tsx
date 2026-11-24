@@ -2,6 +2,7 @@
 
 import React from 'react'
 import { personInitials, personShortName } from '@/lib/organization/person-name'
+import { useTranslations } from '@/lib/i18n/client'
 
 export function UnassignedPeopleList({
   users,
@@ -10,6 +11,7 @@ export function UnassignedPeopleList({
   users: ReadonlyArray<{ id: string; name: string; email: string }>
   onSelectUser?: (userId: string) => void
 }) {
+  const t = useTranslations()
   const sorted = users.slice().sort((left, right) => left.name.localeCompare(right.name))
   return (
     <section
@@ -17,11 +19,11 @@ export function UnassignedPeopleList({
       className="organization-unassigned-dock space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
     >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-sm font-semibold text-slate-800">Unassigned people</h2>
-        <span className="text-xs text-muted-foreground">Available to place</span>
+        <h2 className="text-sm font-semibold text-slate-800">{t('admin.unassignedPeople')}</h2>
+        <span className="text-xs text-muted-foreground">{t('admin.availableToPlace')}</span>
       </div>
       {sorted.length === 0 ? (
-        <p className="text-sm text-muted-foreground">None</p>
+        <p className="text-sm text-muted-foreground">{t('admin.none')}</p>
       ) : (
         <ul className="organization-unassigned-dock-list flex min-w-0 flex-wrap items-center gap-2">
           {sorted.map((user) => (

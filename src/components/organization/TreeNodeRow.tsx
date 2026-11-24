@@ -21,6 +21,7 @@ import {
   positionBadgeClasses,
 } from '@/lib/organization/position-tone'
 import { renameOrganizationUnit, renameTeam, type WorkspaceSnapshot } from '@/server-actions/organization'
+import { useTranslations } from '@/lib/i18n/client'
 
 // Display-name helpers moved to lib so the manage drawers title the same
 // short-name form as the tree; re-exported to keep the historical seam.
@@ -143,12 +144,13 @@ function UnitBranchToggle({ unit, expanded, onToggle }: {
   expanded: boolean
   onToggle: () => void
 }) {
+  const t = useTranslations()
   return (
     <button
       type="button"
       data-testid={`unit-toggle-${unit.id}`}
       aria-expanded={expanded}
-      aria-label={expanded ? `Collapse ${unit.name}` : `Expand ${unit.name}`}
+      aria-label={expanded ? t('admin.collapseUnit', { name: unit.name }) : t('admin.expandUnit', { name: unit.name })}
       onClick={(event) => {
         event.stopPropagation()
         onToggle()
@@ -187,6 +189,7 @@ function TeamGroup({
   positionsById: Map<string, PositionNode>
   onSelectTeam?: (teamId: string) => void
 }) {
+  const t = useTranslations()
   const members = assignments
     .filter((assignment) => assignment.isActive && assignment.teamId === team.id)
     .slice()
@@ -215,7 +218,7 @@ function TeamGroup({
               onSelectTeam(team.id)
             }}
           >
-            Manage
+            {t('admin.manage')}
           </button>
         ) : null}
       </div>
@@ -335,6 +338,7 @@ export function TreeNodeRow({
   onSelectPerson?: (assignmentId: string) => void
   onSelectTeam?: (teamId: string) => void
 }) {
+  const t = useTranslations()
   const nameRef = useRef<HTMLSpanElement>(null)
   const headerRef = useRef<HTMLDivElement>(null)
   // Default expanded preserves the pre-existing behavior: every active row
@@ -430,12 +434,12 @@ export function TreeNodeRow({
             <span className="organization-unit-flags inline-flex shrink-0 items-center gap-1">
               <TooltipProvider delayDuration={200}>
                 {unit.shareRequests ? (
-                  <UnitFlagIcon testId={`sharing-badge-${unit.id}`} label="Request sharing" tone={SHARING_FLAG_ON_CLASSES}>
+                  <UnitFlagIcon testId={`sharing-badge-${unit.id}`} label={t('admin.requestSharing')} tone={SHARING_FLAG_ON_CLASSES}>
                     <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
                   </UnitFlagIcon>
                 ) : null}
                 {unit.canWorkOnSolutions ? (
-                  <UnitFlagIcon testId={`solutions-badge-${unit.id}`} label="Can work on solutions" tone={SOLUTIONS_FLAG_ON_CLASSES}>
+                  <UnitFlagIcon testId={`solutions-badge-${unit.id}`} label={t('admin.canWorkOnSolutions')} tone={SOLUTIONS_FLAG_ON_CLASSES}>
                     <Wrench className="h-3.5 w-3.5" aria-hidden="true" />
                   </UnitFlagIcon>
                 ) : null}
@@ -456,7 +460,7 @@ export function TreeNodeRow({
               data-testid={`unit-rename-${unit.id}`}
               onClick={startRename}
             >
-              Rename
+              {t('admin.rename')}
             </Button>
             <Button
               type="button"
@@ -465,7 +469,7 @@ export function TreeNodeRow({
               data-testid={`unit-manage-${unit.id}`}
               onClick={() => onSelectUnit?.(unit.id)}
             >
-              Manage
+              {t('admin.manage')}
             </Button>
           </div>
           <div className="organization-unit-header-overflow shrink-0">
@@ -477,7 +481,7 @@ export function TreeNodeRow({
                   size="icon"
                   className="h-8 w-8 min-h-8 min-w-8"
                   data-testid={`unit-overflow-${unit.id}`}
-                  aria-label="Open unit actions"
+                  aria-label={t('admin.openUnitActions')}
                 >
                   <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
                 </Button>
@@ -493,15 +497,15 @@ export function TreeNodeRow({
                   event.preventDefault()
                 }}
               >
-                <DropdownMenuItem onSelect={startRename}>Rename</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onSelectUnit?.(unit.id)}>Manage</DropdownMenuItem>
+                <DropdownMenuItem onSelect={startRename}>{t('admin.rename')}</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => onSelectUnit?.(unit.id)}>{t('admin.manage')}</DropdownMenuItem>
                 <DropdownMenuItem
                   onSelect={() => {
                     addOpenedFromMenuRef.current = true
                     setAddOpen(true)
                   }}
                 >
-                  Add unit
+                  {t('admin.addUnit')}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -523,7 +527,7 @@ export function TreeNodeRow({
           >
           {managerAssignment ? (
             <div data-testid={`unit-manager-${unit.id}`} className="organization-manager-row space-y-1.5">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Manager</p>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">{t('admin.manager')}</p>
               <PersonChip
                 assignment={managerAssignment}
                 manager
@@ -540,7 +544,7 @@ export function TreeNodeRow({
             <div className="organization-staff-list space-y-1.5">
               {/* Non-manager assignees get their own heading: the MANAGER row
                   is only the persisted unit manager, never the whole unit. */}
-              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">People</p>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">{t('admin.people')}</p>
               <div className="flex flex-col items-stretch gap-1">
                 {staffList.map((assignment) => (
                   <PersonChip
@@ -560,7 +564,7 @@ export function TreeNodeRow({
           ) : null}
           {peopleList.length > 0 ? (
             <p data-testid={`unit-staff-count-${unit.id}`} className="text-xs text-muted-foreground">
-              {`${peopleList.length} ${peopleList.length === 1 ? 'person' : 'people'}`}
+              {t(peopleList.length === 1 ? 'admin.showPeopleOne' : 'admin.showPeopleMany', { count: peopleList.length })}
             </p>
           ) : null}
           </div>

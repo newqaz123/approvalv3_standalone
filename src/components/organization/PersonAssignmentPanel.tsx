@@ -18,8 +18,8 @@ import {
   removeAssignment,
   type WorkspaceSnapshot,
 } from '@/server-actions/organization'
-import { formatOrganizationErrorForUser } from '@/lib/organization/error-formatting'
 import { UnitTreeSelect } from '@/components/organization/UnitTreeSelect'
+import { useTranslations } from '@/lib/i18n/client'
 
 export const NONE_TEAM = 'none'
 
@@ -91,33 +91,34 @@ export function AssignmentChangeSummary({
   reportsToCorrection?: string | null
   children?: React.ReactNode
 }) {
+  const t = useTranslations()
   return (
     <div data-testid="assignment-move-confirmation" className="space-y-3 rounded-md border p-3">
       <div className="grid grid-cols-2 gap-3">
         <section data-testid="assignment-change-before" className="space-y-1">
-          <h3 className="text-sm font-medium">Current</h3>
-          <p className="text-sm">Unit: {before.unitName}</p>
-          <p className="text-sm">Position: {before.positionName}</p>
-          <p className="text-sm">Team: {before.teamName}</p>
+          <h3 className="text-sm font-medium">{t('admin.current')}</h3>
+          <p className="text-sm">{t('admin.unitLabel')} {before.unitName}</p>
+          <p className="text-sm">{t('admin.positionLabel')} {before.positionName}</p>
+          <p className="text-sm">{t('admin.teamLabel')} {before.teamName}</p>
         </section>
         <section data-testid="assignment-change-after" className="space-y-1">
-          <h3 className="text-sm font-medium">New</h3>
-          <p className="text-sm">Unit: {after.unitName}</p>
-          <p className="text-sm">Position: {after.positionName}</p>
-          <p className="text-sm">Team: {after.teamName}</p>
+          <h3 className="text-sm font-medium">{t('admin.new')}</h3>
+          <p className="text-sm">{t('admin.unitLabel')} {after.unitName}</p>
+          <p className="text-sm">{t('admin.positionLabel')} {after.positionName}</p>
+          <p className="text-sm">{t('admin.teamLabel')} {after.teamName}</p>
         </section>
       </div>
       {invalidatedTeams.length > 0 ? (
         <div data-testid="assignment-reports-to-correction" className="space-y-2">
           <p className="text-sm">
-            This change requires explicit correction of the team&apos;s reports-to person.
+            {t('admin.correctReportsTo')}
           </p>
           <ul className="list-disc space-y-1 pl-4 text-sm">
             {invalidatedTeams.map((team) => (
               <li key={team.id}>{team.name}</li>
             ))}
           </ul>
-          {reportsToCorrection ? <p className="text-sm">Reports-to: {reportsToCorrection}</p> : null}
+          {reportsToCorrection ? <p className="text-sm">{t('admin.reportsToLabel')} {reportsToCorrection}</p> : null}
           {children}
         </div>
       ) : null}
@@ -155,6 +156,7 @@ export function PersonAssignmentPanel({
   }) => void
   onRemoved?: (input: { assignmentId: string; userId: string }) => void
 }) {
+  const t = useTranslations()
   const assignment = snapshot.assignments.find((row) => row.id === assignmentId) ?? null
   const user = snapshot.users.find((row) => row.id === (assignment?.userId ?? userId)) ?? null
   const [unitId, setUnitId] = useState(assignment?.unitId ?? '')
@@ -220,7 +222,7 @@ export function PersonAssignmentPanel({
         isActive: true,
       })
     } catch (err) {
-      setError(err instanceof Error ? formatOrganizationErrorForUser(err.message, snapshot) : formatOrganizationErrorForUser(String(err), snapshot))
+      setError(t('admin.assignmentSaveFailed'))
     } finally {
       setSaving(false)
     }
@@ -251,7 +253,7 @@ export function PersonAssignmentPanel({
       })
       setConfirming(false)
     } catch (err) {
-      setError(err instanceof Error ? formatOrganizationErrorForUser(err.message, snapshot) : formatOrganizationErrorForUser(String(err), snapshot))
+      setError(t('admin.assignmentSaveFailed'))
     } finally {
       setSaving(false)
     }
@@ -265,7 +267,7 @@ export function PersonAssignmentPanel({
       await removeAssignment({ assignmentId: assignment.id })
       onRemoved?.({ assignmentId: assignment.id, userId: assignment.userId })
     } catch (err) {
-      setError(err instanceof Error ? formatOrganizationErrorForUser(err.message, snapshot) : formatOrganizationErrorForUser(String(err), snapshot))
+      setError(t('admin.assignmentRemoveFailed'))
     } finally {
       setSaving(false)
     }
@@ -275,13 +277,13 @@ export function PersonAssignmentPanel({
     ? {
         unitName: nameOf(assignment.unitId, snapshot.units, assignment.unitId),
         positionName: nameOf(assignment.positionId, snapshot.positions, assignment.positionId),
-        teamName: nameOf(assignment.teamId, snapshot.teams, 'None'),
+        teamName: nameOf(assignment.teamId, snapshot.teams, t('admin.none')),
       }
     : null
   const afterLabels = {
-    unitName: nameOf(unitId, snapshot.units, unitId || 'None'),
-    positionName: nameOf(positionId, snapshot.positions, positionId || 'None'),
-    teamName: nameOf(teamId, snapshot.teams, 'None'),
+    unitName: nameOf(unitId, snapshot.units, unitId || t('admin.none')),
+    positionName: nameOf(positionId, snapshot.positions, positionId || t('admin.none')),
+    teamName: nameOf(teamId, snapshot.teams, t('admin.none')),
   }
 
   return (
@@ -295,17 +297,17 @@ export function PersonAssignmentPanel({
           select state — not one combined gray "Name — Unit" string. */}
       <div>
         <h2 className="text-lg font-semibold" data-testid="assignment-panel-title">
-          {assignment ? personShortName(user.name) : 'Assign person'}
+          {assignment ? personShortName(user.name) : t('admin.assignPerson')}
         </h2>
         {assignment ? (
           <div className="space-y-0.5 text-sm text-muted-foreground">
             <p data-testid="assignment-subtitle-unit">
-              <span className="font-medium text-foreground">Unit:</span>{' '}
-              {nameOf(unitId, snapshot.units, unitId || 'None')}
+              <span className="font-medium text-foreground">{t('admin.unitLabel')}</span>{' '}
+              {nameOf(unitId, snapshot.units, unitId || t('admin.none'))}
             </p>
             <p data-testid="assignment-subtitle-position">
-              <span className="font-medium text-foreground">Position:</span>{' '}
-              {nameOf(positionId, snapshot.positions, positionId || 'None')}
+              <span className="font-medium text-foreground">{t('admin.positionLabel')}</span>{' '}
+              {nameOf(positionId, snapshot.positions, positionId || t('admin.none'))}
             </p>
           </div>
         ) : (
@@ -314,7 +316,7 @@ export function PersonAssignmentPanel({
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="assignment-unit-select">Unit</Label>
+        <Label htmlFor="assignment-unit-select">{t('admin.unit')}</Label>
         {/* Searchable, depth-indented tree-path dropdown (owner-approved):
             options show "Factory › Production Division › Engineering
             Department" indented by depth and match on any ancestor name. */}
@@ -327,7 +329,7 @@ export function PersonAssignmentPanel({
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="assignment-position-select">Position</Label>
+        <Label htmlFor="assignment-position-select">{t('admin.position')}</Label>
         <Select
           value={positionId || undefined}
           onValueChange={(value) => {
@@ -336,7 +338,7 @@ export function PersonAssignmentPanel({
           }}
         >
           <SelectTrigger id="assignment-position-select" data-testid="assignment-position-select">
-            <SelectValue placeholder="Select position" />
+            <SelectValue placeholder={t('admin.selectPosition')} />
           </SelectTrigger>
           <SelectContent>
             {activePositions.map((row) => (
@@ -347,7 +349,7 @@ export function PersonAssignmentPanel({
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="assignment-team-select">Team</Label>
+        <Label htmlFor="assignment-team-select">{t('admin.team')}</Label>
         <Select
           value={teamReselectRequired ? undefined : (teamId ?? NONE_TEAM)}
           onValueChange={(value) => {
@@ -357,17 +359,17 @@ export function PersonAssignmentPanel({
           }}
         >
           <SelectTrigger id="assignment-team-select" data-testid="assignment-team-select">
-            <SelectValue placeholder={teamReselectRequired ? 'Select a team' : 'No team'} />
+            <SelectValue placeholder={teamReselectRequired ? t('admin.selectTeam') : t('admin.noTeam')} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={NONE_TEAM}>No team</SelectItem>
+            <SelectItem value={NONE_TEAM}>{t('admin.noTeam')}</SelectItem>
             {teamsInUnit.map((row) => (
               <SelectItem key={row.id} value={row.id}>{row.name}</SelectItem>
             ))}
           </SelectContent>
         </Select>
         {teamReselectRequired ? (
-          <p className="text-sm text-destructive">Select a team for the new unit</p>
+          <p className="text-sm text-destructive">{t('admin.selectTeamForUnit')}</p>
         ) : null}
       </div>
 
@@ -380,7 +382,7 @@ export function PersonAssignmentPanel({
           {invalidated.map((team) => (
             <div key={team.id} className="space-y-1">
               <Label htmlFor={`assignment-reports-to-${team.id}`}>
-                {`Reports-to for ${team.name}`}
+                {t('admin.reportsToFor', { name: team.name })}
               </Label>
               <Select
                 value={reportsToByTeam[team.id]}
@@ -392,7 +394,7 @@ export function PersonAssignmentPanel({
                   id={`assignment-reports-to-${team.id}`}
                   data-testid={`assignment-reports-to-${team.id}`}
                 >
-                  <SelectValue placeholder="Choose reports-to" />
+                  <SelectValue placeholder={t('admin.chooseReportsTo')} />
                 </SelectTrigger>
                 <SelectContent>
                   {snapshot.assignments
@@ -433,7 +435,7 @@ export function PersonAssignmentPanel({
                 }}
                 disabled={saving || teamReselectRequired || !correctionsReady}
               >
-                Confirm move
+                {t('admin.confirmMove')}
               </Button>
               <Button
                 type="button"
@@ -442,7 +444,7 @@ export function PersonAssignmentPanel({
                 onClick={() => setConfirming(false)}
                 disabled={saving}
               >
-                Cancel
+                {t('common.cancel')}
               </Button>
             </>
           ) : (
@@ -453,7 +455,7 @@ export function PersonAssignmentPanel({
                 onClick={() => setConfirming(true)}
                 disabled={saving || teamReselectRequired || !unitId || !positionId}
               >
-                Save
+                {t('admin.save')}
               </Button>
               <Button
                 type="button"
@@ -464,7 +466,7 @@ export function PersonAssignmentPanel({
                 }}
                 disabled={saving}
               >
-                Remove assignment
+                {t('admin.removeAssignment')}
               </Button>
             </>
           )
@@ -477,7 +479,7 @@ export function PersonAssignmentPanel({
             }}
             disabled={saving || teamReselectRequired || !unitId || !positionId}
           >
-            Assign
+            {t('admin.assign')}
           </Button>
         )}
       </div>

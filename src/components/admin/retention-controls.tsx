@@ -17,6 +17,7 @@ import {
 import { Archive, ArchiveRestore, Trash2 } from 'lucide-react'
 import { archiveRequest, unarchiveRequest } from '@/server-actions/requests'
 import { toast } from 'sonner'
+import { useTranslations } from '@/lib/i18n/client'
 
 interface RetentionControlsProps {
   requestId: string
@@ -24,6 +25,7 @@ interface RetentionControlsProps {
 }
 
 export function RetentionControls({ requestId, isArchived }: RetentionControlsProps) {
+  const t = useTranslations()
   const router = useRouter()
   const [archiving, setArchiving] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -33,13 +35,13 @@ export function RetentionControls({ requestId, isArchived }: RetentionControlsPr
     try {
       const result = await archiveRequest(requestId)
       if (result.success) {
-        toast.success('Request archived. It is hidden from normal lists.')
+        toast.success(t('admin.archiveSucceeded'))
         router.refresh()
       } else {
-        toast.error(result.error || 'Failed to archive request')
+        toast.error(t('admin.archiveFailed'))
       }
     } catch {
-      toast.error('An unexpected error occurred')
+      toast.error(t('admin.unexpectedError'))
     } finally {
       setArchiving(false)
     }
@@ -50,13 +52,13 @@ export function RetentionControls({ requestId, isArchived }: RetentionControlsPr
     try {
       const result = await unarchiveRequest(requestId)
       if (result.success) {
-        toast.success('Request unarchived. It is visible in normal lists again.')
+        toast.success(t('admin.unarchiveSucceeded'))
         router.refresh()
       } else {
-        toast.error(result.error || 'Failed to unarchive request')
+        toast.error(t('admin.unarchiveFailed'))
       }
     } catch {
-      toast.error('An unexpected error occurred')
+      toast.error(t('admin.unexpectedError'))
     } finally {
       setArchiving(false)
     }
@@ -72,13 +74,13 @@ export function RetentionControls({ requestId, isArchived }: RetentionControlsPr
       })
       const result = await response.json()
       if (!response.ok || !result.success) {
-        toast.error(result.error || 'Failed to delete request')
+        toast.error(t('admin.deleteRequestFailed'))
         return
       }
-      toast.success('Request permanently deleted')
+      toast.success(t('admin.deleteRequestSucceeded'))
       router.refresh()
     } catch {
-      toast.error('An unexpected error occurred')
+      toast.error(t('admin.unexpectedError'))
     } finally {
       setDeleting(false)
     }
@@ -92,10 +94,10 @@ export function RetentionControls({ requestId, isArchived }: RetentionControlsPr
           size="sm"
           onClick={handleUnarchive}
           disabled={archiving}
-          title="Show this request in normal lists again"
+          title={t('admin.unarchiveHelp')}
         >
           <ArchiveRestore className="h-4 w-4 mr-1" />
-          {archiving ? 'Unarchiving...' : 'Unarchive'}
+          {archiving ? t('admin.unarchiving') : t('admin.unarchive')}
         </Button>
       ) : (
         <Button
@@ -103,10 +105,10 @@ export function RetentionControls({ requestId, isArchived }: RetentionControlsPr
           size="sm"
           onClick={handleArchive}
           disabled={archiving}
-          title="Hide this request from normal lists"
+          title={t('admin.archiveHelp')}
         >
           <Archive className="h-4 w-4 mr-1" />
-          {archiving ? 'Archiving...' : 'Archive'}
+          {archiving ? t('admin.archiving') : t('admin.archive')}
         </Button>
       )}
 
@@ -117,28 +119,26 @@ export function RetentionControls({ requestId, isArchived }: RetentionControlsPr
             variant="destructive"
             size="sm"
             disabled={deleting}
-            title="Permanently delete archived request"
+            title={t('admin.hardDeleteHelp')}
           >
             <Trash2 className="h-4 w-4 mr-1" />
-            {deleting ? 'Deleting...' : 'Hard-delete'}
+            {deleting ? t('admin.deleting') : t('admin.hardDelete')}
           </Button>
         </AlertDialogTrigger>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Permanently Delete Request</AlertDialogTitle>
+            <AlertDialogTitle>{t('admin.deletePermanentTitle')}</AlertDialogTitle>
             <AlertDialogDescription>
-              This action cannot be undone. The request and all associated data
-              (approvals, activities, attachments) will be permanently removed
-              from the database.
+              {t('admin.hardDeleteDescription')}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDelete}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              Delete Permanently
+              {t('admin.confirmHardDelete')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

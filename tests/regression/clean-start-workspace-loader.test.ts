@@ -2,6 +2,7 @@
 // In-memory fake db only: NO Prisma, NO database, NO env, NO schema/server ops.
 // Pins B2 nearest-published walk for routeSources, unassigned active users,
 // and A7 readiness as the snapshot readiness field.
+import { createTranslator } from '@/lib/i18n/messages'
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -217,8 +218,10 @@ describe('clean-start organization workspace loader', () => {
     )
     // Tab labels live in OrganizationTabs; the page just renders the tab bar.
     const tabs = read('src/components/organization/OrganizationTabs.tsx')
-    assert.match(tabs, /Approval chains/)
-    assert.match(tabs, /Positions/)
+    assert.match(tabs, /admin\.approvalChains/)
+    assert.equal(createTranslator('en')('admin.approvalChains'), 'Approval chains')
+    assert.match(tabs, /admin\.positions/)
+    assert.equal(createTranslator('en')('admin.positions'), 'Positions')
     assert.match(page, /OrganizationTabs/)
     assert.match(page, /CreateUnitDialog/)
     assert.doesNotMatch(page, /OrganizationEditor/)

@@ -34,7 +34,8 @@ import {
   updateUnitSettings,
   type WorkspaceSnapshot,
 } from '@/server-actions/organization'
-import { formatOrganizationErrorForUser } from '@/lib/organization/error-formatting'
+import type { Translator } from '@/lib/i18n/messages'
+import { useTranslations } from '@/lib/i18n/client'
 
 const PHASES = ['REQUEST', 'SOLUTION', 'FINAL'] as const
 const PHASE_LABEL: Record<(typeof PHASES)[number], string> = {
@@ -43,11 +44,6 @@ const PHASE_LABEL: Record<(typeof PHASES)[number], string> = {
   FINAL: 'Final',
 }
 const NONE_MANAGER = 'none'
-export const SHARE_REQUESTS_LABEL = 'Share this unit’s requests with the rest of the department'
-export const REQUEST_VISIBILITY_LABEL = 'Request visibility'
-export const APPROVAL_CHAIN_LABEL = 'Approval chain — who must approve'
-const REQUEST_VISIBILITY_HELP = 'On: people in this unit and sister units in the same department can see these requests. Off: only this unit and managers above it. Engineering can still see requests sent to Engineering. Does not grant approval rights.'
-const SOLUTION_CAPABILITY_HELP = 'Grants people in this unit permission to submit and work on solutions; it does not grant approval rights.'
 
 function SettingInfoTooltip({
   label,
@@ -58,6 +54,7 @@ function SettingInfoTooltip({
   description: string
   testId: string
 }): React.JSX.Element {
+  const t = useTranslations()
   const [open, setOpen] = useState(false)
   const touchTapRef = React.useRef(false)
   const shouldOpenAfterTapRef = React.useRef(false)
@@ -83,7 +80,7 @@ function SettingInfoTooltip({
         <button
           type="button"
           data-testid={testId}
-          aria-label={`${label} information`}
+          aria-label={t('admin.settingInformation', { label })}
           className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           onPointerDown={(event) => {
             if (event.pointerType !== 'touch') return
@@ -117,12 +114,13 @@ function SettingInfoTooltip({
 }
 
 export function formatRouteSourceLabel(
+  t: Translator,
   source: WorkspaceSnapshot['routeSources'][number]['source'],
   sourceUnitName: string | null,
 ): string {
-  if (source === 'CUSTOM') return 'Custom at this unit'
-  if (source === 'ROOT_DEFAULT') return 'Uses company default'
-  return `Inherited from ${sourceUnitName ?? 'ancestor'}`
+  if (source === 'CUSTOM') return t('admin.customAtUnit')
+  if (source === 'ROOT_DEFAULT') return t('admin.usesCompanyDefault')
+  return t('admin.inheritedFrom', { name: sourceUnitName ?? t('admin.ancestor') })
 }
 
 export function directManagerCandidates(
@@ -165,11 +163,12 @@ export function exceptionRouteSourcesForUnit(
 }
 
 function routeSourceText(
+  t: Translator,
   row: RouteSource,
   unitsById: ReadonlyMap<string, OrganizationUnitNode>,
 ): string {
   const sourceName = row.sourceUnitId ? unitsById.get(row.sourceUnitId)?.name ?? null : null
-  return formatRouteSourceLabel(row.source, sourceName)
+  return formatRouteSourceLabel(t, row.source, sourceName)
 }
 
 function routeStepText(
@@ -187,6 +186,7 @@ export function UnitExceptionChains({
   unit: OrganizationUnitNode
   snapshot: WorkspaceSnapshot
 }): React.JSX.Element {
+  const t = useTranslations()
   const rows = exceptionRouteSourcesForUnit(snapshot, unit.id)
   const unitsById = new Map(snapshot.units.map((row) => [row.id, row]))
   const positionsById = new Map(snapshot.positions.map((row) => [row.id, row]))
@@ -194,14 +194,14 @@ export function UnitExceptionChains({
     <section data-testid="unit-exception-chains" className="space-y-3">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div>
-          <h3 data-testid="approval-chain-label" className="text-sm font-semibold">{APPROVAL_CHAIN_LABEL}</h3>
-          <p className="text-xs text-muted-foreground">Approval chain exceptions are shown here. Read-only here — edit chains in Approval chains.</p>
-          <p className="text-xs text-muted-foreground">Approval is independent of request visibility; this chain controls who must approve.</p>
+          <h3 data-testid="approval-chain-label" className="text-sm font-semibold">{t('admin.whoMustApprove')}</h3>
+          <p className="text-xs text-muted-foreground">{t('admin.unitExceptionsHelp')}</p>
+          <p className="text-xs text-muted-foreground">{t('admin.approvalIndependent')}</p>
         </div>
       </div>
       {rows.length === 0 ? (
         <p data-testid="unit-exception-chains-empty" className="rounded-md border bg-muted/20 px-3 py-3 text-sm text-muted-foreground">
-          No unit-specific exceptions are configured.
+          {t('admin.noUnitExceptions')}
         </p>
       ) : (
         <div className="space-y-2 rounded-md border bg-muted/20 p-2">
@@ -221,16 +221,16 @@ export function UnitExceptionChains({
                   <span className="font-semibold">{PHASE_LABEL[row.phase]}</span>
                   <span className="text-muted-foreground">•</span>
                   <span className={row.source === 'CUSTOM' ? 'font-medium' : 'text-muted-foreground'}>
-                    {routeSourceText(row, unitsById)}
+                    {routeSourceText(t, row, unitsById)}
                   </span>
                 </div>
                 <div className="space-y-1">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Configured steps</p>
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{t('admin.configuredSteps')}</p>
                   {steps.length > 0 ? (
                     <div
                       data-testid={`unit-exception-steps-${row.phase}`}
                       className="flex flex-wrap items-center gap-1 text-sm"
-                      aria-label={`${PHASE_LABEL[row.phase]} configured approval steps`}
+                      aria-label={t('admin.configuredPhaseSteps', { phase: PHASE_LABEL[row.phase] })}
                     >
                       {steps.map((step, index) => (
                         <React.Fragment key={`${step.order}-${step.positionId}`}>
@@ -240,12 +240,12 @@ export function UnitExceptionChains({
                       ))}
                     </div>
                   ) : (
-                    <p data-testid={`unit-exception-steps-${row.phase}`} className="text-sm text-muted-foreground">None configured</p>
+                    <p data-testid={`unit-exception-steps-${row.phase}`} className="text-sm text-muted-foreground">{t('admin.noneConfigured')}</p>
                   )}
                 </div>
                 <p data-testid={`unit-exception-limit-${row.phase}`} className="text-sm">
-                  <span className="font-medium">Approval limit:</span>{' '}
-                  {limitName ?? 'Not available'}
+                  <span className="font-medium">{t('admin.approvalLimitLabel')}</span>{' '}
+                  {limitName ?? t('admin.notAvailable')}
                 </p>
               </div>
             )
@@ -257,7 +257,7 @@ export function UnitExceptionChains({
         data-testid="manage-in-approval-chains-link"
         className="inline-flex min-h-9 items-center gap-1 rounded-md px-1 text-sm font-medium text-foreground underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        Manage in Approval chains
+        {t('admin.manageApprovalChains')}
         <span aria-hidden="true">→</span>
       </Link>
     </section>
@@ -286,6 +286,7 @@ export function UnitDeactivationSection({
   onConfirm: () => void
   onCancel: () => void
 }) {
+  const t = useTranslations()
   return (
     <div
       data-testid="unit-deactivation-section"
@@ -299,7 +300,7 @@ export function UnitDeactivationSection({
       {confirming ? (
         <div data-testid="unit-deactivate-confirmation" className="space-y-2">
           <p className="text-sm">
-            {`Deactivate "${unitName}"? The unit disappears from the tree. People, teams, and history are not removed; deactivate children and clear assignments first if the unit still has them.`}
+            {t('admin.deactivateUnitQuestion', { name: unitName })}
           </p>
           <div className="flex gap-2">
             <Button
@@ -309,7 +310,7 @@ export function UnitDeactivationSection({
               onClick={onConfirm}
               disabled={saving}
             >
-              Deactivate unit
+              {t('admin.deactivateUnit')}
             </Button>
             <Button
               type="button"
@@ -318,7 +319,7 @@ export function UnitDeactivationSection({
               onClick={onCancel}
               disabled={saving}
             >
-              Cancel
+              {t('common.cancel')}
             </Button>
           </div>
         </div>
@@ -331,7 +332,7 @@ export function UnitDeactivationSection({
           disabled={saving}
           className="px-1 text-sm text-destructive hover:bg-destructive/10 hover:text-destructive"
         >
-          Deactivate unit
+          {t('admin.deactivateUnit')}
         </Button>
       )}
     </div>
@@ -359,6 +360,7 @@ export function UnitSidePanel({
   /** Modal content should not add a second card or competing scroll surface. */
   inModal?: boolean
 }) {
+  const t = useTranslations()
   const [shareRequests, setShareRequests] = useState(unit.shareRequests)
   const [canWorkOnSolutions, setCanWorkOnSolutions] = useState(unit.canWorkOnSolutions)
   const [engineeringCanViewAllRequests, setEngineeringCanViewAllRequests] = useState(unit.engineeringCanViewAllRequests ?? false)
@@ -407,7 +409,7 @@ export function UnitSidePanel({
       })
       onSettingsSaved?.({ shareRequests, canWorkOnSolutions, engineeringCanViewAllRequests })
     } catch (err) {
-      setError(err instanceof Error ? formatOrganizationErrorForUser(err.message, snapshot) : formatOrganizationErrorForUser(String(err), snapshot))
+      setError(t('admin.saveUnitSettingsFailed'))
     } finally {
       setSaving(false)
     }
@@ -421,7 +423,7 @@ export function UnitSidePanel({
       await setUnitManager({ unitId: unit.id, managerUserId: next })
       onManagerSaved?.(next)
     } catch (err) {
-      setError(err instanceof Error ? formatOrganizationErrorForUser(err.message, snapshot) : formatOrganizationErrorForUser(String(err), snapshot))
+      setError(t('admin.setManagerFailed'))
     }
   }
 
@@ -433,7 +435,7 @@ export function UnitSidePanel({
       onDeactivated?.(unit.id)
     } catch (err) {
       // Adjacent error with the confirmation step retained (panel error pattern).
-      setDeactivateError(err instanceof Error ? formatOrganizationErrorForUser(err.message, snapshot) : formatOrganizationErrorForUser(String(err), snapshot))
+      setDeactivateError(t('admin.unitDeactivateFailed'))
     } finally {
       setDeactivating(false)
     }
@@ -457,8 +459,8 @@ export function UnitSidePanel({
 
       <div className={inModal ? 'grid gap-x-8 gap-y-5 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]' : 'space-y-5'}>
         <TooltipProvider delayDuration={200}>
-          <section data-testid="unit-settings" aria-label="Unit settings" className="space-y-3">
-            <h3 className="text-sm font-semibold">Unit settings</h3>
+          <section data-testid="unit-settings" aria-label={t('admin.unitSettings')} className="space-y-3">
+            <h3 className="text-sm font-semibold">{t('admin.unitSettings')}</h3>
             <div className="flex items-start justify-between gap-4 rounded-md border px-3 py-2">
               <div className="flex min-w-0 flex-1 flex-wrap items-start gap-x-2 gap-y-1">
                 {/* Same tone language as the tree header icons: sky when ON,
@@ -471,11 +473,11 @@ export function UnitSidePanel({
                 </span>
                 <span className="flex min-w-0 flex-1 items-center gap-1">
                   <Label htmlFor="unit-share-requests" className="min-w-0 flex-1 text-sm font-medium leading-snug">
-                    {REQUEST_VISIBILITY_LABEL}
+                    {t('admin.requestVisibility')}
                   </Label>
                   <SettingInfoTooltip
-                    label={REQUEST_VISIBILITY_LABEL}
-                    description={REQUEST_VISIBILITY_HELP}
+                    label={t('admin.requestVisibility')}
+                    description={t('admin.requestSharingHelp')}
                     testId="unit-share-requests-info"
                   />
                 </span>
@@ -498,11 +500,11 @@ export function UnitSidePanel({
                 </span>
                 <span className="flex min-w-0 flex-1 items-center gap-1">
                   <Label htmlFor="unit-can-work-on-solutions" className="min-w-0 flex-1 text-sm font-medium leading-snug">
-                    Can work on solutions
+                    {t('admin.canWorkOnSolutions')}
                   </Label>
                   <SettingInfoTooltip
-                    label="Solution capability"
-                    description={SOLUTION_CAPABILITY_HELP}
+                    label={t('admin.solutionCapability')}
+                    description={t('admin.solutionWorkHelp')}
                     testId="unit-can-work-on-solutions-info"
                   />
                 </span>
@@ -525,13 +527,13 @@ export function UnitSidePanel({
                 </span>
                 <div className="min-w-0 flex-1">
                   <Label htmlFor="unit-engineering-view-all-requests" className="text-sm font-medium leading-snug">
-                    Engineering can view all requests
+                    {t('admin.engineeringViewAll')}
                   </Label>
                   <p id="unit-engineering-view-all-requests-help" className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                    Read-only across all departments and stages. Applies to this unit and sub-units with solution-work access; no editing or approval rights. An enabled parent setting still applies when this switch is off.
+                    {t('admin.engineeringViewAllHelp')}
                     {solutionWorkAccess ? null : (
                       <span className="mt-1 block font-medium text-foreground">
-                        Turn on “Can work on solutions” for this unit or a parent unit to use this setting.
+                        {t('admin.engineeringViewAllRequirement')}
                       </span>
                     )}
                   </p>
@@ -550,9 +552,9 @@ export function UnitSidePanel({
           </section>
         </TooltipProvider>
 
-        <section data-testid="unit-manager" aria-label="Unit manager" className="space-y-2">
-          <h3 className="text-sm font-semibold">Unit manager</h3>
-          <Label htmlFor="unit-manager-select" className="text-xs text-muted-foreground">Manager</Label>
+        <section data-testid="unit-manager" aria-label={t('admin.unitManager')} className="space-y-2">
+          <h3 className="text-sm font-semibold">{t('admin.unitManager')}</h3>
+          <Label htmlFor="unit-manager-select" className="text-xs text-muted-foreground">{t('admin.manager')}</Label>
           <Select
             value={managerUserId ?? NONE_MANAGER}
             onValueChange={(value) => {
@@ -560,10 +562,10 @@ export function UnitSidePanel({
             }}
           >
             <SelectTrigger id="unit-manager-select" data-testid="unit-manager-select">
-              <SelectValue placeholder="Select manager" />
+              <SelectValue placeholder={t('admin.selectManager')} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={NONE_MANAGER}>None</SelectItem>
+              <SelectItem value={NONE_MANAGER}>{t('admin.none')}</SelectItem>
               {candidates.map((candidate) => (
                 <SelectItem key={candidate.userId} value={candidate.userId}>
                   {/* Name LEFT, position RIGHT (also in the closed trigger via
@@ -577,7 +579,7 @@ export function UnitSidePanel({
               ))}
             </SelectContent>
           </Select>
-          <p className="text-xs text-muted-foreground">Must be assigned directly to this unit.</p>
+          <p className="text-xs text-muted-foreground">{t('admin.managerAssignmentHelp')}</p>
         </section>
 
         <div className={inModal ? 'lg:col-span-2' : ''}>
@@ -617,7 +619,7 @@ export function UnitSidePanel({
                 data-testid="unit-create-team"
                 onClick={() => onCreateTeam(unit.id)}
               >
-                Create team
+                {t('admin.createTeam')}
               </Button>
             ) : null}
             <Button
@@ -628,7 +630,7 @@ export function UnitSidePanel({
               }}
               disabled={saving}
             >
-              Save
+              {t('admin.save')}
             </Button>
           </div>
         </div>

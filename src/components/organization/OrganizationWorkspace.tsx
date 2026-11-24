@@ -12,10 +12,12 @@ import { UnitSidePanel } from '@/components/organization/UnitSidePanel'
 import { ZoomableFlowchart } from '@/components/organization/ZoomableFlowchart'
 import type { AssignmentNode, OrganizationUnitNode, TeamNode } from '@/lib/organization/model'
 import type { WorkspaceSnapshot } from '@/server-actions/organization'
+import { useTranslations } from '@/lib/i18n/client'
 
 type UnitPatch = Partial<Pick<OrganizationUnitNode, 'shareRequests' | 'canWorkOnSolutions' | 'engineeringCanViewAllRequests' | 'managerUserId' | 'isActive'>>
 
 export function OrganizationWorkspace({ snapshot }: { snapshot: WorkspaceSnapshot }) {
+  const t = useTranslations()
   const [selectedUnitId, setSelectedUnitId] = useState<string | null>(null)
   const [selectedAssignmentId, setSelectedAssignmentId] = useState<string | null>(null)
   const [selectedUnassignedUserId, setSelectedUnassignedUserId] = useState<string | null>(null)
@@ -144,9 +146,9 @@ export function OrganizationWorkspace({ snapshot }: { snapshot: WorkspaceSnapsho
         compact
       />
     </span>
-  ) : creatingTeamUnitId ? 'Create team'
+  ) : creatingTeamUnitId ? t('admin.createTeam')
     : selectedTeam ? selectedTeam.name
-      : selectedPersonName ?? (selectedUnassignedUserId ? 'Assign person' : 'Manage organization')
+      : selectedPersonName ?? (selectedUnassignedUserId ? t('admin.assignPerson') : t('admin.manageOrganization'))
 
   return (
     <div data-testid="organization-workspace" className="flex flex-col items-stretch">
@@ -161,7 +163,7 @@ export function OrganizationWorkspace({ snapshot }: { snapshot: WorkspaceSnapsho
               type="button"
               data-testid="unassigned-dock-toggle"
               aria-expanded={unassignedPanelOpen}
-              aria-label="Unassigned people"
+              aria-label={t('admin.unassignedPeople')}
               onClick={toggleUnassignedPanel}
               className={`inline-flex h-8 max-w-full items-center gap-1.5 rounded-md border px-2.5 text-sm font-medium shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                 unassignedPanelOpen
@@ -170,7 +172,7 @@ export function OrganizationWorkspace({ snapshot }: { snapshot: WorkspaceSnapsho
               }`}
             >
               <Users className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-              <span className="truncate">Unassigned · {viewSnapshot.unassignedUsers.length}</span>
+              <span className="truncate">{t('admin.unassignedCountLabel')} {viewSnapshot.unassignedUsers.length}</span>
             </button>
           }
         >

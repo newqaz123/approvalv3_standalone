@@ -15,6 +15,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { resetUserPassword } from '@/server-actions/users'
 import { Lock, Eye, EyeOff } from 'lucide-react'
+import { useTranslations } from '@/lib/i18n/client'
 
 interface ResetPasswordDialogProps {
   userId: string
@@ -29,6 +30,7 @@ export function ResetPasswordDialog({
   open,
   onOpenChange,
 }: ResetPasswordDialogProps) {
+  const t = useTranslations()
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -42,12 +44,12 @@ export function ResetPasswordDialog({
     setError(null)
 
     if (newPassword.length < 8) {
-      setError('Password must be at least 8 characters')
+      setError(t('admin.passwordMinLength'))
       return
     }
 
     if (newPassword !== confirmPassword) {
-      setError('Passwords do not match')
+      setError(t('admin.passwordsDoNotMatch'))
       return
     }
 
@@ -65,7 +67,7 @@ export function ResetPasswordDialog({
         onOpenChange(false)
       }, 2000)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to reset password')
+      setError(t('admin.resetPasswordFailed'))
     } finally {
       setLoading(false)
     }
@@ -85,18 +87,18 @@ export function ResetPasswordDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Lock className="h-5 w-5" />
-            Reset Password
+            {t('admin.resetPassword')}
           </DialogTitle>
           <DialogDescription>
-            Set a new password for <strong>{userName}</strong>. They will be required to change it on next login.
+            {t('admin.resetPasswordDescription', { name: userName })}
           </DialogDescription>
         </DialogHeader>
 
         {success ? (
           <div className="py-6">
             <div className="rounded-md bg-green-50 p-4 text-sm text-green-700 text-center">
-              <p className="font-medium">Password reset successfully!</p>
-              <p className="mt-1">The user must use the new password on their next login.</p>
+              <p className="font-medium">{t('admin.passwordResetSuccess')}</p>
+              <p className="mt-1">{t('admin.passwordResetNextLogin')}</p>
             </div>
           </div>
         ) : (
@@ -108,14 +110,14 @@ export function ResetPasswordDialog({
             )}
 
             <div className="space-y-2">
-              <Label htmlFor="newPassword">New Password</Label>
+              <Label htmlFor="newPassword">{t('admin.newPassword')}</Label>
               <div className="relative">
                 <Input
                   id="newPassword"
                   type={showPassword ? 'text' : 'password'}
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="Min 8 characters"
+                  placeholder={t('admin.minEightCharacters')}
                   minLength={8}
                   required
                   className="pr-10"
@@ -131,13 +133,13 @@ export function ResetPasswordDialog({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="confirmPassword">Confirm Password</Label>
+              <Label htmlFor="confirmPassword">{t('admin.confirmPassword')}</Label>
               <Input
                 id="confirmPassword"
                 type={showPassword ? 'text' : 'password'}
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
-                placeholder="Confirm new password"
+                placeholder={t('admin.confirmNewPassword')}
                 minLength={8}
                 required
               />
@@ -145,10 +147,10 @@ export function ResetPasswordDialog({
 
             <DialogFooter className="pt-4">
               <Button type="button" variant="outline" onClick={handleClose} disabled={loading}>
-                Cancel
+                {t('common.cancel')}
               </Button>
               <Button type="submit" disabled={loading}>
-                {loading ? 'Resetting...' : 'Reset Password'}
+                {loading ? t('admin.resettingPassword') : t('admin.resetPassword')}
               </Button>
             </DialogFooter>
           </form>
