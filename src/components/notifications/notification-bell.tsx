@@ -26,7 +26,10 @@ export function NotificationBell({ userId }: NotificationBellProps) {
   const [notifications, setNotifications] = useState<Awaited<ReturnType<typeof getNotifications>>>([])
   const [unreadCount, setUnreadCount] = useState(0)
   const [isOpen, setIsOpen] = useState(false)
-  const [isLoading, setIsLoading] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+  const [loadFailed, setLoadFailed] = useState(false)
+  const [isRetrying, setIsRetrying] = useState(false)
+  const retryLoad = useRef<(() => void) | null>(null)
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
 
@@ -36,27 +39,40 @@ export function NotificationBell({ userId }: NotificationBellProps) {
   useEffect(() => {
     let cancelled = false
     let loaded = false
+    let fetching = false
 
-    async function fetchNotifications() {
+    async function fetchNotifications(retry = false) {
+      if (fetching) return
+      fetching = true
+      if (retry) setIsRetrying(true)
       if (!loaded) setIsLoading(true)
       try {
-        const [notifs, count] = await Promise.all([
+        const [notifs, count] = await Promise.allSettled([
           getNotifications(userId, 20),
           getUnreadCount(userId),
         ])
         if (cancelled) return
-        setNotifications(notifs)
-        setUnreadCount(count)
+        if (notifs.status === 'rejected') throw notifs.reason
+        if (count.status === 'rejected') throw count.reason
+        setNotifications(notifs.value)
+        setUnreadCount(count.value)
+        setLoadFailed(false)
         loaded = true
       } catch (error) {
         if (cancelled) return
         console.error('Failed to fetch notifications:', error)
+        setLoadFailed(true)
         toast.error(latestTranslations.current('notifications.loadFailed'))
       } finally {
-        if (!cancelled) setIsLoading(false)
+        fetching = false
+        if (!cancelled) {
+          setIsLoading(false)
+          setIsRetrying(false)
+        }
       }
     }
 
+    retryLoad.current = () => { void fetchNotifications(true) }
     void fetchNotifications()
 
     const interval = setInterval(() => {
@@ -64,6 +80,7 @@ export function NotificationBell({ userId }: NotificationBellProps) {
     }, 30000)
     return () => {
       cancelled = true
+      retryLoad.current = null
       clearInterval(interval)
     }
   }, [userId])
@@ -134,11 +151,21 @@ export function NotificationBell({ userId }: NotificationBellProps) {
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-96 p-0" align="end">
-          {isLoading ? (
+          {loadFailed && (
+            <div className="space-y-2 border-b px-4 py-3">
+              {notifications.length === 0 && <h3 className="font-semibold">{t('notifications.heading')}</h3>}
+              <p role="alert" className="text-sm text-red-700">{t('notifications.loadFailed')}</p>
+              <Button type="button" variant="outline" size="sm" disabled={isLoading || isRetrying} onClick={() => retryLoad.current?.()}>
+                {t('fallback.retry')}
+              </Button>
+            </div>
+          )}
+          {isLoading && !loadFailed && (
             <div className="flex items-center justify-center py-12">
               <div className="text-sm text-gray-500">{t('notifications.loading')}</div>
             </div>
-          ) : (
+          )}
+          {!isLoading && (!loadFailed || notifications.length > 0) && (
             <NotificationList
               notifications={notifications}
               onMarkAsRead={handleMarkAsRead}

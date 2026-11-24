@@ -80,16 +80,77 @@ test.afterAll(async () => {
   }
 })
 
-test('the same unread notification changes language without changing the stored pair, Request link, or read state', async ({ page }) => {
-  const requests = productionSurface('/requests')
-  await page.goto(`${productionSurface('/sign-in/[[...sign-in]]').path}?callbackUrl=${encodeURIComponent(requests.path)}`)
-  await page.locator('#email').fill(EMAIL)
+async function signIn(page: Page, email = EMAIL) {
+  const path = productionSurface('/requests').path
+  await page.goto(`${productionSurface('/sign-in/[[...sign-in]]').path}?callbackUrl=${encodeURIComponent(path)}`)
+  await page.locator('#email').fill(email)
   await page.locator('#password').fill(process.env.E2E_PASSWORD || 'changeme')
   await page.getByRole('button', { name: 'Sign in', exact: true }).click()
-  await expect(page).toHaveURL(`${BASE}${requests.path}`, { timeout: 60_000 })
+  await expect(page).toHaveURL(`${BASE}${path}`, { timeout: 60_000 })
+}
 
+const notificationBell = (page: Page) => page.getByRole('button').filter({ has: page.locator('svg.lucide-bell.h-5') })
+
+test('an interrupted notification load shows a retry, not an empty inbox', async ({ page }) => {
+  let interrupted = 0
+  let recovered = 0
+  let allowListRequest = false
+  let releaseRetry!: () => void
+  const holdRetry = new Promise<void>(resolve => { releaseRetry = resolve })
+  await page.route(`${BASE}/requests`, async route => {
+    const request = route.request()
+    if (request.method() === 'POST' && request.headers()['next-action'] && request.postData() === JSON.stringify([user.id, 20])) {
+      if (!allowListRequest) {
+        interrupted++
+        return route.abort('connectionreset')
+      }
+      recovered++
+      await holdRetry
+    }
+    await route.continue()
+  })
+  try {
+    await signIn(page)
+    const bell = notificationBell(page)
+    await bell.click()
+    const error = page.getByRole('alert').filter({ hasText: 'Failed to load notifications' })
+    await expect(error).toBeVisible()
+    expect(interrupted).toBeGreaterThan(0)
+    await expect(page.getByText('No notifications', { exact: true })).toHaveCount(0)
+    await expect(page.getByText(englishMessage, { exact: true })).toHaveCount(0)
+
+    allowListRequest = true
+    const retry = page.getByRole('button', { name: 'Try again', exact: true })
+    await retry.click()
+    await expect(retry).toBeDisabled()
+    await expect.poll(() => recovered).toBe(1)
+    releaseRetry()
+    await expect(page.getByText(englishMessage, { exact: true })).toBeVisible()
+    await expect(bell).toHaveAccessibleName('Notifications, 2 unread')
+    await expect(error).toHaveCount(0)
+  } finally {
+    releaseRetry()
+    await page.unrouteAll({ behavior: 'wait' })
+  }
+})
+
+test('a successful notification load can show an empty inbox', async ({ page }) => {
+  const email = 'admin@example.com'
+  const account = await prisma.user.findUniqueOrThrow({ where: { email }, select: { id: true } })
+  expect(await prisma.notifications.count({ where: { userId: account.id } })).toBe(0)
+  const loaded = page.waitForResponse(response => response.ok() && response.url() === `${BASE}/requests` &&
+    !!response.request().headers()['next-action'] && response.request().postData() === JSON.stringify([account.id, 20]))
+  await signIn(page, email)
+  await loaded
+  await notificationBell(page).click()
+  await expect(page.getByText('No notifications', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Try again', exact: true })).toHaveCount(0)
+})
+
+test('the same unread notification changes language without changing the stored pair, Request link, or read state', async ({ page }) => {
+  await signIn(page)
   const url = page.url()
-  const bell = page.getByRole('button').filter({ has: page.locator('svg.lucide-bell.h-5') })
+  const bell = notificationBell(page)
   await bell.click()
   await expect(page.getByRole('heading', { name: 'Notifications', exact: true })).toBeVisible({ timeout: 30_000 })
   await expect(page.getByText(englishMessage, { exact: true })).toBeVisible()
