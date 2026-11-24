@@ -344,11 +344,20 @@ async function openEnglishReview(approval: EnglishApprovalFixture, email: string
 englishApprovalTest('English control: own-team leads can approve, reports-to and ancestor cannot', async ({ approval }) => {
   const { title } = await approval.createRequest()
   for (const email of [CASEY, 'quinn@example.com']) {
-    const { dialog } = await openEnglishReview(approval, email, title)
+    const { page, dialog } = await openEnglishReview(approval, email, title)
+    if (email === CASEY) {
+      await expect.poll(async () => {
+        const response = await page.request.get('/api/actions/pending-count')
+        expect(response.ok()).toBe(true)
+        const { count } = await response.json() as { count: number }
+        return count
+      }).toBeGreaterThan(0)
+    }
     await expect(dialog.getByRole('button', { name: 'Approve', exact: true })).toBeVisible()
   }
   for (const email of ['riley@example.com', 'pat@example.com']) {
     const page = await approval.signInAs(email, '/requests/my-actions')
+    await expect(page.getByRole('heading', { name: 'My Action Items', exact: true })).toBeVisible()
     await expect(englishActionRow(page, title)).toHaveCount(0)
     await page.goto('/requests')
     await englishActionRow(page, title).click()
