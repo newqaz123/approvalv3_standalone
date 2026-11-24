@@ -1,4 +1,7 @@
 "use server";
+import { createTranslator, type MessageKey } from "@/lib/i18n/messages";
+import { getRequestLocale } from "@/lib/i18n/server";
+import { getActivityMessageKey } from "@/lib/modal-data-adapters";
 import prisma from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/cache/user-cache";
 import { getMyRequests } from "@/server-actions/requests";
@@ -9,12 +12,22 @@ export type {
 	FollowUpRow,
 } from "@/lib/follow-up-dashboard";
 
+const followUpActivityKeys = new Map<string, MessageKey>([
+	["file_removed", "dashboard.activity.fileRemoved"],
+	["restored", "dashboard.activity.restored"],
+	["archived", "dashboard.activity.archived"],
+	["unarchived", "dashboard.activity.unarchived"],
+	["restarted_stranded_attempt", "dashboard.activity.restarted"],
+]);
+
 export async function getFollowUpDashboard() {
 	const user = await getCurrentUser();
 	if (!user) {
 		throw new Error("User not found");
 	}
 
+	const locale = await getRequestLocale();
+	const t = createTranslator(locale);
 	const visible = await getMyRequests({ wrStatus: "all" });
 	const sendBackIds = visible
 		.filter((request) => request.status === "SendBackToRequester")
@@ -36,7 +49,9 @@ export async function getFollowUpDashboard() {
 		if (estimateByRequest.has(solution.requestId)) continue;
 		estimateByRequest.set(
 			solution.requestId,
-			`Estimate ${solution.currency === "THB" ? "฿" : `${solution.currency} `}${Number(solution.costEstimate).toLocaleString()}`,
+			t("dashboard.estimate", {
+				amount: `${solution.currency === "THB" ? "฿" : `${solution.currency} `}${Number(solution.costEstimate).toLocaleString()}`,
+			}),
 		);
 	}
 
@@ -79,7 +94,7 @@ export async function getFollowUpDashboard() {
 			createdAt: request.createdAt,
 			updatedAt: request.updatedAt ?? request.createdAt,
 			requesterId: request.requesterId,
-			requesterName: request.requester?.name || "Unknown",
+			requesterName: request.requester?.name || t("requests.unknown"),
 			hasRejection: request.hasRejection,
 			workRequisitionReceived: request.workRequisitionReceived,
 			estimateLabel: estimateByRequest.get(request.id) ?? null,
@@ -98,14 +113,18 @@ export async function getFollowUpDashboard() {
 					]
 				: [],
 		),
-		recentActivity: recentActivities.map((activity) => ({
-			id: activity.id,
-			createdAt: activity.createdAt,
-			action: activity.action.replaceAll("_", " "),
-			title: activity.request?.title || "Request",
-			actorName: activity.user?.name || "Someone",
-		})),
+		recentActivity: recentActivities.map((activity) => {
+			const actionKey = getActivityMessageKey(activity.action) ?? followUpActivityKeys.get(activity.action);
+			return {
+				id: activity.id,
+				createdAt: activity.createdAt,
+				action: locale === "th" && actionKey ? t(actionKey) : activity.action.replaceAll("_", " "),
+				title: activity.request?.title || t("insights.request"),
+				actorName: activity.user?.name || t("dashboard.unknownActor"),
+			};
+		}),
 		currentUserId: user.id,
-		departmentName: "Your department",
+		departmentName: t("dashboard.yourDepartment"),
+		t,
 	});
 }

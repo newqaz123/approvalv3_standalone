@@ -1,8 +1,11 @@
+import { createTranslator } from '../../src/lib/i18n/messages'
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const read = (path: string) => readFileSync(path, "utf8");
+
+const english = createTranslator('en')
 
 describe("follow-up dashboard redirects", () => {
 	it("sends admins to Admin and every other role to My Actions after sign-in and from /", () => {
@@ -57,8 +60,10 @@ describe("follow-up dashboard UI", () => {
 			/motion-safe:hover:-translate-y-0\.5[\s\S]*motion-safe:hover:shadow-md/,
 		);
 		assert.match(board, /recentActivity\.slice\(0, 8\)/);
-		assert.match(board, /Show more/);
-		assert.match(board, /Show less/);
+		assert.ok(board.includes("t('dashboard.showMore')"))
+		assert.equal(english('dashboard.showMore'), 'Show more');
+		assert.ok(board.includes("t('dashboard.showLess')"))
+		assert.equal(english('dashboard.showLess'), 'Show less');
 		assert.match(board, /from ["']vaul["']/);
 		assert.match(board, /handleOnly/);
 		assert.match(board, /Drawer\.Root/);
@@ -72,12 +77,18 @@ describe("follow-up dashboard UI", () => {
 			/absolute inset-x-0 bottom-0[\s\S]*md:inset-y-3 md:right-3/,
 		);
 		assert.match(source, /take: 20/);
-		assert.match(board, /Awaiting approval/);
-		assert.match(board, /Completed · no WR/);
-		assert.match(board, /Engineer solution ready/);
-		assert.match(board, /With Engineering/);
-		assert.match(board, /30\+ days/);
-		assert.match(board, /Needs attention/);
+		assert.ok(board.includes("t('dashboard.awaitingApproval')"))
+		assert.equal(english('dashboard.awaitingApproval'), 'Awaiting approval');
+		assert.ok(board.includes("t('dashboard.completedNoWr')"))
+		assert.equal(english('dashboard.completedNoWr'), 'Completed · no WR');
+		assert.ok(board.includes("t('dashboard.solutionReady')"))
+		assert.equal(english('dashboard.solutionReady'), 'Engineer solution ready');
+		assert.ok(board.includes("t('dashboard.withEngineering')"))
+		assert.equal(english('dashboard.withEngineering'), 'With Engineering');
+		assert.ok(board.includes("t('dashboard.noUpdate')"))
+		assert.match(english('dashboard.noUpdate'), /30\+ days/);
+		assert.ok(board.includes("t('dashboard.attention')"))
+		assert.equal(english('dashboard.attention'), 'Needs attention');
 		assert.match(board, /deltaLabels/);
 		assert.match(logic, /from yesterday/);
 		assert.match(board, /data\.completedNoWr/);
@@ -110,9 +121,9 @@ describe("follow-up dashboard UI", () => {
 			/drawer\.rows\.map\([\s\S]*mine=\{row\.isMine\}[\s\S]*waitingDays/,
 		);
 		assert.match(router, /viewOnly\?: boolean/);
-		const awaitingIdx = board.indexOf("Awaiting approval");
-		const noWrIdx = board.indexOf("Completed · no WR");
-		const readyIdx = board.indexOf("Engineer solution ready");
+		const awaitingIdx = board.indexOf("dashboard.awaitingApproval')");
+		const noWrIdx = board.indexOf("dashboard.completedNoWr')");
+		const readyIdx = board.indexOf("dashboard.solutionReady')");
 		assert.ok(awaitingIdx > 0 && noWrIdx > awaitingIdx && readyIdx > noWrIdx);
 	});
 

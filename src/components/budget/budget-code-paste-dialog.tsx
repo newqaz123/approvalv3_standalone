@@ -1,5 +1,6 @@
 'use client'
 
+import { useTranslations } from '@/lib/i18n/client'
 import { useEffect, useMemo, useState, type ClipboardEvent, type PointerEvent } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -38,8 +39,10 @@ export function BudgetCodePasteDialog({
     rows: Array<{ code: string; name: string; budgetAmount: number }>
   ) => Promise<{ created: number; updated: number; skipped: number }>
 }) {
+  const t = useTranslations()
   const [rows, setRows] = useState<BudgetPasteGridRow[]>(() => emptyPasteGrid())
   const [isSaving, setIsSaving] = useState(false)
+  const [hasError, setHasError] = useState(false)
   const [anchor, setAnchor] = useState<Cell | null>(null)
   const [focus, setFocus] = useState<Cell | null>(null)
   const [dragging, setDragging] = useState(false)
@@ -100,6 +103,7 @@ export function BudgetCodePasteDialog({
   }
 
   async function handleConfirm() {
+    setHasError(false)
     setIsSaving(true)
     try {
       await onPaste(parsed.valid.map((row) => ({
@@ -109,6 +113,8 @@ export function BudgetCodePasteDialog({
       })))
       setRows(emptyPasteGrid())
       onOpenChange(false)
+    } catch {
+      setHasError(true)
     } finally {
       setIsSaving(false)
     }
@@ -133,63 +139,70 @@ export function BudgetCodePasteDialog({
             }
           }}
           onPaste={(event) => handleCellPaste(index, column, event)}
-          aria-label={`${label} row ${index + 1}`}
+          aria-label={t('budget.pasteRow', { label, line: index + 1 })}
         />
       </td>
     )
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(nextOpen) => {
+      if (!nextOpen) setHasError(false)
+      onOpenChange(nextOpen)
+    }}>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Paste budget codes</DialogTitle>
+          <DialogTitle>{t('budget.paste')}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Drag to cover cells, then paste. One Excel column fills down; a three-column copy fills the row.
+            {t('budget.pasteIntro')}
           </p>
           <div className={`max-h-80 overflow-auto rounded-md border ${dragging ? 'select-none' : ''}`}>
             <table className="w-full text-sm">
               <thead className="sticky top-0 bg-gray-50 text-left text-xs font-medium text-muted-foreground">
                 <tr>
-                  <th className="px-2 py-2">Budget code</th>
-                  <th className="px-2 py-2">Budget code name</th>
-                  <th className="px-2 py-2">Budget amount</th>
+                  <th className="px-2 py-2">{t('budget.code')}</th>
+                  <th className="px-2 py-2">{t('budget.codeName')}</th>
+                  <th className="px-2 py-2">{t('budget.amount')}</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((_, index) => (
                   <tr key={index} className="border-t">
-                    {renderInput(index, 0, 'code', 'Budget code')}
-                    {renderInput(index, 1, 'name', 'Budget code name')}
-                    {renderInput(index, 2, 'amount', 'Budget amount')}
+                    {renderInput(index, 0, 'code', t('budget.code'))}
+                    {renderInput(index, 1, 'name', t('budget.codeName'))}
+                    {renderInput(index, 2, 'amount', t('budget.amount'))}
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
           <Button type="button" variant="outline" size="sm" onClick={() => setRows((current) => [...current, ...emptyPasteGrid(3)])}>
-            Add rows
+            {t('budget.pasteAddRows')}
           </Button>
           <p className="text-xs text-muted-foreground">
-            {classified.creates.length} create · {classified.updates.length} update · {parsed.skipped.length} skipped
+            {t('budget.pasteSummary', { created: classified.creates.length, updated: classified.updates.length, skipped: parsed.skipped.length })}
           </p>
           {parsed.skipped.length > 0 ? (
             <ul className="max-h-24 overflow-auto text-xs text-red-700">
               {parsed.skipped.map((row) => (
-                <li key={`${row.line}-${row.reason}`}>
-                  Line {row.line}: {row.reason}
+                <li key={`${row.line}-${row.reasonCode}`}>
+                  {t('budget.pasteSkip', { line: row.line, reason: t(`budget.pasteError.${row.reasonCode}`) })}
                 </li>
               ))}
             </ul>
           ) : null}
+          {hasError && <p role="alert" className="text-sm text-destructive">{t('budget.error.paste')}</p>}
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
+            <Button type="button" variant="outline" onClick={() => {
+              setHasError(false)
+              onOpenChange(false)
+            }}>
+              {t('common.cancel')}
             </Button>
             <Button type="button" onClick={handleConfirm} disabled={!canSubmit}>
-              Confirm
+              {t('budget.pasteConfirm')}
             </Button>
           </div>
         </div>

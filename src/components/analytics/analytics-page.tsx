@@ -1,5 +1,6 @@
 'use client'
 
+import { useTranslations } from '@/lib/i18n/client'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
@@ -88,9 +89,11 @@ function SectionCard({
 }
 
 export function AnalyticsPage({ initialData, filters, userId }: AnalyticsPageProps) {
+  const t = useTranslations()
   const router = useRouter()
   const searchParams = useSearchParams()
   const [data, setData] = useState(initialData)
+  const [hasError, setHasError] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [isInitialLoad, setIsInitialLoad] = useState(true)
   const pipelineView = useMemo(() => buildWorkflowPipelineView(data.pipeline), [data.pipeline])
@@ -122,6 +125,7 @@ export function AnalyticsPage({ initialData, filters, userId }: AnalyticsPagePro
    */
   async function handleFilterChange(newFilters: AnalyticsFilters) {
     setIsLoading(true)
+    setHasError(false)
     try {
       const newData = await getAnalyticsData(newFilters)
       setData(newData)
@@ -141,6 +145,7 @@ export function AnalyticsPage({ initialData, filters, userId }: AnalyticsPagePro
 
       router.push(`/analytics?${params.toString()}`)
     } catch (error) {
+      setHasError(true)
       console.error('Failed to fetch analytics data:', error)
     } finally {
       setIsLoading(false)
@@ -152,7 +157,9 @@ export function AnalyticsPage({ initialData, filters, userId }: AnalyticsPagePro
       try {
         const freshData = await getAnalyticsData(getActiveFilters())
         setData(freshData)
+        setHasError(false)
       } catch (error) {
+        setHasError(true)
         console.error('Failed to refresh analytics data:', error)
       }
     }
@@ -176,26 +183,28 @@ export function AnalyticsPage({ initialData, filters, userId }: AnalyticsPagePro
       {/* Page header + filters */}
       <div className="space-y-4">
         <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-bold tracking-tight">Analytics</h1>
+          <h1 className="text-2xl font-bold tracking-tight">{t('nav.analytics')}</h1>
           <p className="text-sm text-muted-foreground">
-            Monitor approval workflows, track performance, and identify bottlenecks.
+            {t('analytics.intro')}
           </p>
         </div>
         <FilterControls filters={filters} onFilterChange={handleFilterChange} />
       </div>
 
+      {hasError && <p role="alert" className="text-sm text-destructive">{t('analytics.error.load')}</p>}
+
       {/* Loading indicator */}
       {showSkeleton && (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
           <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-          Updating analytics...
+          {t('analytics.updating')}
         </div>
       )}
 
       {/* Main content */}
       {!data ? (
         <div className="text-center py-12 text-muted-foreground">
-          No analytics data available
+          {t('analytics.noData')}
         </div>
       ) : (
         <>
@@ -213,8 +222,8 @@ export function AnalyticsPage({ initialData, filters, userId }: AnalyticsPagePro
           {/* Row 2: Engineering Resolution Trend (wide) + Department Breakdown (side) */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <SectionCard
-              title="Engineering Resolution Trend"
-              subtitle="Open Engineering backlog at period end versus requests resolved by Engineering during each period."
+              title={t('analytics.trend')}
+              subtitle={t('analytics.trendIntro')}
               icon={Activity}
               className="lg:col-span-2"
             >
@@ -225,7 +234,7 @@ export function AnalyticsPage({ initialData, filters, userId }: AnalyticsPagePro
               )}
             </SectionCard>
 
-            <SectionCard title="By Department" icon={Building2}>
+            <SectionCard title={t('analytics.byDepartment')} icon={Building2}>
               {showSkeleton ? (
                 <Skeleton className="h-[200px] w-full rounded-lg" />
               ) : (
@@ -237,7 +246,7 @@ export function AnalyticsPage({ initialData, filters, userId }: AnalyticsPagePro
           {/* Row 3: Engineering KPIs (wide) + Approval Speed (side) */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <SectionCard
-              title="Engineering Work Time"
+              title={t('analytics.engineeringTime')}
               icon={Wrench}
               className="lg:col-span-2"
             >
@@ -248,7 +257,7 @@ export function AnalyticsPage({ initialData, filters, userId }: AnalyticsPagePro
               )}
             </SectionCard>
 
-            <SectionCard title="Approval Speed" icon={Clock}>
+            <SectionCard title={t('analytics.approvalSpeed')} icon={Clock}>
               {showSkeleton ? (
                 <Skeleton className="h-[200px] w-full rounded-lg" />
               ) : (
@@ -258,7 +267,7 @@ export function AnalyticsPage({ initialData, filters, userId }: AnalyticsPagePro
           </div>
 
           {/* Row 4: Department Speed Racing Track */}
-          <SectionCard title="Approval Speed by Department" icon={Flag}>
+          <SectionCard title={t('analytics.departmentSpeed')} icon={Flag}>
             {showSkeleton ? (
               <Skeleton className="h-[250px] w-full rounded-lg" />
             ) : (
@@ -268,8 +277,8 @@ export function AnalyticsPage({ initialData, filters, userId }: AnalyticsPagePro
 
           {/* Row 5: Workflow Pipeline */}
           <SectionCard
-            title="Workflow pipeline"
-            subtitle="Where open requests sit along the path"
+            title={t('analytics.pipeline')}
+            subtitle={t('analytics.pipelineIntro')}
             icon={BarChart3}
             actions={
               data.pipeline.length > 0 ? <WorkflowPipelineExits view={pipelineView} /> : null
@@ -283,7 +292,7 @@ export function AnalyticsPage({ initialData, filters, userId }: AnalyticsPagePro
           </SectionCard>
 
           {/* Row 6: Bottleneck Alerts */}
-          <SectionCard title="Bottleneck Alerts" icon={AlertTriangle}>
+          <SectionCard title={t('analytics.bottlenecks')} icon={AlertTriangle}>
             {showSkeleton ? (
               <Skeleton className="h-[80px] w-full rounded-lg" />
             ) : (

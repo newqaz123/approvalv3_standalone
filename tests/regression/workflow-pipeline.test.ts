@@ -1,3 +1,4 @@
+import { createTranslator } from '../../src/lib/i18n/messages'
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -19,6 +20,8 @@ function segment(
   const rejected = step === 'Cancelled' ? count : 0
   return { step, pending, approved, rejected, previews }
 }
+
+const english = createTranslator('en')
 
 describe('buildWorkflowPipelineView', () => {
   it('keeps all in-flight stages in path order, including zeros, and treats Completed/Cancelled as exits', () => {
@@ -93,7 +96,8 @@ describe('workflow pipeline chart wiring', () => {
     assert.match(chart, /flexGrow/)
     assert.match(chart, /view\.completed/)
     assert.match(chart, /view\.cancelled/)
-    assert.match(chart, /\+\{.*moreCount/)
+    assert.match(chart, /t\('insights\.more', \{ count: stage\.moreCount \}\)/)
+    assert.equal(english('insights.more', { count: 3 }), '+3 more')
     assert.match(chart, /bg-blue-500/)
     assert.match(chart, /h-8/)
     assert.doesNotMatch(chart, /bg-zinc-950/)

@@ -1,5 +1,7 @@
 'use client'
 
+import type { Translator } from '@/lib/i18n/messages'
+import { useTranslations } from '@/lib/i18n/client'
 import { Trophy } from 'lucide-react'
 import type { DepartmentApprovalSpeed } from '@/types/analytics'
 import { cn } from '@/lib/utils'
@@ -9,17 +11,17 @@ interface DepartmentSpeedChartProps {
 }
 
 const STEP_CONFIG = [
-  { key: 'avgImprovementHours' as const, label: 'Improvement Approval', color: 'bg-blue-500', textColor: 'text-blue-600', dotColor: 'bg-blue-500' },
-  { key: 'avgEngineeringHours' as const, label: 'Engineering', color: 'bg-amber-500', textColor: 'text-amber-600', dotColor: 'bg-amber-500' },
-  { key: 'avgFinalApprovalHours' as const, label: 'Final Approval', color: 'bg-emerald-500', textColor: 'text-emerald-600', dotColor: 'bg-emerald-500' },
+  { key: 'avgImprovementHours' as const, labelKey: 'analytics.metric.improvementApproval' as const, color: 'bg-blue-500', textColor: 'text-blue-600', dotColor: 'bg-blue-500' },
+  { key: 'avgEngineeringHours' as const, labelKey: 'analytics.metric.engineering' as const, color: 'bg-amber-500', textColor: 'text-amber-600', dotColor: 'bg-amber-500' },
+  { key: 'avgFinalApprovalHours' as const, labelKey: 'analytics.metric.finalApproval' as const, color: 'bg-emerald-500', textColor: 'text-emerald-600', dotColor: 'bg-emerald-500' },
 ]
 
-function formatDuration(hours: number): string {
+function formatDuration(hours: number, t: Translator): string {
   if (hours === 0) return '—'
-  if (hours < 1) return `${Math.round(hours * 60)}m`
-  if (hours < 24) return `${hours.toFixed(1)}h`
+  if (hours < 1) return t('insights.duration.minute', { value: Math.round(hours * 60) })
+  if (hours < 24) return t('insights.duration.hour', { value: hours.toFixed(1) })
   const days = hours / 24
-  return `${days.toFixed(1)}d`
+  return t('insights.duration.day', { value: days.toFixed(1) })
 }
 
 /**
@@ -29,10 +31,11 @@ function formatDuration(hours: number): string {
  * Departments sorted fastest → slowest
  */
 export function DepartmentSpeedChart({ data }: DepartmentSpeedChartProps) {
+  const t = useTranslations()
   if (data.length === 0) {
     return (
       <div className="flex h-[200px] items-center justify-center text-muted-foreground text-sm">
-        No completed requests to calculate department speeds
+        {t('analytics.departmentSpeedEmpty')}
       </div>
     )
   }
@@ -46,7 +49,7 @@ export function DepartmentSpeedChart({ data }: DepartmentSpeedChartProps) {
         {STEP_CONFIG.map((step) => (
           <span key={step.key} className="flex items-center gap-1.5">
             <span className={cn('inline-block h-2.5 w-2.5 rounded-sm', step.dotColor)} />
-            <span className="text-muted-foreground">{step.label}</span>
+            <span className="text-muted-foreground">{t(step.labelKey)}</span>
           </span>
         ))}
       </div>
@@ -56,6 +59,7 @@ export function DepartmentSpeedChart({ data }: DepartmentSpeedChartProps) {
         {data.map((dept, index) => {
           const totalPct = maxHours > 0 ? (dept.avgHours / maxHours) * 100 : 0
           const isFirst = index === 0
+          const departmentName = dept.isUnnamed ? t('requests.unknown') : dept.name
 
           // Calculate each step's proportion within this department's total bar
           const stepSegments = STEP_CONFIG.map((step) => {
@@ -81,8 +85,8 @@ export function DepartmentSpeedChart({ data }: DepartmentSpeedChartProps) {
                 </div>
 
                 {/* Department name */}
-                <span className="w-28 shrink-0 truncate text-sm font-medium" title={dept.name}>
-                  {dept.name}
+                <span className="w-28 shrink-0 truncate text-sm font-medium" title={departmentName}>
+                  {departmentName}
                 </span>
 
                 {/* Stacked track bar */}
@@ -109,7 +113,7 @@ export function DepartmentSpeedChart({ data }: DepartmentSpeedChartProps) {
                           key={seg.key}
                           className={cn('h-full first:rounded-l-full last:rounded-r-full', seg.color)}
                           style={{ width: `${segWidthInBar}%` }}
-                          title={`${seg.label}: ${formatDuration(seg.hours)}`}
+                          title={`${t(seg.labelKey)}: ${formatDuration(seg.hours, t)}`}
                         />
                       )
                     })}
@@ -119,7 +123,7 @@ export function DepartmentSpeedChart({ data }: DepartmentSpeedChartProps) {
                 {/* Total time label */}
                 <div className="w-16 shrink-0 text-right">
                   <span className="text-sm font-semibold tabular-nums">
-                    {formatDuration(dept.avgHours)}
+                    {formatDuration(dept.avgHours, t)}
                   </span>
                 </div>
               </div>
@@ -129,10 +133,10 @@ export function DepartmentSpeedChart({ data }: DepartmentSpeedChartProps) {
                 {stepSegments.map((seg) => (
                   <span key={seg.key} className={cn('flex items-center gap-1', seg.textColor)}>
                     <span className={cn('h-1.5 w-1.5 rounded-full', seg.dotColor)} />
-                    {seg.label}: <span className="font-semibold">{formatDuration(seg.hours)}</span>
+                    {t(seg.labelKey)}: <span className="font-semibold">{formatDuration(seg.hours, t)}</span>
                   </span>
                 ))}
-                <span className="text-muted-foreground ml-auto">{dept.completedCount} completed</span>
+                <span className="text-muted-foreground ml-auto">{t('analytics.completedCount', { count: dept.completedCount })}</span>
               </div>
             </div>
           )
@@ -143,10 +147,10 @@ export function DepartmentSpeedChart({ data }: DepartmentSpeedChartProps) {
       <div className="flex items-center gap-3 pl-[164px]">
         <div className="flex-1 flex justify-between text-[10px] text-muted-foreground">
           <span>0</span>
-          <span>{formatDuration(maxHours * 0.25)}</span>
-          <span>{formatDuration(maxHours * 0.5)}</span>
-          <span>{formatDuration(maxHours * 0.75)}</span>
-          <span>{formatDuration(maxHours)}</span>
+          <span>{formatDuration(maxHours * 0.25, t)}</span>
+          <span>{formatDuration(maxHours * 0.5, t)}</span>
+          <span>{formatDuration(maxHours * 0.75, t)}</span>
+          <span>{formatDuration(maxHours, t)}</span>
         </div>
         <div className="w-16" />
       </div>

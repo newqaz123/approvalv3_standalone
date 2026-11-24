@@ -1,5 +1,6 @@
 'use client'
 
+import { useTranslations } from '@/lib/i18n/client'
 import { useMemo, useState } from 'react'
 import { Check, Search } from 'lucide-react'
 import { Input } from '@/components/ui/input'
@@ -8,17 +9,18 @@ interface BudgetSearchInputProps {
   id?: string
   value: string
   placeholder: string
-  options: Array<{ value: string; label: string; meta?: string }>
+  options: Array<{ value: string; label: string; meta?: string; hasNoDepartment: boolean }>
   onChange: (value: string) => void
 }
 
 export function BudgetSearchInput({ id, value, placeholder, options, onChange }: BudgetSearchInputProps) {
+  const t = useTranslations()
   const [open, setOpen] = useState(false)
   const trimmedValue = value.trim().toLowerCase()
   const filteredOptions = useMemo(() => {
     return options
       .filter((option) =>
-        `${option.label} ${option.meta ?? ''}`.toLowerCase().includes(trimmedValue)
+        `${option.label} ${option.meta ?? (option.hasNoDepartment ? 'No department' : '')}`.toLowerCase().includes(trimmedValue)
       )
       .slice(0, 8)
   }, [options, trimmedValue])
@@ -54,7 +56,7 @@ export function BudgetSearchInput({ id, value, placeholder, options, onChange }:
             >
               <Check className={`h-4 w-4 ${value === option.value ? 'opacity-100' : 'opacity-0'}`} />
               <span className="min-w-0 flex-1 truncate">{option.label}</span>
-              {option.meta ? <span className="max-w-28 truncate text-xs text-gray-500">{option.meta}</span> : null}
+              {(option.meta || option.hasNoDepartment) ? <span className="max-w-28 truncate text-xs text-gray-500">{option.meta ?? t('budget.noDepartment')}</span> : null}
             </button>
           ))}
         </div>

@@ -73,12 +73,19 @@ export interface SummaryMetrics {
   approvalRate: number
 }
 
+export interface DepartmentBreakdown {
+  name: string
+  value: number
+  isUnnamed: boolean
+}
+
 /**
  * Per-department average approval speed
  */
 export interface DepartmentApprovalSpeed {
   /** Department name */
   name: string
+  isUnnamed?: boolean
   /** Total average approval time in hours */
   avgHours: number
   /** Number of completed requests used for calculation */
@@ -184,7 +191,7 @@ export interface AnalyticsData {
   /** Workflow pipeline data grouped by status */
   pipeline: WorkflowPipelineSegment[]
   /** Department breakdown data */
-  departments: Array<{ name: string; value: number }>
+  departments: DepartmentBreakdown[]
   /** Time-based approval metrics */
   timeMetrics: TimeMetrics
   /** Summary metrics for quick overview */

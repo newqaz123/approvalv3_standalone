@@ -1,5 +1,6 @@
 'use client'
 
+import { useTranslations } from '@/lib/i18n/client'
 import { Check, X } from 'lucide-react'
 import type { WorkflowPipelineSegment } from '@/types/analytics'
 import {
@@ -20,6 +21,7 @@ interface WorkflowPipelineChartProps {
 }
 
 function RequestList({ stage }: { stage: PipelineStageView }) {
+  const t = useTranslations()
   return (
     <div>
       <div className="mb-1.5 flex items-baseline gap-1.5 text-xs">
@@ -27,16 +29,16 @@ function RequestList({ stage }: { stage: PipelineStageView }) {
         <span className="text-muted-foreground">· {stage.count}</span>
       </div>
       {stage.count === 0 || stage.previews.length === 0 ? (
-        <p className="text-xs text-muted-foreground">No open requests</p>
+        <p className="text-xs text-muted-foreground">{t('analytics.noOpenRequests')}</p>
       ) : (
         <ul className="space-y-0.5">
           {stage.previews.map((item) => (
             <li key={item.id} className="truncate text-xs">
-              {item.title || 'Untitled'}
+              {item.title || t('insights.untitled')}
             </li>
           ))}
           {stage.moreCount > 0 && (
-            <li className="text-xs text-muted-foreground">+{stage.moreCount} more</li>
+            <li className="text-xs text-muted-foreground">{t('insights.more', { count: stage.moreCount })}</li>
           )}
         </ul>
       )}
@@ -76,12 +78,13 @@ function ExitChip({
 }
 
 export function WorkflowPipelineExits({ view }: { view: WorkflowPipelineView }) {
+  const t = useTranslations()
   return (
     <div className="flex shrink-0 items-center gap-1.5">
       <ExitChip stage={view.completed} tone="success" />
       <ExitChip stage={view.cancelled} tone="muted" />
       <span className="inline-flex h-[26px] items-center rounded-full bg-muted px-2.5 text-xs font-medium">
-        {view.inFlightTotal} in flight
+        {t('analytics.inFlight', { count: view.inFlightTotal })}
       </span>
     </div>
   )
@@ -97,10 +100,11 @@ function stageBarClass(stage: PipelineStageView) {
 }
 
 export function WorkflowPipelineChart({ data }: WorkflowPipelineChartProps) {
+  const t = useTranslations()
   if (!data || data.length === 0) {
     return (
       <div className="flex h-[120px] items-center justify-center text-sm text-muted-foreground">
-        No pipeline data available
+        {t('analytics.pipelineEmpty')}
       </div>
     )
   }
@@ -124,7 +128,7 @@ export function WorkflowPipelineChart({ data }: WorkflowPipelineChartProps) {
                 <button
                   type="button"
                   className={stageBarClass(stage)}
-                  aria-label={`${stage.fullLabel}, ${stage.count} open requests`}
+                  aria-label={t('analytics.pipelineOpenCount', { status: stage.fullLabel, count: stage.count })}
                 >
                   {stage.count}
                 </button>
@@ -143,7 +147,7 @@ export function WorkflowPipelineChart({ data }: WorkflowPipelineChartProps) {
       </div>
       {view.bottleneck && (
         <p className="mt-2 text-xs text-muted-foreground">
-          {view.bottleneck.label} holds the most volume relative to its neighbors.
+          {t('analytics.pipelinePeak', { status: view.bottleneck.label })}
         </p>
       )}
     </div>

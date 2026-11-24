@@ -1,5 +1,6 @@
 'use client'
 
+import { useTranslations } from '@/lib/i18n/client'
 import { ChevronRight, MinusCircle, Pencil } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { getBudgetCodeHealth, getBudgetCodeLabel } from '@/lib/budget-control'
@@ -20,6 +21,7 @@ export function BudgetCodeCard({
   onUnassign: (requestId: string) => void
   onOpenRequest: (requestId: string) => void
 }) {
+  const t = useTranslations()
   const health = getBudgetCodeHealth(group.remainingBudget, group.budgetCode.budgetAmount)
   const usedPercent =
     group.budgetCode.budgetAmount && group.budgetCode.budgetAmount > 0
@@ -57,17 +59,17 @@ export function BudgetCodeCard({
 
         <div className="grid grid-cols-3 gap-0 max-lg:border-t max-lg:divide-x lg:gap-3">
           <div className="py-1 pl-1 lg:py-0 lg:pl-0">
-            <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Budget amount</div>
+            <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('budget.amount')}</div>
             <div className="text-sm font-semibold tabular-nums text-gray-900">
               {group.budgetCode.budgetAmount?.toLocaleString() ?? '—'}
             </div>
           </div>
           <div className="py-1 pl-3 lg:py-0 lg:pl-0">
-            <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Used</div>
+            <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('budget.used')}</div>
             <div className="text-sm font-semibold tabular-nums text-gray-900">{group.usedAmount.toLocaleString()}</div>
           </div>
           <div className="py-1 pl-3 lg:py-0 lg:pl-0">
-            <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Remaining</div>
+            <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('budget.remaining')}</div>
             <div className={`text-sm font-semibold tabular-nums ${group.remainingBudget !== null && group.remainingBudget < 0 ? 'text-red-700' : 'text-gray-900'}`}>
               {group.remainingBudget?.toLocaleString() ?? '—'}
             </div>
@@ -76,9 +78,9 @@ export function BudgetCodeCard({
 
         <div className="flex shrink-0 items-center gap-2 max-lg:px-3 max-lg:pb-3 lg:justify-end">
           <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${healthClass}`}>{health}</span>
-          <Button variant="outline" size="sm" onClick={onEditBudgetCode} title="Edit budget code">
+          <Button variant="outline" size="sm" onClick={onEditBudgetCode} title={t('budget.editCode')}>
             <Pencil className="mr-1 h-3.5 w-3.5" />
-            Edit
+            {t('budget.edit')}
           </Button>
         </div>
       </div>
@@ -96,7 +98,7 @@ export function BudgetCodeCard({
         <div className="overflow-hidden">
           <div className="border-t">
             {group.requests.length === 0 ? (
-              <p className="px-3 py-3 text-sm text-muted-foreground">No requests assigned to this group yet.</p>
+              <p className="px-3 py-3 text-sm text-muted-foreground">{t('budget.groupEmpty')}</p>
             ) : (
               group.requests.map((request) => (
                 <div
@@ -120,7 +122,7 @@ export function BudgetCodeCard({
                     variant="ghost"
                     size="icon"
                     className="h-8 w-8"
-                    title="Remove request from budget code"
+                    title={t('budget.removeRequest')}
                     onClick={() => onUnassign(request.id)}
                   >
                     <MinusCircle className="h-4 w-4" />

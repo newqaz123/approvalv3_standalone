@@ -1,5 +1,6 @@
 'use client'
 
+import { useTranslations } from '@/lib/i18n/client'
 import { useId } from 'react'
 import {
   LineChart,
@@ -30,12 +31,19 @@ interface EngineeringResolutionTrendChartProps {
  * unresolved line, and a distinct dashed-line legend marker.
  */
 export function EngineeringResolutionTrendChart({ data }: EngineeringResolutionTrendChartProps) {
+  const t = useTranslations()
   const headingId = useId()
+  function seriesLabel(dataKey: unknown, fallback: string | number) {
+    if (dataKey === 'engineeringUnresolved' || dataKey === 'resolvedByEngineering') {
+      return t(`analytics.metric.${dataKey}`)
+    }
+    return fallback
+  }
 
   if (!data || data.length === 0) {
     return (
       <div className="flex items-center justify-center h-[280px] text-muted-foreground text-sm">
-        No engineering resolution data available
+        {t('analytics.trendEmpty')}
       </div>
     )
   }
@@ -47,10 +55,10 @@ export function EngineeringResolutionTrendChart({ data }: EngineeringResolutionT
   return (
     <section aria-labelledby={headingId}>
       <h3 id={headingId} className="sr-only">
-        Engineering Resolution Trend
+        {t('analytics.trend')}
       </h3>
       <p className="sr-only">
-        Open engineering backlog at period end versus requests resolved by Engineering during each period.
+        {t('analytics.trendAccessibleIntro')}
       </p>
       <ResponsiveContainer width="100%" height={280}>
         <LineChart data={data} margin={{ top: 8, right: 8, left: -12, bottom: 0 }} accessibilityLayer>
@@ -69,6 +77,7 @@ export function EngineeringResolutionTrendChart({ data }: EngineeringResolutionT
             allowDecimals={false}
           />
           <Tooltip
+            formatter={(value, name, entry) => [value, seriesLabel(entry.dataKey, name)]}
             contentStyle={{
               backgroundColor: 'hsl(var(--card))',
               border: '1px solid hsl(var(--border))',
@@ -78,6 +87,7 @@ export function EngineeringResolutionTrendChart({ data }: EngineeringResolutionT
             }}
           />
           <Legend
+            formatter={(value, entry) => seriesLabel(entry.dataKey, value)}
             iconSize={8}
             wrapperStyle={{ fontSize: '12px', paddingTop: '8px' }}
           />
@@ -88,7 +98,6 @@ export function EngineeringResolutionTrendChart({ data }: EngineeringResolutionT
             strokeWidth={2}
             dot={{ r: 3, strokeWidth: 2, fill: '#fff', stroke: '#3b82f6' }}
             activeDot={{ r: 4, stroke: '#3b82f6', strokeWidth: 2, fill: '#fff' }}
-            name="Engineering unresolved"
             legendType="circle"
           />
           {/* Resolved series — sighted low-vision distinction: darker green
@@ -103,19 +112,18 @@ export function EngineeringResolutionTrendChart({ data }: EngineeringResolutionT
             strokeDasharray="8 4"
             dot={{ r: 3, strokeWidth: 2, fill: '#fff', stroke: '#15803d' }}
             activeDot={{ r: 4, stroke: '#15803d', strokeWidth: 2, fill: '#fff' }}
-            name="Resolved by Engineering"
             legendType="plainline"
           />
         </LineChart>
       </ResponsiveContainer>
       <div className="sr-only">
         <table>
-          <caption>Engineering Resolution Trend by period</caption>
+          <caption>{t('analytics.trendCaption')}</caption>
           <thead>
             <tr>
-              <th scope="col">Period</th>
-              <th scope="col">Engineering unresolved</th>
-              <th scope="col">Resolved by Engineering</th>
+              <th scope="col">{t('analytics.period')}</th>
+              <th scope="col">{t('analytics.metric.engineeringUnresolved')}</th>
+              <th scope="col">{t('analytics.metric.resolvedByEngineering')}</th>
             </tr>
           </thead>
           <tbody>

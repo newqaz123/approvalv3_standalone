@@ -3,6 +3,7 @@ import { describe, it } from 'node:test'
 import { parseLocale, persistLanguage, resolveLocale, type Locale } from '../../src/lib/i18n/locale'
 import { account } from '../../src/lib/i18n/catalogs/account'
 import { common } from '../../src/lib/i18n/catalogs/common'
+import { insights } from '../../src/lib/i18n/catalogs/insights'
 import { createTranslator, interpolateMessage } from '../../src/lib/i18n/messages'
 
 function recordLanguageWrites(accountSaved = true) {
@@ -106,7 +107,7 @@ describe('i18n messages', () => {
   })
 
   it('uses the same catalog keys and interpolation tokens in both locales', () => {
-    const catalogs: { en: Record<string, string>; th: Record<string, string> }[] = [common, account]
+    const catalogs: { en: Record<string, string>; th: Record<string, string> }[] = [common, account, insights]
     const tokens = (message: string) => [...new Set(message.match(/\{\w+\}/g))].sort()
     for (const { en, th } of catalogs) {
       assert.deepEqual(Object.keys(th).sort(), Object.keys(en).sort())

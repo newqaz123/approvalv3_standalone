@@ -15,6 +15,7 @@ import type {
   EngineeringMetrics,
   EngineeringCycle,
   DepartmentApprovalSpeed,
+  DepartmentBreakdown,
 } from '@/types/analytics'
 import { PIPELINE_PREVIEW_LIMIT } from '@/lib/workflow-pipeline'
 import {
@@ -222,7 +223,7 @@ async function fetchPipelineData(
   const grouped = requests.reduce(
     (acc, req) => {
       if (!acc[req.status]) acc[req.status] = []
-      acc[req.status].push({ id: req.id, title: req.title || 'Untitled' })
+      acc[req.status].push({ id: req.id, title: req.title })
       return acc
     },
     {} as Record<string, Array<{ id: string; title: string }>>,
@@ -260,7 +261,7 @@ async function fetchPipelineData(
  */
 async function fetchDepartmentData(
   whereClause: any
-): Promise<Array<{ name: string; value: number }>> {
+): Promise<DepartmentBreakdown[]> {
   const requests = await prisma.requests.findMany({
     where: {
       ...whereClause,
@@ -275,7 +276,8 @@ async function fetchDepartmentData(
     },
   })
 
-  // Group by organization unit name
+  // Keep existing name-based groups. The fallback is translatable only when it contains no real name.
+  const hasNamedUnknown = requests.some(req => req.organizationUnit?.name === 'Unknown')
   const deptCounts = requests.reduce((acc, req) => {
     const deptName = req.organizationUnit?.name || 'Unknown'
     acc[deptName] = (acc[deptName] || 0) + 1
@@ -283,7 +285,11 @@ async function fetchDepartmentData(
   }, {} as Record<string, number>)
 
   // Convert to array format
-  return Object.entries(deptCounts).map(([name, value]) => ({ name, value: value as number }))
+  return Object.entries(deptCounts).map(([name, value]) => ({
+    name,
+    value,
+    isUnnamed: name === 'Unknown' && !hasNamedUnknown,
+  }))
 }
 
 /**
@@ -676,7 +682,7 @@ async function fetchEngineeringMetrics(whereClause: any): Promise<EngineeringMet
 
   for (const [requestId, sentAt] of sentToEngMap.entries()) {
     const backAt = sentBackMap.get(requestId)
-    const title = requestTitleMap.get(requestId) || 'Untitled'
+    const title = requestTitleMap.get(requestId) ?? ''
 
     if (backAt) {
       const cycleHours = differenceInMinutes(backAt, sentAt) / 60
@@ -795,6 +801,7 @@ async function fetchDepartmentSpeeds(whereClause: any): Promise<DepartmentApprov
     improvement: number[]
     engineering: number[]
     finalApproval: number[]
+    hasName: boolean
   }
   const deptData: Record<string, StepTimes> = {}
 
@@ -808,8 +815,10 @@ async function fetchDepartmentSpeeds(whereClause: any): Promise<DepartmentApprov
     const completed = transitions['Completed']
 
     if (!deptData[deptName]) {
-      deptData[deptName] = { total: [], improvement: [], engineering: [], finalApproval: [] }
+      deptData[deptName] = { total: [], improvement: [], engineering: [], finalApproval: [], hasName: false }
     }
+
+    if (req.organizationUnit?.name) deptData[deptName].hasName = true
 
     // Improvement step: Created → SentToEngineer
     if (sentToEng) {
@@ -845,6 +854,7 @@ async function fetchDepartmentSpeeds(whereClause: any): Promise<DepartmentApprov
   return Object.entries(deptData)
     .map(([name, times]) => ({
       name,
+      isUnnamed: !times.hasName,
       avgHours: avg(times.total),
       completedCount: times.total.length,
       avgImprovementHours: avg(times.improvement),

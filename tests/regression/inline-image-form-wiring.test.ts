@@ -545,8 +545,8 @@ describe('inline image form wiring contracts', () => {
       const handler = source.split('const handleSubmitRequest = async')[1]?.split('const lists = useMemo')[0] ?? ''
       assert.match(handler, /inlineImageSessionId: form\.inlineImageSessionId/)
       assert.match(handler, /return \{ success: true \};/)
-      assert.match(handler, /success: false,\s*\n\s*error: result\.error \|\| "Failed to create request",/)
-      assert.match(handler, /error: "An error occurred while creating the request",/)
+      assert.match(handler, /const error = t\(result\.errorKey \?\? "requests\.error\.create"\)[\s\S]*?return \{ success: false, error \};/)
+      assert.match(handler, /const error = t\("requests\.error\.createUnexpected"\)[\s\S]*?return \{ success: false, error \};/)
     })
   })
 

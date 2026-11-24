@@ -1,5 +1,6 @@
 'use client'
 
+import { useTranslations } from '@/lib/i18n/client'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -20,11 +21,13 @@ interface BudgetCodeCreateDialogProps {
 }
 
 export function BudgetCodeCreateDialog({ open, onOpenChange, departments, onCreate }: BudgetCodeCreateDialogProps) {
+  const t = useTranslations()
   const [budgetCode, setBudgetCode] = useState('')
   const [name, setName] = useState('')
   const [budgetAmount, setBudgetAmount] = useState('')
   const [unitId, setDepartmentId] = useState<string>('none')
   const [isSaving, setIsSaving] = useState(false)
+  const [hasError, setHasError] = useState(false)
 
   const parsedAmount = Number(budgetAmount)
   const canSubmit =
@@ -35,6 +38,7 @@ export function BudgetCodeCreateDialog({ open, onOpenChange, departments, onCrea
     parsedAmount >= 0
 
   async function handleCreate() {
+    setHasError(false)
     setIsSaving(true)
     try {
       await onCreate({
@@ -48,23 +52,28 @@ export function BudgetCodeCreateDialog({ open, onOpenChange, departments, onCrea
       setBudgetAmount('')
       setDepartmentId('none')
       onOpenChange(false)
+    } catch {
+      setHasError(true)
     } finally {
       setIsSaving(false)
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(nextOpen) => {
+      if (!nextOpen) setHasError(false)
+      onOpenChange(nextOpen)
+    }}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>New budget code</DialogTitle>
+          <DialogTitle>{t('budget.newCode')}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Add a budget code, name, and amount. Department is optional.
+            {t('budget.newCodeIntro')}
           </p>
           <div className="space-y-2">
-            <Label htmlFor="new-budget-code">Budget code</Label>
+            <Label htmlFor="new-budget-code">{t('budget.code')}</Label>
             <Input
               id="new-budget-code"
               value={budgetCode}
@@ -72,7 +81,7 @@ export function BudgetCodeCreateDialog({ open, onOpenChange, departments, onCrea
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="new-budget-code-name">Budget code name</Label>
+            <Label htmlFor="new-budget-code-name">{t('budget.codeName')}</Label>
             <Input
               id="new-budget-code-name"
               value={name}
@@ -80,7 +89,7 @@ export function BudgetCodeCreateDialog({ open, onOpenChange, departments, onCrea
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="new-budget-amount">Budget amount</Label>
+            <Label htmlFor="new-budget-amount">{t('budget.amount')}</Label>
             <Input
               id="new-budget-amount"
               type="number"
@@ -91,13 +100,13 @@ export function BudgetCodeCreateDialog({ open, onOpenChange, departments, onCrea
             />
           </div>
           <div className="space-y-2">
-            <Label>Department budget</Label>
+            <Label>{t('budget.departmentBudget')}</Label>
             <Select value={unitId} onValueChange={setDepartmentId}>
               <SelectTrigger>
-                <SelectValue placeholder="Select department" />
+                <SelectValue placeholder={t('budget.selectDepartment')} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="none">No department</SelectItem>
+                <SelectItem value="none">{t('budget.noDepartment')}</SelectItem>
                 {departments.map((department) => (
                   <SelectItem key={department.id} value={department.id}>
                     {department.name}
@@ -106,12 +115,16 @@ export function BudgetCodeCreateDialog({ open, onOpenChange, departments, onCrea
               </SelectContent>
             </Select>
           </div>
+          {hasError && <p role="alert" className="text-sm text-destructive">{t('budget.error.create')}</p>}
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
+            <Button type="button" variant="outline" onClick={() => {
+              setHasError(false)
+              onOpenChange(false)
+            }}>
+              {t('common.cancel')}
             </Button>
             <Button type="button" onClick={handleCreate} disabled={isSaving || !canSubmit}>
-              Create
+              {t('budget.create')}
             </Button>
           </div>
         </div>

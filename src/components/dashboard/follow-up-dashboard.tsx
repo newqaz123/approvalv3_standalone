@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "@/lib/i18n/client";
+import type { MessageKey } from "@/lib/i18n/messages";
 import { useMemo, useState, type ElementType } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, X } from "lucide-react";
@@ -37,13 +39,13 @@ function preview(rows: FollowUpRow[], limit = 3) {
 }
 
 export function FollowUpDashboard({ data }: { data: FollowUpDashboardData }) {
+	const t = useTranslations();
 	const router = useRouter();
 	const [showNewRequestModal, setShowNewRequestModal] = useState(false);
-	const [drawer, setDrawer] = useState<{
+	const [drawerSelection, setDrawer] = useState<{
 		key: DrawerKey;
-		title: string;
-		copy: string;
-		rows: FollowUpRow[];
+		titleKey: MessageKey;
+		copyKey: MessageKey;
 	} | null>(null);
 	const [selected, setSelected] = useState<FollowUpRow | null>(null);
 	const [showAllActivity, setShowAllActivity] = useState(false);
@@ -68,23 +70,19 @@ export function FollowUpDashboard({ data }: { data: FollowUpDashboardData }) {
 			});
 
 			if (result.success) {
-				toast.success("Request created successfully");
+				toast.success(t('requests.requestCreated'));
 				router.refresh();
 				return { success: true };
-			} else {
-				toast.error(result.error || "Failed to create request");
-				return {
-					success: false,
-					error: result.error || "Failed to create request",
-				};
 			}
-		} catch (error) {
-			console.error("Failed to create request:", error);
-			toast.error("An error occurred while creating the request");
-			return {
-				success: false,
-				error: "An error occurred while creating the request",
-			};
+
+			const error = t(result.errorKey ?? "requests.error.create");
+			toast.error(error);
+			return { success: false, error };
+		} catch (cause) {
+			console.error("Failed to create request:", cause);
+			const error = t("requests.error.createUnexpected");
+			toast.error(error);
+			return { success: false, error };
 		}
 	};
 
@@ -105,22 +103,19 @@ export function FollowUpDashboard({ data }: { data: FollowUpDashboardData }) {
 		[data],
 	);
 
-	const openDrawer = (
-		key: DrawerKey,
-		title: string,
-		copy: string,
-		rows: FollowUpRow[],
-	) => setDrawer({ key, title, copy, rows });
+	const drawer = drawerSelection ? { ...drawerSelection, rows: lists[drawerSelection.key] } : null;
+	const openDrawer = (key: DrawerKey, titleKey: MessageKey, copyKey: MessageKey) =>
+		setDrawer({ key, titleKey, copyKey });
 
 	return (
 		<div className="follow-up-board mx-auto max-w-[1280px] pb-14">
 			<header className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
 				<div>
 					<p className="mb-2 font-mono text-[11px] uppercase tracking-[0.08em] text-slate-500">
-						department overview · same visibility as /requests
+						{t('dashboard.intro')}
 					</p>
 					<h1 className="text-3xl font-semibold tracking-tight text-slate-900 sm:text-4xl">
-						Improvement Requests — {data.departmentName}
+						{t('dashboard.heading', { department: data.departmentName })}
 					</h1>
 				</div>
 				<Button
@@ -128,78 +123,74 @@ export function FollowUpDashboard({ data }: { data: FollowUpDashboardData }) {
 					onClick={() => setShowNewRequestModal(true)}
 				>
 					<Plus className="mr-2 h-4 w-4" />
-					New Request
+					{t('requests.newRequest')}
 				</Button>
 			</header>
 
 			<div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
 				<Kpi
-					label="Active"
+					label={t('dashboard.active')}
 					value={data.kpis.active}
-					note="Open visible requests"
+					note={t('dashboard.open')}
 					delta={data.deltaLabels.active}
 					onClick={() =>
 						openDrawer(
 							"active",
-							"Active requests",
-							"Same visibility as /requests.",
-							lists.active,
+							'dashboard.activeDrawer',
+							'dashboard.requestVisibility',
 						)
 					}
 				/>
 				<Kpi
-					label="With Engineering"
+					label={t('dashboard.withEngineering')}
 					value={data.kpis.withEngineering}
-					note="Sent to Engineer + Design & cost"
+					note={t('dashboard.engineeringSteps')}
 					delta={data.deltaLabels.withEngineering}
 					onClick={() =>
 						openDrawer(
 							"eng",
-							"With Engineering",
-							"Sent to Engineer plus Design & cost (engineer superior approval).",
-							lists.eng,
+							'dashboard.withEngineering',
+							'dashboard.engineeringDrawer',
 						)
 					}
 				/>
 				<Kpi
-					label="Needs attention"
+					label={t('dashboard.attention')}
 					value={data.kpis.needsAttention}
-					note="No update 30+ days"
+					note={t('dashboard.noUpdate')}
 					delta={data.deltaLabels.needsAttention}
 					warn
 					onClick={() =>
 						openDrawer(
 							"attn",
-							"Needs attention",
-							"No update for 30+ days.",
-							lists.attn,
+							'dashboard.attention',
+							'dashboard.noUpdateDrawer',
 						)
 					}
 				/>
 				<Kpi
-					label="Completed 30d"
+					label={t('dashboard.completed30d')}
 					value={data.kpis.completed30d}
-					note="Closed this month"
+					note={t('dashboard.closedThisMonth')}
 					delta={data.deltaLabels.completed30d}
 					onClick={() =>
 						openDrawer(
 							"done",
-							"Completed 30d",
-							"Finished in the last 30 days.",
-							lists.done,
+							'dashboard.completed30d',
+							'dashboard.closed30d',
 						)
 					}
 				/>
 			</div>
 
 			<p className="mb-2 mt-8 font-mono text-[11px] uppercase tracking-[0.1em] text-slate-500">
-				Work queues
+				{t('dashboard.queues')}
 			</p>
 			<div className="grid gap-3 lg:grid-cols-3">
 				<Card
-					title="Awaiting approval"
+					title={t('dashboard.awaitingApproval')}
 					count={data.awaitingRequestApproval.length}
-					copy="Request approval or final approval still in the chain."
+					copy={t('dashboard.awaitingApprovalIntro')}
 					delta={data.deltaLabels.awaitingApproval}
 				>
 					{preview(data.awaitingRequestApproval).shown.map((row) => (
@@ -213,7 +204,7 @@ export function FollowUpDashboard({ data }: { data: FollowUpDashboardData }) {
 							})}
 							status={row.status}
 							hasRejection={row.hasRejection}
-							meta={<Pill>{row.waitingDays}d</Pill>}
+							meta={<Pill>{t('insights.duration.day', { value: row.waitingDays })}</Pill>}
 							onClick={() => setSelected(row)}
 						/>
 					))}
@@ -224,20 +215,19 @@ export function FollowUpDashboard({ data }: { data: FollowUpDashboardData }) {
 							onClick={() =>
 								openDrawer(
 									"req",
-									"Awaiting approval",
-									"Improvement Request or Final Approval.",
-									lists.req,
+									'dashboard.awaitingApproval',
+									'dashboard.awaitingApprovalDrawer',
 								)
 							}
 						>
-							+{preview(data.awaitingRequestApproval).more} more
+							{t('insights.more', { count: preview(data.awaitingRequestApproval).more })}
 						</button>
 					)}
 				</Card>
 				<Card
-					title="Completed · no WR"
+					title={t('dashboard.completedNoWr')}
 					count={data.completedNoWr.length}
-					copy="Closed without a work requisition — all time, not just the last 30 days."
+					copy={t('dashboard.completedNoWrIntro')}
 					delta={data.deltaLabels.completedNoWr}
 				>
 					{preview(data.completedNoWr).shown.map((row) => (
@@ -257,20 +247,19 @@ export function FollowUpDashboard({ data }: { data: FollowUpDashboardData }) {
 							onClick={() =>
 								openDrawer(
 									"doneNoWr",
-									"Completed · no WR",
-									"All completed requests with no work requisition.",
-									lists.doneNoWr,
+									'dashboard.completedNoWr',
+									'dashboard.completedNoWrDrawer',
 								)
 							}
 						>
-							+{preview(data.completedNoWr).more} more
+							{t('insights.more', { count: preview(data.completedNoWr).more })}
 						</button>
 					)}
 				</Card>
 				<Card
-					title="Engineer solution ready"
+					title={t('dashboard.solutionReady')}
 					count={data.engineerSolutionReady.length}
-					copy="Engineering sent a solution and cost back. Review it, then submit for approval."
+					copy={t('dashboard.solutionReadyIntro')}
 					delta={data.deltaLabels.solutionReady}
 				>
 					{preview(data.engineerSolutionReady).shown.map((row) => (
@@ -289,22 +278,21 @@ export function FollowUpDashboard({ data }: { data: FollowUpDashboardData }) {
 							onClick={() =>
 								openDrawer(
 									"sol",
-									"Engineer solution ready",
-									"Engineering sent a solution back.",
-									lists.sol,
+									'dashboard.solutionReady',
+									'dashboard.solutionReadyDrawer',
 								)
 							}
 						>
-							+{preview(data.engineerSolutionReady).more} more
+							{t('insights.more', { count: preview(data.engineerSolutionReady).more })}
 						</button>
 					)}
 				</Card>
 			</div>
 
 			<p className="mb-2 mt-8 font-mono text-[11px] uppercase tracking-[0.1em] text-slate-500">
-				Recent activity
+				{t('dashboard.recentActivity')}
 			</p>
-			<Card copy="Latest department events.">
+			<Card copy={t('dashboard.latestEvents')}>
 				{(showAllActivity
 					? data.recentActivity
 					: data.recentActivity.slice(0, 8)
@@ -327,7 +315,7 @@ export function FollowUpDashboard({ data }: { data: FollowUpDashboardData }) {
 						className="mt-3 min-h-11 rounded-full px-3 py-2 text-sm text-slate-500"
 						onClick={() => setShowAllActivity((open) => !open)}
 					>
-						{showAllActivity ? "Show less" : "Show more"}
+						{showAllActivity ? t('dashboard.showLess') : t('dashboard.showMore')}
 					</button>
 				)}
 			</Card>
@@ -368,7 +356,7 @@ export function FollowUpDashboard({ data }: { data: FollowUpDashboardData }) {
 					<button
 						type="button"
 						className="absolute inset-0 bg-slate-900/20"
-						aria-label="Close drawer"
+						aria-label={t('dashboard.closeDrawer')}
 						onClick={() => setDrawer(null)}
 					/>
 					<aside className="absolute inset-y-3 right-3 flex w-[min(420px,calc(100vw-24px))] flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-2xl">
@@ -415,8 +403,8 @@ function FollowUpDrawerPanel({
 }: {
 	drawer: {
 		key: DrawerKey;
-		title: string;
-		copy: string;
+		titleKey: MessageKey;
+		copyKey: MessageKey;
 		rows: FollowUpRow[];
 	};
 	handle?: React.ReactNode;
@@ -425,22 +413,24 @@ function FollowUpDrawerPanel({
 	titleAs?: ElementType;
 	descriptionAs?: ElementType;
 }) {
+	const t = useTranslations();
 	return (
 		<>
 			{handle}
 			<div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-200 bg-white p-5">
 				<div>
 					<p className="font-mono text-[11px] uppercase tracking-[0.08em] text-slate-500">
-						{drawer.key}
+						{t(`dashboard.drawer.${drawer.key}`)}
 					</p>
-					<Title className="text-xl font-semibold">{drawer.title}</Title>
+					<Title className="text-xl font-semibold">{t(drawer.titleKey)}</Title>
 					<Description className="mt-1 text-sm text-slate-500">
-						{drawer.copy}
+						{t(drawer.copyKey)}
 					</Description>
 				</div>
 				<button
 					type="button"
 					className="flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200"
+					aria-label={t('dashboard.closeDrawer')}
 					onClick={onClose}
 				>
 					<X className="h-4 w-4" />
@@ -448,7 +438,7 @@ function FollowUpDrawerPanel({
 			</div>
 			<div className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain p-4">
 				{drawer.rows.length === 0 ? (
-					<p className="p-4 text-sm text-slate-500">No requests here.</p>
+					<p className="p-4 text-sm text-slate-500">{t('dashboard.noneHere')}</p>
 				) : (
 					drawer.rows.map((row) => (
 						<Row
@@ -465,7 +455,7 @@ function FollowUpDrawerPanel({
 							}
 							status={drawer.key === "req" ? row.status : undefined}
 							hasRejection={drawer.key === "req" ? row.hasRejection : undefined}
-							meta={<Pill>{row.waitingDays}d</Pill>}
+							meta={<Pill>{t('insights.duration.day', { value: row.waitingDays })}</Pill>}
 							onClick={() => onSelect(row)}
 						/>
 					))
@@ -587,6 +577,7 @@ function Row({
 	hasRejection?: boolean;
 	onClick: () => void;
 }) {
+	const t = useTranslations();
 	return (
 		<button
 			type="button"
@@ -598,7 +589,7 @@ function Row({
 					{title}{" "}
 					{mine && (
 						<span className="text-[11px] font-bold text-emerald-700">
-							★ Mine
+							{t('dashboard.mine')}
 						</span>
 					)}
 				</span>

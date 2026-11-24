@@ -1,5 +1,6 @@
 'use client'
 
+import { useTranslations } from '@/lib/i18n/client'
 import { useCallback, useEffect, useMemo, useState, useTransition } from 'react'
 import { ClipboardPaste, FileSpreadsheet, Plus } from 'lucide-react'
 import { toast } from 'sonner'
@@ -52,7 +53,9 @@ function buildRenderableGroups(data: BudgetMonitorData): BudgetCodeGroup[] {
 }
 
 export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorData }) {
+  const t = useTranslations()
   const [data, setData] = useState(initialData)
+  const [refreshFailed, setRefreshFailed] = useState(false)
   const [filters, setFilters] = useState<BudgetMonitorFilters>({})
   const [view, setView] = useState<'depts' | 'requests'>('depts')
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
@@ -73,7 +76,8 @@ export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorD
       data.budgetCodes.map((budgetCode) => ({
         value: budgetCode.displayCode,
         label: budgetCode.name?.trim() || budgetCode.displayCode,
-        meta: budgetCode.department?.name ?? 'No department',
+        meta: budgetCode.department?.name,
+        hasNoDepartment: !budgetCode.department,
       })),
     [data.budgetCodes]
   )
@@ -92,7 +96,12 @@ export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorD
   const refresh = useCallback(
     (nextFilters = filters) => {
       startTransition(async () => {
-        setData(await getBudgetMonitorData(nextFilters))
+        try {
+          setData(await getBudgetMonitorData(nextFilters))
+          setRefreshFailed(false)
+        } catch {
+          setRefreshFailed(true)
+        }
       })
     },
     [filters]
@@ -130,11 +139,15 @@ export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorD
   }
 
   async function handleExport() {
-    const result = await exportBudgetMonitorXlsx(filters)
-    const link = document.createElement('a')
-    link.href = `data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,${result.base64}`
-    link.download = result.fileName
-    link.click()
+    try {
+      const result = await exportBudgetMonitorXlsx(filters)
+      const link = document.createElement('a')
+      link.href = `data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,${result.base64}`
+      link.download = result.fileName
+      link.click()
+    } catch {
+      toast.error(t('budget.error.export'))
+    }
   }
 
   function clearFilters() {
@@ -144,6 +157,7 @@ export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorD
 
   return (
     <div className="pb-8">
+      {refreshFailed && <p role="alert" className="mb-2 text-sm text-destructive">{t('budget.error.refresh')}</p>}
       <Tabs value={view} onValueChange={updateView}>
       {/* ── merged header: sticky app bar on mobile ─────────────── */}
       <div className="sticky top-0 z-30 -mx-4 mb-4 border-b bg-white/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-white/85 md:static md:mx-0 md:mb-0 md:border-0 md:bg-transparent md:px-0 md:backdrop-blur-none">
@@ -151,23 +165,23 @@ export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorD
         <div className="flex items-center justify-between gap-3 pt-3 md:pt-0">
           <div className="flex min-w-0 flex-wrap items-baseline gap-x-2.5">
             <h1 className="whitespace-nowrap text-base font-bold tracking-tight text-gray-900 md:text-[15px]">
-              Budget Monitor
+              {t('nav.budgetMonitor')}
             </h1>
             <p className="min-w-0 truncate text-xs text-muted-foreground md:text-[12.5px]">
               <span className="font-semibold tabular-nums text-gray-900">{remaining.total.toLocaleString()}</span>
-              {' '}remaining · {remaining.groupCount} group{remaining.groupCount === 1 ? '' : 's'} ·{' '}
-              {data.requests.length} request{data.requests.length === 1 ? '' : 's'}
+              {' '}{t('budget.remainingLower')} · {t(remaining.groupCount === 1 ? 'budget.groupOne' : 'budget.groupMany', { count: remaining.groupCount })} ·{' '}
+              {t(data.requests.length === 1 ? 'budget.requestOne' : 'budget.requestMany', { count: data.requests.length })}
             </p>
           </div>
           {/* mobile: icon-only actions */}
           <div className="flex shrink-0 gap-1.5 md:hidden">
-            <Button type="button" variant="outline" size="icon" className="h-9 w-9" title="Paste budget codes" aria-label="Paste budget codes" onClick={() => setPasteDialogOpen(true)}>
+            <Button type="button" variant="outline" size="icon" className="h-9 w-9" title={t('budget.paste')} aria-label={t('budget.paste')} onClick={() => setPasteDialogOpen(true)}>
               <ClipboardPaste className="h-4 w-4" />
             </Button>
-            <Button type="button" variant="outline" size="icon" className="h-9 w-9" title="Reports" aria-label="Reports" onClick={handleExport} disabled={isPending}>
+            <Button type="button" variant="outline" size="icon" className="h-9 w-9" title={t('budget.reports')} aria-label={t('budget.reports')} onClick={handleExport} disabled={isPending}>
               <FileSpreadsheet className="h-4 w-4" />
             </Button>
-            <Button type="button" size="icon" className="h-9 w-9" title="New budget code" aria-label="New budget code" onClick={() => setCreateDialogOpen(true)}>
+            <Button type="button" size="icon" className="h-9 w-9" title={t('budget.newCode')} aria-label={t('budget.newCode')} onClick={() => setCreateDialogOpen(true)}>
               <Plus className="h-4 w-4" />
             </Button>
           </div>
@@ -175,15 +189,15 @@ export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorD
           <div className="hidden shrink-0 gap-2 md:flex">
             <Button type="button" variant="outline" size="sm" onClick={() => setPasteDialogOpen(true)}>
               <ClipboardPaste className="mr-2 h-4 w-4" />
-              Paste budget codes
+              {t('budget.paste')}
             </Button>
             <Button type="button" variant="outline" size="sm" onClick={handleExport} disabled={isPending}>
               <FileSpreadsheet className="mr-2 h-4 w-4" />
-              Reports
+              {t('budget.reports')}
             </Button>
             <Button type="button" size="sm" onClick={() => setCreateDialogOpen(true)}>
               <Plus className="mr-2 h-4 w-4" />
-              New budget code
+              {t('budget.newCode')}
             </Button>
           </div>
         </div>
@@ -195,13 +209,13 @@ export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorD
                 value="depts"
                 className="group relative min-h-9 rounded-none border-b-2 border-transparent bg-transparent px-1 pb-1 pt-1.5 text-[13.5px] font-medium text-muted-foreground shadow-none transition-colors data-[state=active]:border-gray-900 data-[state=active]:font-semibold data-[state=active]:text-gray-900 data-[state=active]:shadow-none"
               >
-                Budgets
+                {t('budget.budgets')}
               </TabsTrigger>
               <TabsTrigger
                 value="requests"
                 className="group relative min-h-9 rounded-none border-b-2 border-transparent bg-transparent px-1 pb-1 pt-1.5 text-[13.5px] font-medium text-muted-foreground shadow-none transition-colors data-[state=active]:border-gray-900 data-[state=active]:font-semibold data-[state=active]:text-gray-900 data-[state=active]:shadow-none"
               >
-                Requests
+                {t('budget.requests')}
                 <span className="ml-1.5 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-amber-100 px-1 text-[10.5px] font-semibold text-amber-700 transition-colors group-data-[state=active]:bg-amber-500 group-data-[state=active]:text-white">
                   {unassignedCount}
                 </span>
@@ -213,7 +227,7 @@ export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorD
               <div className="min-w-0 flex-1">
                 <BudgetSearchInput
                   id="budget-monitor-search-sm"
-                  placeholder="Search code or request"
+                  placeholder={t('budget.search')}
                   value={filters.budgetCodeSearch ?? ''}
                   options={budgetCodeOptions}
                   onChange={(value) => setFilters({ ...filters, budgetCodeSearch: value || undefined })}
@@ -226,7 +240,7 @@ export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorD
                 className="h-9 shrink-0"
                 onClick={() => setFilterSheetOpen(true)}
               >
-                Filters
+                {t('insights.filters')}
                 {activeFilterCount > 0 ? (
                   <span className="ml-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-white/25 px-1 text-[10px] font-semibold">
                     {activeFilterCount}
@@ -242,7 +256,7 @@ export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorD
             <div className="min-w-0 flex-1 md:max-w-md">
               <BudgetSearchInput
                 id="budget-monitor-search-md"
-                placeholder="Search code or request"
+                placeholder={t('budget.search')}
                 value={filters.budgetCodeSearch ?? ''}
                 options={budgetCodeOptions}
                 onChange={(value) => setFilters({ ...filters, budgetCodeSearch: value || undefined })}
@@ -253,9 +267,9 @@ export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorD
                 type="button"
                 className="inline-flex h-9 items-center gap-1 rounded-full bg-gray-900 px-3 text-xs font-semibold text-white"
                 onClick={() => setFilters({ ...filters, unitId: undefined })}
-                title="Clear department filter"
+                title={t('budget.clearDepartment')}
               >
-                {data.filters.departments.find((d) => d.id === filters.unitId)?.name ?? 'Department'}
+                {data.filters.departments.find((d) => d.id === filters.unitId)?.name ?? t('budget.department')}
                 <span aria-hidden>✕</span>
               </button>
             ) : (
@@ -266,10 +280,10 @@ export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorD
                 }
               >
                 <SelectTrigger className="h-9 w-auto min-w-[9rem] text-xs text-muted-foreground">
-                  <SelectValue placeholder="Department" />
+                  <SelectValue placeholder={t('budget.department')} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All departments</SelectItem>
+                  <SelectItem value="all">{t('budget.allDepartments')}</SelectItem>
                   {data.filters.departments.map((department) => (
                     <SelectItem key={department.id} value={department.id}>
                       {department.name}
@@ -283,7 +297,7 @@ export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorD
                 type="button"
                 className="inline-flex h-9 items-center gap-1 rounded-full bg-gray-900 px-3 text-xs font-semibold text-white"
                 onClick={() => setFilters({ ...filters, status: undefined })}
-                title="Clear status filter"
+                title={t('budget.clearStatus')}
               >
                 {filters.status}
                 <span aria-hidden>✕</span>
@@ -296,10 +310,10 @@ export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorD
                 }
               >
                 <SelectTrigger className="h-9 w-auto min-w-[8rem] text-xs text-muted-foreground">
-                  <SelectValue placeholder="Status" />
+                  <SelectValue placeholder={t('common.status')} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All statuses</SelectItem>
+                  <SelectItem value="all">{t('budget.allStatuses')}</SelectItem>
                   {data.filters.statuses.map((status) => (
                     <SelectItem key={status} value={status}>
                       {status}
@@ -314,7 +328,7 @@ export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorD
                 className="h-9 px-1 text-xs font-semibold text-muted-foreground underline underline-offset-2 hover:text-gray-900"
                 onClick={() => setFilters({})}
               >
-                Clear
+                {t('requests.clear')}
               </button>
             ) : null}
           </div>
@@ -329,10 +343,10 @@ export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorD
           onUnassign={async (requestId) => {
             try {
               await unassignRequestBudgetCode(requestId)
-              toast.success('Request unassigned')
+              toast.success(t('budget.unassignedToast'))
               refresh()
-            } catch (error) {
-              toast.error(error instanceof Error ? error.message : 'Failed to unassign request')
+            } catch {
+              toast.error(t('budget.error.unassign'))
             }
           }}
               />
@@ -344,12 +358,12 @@ export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorD
           onOpenRequest={setDetailRequestId}
           onAssign={async (requestId, budgetCodeId) => {
             await assignRequestToBudgetCode({ requestId, budgetCodeId })
-            toast.success('Request assigned')
+            toast.success(t('budget.assignedToast'))
                   refresh()
           }}
           onUnassign={async (requestId) => {
                   await unassignRequestBudgetCode(requestId)
-                  toast.success('Request unassigned')
+                  toast.success(t('budget.unassignedToast'))
                   refresh()
           }}
           onEditProjectEstimate={(requestId, value) => setEditDialog({ type: 'estimate', requestId, value })}
@@ -362,17 +376,17 @@ export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorD
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>
-              Filters
+              {t('insights.filters')}
               {activeFilterCount > 0 ? (
                 <span className="ml-1.5 text-sm font-normal text-muted-foreground">
-                  · {activeFilterCount} active
+                  · {t('budget.filtersActive', { count: activeFilterCount })}
                 </span>
               ) : null}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label className="text-xs text-muted-foreground">Department</Label>
+              <Label className="text-xs text-muted-foreground">{t('budget.department')}</Label>
               <Select
                 value={filters.unitId ?? 'all'}
                 onValueChange={(value) =>
@@ -380,10 +394,10 @@ export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorD
                 }
               >
                 <SelectTrigger className="h-10">
-                  <SelectValue placeholder="Department" />
+                  <SelectValue placeholder={t('budget.department')} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All departments</SelectItem>
+                  <SelectItem value="all">{t('budget.allDepartments')}</SelectItem>
                   {data.filters.departments.map((department) => (
                     <SelectItem key={department.id} value={department.id}>
                       {department.name}
@@ -393,7 +407,7 @@ export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorD
               </Select>
             </div>
             <div className="space-y-2">
-              <Label className="text-xs text-muted-foreground">Status</Label>
+              <Label className="text-xs text-muted-foreground">{t('common.status')}</Label>
               <Select
                 value={filters.status ?? 'all'}
                 onValueChange={(value) =>
@@ -401,10 +415,10 @@ export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorD
                 }
               >
                 <SelectTrigger className="h-10">
-                  <SelectValue placeholder="Status" />
+                  <SelectValue placeholder={t('common.status')} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All statuses</SelectItem>
+                  <SelectItem value="all">{t('budget.allStatuses')}</SelectItem>
                   {data.filters.statuses.map((status) => (
                     <SelectItem key={status} value={status}>
                       {status}
@@ -415,10 +429,10 @@ export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorD
             </div>
             <div className="flex gap-2 pt-1">
               <Button type="button" variant="outline" className="h-10 flex-1" onClick={clearFilters}>
-                Clear
+                {t('requests.clear')}
               </Button>
               <Button type="button" className="h-10 flex-1" onClick={() => setFilterSheetOpen(false)}>
-                Apply
+                {t('budget.apply')}
               </Button>
             </div>
           </div>
@@ -443,8 +457,8 @@ export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorD
       />
       <BudgetEditDialog
         open={editDialog?.type === 'estimate'}
-        title="Edit project estimate cost"
-        label="Project estimate cost"
+        title={t('budget.editEstimate')}
+        label={t('budget.projectEstimate')}
         initialValue={editDialog?.type === 'estimate' ? editDialog.value : null}
         onOpenChange={(open) => !open && setEditDialog(null)}
         onSave={async (value) => {
@@ -469,7 +483,7 @@ export function BudgetMonitorPage({ initialData }: { initialData: BudgetMonitorD
         onOpenChange={setPasteDialogOpen}
         onPaste={async (rows) => {
           const result = await pasteBudgetCodes({ rows })
-          toast.success(`Created ${result.created}, updated ${result.updated}`)
+          toast.success(t('budget.pasteResult', { created: result.created, updated: result.updated }))
           refresh()
           return result
         }}

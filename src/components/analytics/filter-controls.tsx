@@ -1,5 +1,6 @@
 'use client'
 
+import { useTranslations } from '@/lib/i18n/client'
 import * as React from 'react'
 import { useSearchParams } from 'next/navigation'
 import type { AnalyticsFilters, DateRangePreset } from '@/types/analytics'
@@ -27,6 +28,7 @@ interface FilterControlsProps {
  * Compact inline filter bar with date range tabs and dropdown filters
  */
 export function FilterControls({ filters, onFilterChange }: FilterControlsProps) {
+  const t = useTranslations()
   const searchParams = useSearchParams()
 
   // Local state for filter values
@@ -59,10 +61,10 @@ export function FilterControls({ filters, onFilterChange }: FilterControlsProps)
 
   // Date range presets
   const dateRangePresets: Array<{ value: DateRangePreset; label: string }> = [
-    { value: '7days', label: '7D' },
-    { value: '30days', label: '30D' },
-    { value: '90days', label: '90D' },
-    { value: 'all', label: 'All' },
+    { value: '7days', label: t('analytics.past7') },
+    { value: '30days', label: t('analytics.past30') },
+    { value: '90days', label: t('analytics.past90') },
+    { value: 'all', label: t('analytics.allDates') },
   ]
 
   const hasActiveFilters = !!(unitId || status || requesterId)
@@ -122,7 +124,7 @@ export function FilterControls({ filters, onFilterChange }: FilterControlsProps)
           className="gap-1.5"
         >
           <SlidersHorizontal className="h-3.5 w-3.5" />
-          Filters
+          {t('insights.filters')}
           {hasActiveFilters && (
             <span className="ml-1 rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-bold text-primary-foreground">
               {[unitId, status, requesterId].filter(Boolean).length}
@@ -139,7 +141,7 @@ export function FilterControls({ filters, onFilterChange }: FilterControlsProps)
             className="gap-1 text-muted-foreground hover:text-foreground"
           >
             <X className="h-3.5 w-3.5" />
-            Clear
+            {t('requests.clear')}
           </Button>
         )}
       </div>
@@ -153,10 +155,10 @@ export function FilterControls({ filters, onFilterChange }: FilterControlsProps)
             onValueChange={(value) => setUnitId(value === 'all' ? undefined : value)}
           >
             <SelectTrigger className="w-[180px] bg-background">
-              <SelectValue placeholder="All Departments" />
+              <SelectValue placeholder={t('analytics.allDepartments')} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Departments</SelectItem>
+              <SelectItem value="all">{t('analytics.allDepartments')}</SelectItem>
               {filters.departments.map((dept) => (
                 <SelectItem key={dept.id} value={dept.id}>
                   {dept.name}
@@ -171,10 +173,10 @@ export function FilterControls({ filters, onFilterChange }: FilterControlsProps)
             onValueChange={(value) => setStatus(value === 'all' ? undefined : value)}
           >
             <SelectTrigger className="w-[180px] bg-background">
-              <SelectValue placeholder="All Statuses" />
+              <SelectValue placeholder={t('analytics.allStatuses')} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Statuses</SelectItem>
+              <SelectItem value="all">{t('analytics.allStatuses')}</SelectItem>
               {statusOptions.map((option) => (
                 <SelectItem key={option.value} value={option.value}>
                   {option.label}
@@ -189,10 +191,10 @@ export function FilterControls({ filters, onFilterChange }: FilterControlsProps)
             onValueChange={(value) => setRequesterId(value === 'all' ? undefined : value)}
           >
             <SelectTrigger className="w-[180px] bg-background">
-              <SelectValue placeholder="All Requesters" />
+              <SelectValue placeholder={t('analytics.allRequesters')} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Requesters</SelectItem>
+              <SelectItem value="all">{t('analytics.allRequesters')}</SelectItem>
               {filters.users.map((user) => (
                 <SelectItem key={user.id} value={user.id}>
                   {user.name}

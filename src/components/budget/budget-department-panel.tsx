@@ -1,5 +1,6 @@
 'use client'
 
+import { useTranslations } from '@/lib/i18n/client'
 import { useState } from 'react'
 import { BudgetCodeCard } from '@/components/budget/budget-code-card'
 import { groupBudgetCodesByDepartment } from '@/lib/budget-control'
@@ -16,6 +17,7 @@ export function BudgetDepartmentPanel({
   onUnassign: (requestId: string) => void
   onOpenRequest: (requestId: string) => void
 }) {
+  const t = useTranslations()
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
     () => new Set(groups.map((group) => group.budgetCode.id))
   )
@@ -23,12 +25,13 @@ export function BudgetDepartmentPanel({
 
   return (
     <div className="space-y-8">
+      {departments.length === 0 && <p className="text-sm text-muted-foreground">{t('budget.noCodes')}</p>}
       {departments.map((department) => (
         <section key={department.unitId ?? 'none'}>
           <div className="mb-3 flex items-baseline justify-between gap-2">
-            <h3 className="text-xs font-bold uppercase tracking-wide text-gray-900">{department.departmentName}</h3>
+            <h3 className="text-xs font-bold uppercase tracking-wide text-gray-900">{department.groups[0]?.budgetCode.department ? department.departmentName : t('budget.noDepartment')}</h3>
             <span className="text-xs text-muted-foreground">
-              {department.groups.length} group{department.groups.length === 1 ? '' : 's'}
+              {t(department.groups.length === 1 ? 'budget.groupOne' : 'budget.groupMany', { count: department.groups.length })}
             </span>
           </div>
           <div className="space-y-3">

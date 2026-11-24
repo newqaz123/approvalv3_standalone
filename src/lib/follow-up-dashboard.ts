@@ -1,3 +1,5 @@
+import type { Translator } from "@/lib/i18n/messages";
+
 export type FollowUpRow = {
 	id: string;
 	title: string;
@@ -174,10 +176,12 @@ function requesterNameOf(request: FollowUpVisibleRequest) {
 	return request.requesterName || request.requester?.name || "Unknown";
 }
 
-function nextLabel(request: FollowUpVisibleRequest) {
+function nextLabel(request: FollowUpVisibleRequest, t?: Translator) {
 	if (request.status === "SentToEngineer") {
 		const pic = request.engineerAssignments?.[0]?.engineer.name;
-		return pic ? `PIC: ${pic.split(" ")[0]}` : "Engineering review";
+		if (!pic) return t ? t("dashboard.engineeringReview") : "Engineering review";
+		const name = pic.split(" ")[0];
+		return t ? t("dashboard.pic", { name }) : `PIC: ${name}`;
 	}
 	const pending = request.approvals?.find(
 		(approval) => approval.status === "pending",
@@ -190,21 +194,23 @@ function nextLabel(request: FollowUpVisibleRequest) {
 		}
 		return request.status;
 	}
+	const level = t ? t("dashboard.level", { level: String(pending.requiredLevel) }) : `Level ${pending.requiredLevel}`;
 	const who =
 		pending.requiredApprover?.name ||
-		pending.potentialApprovers?.map((person) => person.name).join(" or ") ||
-		`Level ${pending.requiredLevel}`;
+		pending.potentialApprovers?.map((person) => person.name).join(t ? t("dashboard.or") : " or ") ||
+		level;
 	if (request.status === "DesignCostEstimationApproval")
 		return `Design & cost · ${who}`;
 	if (request.status === "FinalApproval") return `Final approval · ${who}`;
-	return `Level ${pending.requiredLevel} · ${who}`;
+	return `${level} · ${who}`;
 }
 
 function toRow(
 	request: FollowUpVisibleRequest,
 	currentUserId: string,
 	now: number,
-	extras: Partial<FollowUpRow> = {},
+	extras: Partial<FollowUpRow>,
+	t?: Translator,
 ): FollowUpRow {
 	const updatedAt = request.updatedAt ?? request.createdAt;
 	return {
@@ -216,7 +222,7 @@ function toRow(
 		requesterId: request.requesterId,
 		requesterName: requesterNameOf(request),
 		waitingDays: waitingDays(updatedAt, now),
-		nextLabel: nextLabel(request),
+		nextLabel: nextLabel(request, t),
 		isMine: request.requesterId === currentUserId,
 		hasRejection: Boolean(
 			request.hasRejection ||
@@ -247,6 +253,7 @@ function classify(
 	requests: FollowUpVisibleRequest[],
 	now: number,
 	currentUserId: string,
+	t?: Translator,
 ) {
 	const rows = requests.map((request) => {
 		const extras: Partial<FollowUpRow> = {};
@@ -256,7 +263,7 @@ function classify(
 				Math.floor((ms(request.updatedAt) - ms(request.createdAt)) / DAY_MS),
 			);
 		}
-		return toRow(request, currentUserId, now, extras);
+		return toRow(request, currentUserId, now, extras, t);
 	});
 	const byStatus = (predicate: (row: FollowUpRow) => boolean) =>
 		rows.filter(predicate);
@@ -298,7 +305,11 @@ function classify(
 	};
 }
 
-export function formatDeltaFromYesterday(delta: number) {
+export function formatDeltaFromYesterday(delta: number, t?: Translator) {
+	if (t) {
+		if (delta === 0) return t("dashboard.noChange");
+		return t("dashboard.delta", { delta: delta > 0 ? `+${delta}` : delta });
+	}
 	if (delta === 0) return "No change from yesterday";
 	if (delta > 0) return `+${delta} from yesterday`;
 	return `${delta} from yesterday`;
@@ -311,6 +322,7 @@ export function buildFollowUpDashboard({
 	currentUserId,
 	departmentName,
 	now = new Date(),
+	t,
 }: {
 	visible: FollowUpVisibleRequest[];
 	activities?: FollowUpStatusActivity[];
@@ -318,10 +330,11 @@ export function buildFollowUpDashboard({
 	currentUserId: string;
 	departmentName: string;
 	now?: Date | number;
+	t?: Translator;
 }): FollowUpDashboardData {
 	const nowMs = typeof now === "number" ? now : now.getTime();
 	const yesterdayMs = nowMs - DAY_MS;
-	const today = classify(visible, nowMs, currentUserId);
+	const today = classify(visible, nowMs, currentUserId, t);
 	const yesterdayVisible = visible.flatMap((request) => {
 		const status = statusAt(request, activities, yesterdayMs);
 		return status ? [{ ...request, status }] : [];
@@ -356,13 +369,13 @@ export function buildFollowUpDashboard({
 		},
 		deltas,
 		deltaLabels: {
-			active: formatDeltaFromYesterday(deltas.active),
-			withEngineering: formatDeltaFromYesterday(deltas.withEngineering),
-			needsAttention: formatDeltaFromYesterday(deltas.needsAttention),
-			completed30d: formatDeltaFromYesterday(deltas.completed30d),
-			awaitingApproval: formatDeltaFromYesterday(deltas.awaitingApproval),
-			solutionReady: formatDeltaFromYesterday(deltas.solutionReady),
-			completedNoWr: formatDeltaFromYesterday(deltas.completedNoWr),
+			active: formatDeltaFromYesterday(deltas.active, t),
+			withEngineering: formatDeltaFromYesterday(deltas.withEngineering, t),
+			needsAttention: formatDeltaFromYesterday(deltas.needsAttention, t),
+			completed30d: formatDeltaFromYesterday(deltas.completed30d, t),
+			awaitingApproval: formatDeltaFromYesterday(deltas.awaitingApproval, t),
+			solutionReady: formatDeltaFromYesterday(deltas.solutionReady, t),
+			completedNoWr: formatDeltaFromYesterday(deltas.completedNoWr, t),
 		},
 		flow: {
 			requestApproval: today.requestApproval.length,

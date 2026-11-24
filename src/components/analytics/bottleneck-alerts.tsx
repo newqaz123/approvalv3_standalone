@@ -1,5 +1,7 @@
 'use client'
 
+import type { Translator } from '@/lib/i18n/messages'
+import { useTranslations } from '@/lib/i18n/client'
 import { AlertTriangle, Clock } from 'lucide-react'
 import type { Bottleneck } from '@/types/analytics'
 import { cn } from '@/lib/utils'
@@ -8,11 +10,11 @@ interface BottleneckAlertsProps {
   data: Bottleneck[]
 }
 
-function formatWaitTime(hours: number): string {
-  if (hours < 1) return `${Math.round(hours * 60)}m`
-  if (hours < 24) return `${hours.toFixed(1)}h`
+function formatWaitTime(hours: number, t: Translator): string {
+  if (hours < 1) return t('insights.duration.minute', { value: Math.round(hours * 60) })
+  if (hours < 24) return t('insights.duration.hour', { value: hours.toFixed(1) })
   const days = hours / 24
-  return `${days.toFixed(1)}d`
+  return t('insights.duration.day', { value: days.toFixed(1) })
 }
 
 /**
@@ -20,13 +22,14 @@ function formatWaitTime(hours: number): string {
  * Sorted by average wait time (worst first)
  */
 export function BottleneckAlerts({ data }: BottleneckAlertsProps) {
+  const t = useTranslations()
   if (!data || data.length === 0) {
     return (
       <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
         <div className="rounded-full bg-emerald-100 p-1">
           <Clock className="h-4 w-4 text-emerald-600" />
         </div>
-        <p className="text-sm text-emerald-700">All workflow steps are flowing smoothly</p>
+        <p className="text-sm text-emerald-700">{t('analytics.noBottlenecks')}</p>
       </div>
     )
   }
@@ -86,15 +89,15 @@ export function BottleneckAlerts({ data }: BottleneckAlertsProps) {
               </div>
               <div>
                 <p className={cn('text-sm font-medium', config.textColor)}>
-                  {bottleneck.count} request{bottleneck.count !== 1 ? 's' : ''} at {bottleneck.label}
+                  {t(bottleneck.count === 1 ? 'analytics.bottleneckOne' : 'analytics.bottleneckMany', { count: bottleneck.count, status: bottleneck.label })}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Avg wait: {formatWaitTime(bottleneck.avgWaitHours)}
+                  {t('analytics.averageWait', { time: formatWaitTime(bottleneck.avgWaitHours, t) })}
                 </p>
               </div>
             </div>
             <span className={cn('rounded-full px-2 py-0.5 text-xs font-semibold', config.badge)}>
-              {severity === 'critical' ? 'Critical' : severity === 'warning' ? 'Warning' : 'Active'}
+              {severity === 'critical' ? t('analytics.severity.critical') : severity === 'warning' ? t('analytics.severity.warning') : t('analytics.severity.active')}
             </span>
           </div>
         )

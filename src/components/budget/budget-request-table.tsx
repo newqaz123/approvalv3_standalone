@@ -1,5 +1,6 @@
 'use client'
 
+import { useTranslations } from '@/lib/i18n/client'
 import { useState } from 'react'
 import { ChevronRight, Info } from 'lucide-react'
 import { toast } from 'sonner'
@@ -12,24 +13,25 @@ import type { BudgetCodeSummary, BudgetRequestRecord } from '@/types/budget'
 /** Clickable (i) beside the Cost label explaining which estimate is shown
  * and when it can be edited. */
 function CostInfo() {
+  const t = useTranslations()
   return (
     <Popover>
       <PopoverTrigger asChild>
         <button
           type="button"
-          aria-label="How Cost works"
+          aria-label={t('budget.costInfo')}
           className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-gray-100 hover:text-gray-700"
         >
           <Info className="h-3.5 w-3.5" />
         </button>
       </PopoverTrigger>
       <PopoverContent align="end" side="bottom" className="w-72">
-        <p className="mb-1.5 text-xs font-semibold text-gray-900">How Cost works</p>
+        <p className="mb-1.5 text-xs font-semibold text-gray-900">{t('budget.costInfo')}</p>
         <ul className="list-disc space-y-1 pl-4 text-xs leading-relaxed text-gray-600">
-          <li>Shows the <b>approved engineering estimate</b> when one exists.</li>
-          <li>Otherwise shows the <b>project estimate</b> set for the request.</li>
-          <li><span className="font-medium text-blue-700">Blue</span> = click to edit the project estimate.</li>
-          <li>Gray = locked; an approved engineering estimate is in use.</li>
+          <li>{t('budget.approvedEstimateInfo')}</li>
+          <li>{t('budget.projectEstimateInfo')}</li>
+          <li><span className="font-medium text-blue-700">{t('budget.blue')}</span> {t('budget.costBlue')}</li>
+          <li>{t('budget.costGray')}</li>
         </ul>
       </PopoverContent>
     </Popover>
@@ -63,6 +65,7 @@ export function BudgetRequestTable({
   onEditProjectEstimate: (requestId: string, value: number | null) => void
   onOpenRequest: (requestId: string) => void
 }) {
+  const t = useTranslations()
   const [assignedExpanded, setAssignedExpanded] = useState(false)
   const unassigned = requests.filter((request) => !request.budgetCode)
   const assigned = requests.filter((request) => request.budgetCode)
@@ -71,15 +74,15 @@ export function BudgetRequestTable({
     try {
       if (!budgetCodeId) await onUnassign(request.id)
       else await onAssign(request.id, budgetCodeId)
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to update assignment')
+    } catch {
+      toast.error(t('budget.error.assign'))
     }
   }
 
   function renderGroupSelect(request: BudgetRequestRecord) {
     return (
       <BudgetGroupCombobox
-        aria-label="Assign group"
+        aria-label={t('budget.assign')}
         value={request.budgetCode?.id ?? ''}
         options={sortBudgetCodesForRequest(budgetCodes, request).map((code) => ({
           id: code.id,
@@ -125,13 +128,13 @@ export function BudgetRequestTable({
           </colgroup>
           <thead>
             <tr className="border-b text-left text-xs font-medium text-muted-foreground">
-              <th className="px-2 py-2">Request</th>
-              <th className="px-2 py-2">Department</th>
-              <th className="px-2 py-2">Group</th>
-              <th className="px-2 py-2">Status</th>
+              <th className="px-2 py-2">{t('insights.request')}</th>
+              <th className="px-2 py-2">{t('budget.department')}</th>
+              <th className="px-2 py-2">{t('budget.group')}</th>
+              <th className="px-2 py-2">{t('common.status')}</th>
               <th className="px-2 py-2 text-right">
                 <span className="inline-flex items-center justify-end gap-1">
-                  Cost
+                  {t('requests.cost')}
                   <CostInfo />
                 </span>
               </th>
@@ -175,12 +178,12 @@ export function BudgetRequestTable({
               </div>
               <div className="mt-0.5 text-[11px] text-gray-500">
                 {request.department?.name ?? '—'} · {request.status}
-                {request.budgetCode ? ` · in ${getBudgetCodeLabel(request.budgetCode)}` : ''}
+                {request.budgetCode ? ` · ${t('budget.groupLabel', { group: getBudgetCodeLabel(request.budgetCode) })}` : ''}
               </div>
               <div className="mt-2.5 flex items-center gap-2">
                 {renderGroupSelect(request)}
                 <span className="inline-flex shrink-0 items-center gap-1">
-                  <span className="text-[11px] text-gray-500">Cost</span>
+                  <span className="text-[11px] text-gray-500">{t('requests.cost')}</span>
                   <CostInfo />
                   {renderCost(request)}
                 </span>
@@ -195,7 +198,7 @@ export function BudgetRequestTable({
   if (requests.length === 0) {
     return (
       <p className="rounded-md border border-dashed border-gray-300 bg-gray-50 p-4 text-center text-sm text-gray-500">
-        No requests match these filters.
+        {t('budget.noRequests')}
       </p>
     )
   }
@@ -204,15 +207,15 @@ export function BudgetRequestTable({
     <div className="space-y-4">
       <section>
         <div className="mb-1.5 flex items-center gap-2">
-          <h2 className="text-sm font-semibold text-gray-900">Unassigned</h2>
+          <h2 className="text-sm font-semibold text-gray-900">{t('requests.unassigned')}</h2>
           <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-100 px-1.5 text-[11px] font-semibold text-amber-700">
             {unassigned.length}
           </span>
-          <span className="text-xs text-muted-foreground">no budget code yet</span>
+          <span className="text-xs text-muted-foreground">{t('budget.noCodeYet')}</span>
         </div>
         {unassigned.length === 0 ? (
           <p className="rounded-md border border-dashed border-gray-300 bg-gray-50 p-4 text-center text-sm text-gray-500">
-            No unassigned requests.
+            {t('budget.noUnassigned')}
           </p>
         ) : (
           renderSectionRows(unassigned)
@@ -227,11 +230,11 @@ export function BudgetRequestTable({
           onClick={() => setAssignedExpanded(!assignedExpanded)}
         >
           <ChevronRight className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 ${assignedExpanded ? 'rotate-90' : ''}`} />
-          <h2 className="text-sm font-semibold text-gray-900">Assigned</h2>
+          <h2 className="text-sm font-semibold text-gray-900">{t('budget.assigned')}</h2>
           <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-green-100 px-1.5 text-[11px] font-semibold text-green-700">
             {assigned.length}
           </span>
-          <span className="text-xs text-muted-foreground">{assignedExpanded ? 'click to collapse' : 'click to expand'}</span>
+          <span className="text-xs text-muted-foreground">{assignedExpanded ? t('budget.clickToCollapse') : t('budget.clickToExpand')}</span>
         </button>
         <div
           className={`grid transition-[grid-template-rows] duration-200 ease-out ${assignedExpanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}
@@ -240,7 +243,7 @@ export function BudgetRequestTable({
           <div className="overflow-hidden">
             {assigned.length === 0 ? (
               <p className="rounded-md border border-dashed border-gray-300 bg-gray-50 p-4 text-center text-sm text-gray-500">
-                No assigned requests.
+                {t('budget.noAssigned')}
               </p>
             ) : (
               renderSectionRows(assigned)

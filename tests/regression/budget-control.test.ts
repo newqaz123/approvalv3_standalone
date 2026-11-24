@@ -1,3 +1,4 @@
+import { createTranslator } from '../../src/lib/i18n/messages'
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -19,6 +20,8 @@ import {
   parseBudgetCodePaste,
   sumVisibleRemainingBudget,
 } from '../../src/lib/budget-control'
+
+const english = createTranslator('en')
 
 describe('budget control helpers', () => {
   it('normalizes budget codes for case-insensitive lookup', () => {
@@ -400,8 +403,10 @@ describe('budget code dialogs', () => {
     assert.match(dialog, /export function BudgetCodePasteDialog/)
     assert.match(dialog, /parseBudgetCodePaste/)
     assert.match(dialog, /applyPasteToGrid/)
-    assert.match(dialog, /Budget code name/)
-    assert.match(dialog, /Confirm/)
+    assert.ok(dialog.includes("t('budget.codeName')"))
+    assert.equal(english('budget.codeName'), 'Budget code name')
+    assert.ok(dialog.includes("t('budget.pasteConfirm')"))
+    assert.equal(english('budget.pasteConfirm'), 'Confirm')
     assert.doesNotMatch(dialog, /type="file"/)
   })
 
@@ -430,11 +435,14 @@ describe('budget department panel', () => {
     assert.match(card, /export function BudgetCodeCard/)
     assert.match(card, /getBudgetCodeHealth/)
     assert.match(card, /getBudgetCodeLabel/)
-    assert.match(card, /Budget amount/)
+    assert.ok(card.includes("t('budget.amount')"))
+    assert.equal(english('budget.amount'), 'Budget amount')
     assert.doesNotMatch(card, /useDroppable|DndContext|Drop remaining request/)
     assert.match(panel, /groupBudgetCodesByDepartment/)
-    assert.match(page, /Paste budget codes/)
-    assert.match(page, /New budget code/)
+    assert.ok(page.includes("t('budget.paste')"))
+    assert.equal(english('budget.paste'), 'Paste budget codes')
+    assert.ok(page.includes("t('budget.newCode')"))
+    assert.equal(english('budget.newCode'), 'New budget code')
   })
 })
 
@@ -443,9 +451,12 @@ describe('budget request assignment table', () => {
     const table = readFileSync('src/components/budget/budget-request-table.tsx', 'utf8')
 
     assert.match(table, /export function BudgetRequestTable/)
-    assert.match(table, /Unassigned/)
-    assert.match(table, /Assigned/)
-    assert.match(table, /aria-label="Assign group"/)
+    assert.ok(table.includes("t('requests.unassigned')"))
+    assert.equal(english('requests.unassigned'), 'Unassigned')
+    assert.ok(table.includes("t('budget.assigned')"))
+    assert.equal(english('budget.assigned'), 'Assigned')
+    assert.match(table, /aria-label=\{t\('budget\.assign'\)\}/)
+    assert.equal(english('budget.assign'), 'Assign group')
     assert.match(table, /md:hidden/)
     assert.match(table, /hidden min-w-full table-fixed md:table/)
     assert.match(table, /getBudgetProjectEstimateAmount/)

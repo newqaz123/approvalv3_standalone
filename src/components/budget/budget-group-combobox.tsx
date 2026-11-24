@@ -1,5 +1,6 @@
 'use client'
 
+import { useTranslations } from '@/lib/i18n/client'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronsUpDown, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -37,6 +38,7 @@ export function BudgetGroupCombobox({
   onChange: (budgetCodeId: string) => void
   'aria-label'?: string
 }) {
+  const t = useTranslations()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -72,7 +74,7 @@ export function BudgetGroupCombobox({
           className="h-8 w-full justify-between px-2 font-normal"
         >
           <span className={cn('min-w-0 truncate text-sm', !selected && 'text-muted-foreground')}>
-            {selected ? `${selected.label} · ${selected.code}` : 'Unassigned'}
+            {selected ? `${selected.label} · ${selected.code}` : t('requests.unassigned')}
           </span>
           <ChevronsUpDown className="ml-1 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         </Button>
@@ -84,16 +86,16 @@ export function BudgetGroupCombobox({
             <CommandInput
               value={query}
               onValueChange={setQuery}
-              placeholder="Search group name or code…"
+              placeholder={t('budget.groupSearch')}
               className="h-8 flex-1 border-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
             />
           </div>
           <CommandList>
-            <CommandEmpty>No matching group.</CommandEmpty>
+            <CommandEmpty>{t('budget.noMatchingGroup')}</CommandEmpty>
             <CommandGroup>
               <CommandItem value="__unassigned__" onSelect={() => commit('')}>
                 <Check className={cn('mr-2 h-4 w-4', value === '' ? 'opacity-100' : 'opacity-0')} />
-                Unassigned
+                {t('requests.unassigned')}
               </CommandItem>
               {filtered.map((option) => (
                 <CommandItem key={option.id} value={option.id} onSelect={() => commit(option.id)}>

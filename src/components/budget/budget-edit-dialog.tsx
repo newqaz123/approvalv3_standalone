@@ -1,5 +1,6 @@
 'use client'
 
+import { useTranslations } from '@/lib/i18n/client'
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -23,25 +24,33 @@ export function BudgetEditDialog({
   onOpenChange,
   onSave,
 }: BudgetEditDialogProps) {
+  const t = useTranslations()
   const [value, setValue] = useState(initialValue?.toString() ?? '')
   const [isSaving, setIsSaving] = useState(false)
+  const [hasError, setHasError] = useState(false)
 
   useEffect(() => {
     if (open) setValue(initialValue?.toString() ?? '')
   }, [initialValue, open])
 
   async function handleSave() {
+    setHasError(false)
     setIsSaving(true)
     try {
       await onSave(value.trim() === '' ? null : Number(value))
       onOpenChange(false)
+    } catch {
+      setHasError(true)
     } finally {
       setIsSaving(false)
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(nextOpen) => {
+      if (!nextOpen) setHasError(false)
+      onOpenChange(nextOpen)
+    }}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
@@ -56,12 +65,16 @@ export function BudgetEditDialog({
             value={value}
             onChange={(event) => setValue(event.target.value)}
           />
+          {hasError && <p role="alert" className="text-sm text-destructive">{t('budget.error.editEstimate')}</p>}
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
+            <Button type="button" variant="outline" onClick={() => {
+              setHasError(false)
+              onOpenChange(false)
+            }}>
+              {t('common.cancel')}
             </Button>
             <Button type="button" onClick={handleSave} disabled={isSaving}>
-              Save
+              {t('requests.save')}
             </Button>
           </div>
         </div>

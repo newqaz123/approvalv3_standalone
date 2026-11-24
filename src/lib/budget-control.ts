@@ -14,6 +14,7 @@ export type BudgetCodePasteRow = {
 export type BudgetCodePasteSkip = {
   line: number
   reason: string
+  reasonCode: 'missingCode' | 'missingName' | 'invalidAmount' | 'duplicateCode'
   raw: string
 }
 
@@ -320,21 +321,21 @@ export function parseBudgetCodePaste(rawText: string): {
     const line = index + 1
 
     if (!displayCode.trim()) {
-      skipped.push({ line, reason: 'Missing budget code', raw })
+      skipped.push({ line, reason: 'Missing budget code', reasonCode: 'missingCode', raw })
       continue
     }
     if (!name.trim()) {
-      skipped.push({ line, reason: 'Missing budget code name', raw })
+      skipped.push({ line, reason: 'Missing budget code name', reasonCode: 'missingName', raw })
       continue
     }
     if (amount === null) {
-      skipped.push({ line, reason: 'Invalid budget amount', raw })
+      skipped.push({ line, reason: 'Invalid budget amount', reasonCode: 'invalidAmount', raw })
       continue
     }
 
     const code = normalizeBudgetCode(displayCode)
     if (seen.has(code)) {
-      skipped.push({ line, reason: 'Duplicate budget code', raw })
+      skipped.push({ line, reason: 'Duplicate budget code', reasonCode: 'duplicateCode', raw })
       continue
     }
     seen.add(code)

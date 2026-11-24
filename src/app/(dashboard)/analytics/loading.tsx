@@ -1,9 +1,14 @@
+import { createTranslator } from '@/lib/i18n/messages'
+import { getRequestLocale } from '@/lib/i18n/server'
 import { Skeleton } from '@/components/ui/skeleton'
 
-export default function AnalyticsLoading() {
+export default async function AnalyticsLoading() {
+  const t = createTranslator(await getRequestLocale())
   return (
     <div className="w-full py-6">
-      <h1 className="text-2xl font-bold mb-6">Analytics</h1>
+      <h1 className="text-2xl font-bold mb-6">{t('nav.analytics')}</h1>
+
+      <p role="status" className="sr-only">{t('requests.loading')}</p>
 
       {/* Summary cards skeleton */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">

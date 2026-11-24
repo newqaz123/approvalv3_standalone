@@ -1,10 +1,12 @@
 'use client'
 
+import { useTranslations } from '@/lib/i18n/client'
+import type { DepartmentBreakdown } from '@/types/analytics'
 import { DEPT_COLORS } from './chart-utils'
 
 interface DepartmentBreakdownChartProps {
   /** Department data with name and request count */
-  data: Array<{ name: string; value: number }>
+  data: DepartmentBreakdown[]
 }
 
 /**
@@ -14,10 +16,11 @@ interface DepartmentBreakdownChartProps {
 export function DepartmentBreakdownChart({
   data,
 }: DepartmentBreakdownChartProps) {
+  const t = useTranslations()
   if (!data || data.length === 0) {
     return (
       <div className="flex items-center justify-center h-[200px] text-muted-foreground text-sm">
-        No department data available
+        {t('analytics.departmentEmpty')}
       </div>
     )
   }
@@ -37,7 +40,7 @@ export function DepartmentBreakdownChart({
         return (
           <div key={dept.name} className="space-y-1.5">
             <div className="flex items-center justify-between text-sm">
-              <span className="font-medium truncate">{dept.name}</span>
+              <span className="font-medium truncate">{dept.isUnnamed ? t('requests.unknown') : dept.name}</span>
               <span className="text-muted-foreground tabular-nums ml-2">
                 {dept.value} <span className="text-xs">({percentage}%)</span>
               </span>

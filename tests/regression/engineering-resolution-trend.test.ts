@@ -1,3 +1,4 @@
+import { createTranslator } from '../../src/lib/i18n/messages'
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -250,13 +251,14 @@ describe('engineering resolution trend aggregation', () => {
 })
 
 describe('engineering resolution trend wiring', () => {
+  const english = createTranslator('en')
+
   it('replaces the Request Volume card with Engineering Resolution Trend', () => {
     const page = read('src/components/analytics/analytics-page.tsx')
-    assert.match(page, /Engineering Resolution Trend/)
-    assert.match(
-      page,
-      /Open Engineering backlog at period end versus requests resolved by Engineering during each period\./,
-    )
+    assert.match(page, /title=\{t\('analytics\.trend'\)\}/)
+    assert.equal(english('analytics.trend'), 'Engineering Resolution Trend')
+    assert.match(page, /subtitle=\{t\('analytics\.trendIntro'\)\}/)
+    assert.equal(english('analytics.trendIntro'), 'Open Engineering backlog at period end versus requests resolved by Engineering during each period.')
     assert.match(page, /engineering-resolution-trend-chart/)
     assert.match(page, /data\.engineeringResolutionTrend/)
     assert.doesNotMatch(page, /Request Volume/)
@@ -266,8 +268,9 @@ describe('engineering resolution trend wiring', () => {
   it('renders a two-line chart with point markers and the approved legends', () => {
     const chart = read('src/components/analytics/engineering-resolution-trend-chart.tsx')
     assert.match(chart, /LineChart/)
-    assert.match(chart, /Engineering unresolved/)
-    assert.match(chart, /Resolved by Engineering/)
+    assert.match(chart, /<Legend\s+formatter=\{\(value, entry\) => seriesLabel\(entry\.dataKey, value\)\}/)
+    assert.equal(english('analytics.metric.engineeringUnresolved'), 'Engineering unresolved')
+    assert.equal(english('analytics.metric.resolvedByEngineering'), 'Resolved by Engineering')
     const lines = chart.match(/<Line\b/g) ?? []
     assert.equal(lines.length, 2)
     assert.match(chart, /dot=/)

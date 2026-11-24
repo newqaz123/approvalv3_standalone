@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs'
 import { it } from 'node:test'
 import { runInNewContext } from 'node:vm'
 import ts from 'typescript'
+import { createTranslator } from '@/lib/i18n/messages'
+import { getActivityMessageKey } from '@/lib/modal-data-adapters'
 import { buildFollowUpDashboard } from '@/lib/follow-up-dashboard'
 
 // Exercise the surviving action, not imports left behind by the retired dashboard queries.
@@ -14,6 +16,9 @@ function loadDashboard(userId: string | null, visible: Array<Record<string, unkn
     return []
   }
   const modules: Record<string, unknown> = {
+    '@/lib/i18n/messages': { createTranslator },
+    '@/lib/i18n/server': { getRequestLocale: async () => 'en' },
+    '@/lib/modal-data-adapters': { getActivityMessageKey },
     '@/lib/prisma': { __esModule: true, default: {
       solutions: { findMany: findMany('solutions') },
       request_activities: { findMany: findMany('activities') },

@@ -214,6 +214,10 @@ const activityMessageKeys = new Map<string, MessageKey>([
   ['engineers_assigned', 'requests.activity.engineersAssigned'],
 ])
 
+export function getActivityMessageKey(action: string): MessageKey | undefined {
+  return activityMessageKeys.get(action)
+}
+
 export function translateActivityAction(t: Translator, activity: ModalActivityItem): string {
   return activity.actionKey ? t(activity.actionKey) : activity.action
 }
@@ -234,7 +238,7 @@ export function transformActivitiesToTimeline(activities: Array<{
   return activities.map(activity => ({
     id: activity.id,
     action: formatActionLabel(activity.action),
-    actionKey: activityMessageKeys.get(activity.action),
+    actionKey: getActivityMessageKey(activity.action),
     user: activity.user.name || activity.user.email,
     timestamp: activity.createdAt.toISOString(),
     details: activity.comments || undefined,

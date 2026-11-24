@@ -1,3 +1,4 @@
+import { useTranslations } from '@/lib/i18n/client'
 import { ClipboardList, Clock, Timer, CheckCircle, TrendingUp, TrendingDown, Minus, Ban } from 'lucide-react'
 import type { SummaryMetrics, TrendData } from '@/types/analytics'
 import { cn } from '@/lib/utils'
@@ -41,9 +42,10 @@ function TrendBadge({ value, invertColor }: { value: number; invertColor?: boole
 }
 
 export function SummaryCards({ summary, trends }: SummaryCardsProps) {
+  const t = useTranslations()
   const metrics = [
     {
-      title: 'Total Requests',
+      titleKey: 'analytics.metric.total' as const,
       value: summary.totalRequests ?? 0,
       formatted: String(summary.totalRequests ?? '—'),
       icon: ClipboardList,
@@ -54,7 +56,7 @@ export function SummaryCards({ summary, trends }: SummaryCardsProps) {
       invertTrend: false,
     },
     {
-      title: 'Pending',
+      titleKey: 'analytics.metric.pending' as const,
       value: summary.pendingRequests ?? 0,
       formatted: String(summary.pendingRequests ?? '—'),
       icon: Clock,
@@ -65,11 +67,11 @@ export function SummaryCards({ summary, trends }: SummaryCardsProps) {
       invertTrend: true,
     },
     {
-      title: 'Avg Approval Time',
+      titleKey: 'analytics.metric.avgApprovalTime' as const,
       value: summary.avgApprovalTime ?? 0,
       formatted:
         summary.avgApprovalTime !== undefined && summary.avgApprovalTime > 0
-          ? `${summary.avgApprovalTime.toFixed(1)}h`
+          ? t('insights.duration.hour', { value: summary.avgApprovalTime.toFixed(1) })
           : '—',
       icon: Timer,
       accent: 'bg-violet-500',
@@ -79,7 +81,7 @@ export function SummaryCards({ summary, trends }: SummaryCardsProps) {
       invertTrend: true,
     },
     {
-      title: 'Completion Rate',
+      titleKey: 'analytics.metric.completionRate' as const,
       value: summary.approvalRate ?? 0,
       formatted:
         summary.approvalRate !== undefined && summary.approvalRate > 0
@@ -92,7 +94,7 @@ export function SummaryCards({ summary, trends }: SummaryCardsProps) {
       trend: trends?.approvalRateChange,
       invertTrend: false,
       subtitle: summary.cancelledCount > 0
-        ? `${summary.cancelledCount} cancelled (excluded)`
+        ? t('analytics.metric.cancelledExcluded', { count: summary.cancelledCount })
         : undefined,
     },
   ]
@@ -103,7 +105,7 @@ export function SummaryCards({ summary, trends }: SummaryCardsProps) {
         const Icon = metric.icon
         return (
           <div
-            key={metric.title}
+            key={metric.titleKey}
             className="relative overflow-hidden rounded-xl border bg-card p-4 shadow-sm transition-shadow hover:shadow-md"
           >
             {/* Top accent bar */}
@@ -111,7 +113,7 @@ export function SummaryCards({ summary, trends }: SummaryCardsProps) {
 
             <div className="flex items-start justify-between pt-1">
               <div className="space-y-1">
-                <p className="text-sm font-medium text-muted-foreground">{metric.title}</p>
+                <p className="text-sm font-medium text-muted-foreground">{t(metric.titleKey)}</p>
                 <p className="text-2xl font-bold tracking-tight">{metric.formatted}</p>
               </div>
               <div className={cn('rounded-lg p-2', metric.iconBg)}>
@@ -123,7 +125,7 @@ export function SummaryCards({ summary, trends }: SummaryCardsProps) {
             {trends && metric.trend !== undefined && (
               <div className="mt-3 flex items-center gap-1.5">
                 <TrendBadge value={metric.trend} invertColor={metric.invertTrend} />
-                <span className="text-xs text-muted-foreground">vs prev period</span>
+                <span className="text-xs text-muted-foreground">{t('analytics.prevPeriod')}</span>
               </div>
             )}
 

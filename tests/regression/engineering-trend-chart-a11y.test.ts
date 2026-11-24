@@ -1,8 +1,11 @@
+import { createTranslator } from '../../src/lib/i18n/messages'
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 const read = (path: string) => readFileSync(path, 'utf8')
+
+const english = createTranslator('en')
 
 describe('engineering resolution trend chart accessibility', () => {
   it('enables the Recharts accessibility layer', () => {
@@ -14,11 +17,11 @@ describe('engineering resolution trend chart accessibility', () => {
     const chart = read('src/components/analytics/engineering-resolution-trend-chart.tsx')
     assert.match(chart, /aria-labelledby=/)
     assert.match(chart, /sr-only/)
-    assert.match(chart, /Engineering Resolution Trend/)
-    assert.match(
-      chart,
-      /Open engineering backlog at period end versus requests resolved by Engineering during each period\./,
-    )
+    assert.match(chart, /<h3 id=\{headingId\} className="sr-only">\s*\{t\('analytics\.trend'\)\}/)
+    assert.equal(english('analytics.trend'), 'Engineering Resolution Trend')
+    assert.match(chart, /<p className="sr-only">\s*\{t\('analytics\.trendAccessibleIntro'\)\}/)
+    assert.equal(english('analytics.trendAccessibleIntro'),
+      'Open engineering backlog at period end versus requests resolved by Engineering during each period.')
   })
 
   it('provides a visually hidden tabular data equivalent for every period', () => {
@@ -29,9 +32,12 @@ describe('engineering resolution trend chart accessibility', () => {
     assert.match(chart, /<div className="sr-only">\s*<table>/)
     assert.match(chart, /<caption>/)
     // Column headers for period, unresolved, and resolved values.
-    assert.match(chart, /<th scope="col">Period<\/th>/)
-    assert.match(chart, /<th scope="col">Engineering unresolved<\/th>/)
-    assert.match(chart, /<th scope="col">Resolved by Engineering<\/th>/)
+    assert.ok(chart.includes(`<th scope="col">{t('analytics.period')}</th>`))
+    assert.equal(english('analytics.period'), 'Period')
+    assert.ok(chart.includes(`<th scope="col">{t('analytics.metric.engineeringUnresolved')}</th>`))
+    assert.equal(english('analytics.metric.engineeringUnresolved'), 'Engineering unresolved')
+    assert.ok(chart.includes(`<th scope="col">{t('analytics.metric.resolvedByEngineering')}</th>`))
+    assert.equal(english('analytics.metric.resolvedByEngineering'), 'Resolved by Engineering')
     // One row per data point, keyed by period, with row headers.
     assert.match(chart, /data\.map\(\(point\) => \(/)
     assert.match(chart, /<th scope="row">\{point\.period\}<\/th>/)
