@@ -3,6 +3,12 @@ import { PrismaClient } from '@prisma/client'
 import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import * as XLSX from 'xlsx'
+import { productionSurface } from '../support/i18n/production-surfaces'
+
+const dashboard = productionSurface('/dashboard')
+const workflow = productionSurface('/dashboard/workflow')
+const analytics = productionSurface('/analytics')
+const budget = productionSurface('/budget-monitor')
 
 const BASE_URL = 'http://localhost:32143'
 const DATABASE_URL = 'postgresql://th_en_local@127.0.0.1:55473/app_cleanstart_dev'
@@ -59,7 +65,7 @@ test.afterAll(async () => {
 })
 
 async function signIn(page: Page, email: string, path: string) {
-  await page.goto(`/sign-in?callbackUrl=${encodeURIComponent(path)}`)
+  await page.goto(`${productionSurface('/sign-in/[[...sign-in]]').path}?callbackUrl=${encodeURIComponent(path)}`)
   await page.locator('#email').fill(email)
   await page.locator('#password').fill(PASSWORD)
   await page.getByRole('button', { name: 'Sign in', exact: true }).click()
@@ -75,21 +81,21 @@ async function chooseLanguage(page: Page, locale: 'en' | 'th') {
 }
 
 test('Dashboard preserves the request and badge, and Workflow preserves the assigned unit', async ({ page }) => {
-  await signIn(page, ALICE, '/dashboard')
+  await signIn(page, ALICE, dashboard.path)
   const request = page.getByRole('button', { name: new RegExp(`^${title} Final Approval|^${title} ★`) })
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Improvement Requests — Your department')
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(dashboard.heading.en)
   await expect(request.getByText('Final Approval', { exact: true })).toBeVisible()
   await expectEmptyDrawer('Needs attention', 'No requests here.', 'Close drawer')
   await chooseLanguage(page, 'th')
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Request ปรับปรุงงาน — หน่วยงานของคุณ')
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(dashboard.heading.th)
   await expect(request.getByText('Final Approval', { exact: true })).toBeVisible()
   await expectEmptyDrawer('ควรติดตาม', 'ไม่มี Request ในรายการนี้', 'ปิดรายการ')
-  await page.goto('/dashboard/workflow')
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('ขั้นตอนอนุมัติ')
+  await page.goto(workflow.path)
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(workflow.heading.th)
   const unit = (await page.getByText(/^หน่วยงานของคุณ: /).innerText()).split(': ')[1]
   expect(unit).toBeTruthy()
   await chooseLanguage(page, 'en')
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Approval Workflow')
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(workflow.heading.en)
   await expect(page.getByText(`Your unit: ${unit}`, { exact: true })).toBeVisible()
 
   async function expectEmptyDrawer(label: string, empty: string, close: string) {
@@ -102,18 +108,18 @@ test('Dashboard preserves the request and badge, and Workflow preserves the assi
 })
 
 test('Workflow shows bilingual guidance for a seeded account without an assignment', async ({ page }) => {
-  await signIn(page, ADMIN, '/dashboard/workflow')
+  await signIn(page, ADMIN, workflow.path)
   await expect(page.getByText('You are not assigned to an organization unit. Please contact your administrator.')).toBeVisible()
   await chooseLanguage(page, 'th')
   await expect(page.getByText('คุณยังไม่มีหน่วยงานที่ได้รับมอบหมาย กรุณาติดต่อผู้ดูแลระบบ')).toBeVisible()
 })
 
 test('Analytics translates chart legends and loading/empty copy without changing chart data or Status labels', async ({ page }) => {
-  await signIn(page, ALICE, '/analytics?dateRange=30days')
+  await signIn(page, ALICE, `${analytics.path}?dateRange=30days`)
   const heading = page.getByRole('heading', { level: 1 })
   const legend = page.locator('.recharts-legend-item-text')
   const chartRows = page.getByRole('table', { name: /^(Engineering Resolution Trend by period|แนวโน้มการจัดการงาน Engineering แยกตามช่วงเวลา)$/ }).locator('tbody tr')
-  await expect(heading).toHaveText('Analytics')
+  await expect(heading).toHaveText(analytics.heading.en)
   await expect(legend).toHaveText(['Engineering unresolved', 'Resolved by Engineering'], { timeout: 25_000 })
   const englishRange = page.getByText('Engineering Cycle Range', { exact: true }).locator('..')
   await expect(englishRange.getByText('Avg', { exact: true })).toBeVisible()
@@ -146,7 +152,7 @@ test('Analytics translates chart legends and loading/empty copy without changing
   }
 
   await chooseLanguage(page, 'th')
-  await expect(heading).toHaveText('วิเคราะห์ข้อมูล')
+  await expect(heading).toHaveText(analytics.heading.th)
   await expect(legend).toHaveText(['งาน Engineering ที่ยังค้าง', 'งานที่ Engineering จัดการแล้ว'])
   const thaiRange = page.getByText('ช่วงเวลาทำงานของ Engineering', { exact: true }).locator('..')
   await expect(thaiRange.getByText('เฉลี่ย', { exact: true })).toBeVisible()
@@ -165,17 +171,16 @@ test('Analytics translates chart legends and loading/empty copy without changing
 
 test('Budget preserves the saved Requests view, filter value, Status and THB amounts', async ({ page }) => {
   const ready = page.waitForResponse(response =>
-    new URL(response.url()).pathname === '/budget-monitor' && response.request().method() === 'POST' && response.ok(),
+    new URL(response.url()).pathname === budget.path && response.request().method() === 'POST' && response.ok(),
   { timeout: 45_000 })
-  await signIn(page, ALICE, '/budget-monitor')
+  await signIn(page, ALICE, budget.path)
   // The first debounced data fetch proves the client has hydrated.
   await ready
   const heading = page.getByRole('heading', { level: 1 })
-  await expect(heading).toHaveText('Budget Monitor')
+  await expect(heading).toHaveText(budget.heading.en)
   await expect(page.getByText('54,321', { exact: true })).toBeVisible()
   const englishReport = await downloadReport('Reports')
-  expect(englishReport.sheet).toContain(`${title} / Engineering`)
-  expect(englishReport.sheet).toContain('SentToEngineer')
+  expect(englishReport.rows.find(row => row.includes(`${title} / Engineering`))).toContain('SentToEngineer')
   await page.getByRole('tab', { name: /^Requests/ }).click()
   const search = page.locator('#budget-monitor-search-md')
   await search.fill(title)
@@ -187,7 +192,7 @@ test('Budget preserves the saved Requests view, filter value, Status and THB amo
   await page.getByRole('option', { name: 'FinalApproval', exact: true }).click()
   await expect(page.getByRole('button', { name: 'FinalApproval' })).toBeVisible()
   await chooseLanguage(page, 'th')
-  await expect(heading).toHaveText('ติดตามงบ')
+  await expect(heading).toHaveText(budget.heading.th)
   await expect(page.getByRole('tab', { name: /^Request/ })).toHaveAttribute('aria-selected', 'true')
   expect(await page.evaluate(() => localStorage.getItem('budget-monitor-view'))).toBe('requests')
   await expect(search).toHaveValue(title)
@@ -199,7 +204,10 @@ test('Budget preserves the saved Requests view, filter value, Status and THB amo
   await page.getByRole('button', { name: 'ล้าง', exact: true }).click()
   await expect(search).toHaveValue('')
   await expect(row).toBeVisible()
-  expect(await downloadReport('รายงาน')).toEqual(englishReport)
+  const thaiReport = await downloadReport('รายงาน')
+  expect(thaiReport).toEqual(englishReport)
+  const [header, ...rows] = thaiReport.rows
+  expect({ ...thaiReport, rows: [['รหัสงบ', ...header.slice(1)], ...rows] }).not.toEqual(englishReport)
   await search.fill(`missing-${fixtureId}`)
   await chooseLanguage(page, 'en')
   await expect(page.getByText('No requests match these filters.')).toBeVisible()
@@ -213,6 +221,29 @@ test('Budget preserves the saved Requests view, filter value, Status and THB amo
     ])
     const workbook = XLSX.read(await readFile(await download.path()), { type: 'buffer' })
     expect(workbook.SheetNames).toEqual(['Budget Monitor'])
-    return { fileName: download.suggestedFilename(), sheet: XLSX.utils.sheet_to_csv(workbook.Sheets['Budget Monitor']) }
+    return { fileName: download.suggestedFilename(), rows: XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets['Budget Monitor'], { header: 1, raw: true, defval: null }) }
+  }
+})
+
+test('Requests worklist downloads the same ordered XLSX cells for the same authorized rows in both languages', async ({ page }) => {
+  const requests = productionSurface('/requests')
+  await signIn(page, ALICE, requests.path)
+  const en = await download('Export XLSX')
+  expect(en.sheets).toEqual(['Requests'])
+  expect(en.rows[0]).toEqual(['Title', 'Status', 'Department', 'Requester', 'Created', 'PIC', 'Files', 'WR Received', 'Approval Progress', 'Current Approver', 'Rejected'])
+  expect(en.rows.find(([name]) => name === title)?.slice(0, 2)).toEqual([title, 'FinalApproval'])
+  await chooseLanguage(page, 'th')
+  const th = await download('ส่งออก XLSX')
+  expect(th).toEqual(en)
+  const [header, ...remaining] = th.rows
+  expect({ ...th, rows: [['หัวข้อ', ...header.slice(1)], ...remaining] }).not.toEqual(en)
+
+  async function download(label: string) {
+    const [file] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: label, exact: true }).click()])
+    const workbook = XLSX.read(await readFile(await file.path()), { type: 'buffer' })
+    return {
+      fileName: file.suggestedFilename(), sheets: workbook.SheetNames,
+      rows: XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets.Requests, { header: 1, raw: true, defval: null }),
+    }
   }
 })

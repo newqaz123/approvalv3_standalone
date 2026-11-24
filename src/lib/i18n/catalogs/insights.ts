@@ -380,7 +380,7 @@ const th = {
   'dashboard.drawer.attn': 'ติดตาม',
   'dashboard.drawer.done': 'งานเสร็จ',
   'dashboard.drawer.doneNoWr': 'งานไม่มี WR',
-  'dashboard.drawer.eng': 'Engineering',
+  'dashboard.drawer.eng': 'งานวิศวกรรม',
   'dashboard.drawer.req': 'รออนุมัติ',
   'dashboard.drawer.sol': 'Solution',
   'dashboard.engineeringDrawer': 'Sent to Engineer และ Design & cost (รอหัวหน้า Engineering อนุมัติ)',

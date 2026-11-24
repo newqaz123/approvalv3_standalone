@@ -1,6 +1,10 @@
 import { expect, test, type Page } from '@playwright/test'
 import { PrismaClient } from '@prisma/client'
 import { randomUUID } from 'node:crypto'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import { startMailCapture, type CapturedSmtpMessage } from '../support/native/mail-capture'
+import { productionSurface } from '../support/i18n/production-surfaces'
 
 const BASE = 'http://localhost:32143'
 const DB = 'postgresql://th_en_local@127.0.0.1:55473/app_cleanstart_dev'
@@ -9,7 +13,7 @@ const requestId = randomUUID()
 const notificationId = randomUUID()
 const otherNotificationId = randomUUID()
 const otherTitle = 'Private notification for another user'
-const legacyId = 'b3608961-e034-4773-86c8-9293dcbda266'
+const legacyId = randomUUID()
 const requestTitle = `Request {reason} — ชื่อเดิม ${requestId}`
 const reason = 'Rework <b>this</b> — เหตุผลเดิม'
 const legacyTitle = 'Stored legacy notice — เดิม'
@@ -18,7 +22,7 @@ const englishMessage = `❌ Request Rejected: Your request "${requestTitle}" has
 const thaiMessage = `❌ ไม่อนุมัติ Request "${requestTitle}" เหตุผล: "${reason}"`
 let prisma: PrismaClient
 let user: { id: string; preferredLocale: string }
-let insertedLegacy = false
+
 
 async function switchLanguage(page: Page, locale: 'th' | 'en') {
   await page.getByRole('button', { name: /^(Open user menu|เปิดเมนูผู้ใช้)$/ }).click()
@@ -38,11 +42,10 @@ test.beforeAll(async () => {
   await prisma.user.update({ where: { id: user.id }, data: { preferredLocale: 'en' } })
   const unit = await prisma.organization_units.findFirstOrThrow({ where: { parentId: null, isActive: true } })
   await prisma.requests.create({ data: { id: requestId, title: requestTitle, description: 'Original Request details', status: 'ImprovementRequest', requesterId: user.id, organizationUnitId: unit.id } })
-  insertedLegacy = (await prisma.$executeRaw`
+  await prisma.$executeRaw`
     INSERT INTO notifications (id, "userId", type, title, message)
     VALUES (${legacyId}, ${user.id}, 'status_changed', ${legacyTitle}, ${legacyBody})
-    ON CONFLICT (id) DO NOTHING
-  `) === 1
+  `
   const otherUser = await prisma.user.findUniqueOrThrow({ where: { email: 'bob@example.com' } })
   await prisma.$executeRaw`
     INSERT INTO notifications (id, "userId", type, title, message, "requestId")
@@ -69,7 +72,7 @@ test.afterAll(async () => {
   if (!prisma) return
   try {
     await prisma.$executeRaw`DELETE FROM notifications WHERE id IN (${notificationId}, ${otherNotificationId})`
-    if (insertedLegacy) await prisma.$executeRaw`DELETE FROM notifications WHERE id = ${legacyId}`
+    await prisma.$executeRaw`DELETE FROM notifications WHERE id = ${legacyId}`
     await prisma.requests.deleteMany({ where: { id: requestId } })
     if (user) await prisma.user.update({ where: { id: user.id }, data: { preferredLocale: user.preferredLocale } })
   } finally {
@@ -78,11 +81,12 @@ test.afterAll(async () => {
 })
 
 test('the same unread notification changes language without changing the stored pair, Request link, or read state', async ({ page }) => {
-  await page.goto('/sign-in?callbackUrl=%2Frequests')
+  const requests = productionSurface('/requests')
+  await page.goto(`${productionSurface('/sign-in/[[...sign-in]]').path}?callbackUrl=${encodeURIComponent(requests.path)}`)
   await page.locator('#email').fill(EMAIL)
   await page.locator('#password').fill(process.env.E2E_PASSWORD || 'changeme')
   await page.getByRole('button', { name: 'Sign in', exact: true }).click()
-  await expect(page).toHaveURL(`${BASE}/requests`, { timeout: 60_000 })
+  await expect(page).toHaveURL(`${BASE}${requests.path}`, { timeout: 60_000 })
 
   const url = page.url()
   const bell = page.getByRole('button').filter({ has: page.locator('svg.lucide-bell.h-5') })
@@ -130,4 +134,82 @@ test('the same unread notification changes language without changing the stored 
   await expect(page).toHaveURL(url)
   await expect.poll(() => prisma.$queryRaw<{ isRead: boolean }[]>`SELECT "isRead" FROM notifications WHERE id = ${legacyId}`).toEqual([{ isRead: true }])
   expect(await prisma.$queryRaw<{ isRead: boolean }[]>`SELECT "isRead" FROM notifications WHERE id = ${otherNotificationId}`).toEqual([{ isRead: false }])
+})
+
+// Keep every MIME part and its transfer encoding. Ignore only SMTP envelope time,
+// Date/Message-ID headers and Nodemailer's random multipart boundary.
+function capturedMail({ raw, from, to }: CapturedSmtpMessage) {
+  const split = raw.indexOf('\n\n')
+  expect(split).toBeGreaterThan(0)
+  const headers = raw.slice(0, split).replace(/\n[ \t]+/g, ' ')
+  const subject = /^Subject: (.+)$/im.exec(headers)?.[1]
+  expect(subject).toBeTruthy()
+  const boundary = /boundary="([^"]+)"/i.exec(headers)?.[1]
+  const body = raw.slice(split + 2)
+  if (!boundary) {
+    expect(headers).toMatch(/^Content-Type: text\/plain/im)
+    return { from, to, subject, plain: body, html: null }
+  }
+  const [preamble, plain, html, end] = body.split(`--${boundary}`)
+  expect(preamble).toBe('')
+  expect(end.trim()).toBe('--')
+  expect(plain).toMatch(/Content-Type: text\/plain/)
+  expect(html).toMatch(/Content-Type: text\/html/)
+  return { from, to, subject, plain, html }
+}
+
+test('notification, admin probe and storage mail preserve the captured subject, plain text and HTML across locale changes', async ({ page }) => {
+  const requests = productionSurface('/requests')
+  await page.goto(`${productionSurface('/sign-in/[[...sign-in]]').path}?callbackUrl=${encodeURIComponent(requests.path)}`)
+  await page.locator('#email').fill(EMAIL)
+  await page.locator('#password').fill(process.env.E2E_PASSWORD || 'changeme')
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click()
+  await expect(page).toHaveURL(`${BASE}${requests.path}`, { timeout: 60_000 })
+  await expect(page.locator('html')).toHaveAttribute('lang', 'en')
+
+  // Fail before calling the sender if its fallback could go anywhere other than this capture.
+  expect(process.env.SMTP_HOST ?? '').toBe('')
+  expect(await prisma.email_settings.count()).toBe(0)
+  const admin = await prisma.user.findUniqueOrThrow({ where: { email: 'admin@example.com' } })
+  const capture = await startMailCapture({ host: '127.0.0.1', port: 35247 })
+  const fromAddress = 'i18n-fixture@example.invalid'
+  const host = capture.plan.host
+  const port = capture.port
+  let configured = false
+  try {
+    await prisma.email_settings.create({ data: { host, port, fromAddress, enabled: true } })
+    configured = true
+    const send = (locale: 'en' | 'th', mode: 'families' | 'changed-body') => promisify(execFile)(process.execPath, [
+      '--import', 'tsx', 'tests/support/i18n/send-compatibility-mail.ts', requestId, locale, mode,
+    ], { env: { NODE_ENV: 'test', DATABASE_URL: DB, TEST_BASE_URL: BASE, NEXT_PUBLIC_APP_URL: BASE }, timeout: 30_000 })
+    async function sendFamilies(locale: 'en' | 'th') {
+      await prisma.user.update({ where: { id: admin.id }, data: { preferredLocale: locale } })
+      const start = capture.messages().length
+      await send(locale, 'families')
+      const messages = capture.messages().slice(start).map(capturedMail)
+      expect(messages).toHaveLength(7)
+      expect(messages.map(message => message.from)).toEqual(Array(7).fill(fromAddress))
+      expect(messages[0].to).toEqual([EMAIL])
+      expect(messages[5].subject).toBe('Approval App test email')
+      expect(messages.map(message => !!message.html)).toEqual([true, true, true, true, true, false, true])
+      return messages
+    }
+
+    const en = await sendFamilies('en')
+    await switchLanguage(page, 'th')
+    expect(await sendFamilies('th')).toEqual(en)
+    const count = capture.messages().length
+    await send('th', 'changed-body')
+    expect(capture.messages()).toHaveLength(count + 1)
+    const changed = capturedMail(capture.messages().at(-1)!)
+    expect(changed.subject).toBe(en[0].subject)
+    expect(changed.plain).not.toBe(en[0].plain)
+    expect(changed.html).not.toBe(en[0].html)
+  } finally {
+    if (configured) await prisma.email_settings.delete({ where: { id: 'default', host, port, fromAddress } })
+    await prisma.notifications.deleteMany({ where: { requestId, id: { notIn: [notificationId, otherNotificationId] } } })
+    await prisma.user.update({ where: { id: admin.id }, data: { preferredLocale: admin.preferredLocale } })
+    await capture.close()
+    await prisma.user.update({ where: { id: user.id }, data: { preferredLocale: 'en' } })
+  }
 })

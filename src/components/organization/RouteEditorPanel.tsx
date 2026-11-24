@@ -321,7 +321,7 @@ export function RouteEditorPanel({
                 key={`${conflict.order}-${conflict.positionId}`}
                 data-testid={`route-editor-conflict-${conflict.order}`}
               >
-                {`Step ${conflict.order} — ${positionNames.get(conflict.positionId) ?? conflict.positionId} (${conflict.problem})`}
+                {t('admin.stepPosition', { order: conflict.order, name: positionNames.get(conflict.positionId) ?? conflict.positionId })} ({conflict.problem})
               </li>
             ))}
           </ul>

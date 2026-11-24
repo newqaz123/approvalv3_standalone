@@ -1,5 +1,13 @@
 import { expect, test, type BrowserContext, type Page, type Request } from '@playwright/test'
 import { PrismaClient } from '@prisma/client'
+import { productionSurface } from '../support/i18n/production-surfaces'
+
+const home = productionSurface('/')
+const login = productionSurface('/sign-in/[[...sign-in]]')
+const signup = productionSurface('/sign-up/[[...sign-up]]')
+const profile = productionSurface('/profile')
+const approvalChain = productionSurface('/approval-chain')
+const changePassword = productionSurface('/change-password')
 
 const BASE_URL = 'http://localhost:32143'
 const DATABASE_URL = 'postgresql://th_en_local@127.0.0.1:55473/app_cleanstart_dev'
@@ -29,8 +37,8 @@ test.afterAll(async () => {
   await prisma?.$disconnect()
 })
 
-async function signIn(page: Page, email: string, path = '/profile') {
-  await page.goto(`/sign-in?callbackUrl=${encodeURIComponent(path)}`)
+async function signIn(page: Page, email: string, path: string = profile.path) {
+  await page.goto(`${login.path}?callbackUrl=${encodeURIComponent(path)}`)
   await page.locator('#email').fill(email)
   await page.locator('#password').fill(PASSWORD)
   await page.getByRole('button', { name: /^(Sign in|เข้าสู่ระบบ)$/ }).click()
@@ -67,8 +75,12 @@ async function expectFirstDocument(context: BrowserContext, path: string, locale
 }
 
 test('public language survives reload without losing a draft; the account wins until sign-out', async ({ page, context, browser }) => {
-  const path = '/sign-in?callbackUrl=%2Fprofile'
+  const path = `${login.path}?callbackUrl=${encodeURIComponent(profile.path)}`
+  await page.goto(home.path)
+  await expect(page).toHaveURL(`${BASE_URL}${login.path}`)
   await page.goto(path)
+  await expect(page.getByRole('heading', { name: login.heading.en })).toBeVisible()
+  await expect(page.getByText('Sign in to manage your workflow')).toBeVisible()
   await expect(lang(page)).toHaveAttribute('lang', 'en')
   await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible()
   await page.getByLabel('Email address').fill(ALICE)
@@ -82,6 +94,8 @@ test('public language survives reload without losing a draft; the account wins u
   await expect(page.getByLabel('อีเมล')).toHaveValue(ALICE)
   await expect(page).toHaveURL(`${BASE_URL}${path}`, { timeout: 20_000 })
   await page.reload()
+  await expect(page.getByRole('heading', { name: login.heading.th })).toHaveAttribute('lang', 'en')
+  await expect(page.getByText('เข้าสู่ระบบเพื่อจัดการงานของคุณ')).toBeVisible()
   await expect(lang(page)).toHaveAttribute('lang', 'th')
   await expect(page.getByRole('button', { name: 'เข้าสู่ระบบ', exact: true })).toBeVisible()
   await page.locator('#email').fill(ALICE)
@@ -95,8 +109,8 @@ test('public language survives reload without losing a draft; the account wins u
   } finally {
     await noScript.close()
   }
-  await page.goto('/sign-up')
-  await expect(page.getByRole('heading', { name: 'สร้างบัญชี' })).toBeVisible()
+  await page.goto(signup.path)
+  await expect(page.getByRole('heading', { name: signup.heading.th })).toBeVisible()
   await expect(publicSelector(page).getByRole('radio', { checked: true })).toHaveAccessibleName('ไทย')
   await page.locator('#name').fill('Duplicate email test')
   await page.locator('#email').fill(ALICE)
@@ -105,7 +119,7 @@ test('public language survives reload without losing a draft; the account wins u
   await page.getByRole('button', { name: 'สร้างบัญชี', exact: true }).click()
   await expect(page.getByRole('alert').filter({ hasText: 'อีเมลนี้มีบัญชีแล้ว' })).toBeVisible()
   await publicSelector(page).getByRole('radio', { name: 'English' }).click()
-  await expect(page.getByRole('heading', { name: 'Create Account', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: signup.heading.en, exact: true })).toBeVisible()
   await expect(page.locator('#email')).toHaveValue(ALICE)
   await expect(page.getByRole('alert').filter({ hasText: 'A user with this email already exists' })).toBeVisible()
   await publicSelector(page).getByRole('radio', { name: 'ไทย' }).click()
@@ -116,7 +130,7 @@ test('public language survives reload without losing a draft; the account wins u
 
   await signIn(page, ALICE)
   await expect(lang(page)).toHaveAttribute('lang', 'en')
-  await expect(page.getByRole('heading', { name: 'Profile', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: profile.heading.en, exact: true })).toBeVisible()
   await chooseThaiInMenu(page)
   await avatar(page).click()
   await menu(page).getByRole('menuitemradio', { name: 'English' }).click()
@@ -133,7 +147,7 @@ test('saved account language follows the account, including the first document, 
   await page.getByLabel('Display Name').fill('Unsaved locale test draft')
   await chooseThaiInMenu(page)
   await expect(page).toHaveURL(`${BASE_URL}${path}`, { timeout: 20_000 })
-  await expect(page.getByRole('heading', { name: 'โปรไฟล์', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: profile.heading.th, exact: true })).toBeVisible()
   await expect(page.getByRole('navigation', { name: 'เมนูหลัก' }).getByRole('link', { name: 'รายการ Request' })).toHaveAttribute('href', '/requests')
   await expect(page.getByLabel('ชื่อที่แสดง')).toHaveValue('Unsaved locale test draft')
   await page.getByLabel('ชื่อที่แสดง').fill('  ')
@@ -146,15 +160,17 @@ test('saved account language follows the account, including the first document, 
     await signIn(freshPage, ALICE)
     const noScript = await browser.newContext({ storageState: await fresh.storageState(), javaScriptEnabled: false })
     try {
-      await expectFirstDocument(noScript, '/profile', 'th', 'โปรไฟล์')
+      await expectFirstDocument(noScript, profile.path, 'th', profile.heading.th)
     } finally {
       await noScript.close()
     }
-    await expect(freshPage.getByRole('heading', { name: 'โปรไฟล์', exact: true })).toBeVisible()
-    await freshPage.goto('/approval-chain')
-    await expect(freshPage.getByRole('heading', { name: 'สายอนุมัติ' })).toBeVisible()
-    await freshPage.goto('/change-password')
-    await expect(freshPage.getByRole('heading', { name: 'เปลี่ยนรหัสผ่าน' })).toBeVisible()
+    await expect(freshPage.getByRole('heading', { name: profile.heading.th, exact: true })).toBeVisible()
+    await freshPage.goto(home.path)
+    await expect(freshPage).toHaveURL(`${BASE_URL}${productionSurface('/requests/my-actions').path}`)
+    for (const surface of [approvalChain, changePassword]) {
+      await freshPage.goto(surface.path)
+      await expect(freshPage.getByRole('heading', { name: surface.heading.th, exact: true })).toBeVisible()
+    }
     await freshPage.getByLabel('รหัสผ่านปัจจุบัน', { exact: true }).fill('incorrect test password')
     await freshPage.getByLabel('รหัสผ่านใหม่', { exact: true }).fill('not-applied-test-password')
     await freshPage.getByLabel('ยืนยันรหัสผ่านใหม่', { exact: true }).fill('not-applied-test-password')
@@ -167,7 +183,11 @@ test('saved account language follows the account, including the first document, 
     await expect(lang(freshPage)).toHaveAttribute('lang', 'en')
     await signIn(freshPage, BOB)
     await expect(lang(freshPage)).toHaveAttribute('lang', 'en')
-    await expect(freshPage.getByRole('heading', { name: 'Profile', exact: true })).toBeVisible()
+    await expect(freshPage.getByRole('heading', { name: profile.heading.en, exact: true })).toBeVisible()
+    for (const surface of [approvalChain, changePassword]) {
+      await freshPage.goto(surface.path)
+      await expect(freshPage.getByRole('heading', { name: surface.heading.en, exact: true })).toBeVisible()
+    }
   } finally {
     await fresh.close()
   }
@@ -252,7 +272,7 @@ test.describe('mobile avatar selector', () => {
       const alert = page.getByRole('alert').filter({ hasText: 'Could not save the language. Try again.' })
       await expect(alert).toBeVisible()
       await expect(lang(page)).toHaveAttribute('lang', 'en')
-      await expect(page.getByRole('heading', { name: 'Profile', exact: true })).toBeVisible()
+      await expect(page.getByRole('heading', { name: profile.heading.en, exact: true })).toBeVisible()
       await expect(avatar(page)).toBeFocused()
 
       const retry = page.getByRole('button', { name: 'Try again', exact: true })
@@ -397,7 +417,7 @@ test.describe('mobile avatar selector', () => {
       await expect(menu(page).getByRole('alert')).toHaveText('Could not save the language. Try again.')
       await expect(menu(page).getByRole('menuitemradio', { checked: true })).toHaveText('English')
       await expect(lang(page)).toHaveAttribute('lang', 'en')
-      await expect(page.getByRole('heading', { name: 'Profile', exact: true, includeHidden: true })).toBeVisible()
+      await expect(page.getByRole('heading', { name: profile.heading.en, exact: true, includeHidden: true })).toBeVisible()
 
       await thai.tap()
       await expect(thai).toBeDisabled()
@@ -429,4 +449,24 @@ test.describe('mobile avatar selector', () => {
     await expect(lang(page)).toHaveAttribute('lang', 'en')
     await expect(menu(page).getByRole('menuitemradio', { checked: true })).toHaveText('English')
   })
+})
+
+test('the app error boundary renders the retry and hides the development diagnostic in both locales', async ({ page }) => {
+  const failurePath = '/test-harness/language-workflow?failure=1'
+  for (const [locale, label, title, retry] of [
+    ['en', 'English', 'Something went wrong', 'Try again'],
+    ['th', 'ไทย', 'เกิดข้อผิดพลาด', 'ลองอีกครั้ง'],
+  ] as const) {
+    await page.goto(login.path)
+    const choice = publicSelector(page).getByRole('radio', { name: label, exact: true })
+    await choice.click()
+    await expect(lang(page)).toHaveAttribute('lang', locale)
+    await page.goto(failurePath)
+    await expect(lang(page)).toHaveAttribute('lang', locale)
+    const heading = page.getByRole('heading', { name: title, exact: true })
+    const appAlert = page.getByRole('alert').filter({ has: heading })
+    await expect(appAlert.getByRole('heading', { name: title, exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: retry, exact: true })).toBeVisible()
+    await expect(appAlert).not.toContainText('language error fixture')
+  }
 })

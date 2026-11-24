@@ -1,6 +1,11 @@
 import { expect, test, type Page } from '@playwright/test'
 import { PrismaClient } from '@prisma/client'
 import { randomUUID } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
+import JSZip from 'jszip'
+import { decodePDFRawStream, PDFArray, PDFDict, PDFDocument, PDFName, PDFObject, PDFRawStream } from 'pdf-lib'
+import * as XLSX from 'xlsx'
+import { productionSurface, productionSurfaces } from '../support/i18n/production-surfaces'
 
 const BASE = 'http://localhost:32143'
 const DB = 'postgresql://th_en_local@127.0.0.1:55473/app_cleanstart_dev'
@@ -8,6 +13,8 @@ const ADMIN = 'admin@example.com'
 const ALICE = 'alice@example.com'
 const PASSWORD = process.env.E2E_PASSWORD || 'changeme'
 const id = randomUUID()
+const template = productionSurface('/admin/templates/[id]')
+const templateId = template.path.split('/').at(-1)!
 const configuredName = `Admin fixture ${id} — ชื่อเดิม`
 const reason = 'Legacy audit detail — เหตุผลเดิม {count}'
 let prisma: PrismaClient
@@ -32,9 +39,9 @@ test.beforeAll(async () => {
   rootName = root.name
   await prisma.$transaction([
     prisma.organization_units.create({ data: { id, name: configuredName, parentId: rootId } }),
-    prisma.templates.create({ data: { id, name: configuredName, title: configuredName, description: 'Configured template details' } }),
+    prisma.templates.create({ data: { id: templateId, name: configuredName, title: configuredName, description: 'Configured template details' } }),
     prisma.sub_task_stages.create({ data: { id, name: configuredName, sortOrder: 999, isDefault: false } }),
-    prisma.requests.create({ data: { id, title: configuredName, description: 'Configured request details', status: 'FinalApproval', requesterId: admin.id, organizationUnitId: id, isDeleted: true, deletedAt: new Date(), deletedBy: admin.id, activities: { create: { userId: admin.id, action: 'deleted', comments: reason } } } }),
+    prisma.requests.create({ data: { id, title: configuredName, description: 'Configured request details', status: 'FinalApproval', requesterId: admin.id, organizationUnitId: id, isDeleted: true, deletedAt: new Date(), deletedBy: admin.id, activities: { create: { userId: admin.id, action: 'deleted', comments: reason, createdAt: new Date('2026-03-25T12:00:00Z') } } } }),
   ])
 })
 
@@ -48,7 +55,7 @@ test.afterAll(async () => {
     await prisma.$transaction([
       prisma.requests.deleteMany({ where: { id } }),
       prisma.sub_task_stages.deleteMany({ where: { id } }),
-      prisma.templates.deleteMany({ where: { id } }),
+      prisma.templates.deleteMany({ where: { id: templateId, name: configuredName } }),
       prisma.organization_units.deleteMany({ where: { id } }),
       ...preferences.map(user => prisma.user.update({ where: { id: user.id }, data: { preferredLocale: user.preferredLocale } })),
     ])
@@ -58,7 +65,7 @@ test.afterAll(async () => {
 })
 
 async function signIn(page: Page, email: string, target = '/admin') {
-  await page.goto(`/sign-in?callbackUrl=${encodeURIComponent(target)}`)
+  await page.goto(`${productionSurface('/sign-in/[[...sign-in]]').path}?callbackUrl=${encodeURIComponent(target)}`)
   await page.locator('#email').fill(email)
   await page.locator('#password').fill(PASSWORD)
   await page.getByRole('button', { name: 'Sign in', exact: true }).click()
@@ -74,32 +81,19 @@ async function language(page: Page, locale: 'en' | 'th') {
 
 const heading = (page: Page, name: string) => page.getByRole('heading', { name, exact: true, level: 1 })
 
-for (const [path, english, thai] of [
-  ['/admin', 'Admin Dashboard', 'แดชบอร์ดผู้ดูแลระบบ'],
-  ['/admin/users', 'Users', 'ผู้ใช้'],
-  ['/admin/organization', 'Organization & Approvals', 'องค์กรและการอนุมัติ'],
-  ['/admin/templates', 'Request Templates', 'เทมเพลต Request'],
-  ['/admin/templates/new', 'Create New Template', 'สร้างเทมเพลตใหม่'],
-  [`/admin/templates/${id}`, 'Edit Template', 'แก้ไขเทมเพลต'],
-  ['/admin/sub-task-stages', 'Sub-task stages', 'ขั้นตอนงานย่อย'],
-  ['/admin/storage', 'Data storage', 'พื้นที่จัดเก็บข้อมูล'],
-  ['/admin/retention', 'Request Retention', 'การเก็บรักษา Request'],
-  ['/admin/email', 'Email notifications', 'การแจ้งเตือนทางอีเมล'],
-  ['/admin/deleted-requests', 'Deleted Requests', 'Request ที่ลบแล้ว'],
-  ['/admin/audit', 'Audit Trail Export', 'ส่งออกบันทึก Audit'],
-]) {
+for (const { pattern, path, heading: { en: english, th: thai } } of productionSurfaces.filter(surface => surface.role === 'admin')) {
   test(`${english} renders both languages on the same route`, async ({ page }) => {
     await signIn(page, ADMIN, path)
     await expect(heading(page, english)).toBeVisible()
     if (path === '/admin/templates') await expect(page.getByRole('cell', { name: configuredName, exact: true }).first()).toBeVisible()
     if (path === '/admin/sub-task-stages') await expect(page.locator(`input[value="${configuredName}"]`)).toBeVisible()
-    if (path === `/admin/templates/${id}`) await expect(page.locator(`input[value="${configuredName}"]`).first()).toBeVisible()
+    if (pattern === '/admin/templates/[id]') await expect(page.locator(`input[value="${configuredName}"]`).first()).toBeVisible()
     await language(page, 'th')
     await expect(heading(page, thai)).toBeVisible()
     await expect(page).toHaveURL(`${BASE}${path}`)
     if (path === '/admin/templates') await expect(page.getByRole('cell', { name: configuredName, exact: true }).first()).toBeVisible()
     if (path === '/admin/sub-task-stages') await expect(page.locator(`input[value="${configuredName}"]`)).toBeVisible()
-    if (path === `/admin/templates/${id}`) await expect(page.locator(`input[value="${configuredName}"]`).first()).toBeVisible()
+    if (pattern === '/admin/templates/[id]') await expect(page.locator(`input[value="${configuredName}"]`).first()).toBeVisible()
     if (path === '/admin/audit') await expect(page.getByText('ส่งออกตาม Request', { exact: true })).toBeVisible()
   })
 }
@@ -125,6 +119,10 @@ test('approval route editor retains its configured scope and does not publish', 
   await expect(editor.getByRole('heading')).toContainText(`${rootName} — REQUEST`)
   await expect(editor.getByTestId('route-editor-publish')).toHaveText('เผยแพร่')
   await expect(page).toHaveURL(editorUrl)
+  await editor.getByTestId('route-editor-limit-select').click()
+  await page.getByRole('option', { name: /^Manager / }).click()
+  await expect(editor.getByTestId('route-editor-conflicts')).toContainText(/ขั้นที่ \d+ — Director \(EXCEEDS_LIMIT\)/)
+  await expect(editor.getByTestId('route-editor-publish')).toBeDisabled()
 })
 
 test('deleted requests retain the exact status and audit detail; cancel leaves fixture untouched', async ({ page }) => {
@@ -245,6 +243,66 @@ test('Organization keyboard collapse, create, rename and deactivation work in th
   }
 })
 
+test('a queued Organization rename survives collapsing its branch and writes each draft once', async ({ page }) => {
+  await signIn(page, ADMIN, productionSurface('/admin/organization').path)
+  await language(page, 'th')
+  const header = page.getByTestId(`unit-header-${id}`)
+  const rootToggle = page.getByTestId(`unit-toggle-${rootId}`)
+  const first = `${configuredName} / First`
+  const last = `${configuredName} / Last`
+  let release!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  const writes: string[] = []
+  await page.route('**/admin/organization**', async route => {
+    const request = route.request()
+    if (request.method() === 'POST' && request.headers()['next-action']) {
+      for (const draft of [first, last]) {
+        if (request.postData()?.includes(draft)) {
+          writes.push(draft)
+          if (draft === first) await held
+          break
+        }
+      }
+    }
+    await route.continue()
+  })
+  const auditWhere = { requestId: null, action: 'organization_unit_renamed', comments: { contains: id } }
+  try {
+    await header.hover()
+    const menu = header.getByTestId(`unit-overflow-${id}`)
+    if (await menu.isVisible()) {
+      await menu.click()
+      await page.getByRole('menuitem', { name: 'เปลี่ยนชื่อ' }).click()
+    } else {
+      await header.getByTestId(`unit-rename-${id}`).click()
+    }
+    const input = header.getByTestId('inline-name-edit-input')
+    await input.fill(first)
+    await input.press('Enter')
+    await expect.poll(() => writes).toEqual([first])
+    await input.fill(last)
+    await heading(page, productionSurface('/admin/organization').heading.th).click()
+    await expect(input).toHaveValue(last)
+    await rootToggle.click()
+    await expect(rootToggle).toHaveAttribute('aria-expanded', 'false')
+    await expect(header).toBeHidden()
+    release()
+    await expect.poll(() => writes).toEqual([first, last])
+    await expect.poll(async () => (await prisma.organization_units.findUniqueOrThrow({ where: { id } })).name).toBe(last)
+    await rootToggle.click()
+    await expect(page.getByTestId(`unit-name-${id}`)).toHaveText(last)
+    await expect(input).toHaveCount(0)
+    expect(await prisma.request_activities.count({ where: auditWhere })).toBe(2)
+  } finally {
+    release()
+    await page.unrouteAll({ behavior: 'wait' })
+    await prisma.$transaction([
+      prisma.request_activities.deleteMany({ where: auditWhere }),
+      prisma.organization_units.update({ where: { id }, data: { name: configuredName } }),
+    ])
+  }
+})
+
 test('stage name draft survives a locale refresh; duplicate errors translate by key', async ({ page }) => {
   await signIn(page, ADMIN, '/admin/sub-task-stages')
   const draft = `${configuredName} unsaved`
@@ -258,20 +316,47 @@ test('stage name draft survives a locale refresh; duplicate errors translate by 
   expect((await prisma.sub_task_stages.findUniqueOrThrow({ where: { id } })).name).toBe(configuredName)
 })
 
-test('Audit CSV keeps the original action, comments and bytes in both languages', async ({ page }) => {
-  await signIn(page, ADMIN, '/admin/audit')
-  const url = `/api/audit/export/request/${id}?format=csv`
-  const en = await page.request.get(url)
-  expect(en.ok()).toBe(true)
-  const body = await en.text()
-  expect(body).toContain(reason)
-  expect(body).toContain('"deleted"')
+test('per-request and date-range Audit CSV and JSON preserve ordered headers, data and legacy text', async ({ page }) => {
+  await signIn(page, ADMIN, productionSurface('/admin/audit').path)
+  const en = await exports()
   await language(page, 'th')
   await expect(page.getByText('ส่งออกตามช่วงวันที่', { exact: true })).toBeVisible()
-  const th = await page.request.get(url)
-  expect(th.ok()).toBe(true)
-  expect(th.headers()['content-disposition']).toBe(`attachment; filename="audit-trail-${id}.csv"`)
-  expect(await th.text()).toBe(body)
+  const th = await exports()
+  expect(th).toEqual(en)
+  for (const [csv, json] of th) {
+    const changedBody = csv.body.replace('"timestamp"', '"เวลา"')
+    expect(parseCsv(changedBody)).not.toEqual(csv.rows)
+    expect({ ...json, data: [{ ...json.data[0], status: 'อนุมัติรอบสุดท้าย' }, ...json.data.slice(1)] }).not.toEqual(json)
+  }
+
+  function parseCsv(body: string) {
+    const spreadsheet = XLSX.read(body, { type: 'string', raw: true })
+    return XLSX.utils.sheet_to_json<string[]>(spreadsheet.Sheets[spreadsheet.SheetNames[0]], { header: 1, defval: '' })
+  }
+
+  async function exports() {
+    const outputs = []
+    for (const [path, query, filename] of [
+      [`/api/audit/export/request/${id}`, '', `audit-trail-${id}`],
+      ['/api/audit/export/date-range', 'startDate=2026-03-25&endDate=2026-03-25&', 'audit-trail-2026-03-25-to-2026-03-25'],
+    ]) {
+      const csv = await page.request.get(`${path}?${query}format=csv`)
+      expect(csv.ok(), await csv.text()).toBe(true)
+      expect(csv.headers()['content-disposition']).toBe(`attachment; filename="${filename}.csv"`)
+      const body = await csv.text()
+      const rows = parseCsv(body)
+      expect(rows[0]).toEqual(['timestamp', 'timestampLocale', 'userId', 'userName', 'userEmail', 'action', 'requestId', 'requestTitle', 'fromStatus', 'toStatus', 'comments'])
+      expect(rows.find(row => row[6] === id)?.slice(5)).toEqual(['deleted', id, configuredName, '', '', reason])
+      const json = await page.request.get(`${path}?${query}format=json`)
+      expect(json.ok(), await json.text()).toBe(true)
+      expect(json.headers()['content-disposition']).toBe(`attachment; filename="${filename}.json"`)
+      const data = await json.json() as { requestId: string; status: string }[]
+      const snapshot = data.find(request => request.requestId === id)
+      expect(snapshot).toMatchObject({ status: 'FinalApproval', requestTitle: configuredName, activities: [expect.objectContaining({ action: 'deleted', comments: reason })] })
+      outputs.push([{ body, rows }, { data }] as const)
+    }
+    return outputs
+  }
 })
 
 test('mobile user cards localize accessible actions, not status names', async ({ page }) => {
@@ -299,8 +384,12 @@ test('approval chains keep Published unchanged while translating the version lab
 
 test('position dialogs use their translated headings as accessible names', async ({ page }) => {
   const position = await prisma.positions.findFirstOrThrow({ where: { isActive: true } })
+  const singleton = await prisma.positions.findFirstOrThrow({ where: { name: 'Director', isActive: true } })
   await signIn(page, ADMIN, '/admin/organization?panel=positions')
+  const count = page.getByTestId(`position-assignment-count-${singleton.id}`)
+  await expect(count).toHaveText('1 person holds this title')
   await language(page, 'th')
+  await expect(count).toHaveText('1 คนอยู่ในตำแหน่งนี้')
   for (const [trigger, title] of [
     ['position-create-open', 'เพิ่มตำแหน่ง'],
     [`position-rank-edit-${position.id}`, 'แก้ไขระดับตำแหน่ง'],
@@ -349,6 +438,15 @@ test('an open route publish refusal follows the language without losing its draf
     await expect(error.filter({ hasText: 'Publication refused: 1 step(s)' })).toBeVisible()
     const versions = await prisma.approval_route_versions.findMany({ where: { scopeUnitId: id }, select: { id: true, status: true } })
     expect(versions).toEqual([{ id: versionId, status: 'PUBLISHED' }])
+    await editor.getByTestId('route-editor-limit-select').click()
+    await page.getByRole('option').filter({ hasText: `${configuredName} step` }).click()
+    await language(page, 'th')
+    await expect(publish).toHaveText('เผยแพร่')
+    await publish.click()
+    await expect.poll(() => prisma.approval_route_versions.findFirst({
+      where: { scopeUnitId: id, phase: 'REQUEST', status: 'PUBLISHED', version: 2 },
+      select: { approvalLimitPositionId: true, steps: { select: { positionId: true, stepOrder: true } } },
+    })).toEqual({ approvalLimitPositionId: stepId, steps: [{ positionId: stepId, stepOrder: 1 }] })
   } finally {
     await prisma.approval_route_versions.deleteMany({ where: { scopeUnitId: id } })
     await prisma.positions.deleteMany({ where: { id: { in: [stepId, limitId] } } })
@@ -410,5 +508,84 @@ test('team deactivation names live blockers rather than the open snapshot', asyn
       prisma.organization_assignments.deleteMany({ where: { id: { in: assignments } } }),
       prisma.user.deleteMany({ where: { id: { in: users.map(user => user.id) } } }),
     ])
+  }
+})
+
+async function pdfPageContent(bytes: Buffer) {
+  const pdf = await PDFDocument.load(bytes, { updateMetadata: false })
+  expect(pdf.getPageCount()).toBeGreaterThan(0)
+  return pdf.getPages().map(page => {
+    const streamText = (stream: PDFObject | undefined) => {
+      if (!(stream instanceof PDFRawStream)) throw new Error('Expected a PDF content stream')
+      return Buffer.from(decodePDFRawStream(stream).decode()).toString('latin1')
+    }
+    const contents = page.node.Contents()
+    const operators = contents instanceof PDFArray
+      ? contents.asArray().map(ref => streamText(pdf.context.lookup(ref)))
+      : [streamText(pdf.context.lookup(contents))]
+    expect(operators.join('')).toMatch(/\bBT\b[\s\S]*\bET\b/)
+    const fonts = page.node.normalizedEntries().Font
+    const unicode = fonts.entries().map(([key, ref]) => {
+      const font = pdf.context.lookup(ref, PDFDict)
+      const toUnicode = font.lookup(PDFName.of('ToUnicode'))
+      return [key.toString(), font.get(PDFName.of('BaseFont'))?.toString(), toUnicode && streamText(toUnicode)]
+    })
+    return { size: page.getSize(), operators, unicode }
+  })
+}
+
+test('the completed approval packet PDF and retention ZIP preserve page content and archive entries across locales', async ({ page }) => {
+  const completedId = randomUUID()
+  const description = 'Original report body, unchanged across locales.'
+  const title = 'Coverage approval packet'
+  await prisma.requests.create({ data: {
+    id: completedId, title, description, status: 'Completed', requesterId: adminId, organizationUnitId: rootId,
+    createdAt: new Date('2026-03-25T12:00:00Z'),
+    solutions: { create: { title: 'Original Solution', description: 'Solution evidence', costEstimate: 4250, submittedById: adminId } },
+    activities: { create: { userId: adminId, action: 'manually_completed', toStatus: 'Completed', comments: reason, createdAt: new Date('2026-03-25T14:00:00Z') } },
+  } })
+  try {
+    const path = `${productionSurface('/requests').path}?requestId=${completedId}`
+    await signIn(page, ADMIN, path)
+    const dialog = page.getByRole('dialog')
+    await expect(dialog.getByRole('heading', { name: title, exact: true })).toBeVisible()
+    // Keep the visible PDF footer timestamp in the comparison by sampling in one minute.
+    await expect.poll(() => new Date().getSeconds(), { timeout: 65_000, intervals: [1_000] }).toBeLessThan(15)
+    const minute = Math.floor(Date.now() / 60_000)
+    const en = { packet: await packet('Export Report', 'Export Approval Packet'), backup: await backup() }
+    await page.keyboard.press('Escape')
+    await expect(dialog).toHaveCount(0)
+    await language(page, 'th')
+    await page.goto(path)
+    const th = { packet: await packet('ส่งออกรายงาน', 'ส่งออกชุดเอกสารอนุมัติ'), backup: await backup() }
+    expect(Math.floor(Date.now() / 60_000), 'PDF generated footer minute').toBe(minute)
+    expect(th).toEqual(en)
+
+    await prisma.requests.update({ where: { id: completedId }, data: { description: 'Different report body fixture.' } })
+    const changed = await backup()
+    expect(Math.floor(Date.now() / 60_000), 'negative-control footer minute').toBe(minute)
+    expect(changed.entries).toEqual(th.backup.entries)
+    expect(changed.report).not.toEqual(th.backup.report)
+    expect({ ...th.backup, entries: ['localized/report.pdf'] }).not.toEqual(en.backup)
+    expect((await prisma.requests.findUniqueOrThrow({ where: { id: completedId } })).status).toBe('Completed')
+  } finally {
+    await prisma.requests.deleteMany({ where: { id: completedId } })
+  }
+
+  async function packet(open: string, download: string) {
+    await page.getByRole('button', { name: open, exact: true }).click()
+    const [file] = await Promise.all([page.waitForEvent('download', { timeout: 35_000 }), page.getByRole('button', { name: download, exact: true }).click()])
+    expect(file.suggestedFilename()).toBe('Approval_Package_Coverage_approval_packet_2026-03-25.pdf')
+    return { filename: file.suggestedFilename(), report: await pdfPageContent(await readFile(await file.path())) }
+  }
+
+  async function backup() {
+    const response = await page.request.post('/api/admin/retention/backup', { data: { requestIds: [completedId] } })
+    expect(response.ok()).toBe(true)
+    const zip = await JSZip.loadAsync(await response.body())
+    const files = Object.values(zip.files).filter(file => !file.dir)
+    const entries = files.map(file => file.name)
+    expect(entries).toEqual([expect.stringMatching(/\/report\.pdf$/)])
+    return { entries, report: await pdfPageContent(await files[0].async('nodebuffer')) }
   }
 })

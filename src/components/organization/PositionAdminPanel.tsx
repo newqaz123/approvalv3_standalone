@@ -575,7 +575,7 @@ export function PositionAdminPanel({
                   data-testid={`position-assignment-count-${row.id}`}
                   className="text-sm text-muted-foreground"
                 >
-                  {count === 1 ? '1 person holds this title' : t('admin.positionHolders', { count })}
+                  {count === 1 ? t('admin.positionOneHolder') : t('admin.positionHolders', { count })}
                 </span>
                 <span className="flex-1" />
                 {rankSession.positionId !== row.id ? (

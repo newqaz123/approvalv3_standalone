@@ -1,5 +1,10 @@
 import { expect, test, type Page } from '@playwright/test'
 import { PrismaClient } from '@prisma/client'
+import { productionSurface } from '../support/i18n/production-surfaces'
+
+const requestList = productionSurface('/requests')
+const actionItems = productionSurface('/requests/my-actions')
+const engineering = productionSurface('/engineering')
 
 const BASE_URL = 'http://localhost:32143'
 const DATABASE_URL = 'postgresql://th_en_local@127.0.0.1:55473/app_cleanstart_dev'
@@ -21,7 +26,7 @@ test.afterEach(async () => {
 test.afterAll(async () => { await prisma?.$disconnect() })
 
 async function signIn(page: Page, email: string, path: string) {
-  await page.goto(`/sign-in?callbackUrl=${encodeURIComponent(path)}`)
+  await page.goto(`${productionSurface('/sign-in/[[...sign-in]]').path}?callbackUrl=${encodeURIComponent(path)}`)
   await page.locator('#email').fill(email)
   await page.locator('#password').fill(PASSWORD)
   await page.getByRole('button', { name: 'Sign in', exact: true }).click()
@@ -37,8 +42,9 @@ async function chooseLanguage(page: Page, locale: 'en' | 'th') {
 }
 
 test('Thai refresh keeps the active Status filter and the requests URL', async ({ page }) => {
-  const path = '/requests?view=approval-workflow'
+  const path = `${requestList.path}?view=approval-workflow`
   await signIn(page, ALICE, path)
+  await expect(page.getByRole('heading', { name: requestList.heading.en, exact: true })).toBeVisible()
   const filter = page.locator('[data-filter-tier="status"]')
   const statuses = filter.getByRole('checkbox')
   const englishStatuses = await statuses.evaluateAll((items) => items.map((item) => item.parentElement?.querySelector('label')?.textContent))
@@ -46,10 +52,30 @@ test('Thai refresh keeps the active Status filter and the requests URL', async (
   await completed.check()
   await chooseLanguage(page, 'th')
   await expect(page).toHaveURL(`${BASE_URL}${path}`)
+  await expect(page.getByRole('heading', { name: requestList.heading.th, exact: true })).toBeVisible()
   await expect(completed).toBeChecked()
   expect(await statuses.evaluateAll((items) => items.map((item) => item.parentElement?.querySelector('label')?.textContent))).toEqual(englishStatuses)
   await expect(page.getByRole('button', { name: 'สร้าง Request', exact: true })).toBeVisible()
 })
+
+for (const [surface, email] of [[actionItems, 'casey@example.com'], [engineering, 'bob@example.com']] as const) {
+  test(`${surface.pattern} renders both languages for its ${surface.role}`, async ({ page }) => {
+    const unit = surface.role === 'engineer' ? await prisma.organization_units.findFirstOrThrow({
+      where: { assignments: { some: { user: { email }, isActive: true } } },
+    }) : undefined
+    try {
+      if (unit) await prisma.organization_units.update({ where: { id: unit.id }, data: { canWorkOnSolutions: true } })
+      await signIn(page, email, surface.path)
+      await expect(page.getByRole('heading', { name: surface.heading.en, exact: true })).toBeVisible()
+      await chooseLanguage(page, 'th')
+      await expect(page.getByRole('heading', { name: surface.heading.th, exact: true })).toBeVisible()
+      await expect(page).toHaveURL(`${BASE_URL}${surface.path}`)
+    } finally {
+      await prisma.user.update({ where: { email }, data: { preferredLocale: 'en' } })
+      if (unit) await prisma.organization_units.update({ where: { id: unit.id }, data: { canWorkOnSolutions: unit.canWorkOnSolutions } })
+    }
+  })
+}
 
 test('an open request draft survives server-rendered locale prop reconciliation', async ({ page }) => {
   await page.goto('/test-harness/language-workflow')
@@ -82,11 +108,11 @@ test('seeded Request, Solution and Final include rejection, rework and stable wo
     const context = await browser.newContext({ baseURL: BASE_URL })
     contexts.set(email, context)
     const page = await context.newPage()
-    await signIn(page, email, '/requests')
+    await signIn(page, email, requestList.path)
     await chooseLanguage(page, 'th')
     return page
   }
-  const open = async (page: Page, id: string, path = '/requests', isDraft = false) => {
+  const open = async (page: Page, id: string, path: string = requestList.path, isDraft = false) => {
     const url = `${path}?requestId=${id}`
     await page.goto(url)
     await expect(page).toHaveURL(`${BASE_URL}${url}`)
@@ -96,7 +122,7 @@ test('seeded Request, Solution and Final include rejection, rework and stable wo
     return dialog
   }
   const create = async (page: Page, name: string) => {
-    await page.goto('/requests')
+    await page.goto(requestList.path)
     await page.getByRole('button', { name: 'สร้าง Request', exact: true }).click()
     const dialog = page.getByRole('dialog')
     await dialog.locator('#title').fill(name)
@@ -127,7 +153,7 @@ test('seeded Request, Solution and Final include rejection, rework and stable wo
       const email = await step(id, phase)
       if (!email) return
       const page = await getPage(email)
-      const dialog = await open(page, id, '/requests/my-actions')
+      const dialog = await open(page, id, actionItems.path)
       await dialog.getByRole('button', { name: phase === 'SOLUTION' ? 'อนุมัติ Solution' : 'อนุมัติ', exact: true }).click()
       if (phase !== 'SOLUTION') {
         const confirmation = page.getByRole('dialog').filter({ has: page.getByRole('button', { name: 'ยืนยันการอนุมัติ', exact: true }) })
@@ -147,12 +173,12 @@ test('seeded Request, Solution and Final include rejection, rework and stable wo
     const alice = await getPage(ALICE)
     const record = await create(alice, title)
     const casey = await getPage(CASEY)
-    await open(casey, record.id, '/requests/my-actions')
+    await open(casey, record.id, actionItems.path)
     await casey.getByRole('button', { name: 'ไม่อนุมัติ', exact: true }).click()
     await casey.getByPlaceholder('ระบุเหตุผลที่ไม่อนุมัติ...').fill(rejection)
     await casey.getByRole('button', { name: 'ยืนยันการไม่อนุมัติ', exact: true }).click()
     await expect(casey.getByText('บันทึกการไม่อนุมัติแล้ว', { exact: true })).toBeVisible({ timeout: 25_000 })
-    const revision = await open(alice, record.id, '/requests', true)
+    const revision = await open(alice, record.id, requestList.path, true)
     await expect(revision.getByText(rejection)).toHaveText(`“${rejection}”`)
     await revision.locator('[contenteditable="true"]').first().fill('Revised description — รายละเอียดเดิม')
     await revision.getByRole('button', { name: 'ส่ง Request ใหม่', exact: true }).click()
@@ -161,16 +187,20 @@ test('seeded Request, Solution and Final include rejection, rework and stable wo
     await expect.poll(async () => (await prisma.requests.findUniqueOrThrow({ where: { id: record.id } })).status).toBe('SentToEngineer')
 
     const bob = await getPage(BOB)
-    await bob.goto('/engineering', { waitUntil: 'domcontentloaded' })
-    await expect(bob.getByRole('heading', { name: 'ภาพรวมงานวิศวกรรม' })).toBeVisible({ timeout: 60_000 })
+    await bob.goto(engineering.path, { waitUntil: 'domcontentloaded' })
+    await expect(bob.getByRole('heading', { name: engineering.heading.th })).toBeVisible({ timeout: 60_000 })
     const engineeringQueue = bob.getByRole('heading', { name: 'Sent to Engineer', exact: true })
     await expect(async () => {
       if (!(await engineeringQueue.isVisible())) await bob.getByRole('button', { name: 'งานติดตาม', exact: true }).click()
       await expect(engineeringQueue).toBeVisible({ timeout: 2_000 })
     }).toPass({ timeout: 60_000 })
-    await bob.getByText(title, { exact: true }).click()
     const solution = bob.getByRole('dialog')
-    await solution.getByRole('button', { name: 'ส่ง Solution', exact: true }).click()
+    const submitSolution = solution.getByRole('button', { name: 'ส่ง Solution', exact: true })
+    await expect(async () => {
+      if (!(await solution.isVisible())) await bob.getByText(title, { exact: true }).click()
+      await expect(submitSolution).toBeVisible({ timeout: 2_000 })
+    }).toPass({ timeout: 45_000 })
+    await submitSolution.click()
     const form = bob.getByRole('dialog').filter({ has: bob.locator('#solutionTitle') })
     await form.locator('#solutionTitle').fill('Untranslated engineering plan')
     await form.locator('[contenteditable="true"]').first().fill('Engineering description เส้นทาง A')
@@ -188,21 +218,22 @@ test('seeded Request, Solution and Final include rejection, rework and stable wo
     expect((await prisma.requests.findUniqueOrThrow({ where: { id: record.id } })).status).toBe('Completed')
     const pending = await create(alice, pendingTitle)
 
-    const sample = async (page: Page) => {
-      await page.goto('/requests')
+    const sample = async (page: Page, locale: 'en' | 'th', mobile = false) => {
+      await page.goto(requestList.path)
+      await expect(page.locator('html')).toHaveAttribute('lang', locale)
       const labels: Array<string | null> = []
       for (const [name, status] of [[title, 'Completed'], [pendingTitle, 'Improvement Request']]) {
         const row = page.getByRole('row').filter({ hasText: name }).filter({ has: page.getByText(status, { exact: true }) })
         const card = page.getByRole('button').filter({ has: page.getByRole('heading', { name, exact: true }) })
-        const item = row.or(card)
+        const item = mobile ? card : row
         await expect(item.getByText(name, { exact: true })).toBeVisible()
         labels.push(await item.getByText(status, { exact: true }).textContent())
         labels.push(await page.locator('[data-filter-tier="status"]').getByText(status, { exact: true }).textContent())
       }
       for (const [item, name, status] of [[record, title, 'Approved'], [pending, pendingTitle, 'Pending']] as const) {
-        await page.goto(`/requests?requestId=${item.id}`)
+        await page.goto(`${requestList.path}?requestId=${item.id}`)
         const dialog = page.getByRole('dialog')
-        await expect(dialog.getByText(name, { exact: true })).toBeVisible()
+        await expect(dialog.getByText(name, { exact: true })).toBeVisible({ timeout: 25_000 })
         const badges = dialog.getByText(status, { exact: true })
         await expect(badges.first()).toBeVisible()
         labels.push(...await badges.allTextContents())
@@ -210,17 +241,17 @@ test('seeded Request, Solution and Final include rejection, rework and stable wo
       }
       return labels
     }
-    await alice.goto('/requests')
+    await alice.goto(requestList.path)
     await chooseLanguage(alice, 'en')
     const mobile = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, baseURL: BASE_URL, storageState: await alice.context().storageState() })
     try {
       const phone = await mobile.newPage()
-      const englishDesktop = await sample(alice)
-      const englishMobile = await sample(phone)
-      await alice.goto('/requests')
+      const englishDesktop = await sample(alice, 'en')
+      const englishMobile = await sample(phone, 'en', true)
+      await alice.goto(requestList.path)
       await chooseLanguage(alice, 'th')
-      expect(await sample(alice)).toEqual(englishDesktop)
-      expect(await sample(phone)).toEqual(englishMobile)
+      expect(await sample(alice, 'th')).toEqual(englishDesktop)
+      expect(await sample(phone, 'th', true)).toEqual(englishMobile)
     } finally {
       await mobile.close()
     }
@@ -288,7 +319,7 @@ test('Thai removal failures are visible after uploading an image', async ({ page
 })
 
 type EnglishApprovalFixture = {
-  createRequest: () => Promise<{ id: string; title: string }>
+  createRequest: (email?: string, suffix?: string) => Promise<{ id: string; title: string }>
   signInAs: (email: string, path?: string) => Promise<Page>
 }
 
@@ -296,7 +327,7 @@ const englishApprovalTest = test.extend<{ approval: EnglishApprovalFixture }>({
   approval: async ({ browser }, use) => {
     const contexts: Awaited<ReturnType<typeof browser.newContext>>[] = []
     const title = `English approval control ${crypto.randomUUID()}`
-    const signInAs = async (email: string, path = '/requests') => {
+    const signInAs = async (email: string, path: string = requestList.path) => {
       const context = await browser.newContext({ baseURL: BASE_URL })
       contexts.push(context)
       const page = await context.newPage()
@@ -304,15 +335,16 @@ const englishApprovalTest = test.extend<{ approval: EnglishApprovalFixture }>({
       await expect(page.locator('html')).toHaveAttribute('lang', 'en')
       return page
     }
-    const createRequest = async () => {
-      const page = await signInAs(ALICE)
+    const createRequest = async (email = ALICE, suffix = '') => {
+      const page = await signInAs(email)
+      const submittedTitle = `${title}${suffix}`
       await page.getByRole('button', { name: 'New Request', exact: true }).click()
       const dialog = page.getByRole('dialog')
-      await dialog.locator('#title').fill(title)
+      await dialog.locator('#title').fill(submittedTitle)
       await dialog.locator('[contenteditable="true"]').first().fill('English control for seeded approval routing')
       await dialog.getByRole('button', { name: 'Submit Request', exact: true }).click()
       await expect(page.getByText('Request created successfully', { exact: true })).toBeVisible({ timeout: 25_000 })
-      return prisma.requests.findFirstOrThrow({ where: { title }, select: { id: true, title: true } })
+      return prisma.requests.findFirstOrThrow({ where: { title: submittedTitle }, select: { id: true, title: true } })
     }
     expect(await prisma.email_settings.count()).toBe(0)
     await prisma.email_settings.create({ data: { id: 'default', enabled: false, host: 'localhost', fromAddress: 'fixture@example.com' } })
@@ -320,7 +352,7 @@ const englishApprovalTest = test.extend<{ approval: EnglishApprovalFixture }>({
       await use({ createRequest, signInAs })
     } finally {
       try {
-        await prisma.requests.deleteMany({ where: { title } })
+        await prisma.requests.deleteMany({ where: { title: { startsWith: title } } })
       } finally {
         await prisma.email_settings.delete({ where: { id: 'default' } })
         await Promise.allSettled(contexts.map((context) => context.close()))
@@ -333,7 +365,7 @@ function englishActionRow(page: Page, title: string) {
   return page.getByRole('row', { name: `Open request ${title}`, exact: true })
 }
 
-async function openEnglishReview(approval: EnglishApprovalFixture, email: string, title: string, path = '/requests/my-actions') {
+async function openEnglishReview(approval: EnglishApprovalFixture, email: string, title: string, path: string = actionItems.path) {
   const page = await approval.signInAs(email, path)
   await englishActionRow(page, title).click()
   const dialog = page.getByRole('dialog')
@@ -356,10 +388,10 @@ englishApprovalTest('English control: own-team leads can approve, reports-to and
     await expect(dialog.getByRole('button', { name: 'Approve', exact: true })).toBeVisible()
   }
   for (const email of ['riley@example.com', 'pat@example.com']) {
-    const page = await approval.signInAs(email, '/requests/my-actions')
-    await expect(page.getByRole('heading', { name: 'My Action Items', exact: true })).toBeVisible()
+    const page = await approval.signInAs(email, actionItems.path)
+    await expect(page.getByRole('heading', { name: actionItems.heading.en, exact: true })).toBeVisible()
     await expect(englishActionRow(page, title)).toHaveCount(0)
-    await page.goto('/requests')
+    await page.goto(requestList.path)
     await englishActionRow(page, title).click()
     const dialog = page.getByRole('dialog')
     await expect(dialog.getByRole('heading', { name: title, exact: true })).toBeVisible({ timeout: 25_000 })
@@ -442,7 +474,7 @@ englishApprovalTest('English control: admin restarts a stranded attempt with a r
   } finally {
     await prisma.user.updateMany({ where: { id: { in: activeMemberIds } }, data: { isActive: true } })
   }
-  await openEnglishReview(approval, ALICE, title, '/requests')
+  await openEnglishReview(approval, ALICE, title, requestList.path)
 })
 
 englishApprovalTest('Thai attachment download uses HTTP status and hides response text', async ({ approval }) => {
@@ -453,7 +485,7 @@ englishApprovalTest('Thai attachment download uses HTTP status and hides respons
   } })
   const page = await approval.signInAs(ALICE)
   await chooseLanguage(page, 'th')
-  await page.goto(`/requests?requestId=${id}`)
+  await page.goto(`${requestList.path}?requestId=${id}`)
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('heading', { name: title, exact: true })).toBeVisible({ timeout: 25_000 })
   let status = 404
@@ -469,5 +501,43 @@ englishApprovalTest('Thai attachment download uses HTTP status and hides respons
     await dialog.getByRole('button', { name: 'ดาวน์โหลด', exact: true }).click()
     await expect(page.getByText(copy, { exact: true })).toBeVisible()
     await expect(page.getByText(rawError)).toHaveCount(0)
+  }
+})
+
+englishApprovalTest('English control: cross-unit view-only sharing does not grant approval or send notification', async ({ approval }) => {
+  const units = await Promise.all([ALICE, BOB].map(email => prisma.organization_units.findFirstOrThrow({
+    where: { assignments: { some: { user: { email }, isActive: true } } },
+    select: { id: true, shareRequests: true },
+  })))
+  expect(new Set(units.map(unit => unit.id)).size).toBe(2)
+  // The current seed shares horizontally when ON; disabling it isolates sister units
+  // while preserving the ancestor's view-only access from the original control.
+  const unitIds = units.map(unit => unit.id)
+  await prisma.organization_units.updateMany({ where: { id: { in: unitIds } }, data: { shareRequests: false } })
+  try {
+    const a = await approval.createRequest(ALICE, ' / Section A')
+    const b = await approval.createRequest(BOB, ' / Section B')
+    const pat = await approval.signInAs('pat@example.com')
+    await expect(englishActionRow(pat, a.title)).toBeVisible()
+    await expect(englishActionRow(pat, b.title)).toBeVisible()
+    await englishActionRow(pat, a.title).click()
+    const dialog = pat.getByRole('dialog')
+    await expect(dialog.getByRole('heading', { name: a.title, exact: true })).toBeVisible()
+    await expect(dialog.getByRole('button', { name: /^(Approve|Reject)$/ })).toHaveCount(0)
+    await pat.keyboard.press('Escape')
+    await pat.getByRole('button', { name: /^Notifications/ }).click()
+    const notices = pat.locator('[data-radix-popper-content-wrapper]')
+    await expect(notices.getByRole('heading', { name: 'Notifications', exact: true })).toBeVisible()
+    await expect(notices.getByText(a.title, { exact: false })).toHaveCount(0)
+    const { id: patId } = await prisma.user.findUniqueOrThrow({ where: { email: 'pat@example.com' } })
+    expect(await prisma.notifications.count({ where: { userId: patId, requestId: a.id } })).toBe(0)
+
+    for (const [email, visible, hidden] of [[ALICE, a, b], [BOB, b, a]] as const) {
+      const page = await approval.signInAs(email)
+      await expect(englishActionRow(page, visible.title)).toBeVisible()
+      await expect(englishActionRow(page, hidden.title)).toHaveCount(0)
+    }
+  } finally {
+    await prisma.$transaction(units.map(({ id, shareRequests }) => prisma.organization_units.update({ where: { id }, data: { shareRequests } })))
   }
 })
