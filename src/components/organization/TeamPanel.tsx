@@ -141,7 +141,9 @@ export function TeamPanel({
   const [saving, setSaving] = useState(false)
   const [confirmingDeactivate, setConfirmingDeactivate] = useState(false)
   const [deactivating, setDeactivating] = useState(false)
-  const [deactivateError, setDeactivateError] = useState<string | null>(null)
+  const [deactivateError, setDeactivateError] = useState<
+    { reason: 'failed' } | { reason: 'members_assigned'; memberNames: string[] } | null
+  >(null)
 
   // Refreshes with the same persisted team (including language changes) must keep the open draft.
   const storedName = team?.name ?? ''
@@ -184,17 +186,14 @@ export function TeamPanel({
     setDeactivateError(null)
     setDeactivating(true)
     try {
-      await deactivateTeam({ teamId: team.id })
+      const result = await deactivateTeam({ teamId: team.id })
+      if (!result.success) {
+        setDeactivateError(result)
+        return
+      }
       onDeactivated?.(team.id)
-    } catch (err) {
-      // Adjacent error with the confirmation step retained (panel error pattern).
-      const names = unitAssignments
-        .filter(row => row.teamId === team.id)
-        .map(row => snapshot.users.find(user => user.id === row.userId)?.name)
-        .filter(Boolean)
-      setDeactivateError(names.length
-        ? `${t('admin.teamDeactivateFailed')} ${t('admin.teamDeactivateMembers', { names: names.join(', ') })}`
-        : t('admin.teamDeactivateFailed'))
+    } catch {
+      setDeactivateError({ reason: 'failed' })
     } finally {
       setDeactivating(false)
     }
@@ -315,7 +314,9 @@ export function TeamPanel({
           teamName={team.name}
           confirming={confirmingDeactivate}
           saving={deactivating}
-          error={deactivateError}
+          error={deactivateError && (deactivateError.reason === 'members_assigned' && deactivateError.memberNames.length > 0
+            ? t('admin.teamDeactivateMembers', { names: deactivateError.memberNames.join(', ') })
+            : t('admin.teamDeactivateFailed'))}
           onStart={() => {
             setDeactivateError(null)
             setConfirmingDeactivate(true)

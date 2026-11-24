@@ -14,6 +14,7 @@ import type { AssignmentNode, OrganizationUnitNode, PositionNode, TeamNode } fro
 import { OrganizationValidationError } from '@/lib/organization/assignments'
 import {
   deactivateTeam,
+  TeamMembersAssignedError,
   type OrganizationTeamDeactivationDb,
   type WorkspaceSnapshot,
 } from '@/lib/organization/workspace-admin'
@@ -242,6 +243,8 @@ describe('deactivateTeam fake db — refusals', () => {
       () => deactivateTeam({ teamId: 'team-line' }, db),
       (error: unknown) => {
         assert.equal(error instanceof OrganizationValidationError, true)
+        assert.ok(error instanceof TeamMembersAssignedError)
+        assert.deepEqual(error.memberNames, ['Alice', 'Casey'])
         assert.match(String(error), /assigned/i)
         assert.match(String(error), /Alice/)
         assert.match(String(error), /asg-alice/)

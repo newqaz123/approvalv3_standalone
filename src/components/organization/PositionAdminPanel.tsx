@@ -7,7 +7,7 @@
 // and /in use/-guarded deactivation plus confirmation-gated cleanup of inactive
 // rows. Attempt snapshots are never touched.
 
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -322,6 +322,7 @@ export function PositionAdminPanel({
   snapshot: WorkspaceSnapshot
 }) {
   const t = useTranslations()
+  const dialogTitleId = useId()
   const [rows, setRows] = useState<PositionNode[]>(() => activePositionsSorted(snapshot.positions))
   const [inactiveRows, setInactiveRows] = useState<PositionNode[]>(
     () => inactivePositionsSorted(snapshot.positions),
@@ -699,7 +700,7 @@ export function PositionAdminPanel({
           onClose={cancelRankEdit}
           className="max-w-lg"
           title={t('admin.editPositionRank')}
-          ariaLabel="Edit position rank"
+          titleId={`${dialogTitleId}-rank`}
         >
           <div className="p-4">
             {rows.filter((row) => row.id === rankSession.positionId).map((row) => (
@@ -730,7 +731,7 @@ export function PositionAdminPanel({
           onClose={() => setCreateOpen(false)}
           className="max-w-sm"
           title={t('admin.addPosition')}
-          ariaLabel="Add position"
+          titleId={`${dialogTitleId}-create`}
         >
           <div className="space-y-4 p-4">
             <div>

@@ -52,8 +52,8 @@ describe('organization modal presentation contract', () => {
     const panel = read('src/components/organization/PositionAdminPanel.tsx')
     assert.doesNotMatch(panel, /data-testid="position-panel-close"/)
     assert.match(panel, /InTreeModal/)
-    assert.match(panel, /ariaLabel="Edit position rank"/)
-    assert.match(panel, /ariaLabel="Add position"/)
+    assert.match(panel, /title=\{t\('admin\.editPositionRank'\)\}\s+titleId=\{`\$\{dialogTitleId\}-rank`\}/)
+    assert.match(panel, /title=\{t\('admin\.addPosition'\)\}\s+titleId=\{`\$\{dialogTitleId\}-create`\}/)
   })
 })
 

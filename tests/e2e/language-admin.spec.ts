@@ -285,3 +285,130 @@ test('mobile user cards localize accessible actions, not status names', async ({
   await expect(page.getByRole('menuitem', { name: 'ตั้งรหัสผ่านใหม่' })).toBeVisible()
   await page.keyboard.press('Escape')
 })
+
+test('approval chains keep Published unchanged while translating the version label', async ({ page }) => {
+  const published = await prisma.approval_route_versions.findFirstOrThrow({
+    where: { scopeUnitId: rootId, status: 'PUBLISHED' },
+  })
+  await signIn(page, ADMIN, '/admin/organization?panel=chains')
+  const row = page.getByTestId(`chains-published-route-${published.id}`)
+  await expect(row.getByText(`Published · version ${published.version}`, { exact: true })).toBeVisible()
+  await language(page, 'th')
+  await expect(row.getByText(`Published · เวอร์ชัน ${published.version}`, { exact: true })).toBeVisible()
+})
+
+test('position dialogs use their translated headings as accessible names', async ({ page }) => {
+  const position = await prisma.positions.findFirstOrThrow({ where: { isActive: true } })
+  await signIn(page, ADMIN, '/admin/organization?panel=positions')
+  await language(page, 'th')
+  for (const [trigger, title] of [
+    ['position-create-open', 'เพิ่มตำแหน่ง'],
+    [`position-rank-edit-${position.id}`, 'แก้ไขระดับตำแหน่ง'],
+  ]) {
+    await page.getByTestId(trigger).click()
+    const dialog = page.getByRole('dialog', { name: title, exact: true })
+    await expect(dialog.getByRole('heading', { name: title, exact: true }).first()).toBeVisible()
+    await dialog.getByRole('button', { name: 'ปิด', exact: true }).click()
+    await expect(dialog).toHaveCount(0)
+  }
+})
+
+test('an open route publish refusal follows the language without losing its draft', async ({ page }) => {
+  const stepId = `${id}-route-step`
+  const limitId = `${id}-route-limit`
+  const versionId = `${id}-route-version`
+  const maxRank = (await prisma.positions.aggregate({ _max: { rank: true } }))._max.rank ?? 0
+  await prisma.$transaction([
+    prisma.positions.createMany({ data: [
+      { id: stepId, name: `${configuredName} step`, rank: maxRank + 2 },
+      { id: limitId, name: `${configuredName} ceiling`, rank: maxRank + 3 },
+    ] }),
+    prisma.approval_route_versions.create({ data: {
+      id: versionId, scopeUnitId: id, phase: 'REQUEST', version: 1, status: 'PUBLISHED',
+      createdById: adminId, approvalLimitPositionId: limitId, publishedAt: new Date(),
+      steps: { create: { positionId: stepId, stepOrder: 1 } },
+    } }),
+  ])
+  try {
+    const path = `/admin/organization?panel=chains&scope=${id}&phase=REQUEST`
+    await signIn(page, ADMIN, path)
+    const editor = page.getByTestId(`route-editor-${id}-REQUEST`)
+    const publish = editor.getByTestId('route-editor-publish')
+    await expect(publish).toBeEnabled()
+    // The displayed draft still allows Publish; the live server sees a lowered ceiling.
+    await prisma.positions.update({ where: { id: limitId }, data: { rank: maxRank + 1 } })
+    await publish.click()
+    const error = editor.getByRole('alert')
+    await expect(error).toHaveText('Publication refused: 1 step(s) exceed the approval limit. Correct the flagged steps first.')
+    await language(page, 'th')
+    await expect(error.filter({ hasText: 'เผยแพร่ไม่ได้: มี 1 ขั้นที่เกินเพดานอนุมัติ แก้ไขขั้นที่ระบุก่อน' })).toBeVisible()
+    await expect(editor.getByTestId('route-editor-limit-select')).toContainText(`${configuredName} ceiling`)
+    await expect(editor.getByTestId('route-editor-step-1')).toContainText(`${configuredName} step`)
+    await expect(page).toHaveURL(`${BASE}${path}`)
+    await language(page, 'en')
+    await expect(error.filter({ hasText: 'Publication refused: 1 step(s)' })).toBeVisible()
+    const versions = await prisma.approval_route_versions.findMany({ where: { scopeUnitId: id }, select: { id: true, status: true } })
+    expect(versions).toEqual([{ id: versionId, status: 'PUBLISHED' }])
+  } finally {
+    await prisma.approval_route_versions.deleteMany({ where: { scopeUnitId: id } })
+    await prisma.positions.deleteMany({ where: { id: { in: [stepId, limitId] } } })
+  }
+})
+
+test('team deactivation names live blockers rather than the open snapshot', async ({ page }) => {
+  const teamId = `${id}-team`
+  const users = ['lead', 'old member', 'new member'].map((name, i) => ({ id: `${id}-team-user-${i}`, name: `${configuredName} ${name}`, email: `${id}-${i}@example.com` }))
+  const assignments = users.map(user => `${user.id}-assignment`)
+  const positions = await prisma.positions.findMany({ where: { isActive: true }, orderBy: { rank: 'asc' } })
+  const highest = positions.at(-1)!
+  expect(highest.rank).toBeGreaterThan(positions[0].rank)
+  await prisma.$transaction([
+    prisma.user.createMany({ data: users }),
+    prisma.organization_assignments.createMany({ data: users.map((user, i) => ({
+      id: assignments[i], userId: user.id, unitId: id, positionId: i === 0 ? highest.id : positions[0].id,
+    })) }),
+    prisma.teams.create({ data: { id: teamId, unitId: id, name: configuredName, reportsToAssignmentId: assignments[0] } }),
+    prisma.organization_assignments.update({ where: { id: assignments[1] }, data: { teamId } }),
+  ])
+  try {
+    await signIn(page, ADMIN, '/admin/organization')
+    await language(page, 'th')
+    await page.getByTestId(`team-select-${teamId}`).click()
+    await expect(page.getByTestId(`team-member-${assignments[1]}`)).toBeChecked()
+    await expect(page.getByTestId(`team-member-${assignments[2]}`)).not.toBeChecked()
+    await page.getByTestId('team-deactivate').click()
+    await prisma.$transaction([
+      prisma.organization_assignments.update({ where: { id: assignments[1] }, data: { teamId: null } }),
+      prisma.organization_assignments.update({ where: { id: assignments[2] }, data: { teamId } }),
+    ])
+    await page.getByTestId('team-deactivate-confirm').click()
+    const alert = page.getByTestId('team-deactivate-error')
+    await expect(alert).toContainText(`สมาชิกที่ยังอยู่ในทีม: ${users[2].name}`)
+    await expect(alert).not.toContainText(users[1].name)
+    await expect(page.getByTestId('team-deactivate-confirmation')).toBeVisible()
+    const auditWhere = { action: 'team_deactivated', comments: { contains: teamId } }
+    expect((await prisma.teams.findUniqueOrThrow({ where: { id: teamId } })).isActive).toBe(true)
+    expect(await prisma.request_activities.count({ where: auditWhere })).toBe(0)
+
+    // A different live refusal must not misreport the stale member or the prior blocker.
+    await prisma.teams.update({ where: { id: teamId }, data: { isActive: false } })
+    await page.getByTestId('team-deactivate-confirm').click()
+    await expect(alert).toHaveText('ปิดใช้งานทีมไม่ได้ ลองอีกครั้ง')
+
+    await prisma.$transaction([
+      prisma.organization_assignments.update({ where: { id: assignments[2] }, data: { teamId: null } }),
+      prisma.teams.update({ where: { id: teamId }, data: { isActive: true } }),
+    ])
+    await page.getByTestId('team-deactivate-confirm').click()
+    await expect(page.getByTestId(`team-select-${teamId}`)).toHaveCount(0)
+    expect((await prisma.teams.findUniqueOrThrow({ where: { id: teamId } }))).toMatchObject({ isActive: false, reportsToAssignmentId: assignments[0] })
+    expect(await prisma.request_activities.count({ where: auditWhere })).toBe(1)
+  } finally {
+    await prisma.$transaction([
+      prisma.request_activities.deleteMany({ where: { action: 'team_deactivated', comments: { contains: teamId } } }),
+      prisma.teams.deleteMany({ where: { id: teamId } }),
+      prisma.organization_assignments.deleteMany({ where: { id: { in: assignments } } }),
+      prisma.user.deleteMany({ where: { id: { in: users.map(user => user.id) } } }),
+    ])
+  }
+})

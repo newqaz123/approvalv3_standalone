@@ -53,7 +53,12 @@ export async function deactivateOrganizationUnit(input: Parameters<typeof core.d
 }
 
 export async function deactivateTeam(input: Parameters<typeof core.deactivateTeam>[0]) {
-  return core.deactivateTeam(input)
+  try {
+    return await core.deactivateTeam(input)
+  } catch (error) {
+    if (!(error instanceof core.TeamMembersAssignedError)) throw error
+    return { success: false as const, reason: 'members_assigned' as const, memberNames: error.memberNames }
+  }
 }
 
 export async function assignPerson(input: Parameters<typeof core.assignPerson>[0]) {

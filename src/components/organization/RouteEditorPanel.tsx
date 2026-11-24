@@ -28,6 +28,11 @@ import { publishRoute } from '@/server-actions/approval-routes'
 import { SubmitterTestDialog } from '@/components/organization/SubmitterTestDialog'
 import { useTranslations } from '@/lib/i18n/client'
 
+type RoutePublishFeedback =
+  | { key: 'admin.publishFailed' }
+  | { key: 'admin.routePublishConflictCount'; values: { count: number } }
+  | { key: 'admin.routePublished'; values: { version: string } }
+
 export interface EditorStep {
   order: number
   positionId: string
@@ -130,8 +135,7 @@ export function RouteEditorPanel({
   const [steps, setSteps] = useState<EditorStep[]>(
     initial ? initial.steps.map((step) => ({ ...step })) : [],
   )
-  const [error, setError] = useState<string | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
+  const [feedback, setFeedback] = useState<RoutePublishFeedback | null>(null)
   const [saving, setSaving] = useState(false)
   const [showSubmitterTest, setShowSubmitterTest] = useState(false)
 
@@ -175,8 +179,7 @@ export function RouteEditorPanel({
   }
 
   async function handlePublish() {
-    setError(null)
-    setNotice(null)
+    setFeedback(null)
     setSaving(true)
     try {
       const result = await publishRoute({
@@ -186,19 +189,17 @@ export function RouteEditorPanel({
         steps: steps.map((step) => ({ order: step.order, positionId: step.positionId })),
       })
       if (!result.published) {
-        setError(
-          t('admin.routePublishConflictCount', { count: result.conflicts.length }),
-        )
+        setFeedback({ key: 'admin.routePublishConflictCount', values: { count: result.conflicts.length } })
         return
       }
-      setNotice(t('admin.routePublished', { version: result.versionId }))
+      setFeedback({ key: 'admin.routePublished', values: { version: result.versionId } })
       onPublished?.({
         versionId: result.versionId,
         approvalLimitPositionId: approvalLimitPositionId ?? '',
         steps: steps.map((step) => ({ ...step })),
       })
-    } catch (err) {
-      setError(t('admin.publishFailed'))
+    } catch {
+      setFeedback({ key: 'admin.publishFailed' })
     } finally {
       setSaving(false)
     }
@@ -327,11 +328,14 @@ export function RouteEditorPanel({
         </div>
       ) : null}
 
-      {error ? (
-        <p role="alert" className="text-sm text-destructive">{error}</p>
-      ) : null}
-      {notice ? (
-        <p role="status" className="text-sm text-muted-foreground">{notice}</p>
+      {feedback ? (
+        feedback.key === 'admin.routePublished' ? (
+          <p role="status" className="text-sm text-muted-foreground">{t(feedback.key, feedback.values)}</p>
+        ) : (
+          <p role="alert" className="text-sm text-destructive">
+            {t(feedback.key, 'values' in feedback ? feedback.values : undefined)}
+          </p>
+        )
       ) : null}
 
       {!readOnly ? (

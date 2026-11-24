@@ -65,7 +65,7 @@ describe('H8: client-callable admin actions cannot skip requireAdmin via an inje
       for (const [, name, params] of exported) {
         assert.doesNotMatch(params, /\bdb\b/, `${name} must not accept a db argument`)
         const body = exportedFunctionBody(source, name)
-        assert.match(body, new RegExp(`return core\\.${name}\\((input)?\\)`), `${name} must forward only its input`)
+        assert.match(body, new RegExp(`return (?:await )?core\\.${name}\\((input)?\\)`), `${name} must forward only its input`)
       }
     })
 

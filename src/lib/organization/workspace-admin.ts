@@ -1348,6 +1348,12 @@ export async function deactivateOrganizationUnit(
   })
 }
 
+export class TeamMembersAssignedError extends OrganizationValidationError {
+  constructor(message: string, readonly memberNames: string[]) {
+    super(message)
+  }
+}
+
 /**
  * Deactivate a flat team (isActive=false only; never a hard delete). Refused
  * with named offenders while any ACTIVE member assignment still references
@@ -1383,11 +1389,14 @@ export async function deactivateTeam(
       row.isActive && row.teamId === current.id
     ))
     if (activeMembers.length > 0) {
-      const offenders = activeMembers
-        .map((row) => `"${personName(users, row.userId, row.id)}" (${row.id})`)
-        .join(', ')
-      throw new OrganizationValidationError(
+      const members = activeMembers.map((row) => ({
+        assignmentId: row.id,
+        name: users.find((user) => user.id === row.userId)?.name,
+      }))
+      const offenders = members.map(({ assignmentId, name }) => `"${name ?? assignmentId}" (${assignmentId})`).join(', ')
+      throw new TeamMembersAssignedError(
         `Team "${current.name}" has members still assigned: ${offenders}; move or remove members first`,
+        members.flatMap(({ name }) => name === undefined ? [] : [name]),
       )
     }
     const nextTeams = teams.map((row) => (

@@ -623,7 +623,7 @@ export function ApprovalChainsPanel({
                       className="space-y-1 rounded-md border px-3 py-2"
                     >
                       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                        {t('admin.publishedVersion', { version: version.version })}
+                        {t('admin.routeVersionStatus', { status: 'Published', version: version.version })}
                       </p>
                       <ChainsVersionSummary version={version} positionNames={positionNames} />
                     </li>
