@@ -125,10 +125,10 @@ export function EngineeringMetricsPanel({ data }: EngineeringMetricsProps) {
                 <span>{formatDuration(data.minCycleHours, t)}</span>
                 <div className="flex items-center gap-3">
                   <span className="flex items-center gap-1">
-                    <span className="inline-block h-2 w-2 rounded-full bg-blue-500" /> Avg
+                    <span className="inline-block h-2 w-2 rounded-full bg-blue-500" /> {t('analytics.avgShort')}
                   </span>
                   <span className="flex items-center gap-1">
-                    <span className="inline-block h-2 w-2 rounded-full bg-violet-500" /> Med
+                    <span className="inline-block h-2 w-2 rounded-full bg-violet-500" /> {t('analytics.medShort')}
                   </span>
                 </div>
                 <span>{formatDuration(data.maxCycleHours, t)}</span>

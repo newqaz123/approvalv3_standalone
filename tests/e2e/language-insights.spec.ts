@@ -27,9 +27,19 @@ test.beforeAll(async () => {
   const alice = await prisma.user.findUniqueOrThrow({ where: { email: ALICE }, select: { id: true } })
   const { unitId } = await prisma.organization_assignments.findFirstOrThrow({ where: { userId: alice.id, isActive: true }, select: { unitId: true } })
   await prisma.budget_codes.create({ data: { id: fixtureId, code: budgetCode.toUpperCase(), displayCode: budgetCode, name: 'Fixture budget — ชื่อเดิม', unitId, createdById: alice.id, budgetAmount: 54321 } })
+  const now = Date.now()
+  const hoursAgo = (hours: number) => new Date(now - hours * 3_600_000)
   await prisma.requests.createMany({ data: [
-    { id: `${fixtureId}-approval`, title, description: 'Insights fixture', status: 'FinalApproval', requesterId: alice.id, organizationUnitId: unitId, projectEstimateCost: 12345 },
+    { id: `${fixtureId}-approval`, title, description: 'Insights fixture', status: 'FinalApproval', requesterId: alice.id, organizationUnitId: unitId, projectEstimateCost: 12345, createdAt: hoursAgo(6) },
     { id: `${fixtureId}-engineering`, title: `${title} / Engineering`, description: 'Insights fixture', status: 'SentToEngineer', requesterId: alice.id, organizationUnitId: unitId, budgetCodeId: fixtureId, projectEstimateCost: 23456 },
+    { id: `${fixtureId}-cycle`, title: `${title} / Completed cycle`, description: 'Insights fixture', status: 'SendBackToRequester', requesterId: alice.id, organizationUnitId: unitId, createdAt: hoursAgo(6) },
+  ] })
+  // The range only renders when at least two completed cycles have different durations.
+  await prisma.request_activities.createMany({ data: [
+    { requestId: `${fixtureId}-approval`, userId: alice.id, action: 'status_changed', toStatus: 'SentToEngineer', createdAt: hoursAgo(4) },
+    { requestId: `${fixtureId}-approval`, userId: alice.id, action: 'status_changed', toStatus: 'SendBackToRequester', createdAt: hoursAgo(3) },
+    { requestId: `${fixtureId}-cycle`, userId: alice.id, action: 'status_changed', toStatus: 'SentToEngineer', createdAt: hoursAgo(4) },
+    { requestId: `${fixtureId}-cycle`, userId: alice.id, action: 'status_changed', toStatus: 'SendBackToRequester', createdAt: hoursAgo(2) },
   ] })
 })
 test.afterEach(async () => {
@@ -38,7 +48,7 @@ test.afterEach(async () => {
 test.afterAll(async () => {
   if (!prisma) return
   try {
-    await prisma.requests.deleteMany({ where: { id: { in: [`${fixtureId}-approval`, `${fixtureId}-engineering`] } } })
+    await prisma.requests.deleteMany({ where: { id: { in: [`${fixtureId}-approval`, `${fixtureId}-engineering`, `${fixtureId}-cycle`] } } })
     await prisma.budget_codes.deleteMany({ where: { id: fixtureId } })
     for (const user of originalPreferences) {
       await prisma.user.update({ where: { id: user.id }, data: { preferredLocale: user.preferredLocale } })
@@ -102,9 +112,12 @@ test('Analytics translates chart legends and loading/empty copy without changing
   await signIn(page, ALICE, '/analytics?dateRange=30days')
   const heading = page.getByRole('heading', { level: 1 })
   const legend = page.locator('.recharts-legend-item-text')
-  const chartRows = page.getByRole('table').locator('tbody tr')
+  const chartRows = page.getByRole('table', { name: /^(Engineering Resolution Trend by period|แนวโน้มการจัดการงาน Engineering แยกตามช่วงเวลา)$/ }).locator('tbody tr')
   await expect(heading).toHaveText('Analytics')
   await expect(legend).toHaveText(['Engineering unresolved', 'Resolved by Engineering'], { timeout: 25_000 })
+  const englishRange = page.getByText('Engineering Cycle Range', { exact: true }).locator('..')
+  await expect(englishRange.getByText('Avg', { exact: true })).toBeVisible()
+  await expect(englishRange.getByText('Med', { exact: true })).toBeVisible()
   const englishRows = await chartRows.allTextContents()
   expect(englishRows.length).toBeGreaterThan(0)
   expect(await chartRows.locator('td:first-of-type').allTextContents()).toContain('1')
@@ -135,6 +148,9 @@ test('Analytics translates chart legends and loading/empty copy without changing
   await chooseLanguage(page, 'th')
   await expect(heading).toHaveText('วิเคราะห์ข้อมูล')
   await expect(legend).toHaveText(['งาน Engineering ที่ยังค้าง', 'งานที่ Engineering จัดการแล้ว'])
+  const thaiRange = page.getByText('ช่วงเวลาทำงานของ Engineering', { exact: true }).locator('..')
+  await expect(thaiRange.getByText('เฉลี่ย', { exact: true })).toBeVisible()
+  await expect(thaiRange.getByText('มัธยฐาน', { exact: true })).toBeVisible()
   expect(await chartRows.allTextContents()).toEqual(englishRows)
   await filterStatus('ทุกสถานะ', 'กำลังอัปเดตข้อมูล...', 'ไม่มีข้อมูลแนวโน้มงาน Engineering')
   await chooseLanguage(page, 'en')
