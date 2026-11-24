@@ -15,7 +15,7 @@ The route matrix is [`tests/support/i18n/production-surfaces.ts`](../../tests/su
 
 | Surface | Evidence |
 | --- | --- |
-| Global not-found, error, locale write failure/retry | `language-settings`: unknown route, opt-in development-only error on the existing language workflow harness, and intercepted failed account changes; no developer diagnostic in app UI |
+| Global not-found, error, locale write failure/retry | `language-settings`: unknown route, opt-in error on the existing language workflow harness, and intercepted failed account changes; no developer diagnostic in app UI |
 | Keyboard and mobile menu | `language-settings`: Arrow keys, Enter and Escape, 44px touch target, in-viewport focus restoration at 390px and desktop. `language-admin`: 390px user card actions. `language-workflow`: mobile cards versus desktop rows |
 | Draft, upload, action/pending dialogs, and deep links | `language-workflow`: gated form reconciliation, live Request and Solution forms, approval/rejection/resubmission, crop and failed image removal, and `requestId` routing; original pending-state harness is a separate control |
 | Dashboard drawer, Analytics loading/empty, Budget empty | `language-insights`: drawer title and empty copy, held Analytics request, zero-data status, and Budget empty filter |
@@ -42,7 +42,7 @@ All comparisons use one guarded disposable fixture app and the same account and 
 
 ## Runbook
 
-Run only in this worktree against the seeded, disposable `app_cleanstart_dev` app at `http://localhost:32143`. Set `E2E_UI_HARNESS=1` on that isolated server for harness tests; the harness guard is not a substitute for target isolation. Keep the browser profile and test worker single-worker, and restore preferences/temporary rows before running English controls. For loopback capture the `email_settings` table must be fixture-owned and empty at start. The mail tests refuse an SMTP host in the test process, install an authoritative DB row pointing only to their owned `127.0.0.1:35247` capture, and restore that row after the test. The production workflow sends only while its loopback setting is in place.
+Run only in this worktree against the seeded, disposable `app_cleanstart_dev` app at `http://localhost:32143`. Set `E2E_UI_HARNESS=1` on that isolated server for harness tests; the harness guard is not a substitute for target isolation. For a production-mode browser run (`next build` + `next start`), also set `E2E_LANGUAGE_WORKFLOW_FAILURE=1` on the disposable test server so the existing `?failure=1` URL triggers the error. Never set either harness flag in a deployment. Development mode needs only `E2E_UI_HARNESS=1`. Keep the browser profile and test worker single-worker, and restore preferences/temporary rows before running English controls. For loopback capture the `email_settings` table must be fixture-owned and empty at start. The mail tests refuse an SMTP host in the test process, install an authoritative DB row pointing only to their owned `127.0.0.1:35247` capture, and restore that row after the test. The production workflow sends only while its loopback setting is in place.
 
 ```sh
 export DATABASE_URL=postgresql://th_en_local@127.0.0.1:55473/app_cleanstart_dev
