@@ -134,6 +134,49 @@ test('an interrupted notification load shows a retry, not an empty inbox', async
   }
 })
 
+test('notification Retry stays disabled during a background poll with cached rows', async ({ page }) => {
+  await page.clock.install()
+  let phase: 'initial' | 'fail' | 'hold' = 'initial'
+  let polled = 0
+  let releasePoll!: () => void
+  const heldPoll = new Promise<void>(resolve => { releasePoll = resolve })
+  await page.route(`${BASE}/requests`, async route => {
+    const request = route.request()
+    if (request.method() === 'POST' && request.headers()['next-action'] && request.postData() === JSON.stringify([user.id, 20])) {
+      if (phase === 'fail') return route.abort('connectionreset')
+      if (phase === 'hold') {
+        polled++
+        await heldPoll
+      }
+    }
+    await route.continue()
+  })
+  try {
+    await signIn(page)
+    const bell = notificationBell(page)
+    await bell.click()
+    const body = page.getByText(englishMessage, { exact: true })
+    await expect(body).toBeVisible()
+    phase = 'fail'
+    await page.clock.fastForward(30_000)
+    const retry = page.getByRole('button', { name: 'Try again', exact: true })
+    await expect(retry).toBeEnabled()
+    await expect(body).toBeVisible()
+
+    phase = 'hold'
+    await page.clock.fastForward(30_000)
+    await expect.poll(() => polled).toBe(1)
+    await expect(retry).toBeDisabled()
+    await expect(body).toBeVisible()
+    await expect(bell).toHaveAccessibleName('Notifications, 2 unread')
+    releasePoll()
+    await expect(retry).toHaveCount(0)
+  } finally {
+    releasePoll()
+    await page.unrouteAll({ behavior: 'wait' })
+  }
+})
+
 test('a successful notification load can show an empty inbox', async ({ page }) => {
   const email = 'admin@example.com'
   const account = await prisma.user.findUniqueOrThrow({ where: { email }, select: { id: true } })

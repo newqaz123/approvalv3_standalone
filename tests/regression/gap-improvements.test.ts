@@ -158,6 +158,11 @@ describe("Gapforimprove regressions", () => {
 		assert.match(bell, /<RequestModalRouter/);
 	});
 
+	it("the navbar remounts NotificationBell when the signed-in user changes", () => {
+		const navbar = read("src/components/navigation/navbar.tsx");
+		assert.match(navbar, /<NotificationBell\s+key=\{user\.id\}\s+userId=\{user\.id\}/);
+	});
+
 	it("request list refreshes local table state after mutations and router refreshes", () => {
 		const requestTable = read("src/components/requests/request-table.tsx");
 		const listWithFilters = read(

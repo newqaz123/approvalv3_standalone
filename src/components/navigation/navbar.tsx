@@ -211,7 +211,7 @@ export function Navbar() {
 					{/* Right side - User info and logout */}
 					<div className="flex shrink-0 items-center gap-3 xl:gap-5">
 						{/* Notification Bell */}
-						{user && <NotificationBell userId={user.id} />}
+						{user && <NotificationBell key={user.id} userId={user.id} />}
 
 						<div className="text-right">
 							<p className="text-sm font-medium text-gray-900">

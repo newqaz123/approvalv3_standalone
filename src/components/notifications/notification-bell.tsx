@@ -28,7 +28,7 @@ export function NotificationBell({ userId }: NotificationBellProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [loadFailed, setLoadFailed] = useState(false)
-  const [isRetrying, setIsRetrying] = useState(false)
+  const [isFetching, setIsFetching] = useState(false)
   const retryLoad = useRef<(() => void) | null>(null)
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -41,10 +41,10 @@ export function NotificationBell({ userId }: NotificationBellProps) {
     let loaded = false
     let fetching = false
 
-    async function fetchNotifications(retry = false) {
+    async function fetchNotifications() {
       if (fetching) return
       fetching = true
-      if (retry) setIsRetrying(true)
+      setIsFetching(true)
       if (!loaded) setIsLoading(true)
       try {
         const [notifs, count] = await Promise.allSettled([
@@ -67,12 +67,12 @@ export function NotificationBell({ userId }: NotificationBellProps) {
         fetching = false
         if (!cancelled) {
           setIsLoading(false)
-          setIsRetrying(false)
+          setIsFetching(false)
         }
       }
     }
 
-    retryLoad.current = () => { void fetchNotifications(true) }
+    retryLoad.current = () => { void fetchNotifications() }
     void fetchNotifications()
 
     const interval = setInterval(() => {
@@ -155,7 +155,7 @@ export function NotificationBell({ userId }: NotificationBellProps) {
             <div className="space-y-2 border-b px-4 py-3">
               {notifications.length === 0 && <h3 className="font-semibold">{t('notifications.heading')}</h3>}
               <p role="alert" className="text-sm text-red-700">{t('notifications.loadFailed')}</p>
-              <Button type="button" variant="outline" size="sm" disabled={isLoading || isRetrying} onClick={() => retryLoad.current?.()}>
+              <Button type="button" variant="outline" size="sm" disabled={isFetching} onClick={() => retryLoad.current?.()}>
                 {t('fallback.retry')}
               </Button>
             </div>
