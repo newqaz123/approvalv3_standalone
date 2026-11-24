@@ -562,10 +562,12 @@ test('the completed approval packet PDF and retention ZIP preserve page content 
     expect(th).toEqual(en)
 
     await prisma.requests.update({ where: { id: completedId }, data: { description: 'Different report body fixture.' } })
-    const changed = await backup()
+    const changedPacket = await packet('ส่งออกรายงาน', 'ส่งออกชุดเอกสารอนุมัติ')
+    const changedBackup = await backup()
     expect(Math.floor(Date.now() / 60_000), 'negative-control footer minute').toBe(minute)
-    expect(changed.entries).toEqual(th.backup.entries)
-    expect(changed.report).not.toEqual(th.backup.report)
+    expect(changedPacket.report, 'changed description in the standalone approval packet').not.toEqual(th.packet.report)
+    expect(changedBackup.entries).toEqual(th.backup.entries)
+    expect(changedBackup.report).not.toEqual(th.backup.report)
     expect({ ...th.backup, entries: ['localized/report.pdf'] }).not.toEqual(en.backup)
     expect((await prisma.requests.findUniqueOrThrow({ where: { id: completedId } })).status).toBe('Completed')
   } finally {

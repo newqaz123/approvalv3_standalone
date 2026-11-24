@@ -296,7 +296,7 @@ function hexValue(first: string | undefined, second: string | undefined): number
 /** Strict quoted-printable decode: strips CRLF/LF soft line breaks, expands
  * =XX escapes. Malformed escapes or forbidden raw bytes return null so the
  * caller fails closed instead of extracting a corrupt id. */
-function decodeQuotedPrintable(input: string): string | null {
+export function decodeQuotedPrintable(input: string): string | null {
   if (input.length > MAX_PART_BYTES) return null
   const encoded = input.replace(/=\r?\n/g, '')
   const bytes: number[] = []
@@ -316,7 +316,7 @@ function decodeQuotedPrintable(input: string): string | null {
 }
 
 /** Strict base64 decode of a body part; invalid input returns null. */
-function decodeBase64Part(input: string): string | null {
+export function decodeBase64Part(input: string): string | null {
   const compact = input.replace(/\s/g, '')
   if (compact.length === 0 || compact.length > MAX_PART_BYTES || compact.length % 4 !== 0) return null
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(compact)) return null

@@ -1,5 +1,8 @@
 import { expect, test, type Page } from '@playwright/test'
 import { PrismaClient } from '@prisma/client'
+import { createTranslator } from '../../src/lib/i18n/messages'
+import { readWorkflowMail } from '../support/i18n/workflow-mail'
+import { startMailCapture } from '../support/native/mail-capture'
 import { productionSurface } from '../support/i18n/production-surfaces'
 
 const requestList = productionSurface('/requests')
@@ -94,173 +97,225 @@ const CASEY = 'casey@example.com'
 const WORKFLOW_ACCOUNTS = [
   ALICE, BOB, CASEY, 'quinn@example.com', 'riley@example.com', 'dana@example.com', 'pat@example.com', 'morgan@example.com',
 ]
+const WORKFLOW_MAIL_RECIPIENTS = [...WORKFLOW_ACCOUNTS, 'admin@example.com']
 
-test('seeded Request, Solution and Final include rejection, rework and stable workflow labels', async ({ browser }) => {
-  test.setTimeout(360_000)
+test('seeded Request, Solution and Final preserve workflow labels and outbound email across locales', async ({ browser }) => {
+  test.setTimeout(480_000)
   const title = `Language workflow ชื่อเดิม ${Date.now()}`
   const pendingTitle = `${title} / Pending`
   const rejection = 'Please revise — เหตุผลเดิม'
   const comment = 'Approved as revised — ข้อคิดเห็นเดิม'
-  const contexts = new Map<string, Awaited<ReturnType<typeof browser.newContext>>>()
-  const getPage = async (email: string) => {
-    const existing = contexts.get(email)
-    if (existing) return existing.pages()[0]
-    const context = await browser.newContext({ baseURL: BASE_URL })
-    contexts.set(email, context)
-    const page = await context.newPage()
-    await signIn(page, email, requestList.path)
-    await chooseLanguage(page, 'th')
-    return page
-  }
-  const open = async (page: Page, id: string, path: string = requestList.path, isDraft = false) => {
-    const url = `${path}?requestId=${id}`
-    await page.goto(url)
-    await expect(page).toHaveURL(`${BASE_URL}${url}`)
-    const dialog = page.getByRole('dialog')
-    if (isDraft) await expect(dialog.locator('#title')).toHaveValue(title, { timeout: 25_000 })
-    else await expect(dialog.getByText(title, { exact: true }).first()).toBeVisible({ timeout: 25_000 })
-    return dialog
-  }
-  const create = async (page: Page, name: string) => {
-    await page.goto(requestList.path)
-    await page.getByRole('button', { name: 'สร้าง Request', exact: true }).click()
-    const dialog = page.getByRole('dialog')
-    await dialog.locator('#title').fill(name)
-    await dialog.locator('[contenteditable="true"]').first().fill('Keep this description — รายละเอียดเดิม')
-    await dialog.getByRole('button', { name: 'ส่ง Request', exact: true }).click()
-    await expect(page.getByText('สร้าง Request แล้ว', { exact: true })).toBeVisible({ timeout: 25_000 })
-    return prisma.requests.findFirstOrThrow({ where: { title: name } })
-  }
-  const step = async (id: string, phase: 'REQUEST' | 'SOLUTION' | 'FINAL') => {
-    const instance = await prisma.approval_instances.findFirstOrThrow({
-      where: { ...(phase === 'SOLUTION' ? { solution: { requestId: id } } : { requestId: id }), phase, supersededAt: null },
-      include: {
-        candidateGroups: { include: { members: true } },
-        requestApprovals: { where: { status: 'pending' }, orderBy: { order: 'asc' } },
-        solutionApprovals: { where: { status: 'pending' }, orderBy: { order: 'asc' } },
-      },
-    })
-    const approval = (phase === 'SOLUTION' ? instance.solutionApprovals : instance.requestApprovals)[0]
-    if (!approval) return null
-    const group = instance.candidateGroups.find((candidate) => candidate.id === approval.candidateGroupId)
-    const userIds = approval.requiredApproverId ? [approval.requiredApproverId] : group?.members.map((member) => member.userId) ?? []
-    const user = await prisma.user.findFirst({ where: { id: { in: userIds }, email: { in: WORKFLOW_ACCOUNTS } }, orderBy: { email: 'asc' } })
-    if (!user) throw new Error(`No seeded candidate found for ${phase} step ${approval.order} (${instance.routingMode}, ${userIds.length} candidates)`)
-    return user.email
-  }
-  const finish = async (id: string, phase: 'REQUEST' | 'SOLUTION' | 'FINAL') => {
-    for (let approvals = 0; approvals < 5; approvals++) {
-      const email = await step(id, phase)
-      if (!email) return
-      const page = await getPage(email)
-      const dialog = await open(page, id, actionItems.path)
-      await dialog.getByRole('button', { name: phase === 'SOLUTION' ? 'อนุมัติ Solution' : 'อนุมัติ', exact: true }).click()
-      if (phase !== 'SOLUTION') {
-        const confirmation = page.getByRole('dialog').filter({ has: page.getByRole('button', { name: 'ยืนยันการอนุมัติ', exact: true }) })
-        await confirmation.locator('textarea').fill(comment)
-        await confirmation.getByRole('button', { name: 'ยืนยันการอนุมัติ', exact: true }).click()
-      }
-      await expect(page.getByText('อนุมัติแล้ว', { exact: true })).toBeVisible({ timeout: 25_000 })
-    }
-    throw new Error(`Seeded ${phase} attempt did not finish within its configured steps`)
-  }
-
   const unit = await prisma.organization_units.findFirstOrThrow({ where: { assignments: { some: { user: { email: BOB }, isActive: true } } } })
+  expect(process.env.SMTP_HOST ?? '').toBe('')
   expect(await prisma.email_settings.count()).toBe(0)
-  await prisma.email_settings.create({ data: { id: 'default', enabled: false, host: 'localhost', fromAddress: 'fixture@example.com' } })
+  expect(await prisma.requests.count({ where: { title: { in: [title, pendingTitle] } } })).toBe(0)
+  const host = '127.0.0.1'
+  const port = 35247
+  const fromAddress = 'i18n-fixture@example.invalid'
+  // The isolated Next server uses the sender's default public origin unless
+  // the launcher also exports NEXT_PUBLIC_APP_URL for the Playwright worker.
+  const mailBase = (process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000').replace(/\/$/, '')
+  const capture = await startMailCapture({ host, port })
+  let configured = false
   try {
+    await prisma.email_settings.create({ data: { id: 'default', enabled: true, host, port, fromAddress } })
+    configured = true
     await prisma.organization_units.update({ where: { id: unit.id }, data: { canWorkOnSolutions: true } })
-    const alice = await getPage(ALICE)
-    const record = await create(alice, title)
-    const casey = await getPage(CASEY)
-    await open(casey, record.id, actionItems.path)
-    await casey.getByRole('button', { name: 'ไม่อนุมัติ', exact: true }).click()
-    await casey.getByPlaceholder('ระบุเหตุผลที่ไม่อนุมัติ...').fill(rejection)
-    await casey.getByRole('button', { name: 'ยืนยันการไม่อนุมัติ', exact: true }).click()
-    await expect(casey.getByText('บันทึกการไม่อนุมัติแล้ว', { exact: true })).toBeVisible({ timeout: 25_000 })
-    const revision = await open(alice, record.id, requestList.path, true)
-    await expect(revision.getByText(rejection)).toHaveText(`“${rejection}”`)
-    await revision.locator('[contenteditable="true"]').first().fill('Revised description — รายละเอียดเดิม')
-    await revision.getByRole('button', { name: 'ส่ง Request ใหม่', exact: true }).click()
-    await expect(alice.getByText('ส่ง Request ใหม่แล้ว', { exact: true })).toBeVisible({ timeout: 25_000 })
-    await finish(record.id, 'REQUEST')
-    await expect.poll(async () => (await prisma.requests.findUniqueOrThrow({ where: { id: record.id } })).status).toBe('SentToEngineer')
-
-    const bob = await getPage(BOB)
-    await bob.goto(engineering.path, { waitUntil: 'domcontentloaded' })
-    await expect(bob.getByRole('heading', { name: engineering.heading.th })).toBeVisible({ timeout: 60_000 })
-    const engineeringQueue = bob.getByRole('heading', { name: 'Sent to Engineer', exact: true })
-    await expect(async () => {
-      if (!(await engineeringQueue.isVisible())) await bob.getByRole('button', { name: 'งานติดตาม', exact: true }).click()
-      await expect(engineeringQueue).toBeVisible({ timeout: 2_000 })
-    }).toPass({ timeout: 60_000 })
-    const solution = bob.getByRole('dialog')
-    const submitSolution = solution.getByRole('button', { name: 'ส่ง Solution', exact: true })
-    await expect(async () => {
-      if (!(await solution.isVisible())) await bob.getByText(title, { exact: true }).click()
-      await expect(submitSolution).toBeVisible({ timeout: 2_000 })
-    }).toPass({ timeout: 45_000 })
-    await submitSolution.click()
-    const form = bob.getByRole('dialog').filter({ has: bob.locator('#solutionTitle') })
-    await form.locator('#solutionTitle').fill('Untranslated engineering plan')
-    await form.locator('[contenteditable="true"]').first().fill('Engineering description เส้นทาง A')
-    await form.locator('#cost').fill('250')
-    await form.locator('#timeline').fill('2 weeks')
-    await form.getByRole('button', { name: 'ส่ง Solution', exact: true }).click()
-    await expect.poll(() => prisma.solutions.count({ where: { requestId: record.id } }), { timeout: 25_000 }).toBe(1)
-    await finish(record.id, 'SOLUTION')
-
-    const final = await open(alice, record.id)
-    await final.getByRole('button', { name: 'ส่งให้อนุมัติรอบ Final', exact: true }).click()
-    await alice.getByRole('dialog').filter({ has: alice.getByRole('heading', { name: 'เริ่มอนุมัติรอบ Final' }) }).getByRole('button', { name: 'ส่งให้อนุมัติรอบ Final', exact: true }).click()
-    await expect(alice.getByText('ส่งให้อนุมัติรอบ Final แล้ว', { exact: true })).toBeVisible({ timeout: 25_000 })
-    await finish(record.id, 'FINAL')
-    expect((await prisma.requests.findUniqueOrThrow({ where: { id: record.id } })).status).toBe('Completed')
-    const pending = await create(alice, pendingTitle)
-
-    const sample = async (page: Page, locale: 'en' | 'th', mobile = false) => {
-      await page.goto(requestList.path)
-      await expect(page.locator('html')).toHaveAttribute('lang', locale)
-      const labels: Array<string | null> = []
-      for (const [name, status] of [[title, 'Completed'], [pendingTitle, 'Improvement Request']]) {
-        const row = page.getByRole('row').filter({ hasText: name }).filter({ has: page.getByText(status, { exact: true }) })
-        const card = page.getByRole('button').filter({ has: page.getByRole('heading', { name, exact: true }) })
-        const item = mobile ? card : row
-        await expect(item.getByText(name, { exact: true })).toBeVisible()
-        labels.push(await item.getByText(status, { exact: true }).textContent())
-        labels.push(await page.locator('[data-filter-tier="status"]').getByText(status, { exact: true }).textContent())
-      }
-      for (const [item, name, status] of [[record, title, 'Approved'], [pending, pendingTitle, 'Pending']] as const) {
-        await page.goto(`${requestList.path}?requestId=${item.id}`)
-        const dialog = page.getByRole('dialog')
-        await expect(dialog.getByText(name, { exact: true })).toBeVisible({ timeout: 25_000 })
-        const badges = dialog.getByText(status, { exact: true })
-        await expect(badges.first()).toBeVisible()
-        labels.push(...await badges.allTextContents())
-        if (item.id === record.id) await expect(dialog.getByText(`“${comment}”`, { exact: true }).first()).toBeVisible()
-      }
-      return labels
-    }
-    await alice.goto(requestList.path)
-    await chooseLanguage(alice, 'en')
-    const mobile = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, baseURL: BASE_URL, storageState: await alice.context().storageState() })
-    try {
-      const phone = await mobile.newPage()
-      const englishDesktop = await sample(alice, 'en')
-      const englishMobile = await sample(phone, 'en', true)
-      await alice.goto(requestList.path)
-      await chooseLanguage(alice, 'th')
-      expect(await sample(alice, 'th')).toEqual(englishDesktop)
-      expect(await sample(phone, 'th', true)).toEqual(englishMobile)
-    } finally {
-      await mobile.close()
-    }
+    const en = await run('en')
+    const th = await run('th')
+    expect(th, 'wire mail from the same workflow in Thai and English').toEqual(en)
   } finally {
-    await prisma.user.updateMany({ where: { email: { in: WORKFLOW_ACCOUNTS }, preferredLocale: 'th' }, data: { preferredLocale: 'en' } })
+    if (configured) await prisma.email_settings.delete({ where: { id: 'default', host, port, fromAddress } })
     await prisma.organization_units.update({ where: { id: unit.id }, data: { canWorkOnSolutions: unit.canWorkOnSolutions } })
-    await prisma.email_settings.delete({ where: { id: 'default' } })
-    await prisma.requests.deleteMany({ where: { title: { in: [title, pendingTitle] } } })
-    await Promise.allSettled([...contexts.values()].map((context) => context.close()))
+    await capture.close()
+  }
+
+  async function run(locale: 'en' | 'th') {
+    const t = createTranslator(locale)
+    const captureStart = capture.messages().length
+    const contexts = new Map<string, Awaited<ReturnType<typeof browser.newContext>>>()
+    const getPage = async (email: string) => {
+      const existing = contexts.get(email)
+      if (existing) return existing.pages()[0]
+      const context = await browser.newContext({ baseURL: BASE_URL })
+      contexts.set(email, context)
+      const page = await context.newPage()
+      await signIn(page, email, requestList.path)
+      await expect(page.locator('html')).toHaveAttribute('lang', locale)
+      return page
+    }
+    const open = async (page: Page, id: string, path: string = requestList.path, isDraft = false) => {
+      const url = `${path}?requestId=${id}`
+      await page.goto(url)
+      await expect(page).toHaveURL(`${BASE_URL}${url}`)
+      const dialog = page.getByRole('dialog')
+      if (isDraft) await expect(dialog.locator('#title')).toHaveValue(title, { timeout: 25_000 })
+      else await expect(dialog.getByText(title, { exact: true }).first()).toBeVisible({ timeout: 25_000 })
+      return dialog
+    }
+    const create = async (page: Page, name: string) => {
+      await page.goto(requestList.path)
+      await page.getByRole('button', { name: t('requests.newRequest'), exact: true }).click()
+      const dialog = page.getByRole('dialog')
+      await dialog.locator('#title').fill(name)
+      await dialog.locator('[contenteditable="true"]').first().fill('Keep this description — รายละเอียดเดิม')
+      await dialog.getByRole('button', { name: t('requests.submitRequest'), exact: true }).click()
+      await expect(page.getByText(t('requests.requestCreated'), { exact: true })).toBeVisible({ timeout: 25_000 })
+      return prisma.requests.findFirstOrThrow({ where: { title: name } })
+    }
+    const step = async (id: string, phase: 'REQUEST' | 'SOLUTION' | 'FINAL') => {
+      const instance = await prisma.approval_instances.findFirstOrThrow({
+        where: { ...(phase === 'SOLUTION' ? { solution: { requestId: id } } : { requestId: id }), phase, supersededAt: null },
+        include: {
+          candidateGroups: { include: { members: true } },
+          requestApprovals: { where: { status: 'pending' }, orderBy: { order: 'asc' } },
+          solutionApprovals: { where: { status: 'pending' }, orderBy: { order: 'asc' } },
+        },
+      })
+      const approval = (phase === 'SOLUTION' ? instance.solutionApprovals : instance.requestApprovals)[0]
+      if (!approval) return null
+      const group = instance.candidateGroups.find((candidate) => candidate.id === approval.candidateGroupId)
+      const userIds = approval.requiredApproverId ? [approval.requiredApproverId] : group?.members.map((member) => member.userId) ?? []
+      const user = await prisma.user.findFirst({ where: { id: { in: userIds }, email: { in: WORKFLOW_ACCOUNTS } }, orderBy: { email: 'asc' } })
+      if (!user) throw new Error(`No seeded candidate found for ${phase} step ${approval.order} (${instance.routingMode}, ${userIds.length} candidates)`)
+      return user.email
+    }
+    const finish = async (id: string, phase: 'REQUEST' | 'SOLUTION' | 'FINAL') => {
+      for (let approvals = 0; approvals < 5; approvals++) {
+        const email = await step(id, phase)
+        if (!email) return
+        const page = await getPage(email)
+        const dialog = await open(page, id, actionItems.path)
+        await dialog.getByRole('button', { name: phase === 'SOLUTION' ? t('requests.approveSolutionHeading') : t('requests.approve'), exact: true }).click()
+        if (phase !== 'SOLUTION') {
+          const confirmation = page.getByRole('dialog').filter({ has: page.getByRole('button', { name: t('requests.confirmApproval'), exact: true }) })
+          await confirmation.locator('textarea').fill(comment)
+          await confirmation.getByRole('button', { name: t('requests.confirmApproval'), exact: true }).click()
+        }
+        await expect(page.getByText(t('requests.approved'), { exact: true })).toBeVisible({ timeout: 25_000 })
+      }
+      throw new Error(`Seeded ${phase} attempt did not finish within its configured steps`)
+    }
+
+    try {
+      // Alternate approval candidates receive mail before they ever open the app.
+      await prisma.user.updateMany({ where: { email: { in: WORKFLOW_MAIL_RECIPIENTS } }, data: { preferredLocale: locale } })
+      const alice = await getPage(ALICE)
+      const record = await create(alice, title)
+      const casey = await getPage(CASEY)
+      await open(casey, record.id, actionItems.path)
+      await casey.getByRole('button', { name: t('requests.reject'), exact: true }).click()
+      await casey.getByPlaceholder(t('requests.rejectionHint')).fill(rejection)
+      await casey.getByRole('button', { name: t('requests.confirmRejection'), exact: true }).click()
+      await expect(casey.getByText(t('requests.rejected'), { exact: true })).toBeVisible({ timeout: 25_000 })
+      const revision = await open(alice, record.id, requestList.path, true)
+      await expect(revision.getByText(rejection)).toHaveText(`“${rejection}”`)
+      await revision.locator('[contenteditable="true"]').first().fill('Revised description — รายละเอียดเดิม')
+      await revision.getByRole('button', { name: t('requests.resubmitRequest'), exact: true }).click()
+      await expect(alice.getByText(t('requests.requestResubmitted'), { exact: true })).toBeVisible({ timeout: 25_000 })
+      await finish(record.id, 'REQUEST')
+      await expect.poll(async () => (await prisma.requests.findUniqueOrThrow({ where: { id: record.id } })).status).toBe('SentToEngineer')
+
+      const bob = await getPage(BOB)
+      await bob.goto(engineering.path, { waitUntil: 'domcontentloaded' })
+      await expect(bob.getByRole('heading', { name: engineering.heading[locale] })).toBeVisible({ timeout: 60_000 })
+      const engineeringQueue = bob.getByRole('heading', { name: 'Sent to Engineer', exact: true })
+      await expect(async () => {
+        if (!(await engineeringQueue.isVisible())) await bob.getByRole('button', { name: t('requests.followUpWork'), exact: true }).click()
+        await expect(engineeringQueue).toBeVisible({ timeout: 2_000 })
+      }).toPass({ timeout: 60_000 })
+      const engineeringRow = bob.getByTestId('engineering-request-row').filter({ hasText: title })
+      await engineeringRow.getByRole('button', { name: t('requests.assignPic'), exact: true }).click()
+      await bob.getByRole('option').filter({ hasText: BOB }).click()
+      await bob.getByRole('button', { name: t('requests.save'), exact: true }).click()
+      await expect(bob.getByText(t('requests.picsAssigned', { count: 1 }), { exact: true })).toBeVisible()
+
+      const solution = bob.getByRole('dialog')
+      const submitSolution = solution.getByRole('button', { name: t('requests.submitSolution'), exact: true })
+      await expect(async () => {
+        if (!(await solution.isVisible())) await bob.getByText(title, { exact: true }).click()
+        await expect(submitSolution).toBeVisible({ timeout: 2_000 })
+      }).toPass({ timeout: 45_000 })
+      await submitSolution.click()
+      const form = bob.getByRole('dialog').filter({ has: bob.locator('#solutionTitle') })
+      await form.locator('#solutionTitle').fill('Untranslated engineering plan')
+      await form.locator('[contenteditable="true"]').first().fill('Engineering description เส้นทาง A')
+      await form.locator('#cost').fill('250')
+      await form.locator('#timeline').fill('2 weeks')
+      await form.getByRole('button', { name: t('requests.submitSolution'), exact: true }).click()
+      await expect.poll(() => prisma.solutions.count({ where: { requestId: record.id } }), { timeout: 25_000 }).toBe(1)
+      await finish(record.id, 'SOLUTION')
+
+      const final = await open(alice, record.id)
+      await final.getByRole('button', { name: t('requests.submitFinalShort'), exact: true }).click()
+      await alice.getByRole('dialog').filter({ has: alice.getByRole('heading', { name: t('requests.initiateFinal') }) }).getByRole('button', { name: t('requests.startFinal'), exact: true }).click()
+      await expect(alice.getByText(t('requests.finalStarted'), { exact: true })).toBeVisible({ timeout: 25_000 })
+      await finish(record.id, 'FINAL')
+      expect((await prisma.requests.findUniqueOrThrow({ where: { id: record.id } })).status).toBe('Completed')
+      const entries = await prisma.notifications.findMany({ where: { requestId: record.id }, select: { type: true } })
+      expect(entries.map(entry => entry.type)).toEqual(expect.arrayContaining([
+        'approval_needed', 'approval_rejected', 'request_assigned', 'solution_ready', 'final_approval_needed', 'approval_granted',
+      ]))
+      // Request status-change rows are written directly for the in-app bell.
+      const mailEntries = entries.filter(entry => entry.type !== 'status_changed')
+      await expect.poll(() => capture.messages().length - captureStart).toBe(mailEntries.length)
+      const mail = capture.messages().slice(captureStart).map(message => {
+        expect(message.from).toBe(fromAddress)
+        expect(WORKFLOW_MAIL_RECIPIENTS).toEqual(expect.arrayContaining(message.to))
+        return readWorkflowMail(message, record, mailBase)
+      }).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
+      expect(mail.map(item => item.subject)).toEqual(expect.arrayContaining([
+        expect.stringMatching(/^Approval Needed:/), expect.stringMatching(/^Rejected:/), 'PIC Assignment',
+        expect.stringMatching(/^Solution Ready:/), expect.stringMatching(/^Final Approval Needed:/), 'Request Completed',
+      ]))
+      if (locale === 'th') {
+        await prisma.email_settings.update({ where: { id: 'default' }, data: { enabled: false } })
+        const pending = await create(alice, pendingTitle)
+
+        const sample = async (page: Page, locale: 'en' | 'th', mobile = false) => {
+          await page.goto(requestList.path)
+          await expect(page.locator('html')).toHaveAttribute('lang', locale)
+          const labels: Array<string | null> = []
+          for (const [name, status] of [[title, 'Completed'], [pendingTitle, 'Improvement Request']]) {
+            const row = page.getByRole('row').filter({ hasText: name }).filter({ has: page.getByText(status, { exact: true }) })
+            const card = page.getByRole('button').filter({ has: page.getByRole('heading', { name, exact: true }) })
+            const item = mobile ? card : row
+            await expect(item.getByText(name, { exact: true })).toBeVisible()
+            labels.push(await item.getByText(status, { exact: true }).textContent())
+            labels.push(await page.locator('[data-filter-tier="status"]').getByText(status, { exact: true }).textContent())
+          }
+          for (const [item, name, status] of [[record, title, 'Approved'], [pending, pendingTitle, 'Pending']] as const) {
+            await page.goto(`${requestList.path}?requestId=${item.id}`)
+            const dialog = page.getByRole('dialog')
+            await expect(dialog.getByText(name, { exact: true })).toBeVisible({ timeout: 25_000 })
+            const badges = dialog.getByText(status, { exact: true })
+            await expect(badges.first()).toBeVisible()
+            labels.push(...await badges.allTextContents())
+            if (item.id === record.id) await expect(dialog.getByText(`“${comment}”`, { exact: true }).first()).toBeVisible()
+          }
+          return labels
+        }
+        await alice.goto(requestList.path)
+        await chooseLanguage(alice, 'en')
+        const mobile = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, baseURL: BASE_URL, storageState: await alice.context().storageState() })
+        try {
+          const phone = await mobile.newPage()
+          const englishDesktop = await sample(alice, 'en')
+          const englishMobile = await sample(phone, 'en', true)
+          await alice.goto(requestList.path)
+          await chooseLanguage(alice, 'th')
+          expect(await sample(alice, 'th')).toEqual(englishDesktop)
+          expect(await sample(phone, 'th', true)).toEqual(englishMobile)
+        } finally {
+          await mobile.close()
+        }
+      }
+      return mail
+    } finally {
+      await prisma.user.updateMany({ where: { email: { in: WORKFLOW_MAIL_RECIPIENTS }, preferredLocale: 'th' }, data: { preferredLocale: 'en' } })
+      await prisma.requests.deleteMany({ where: { title: { in: [title, pendingTitle] } } })
+      await Promise.allSettled([...contexts.values()].map(context => context.close()))
+    }
   }
 })
 
