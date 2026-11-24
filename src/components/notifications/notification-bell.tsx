@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { useTranslations } from '@/lib/i18n/client'
 import { Bell } from 'lucide-react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
@@ -19,7 +20,10 @@ interface NotificationBellProps {
 }
 
 export function NotificationBell({ userId }: NotificationBellProps) {
-  const [notifications, setNotifications] = useState<Array<any>>([])
+  const t = useTranslations()
+  const latestTranslations = useRef(t)
+  useEffect(() => { latestTranslations.current = t }, [t])
+  const [notifications, setNotifications] = useState<Awaited<ReturnType<typeof getNotifications>>>([])
   const [unreadCount, setUnreadCount] = useState(0)
   const [isOpen, setIsOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
@@ -47,7 +51,7 @@ export function NotificationBell({ userId }: NotificationBellProps) {
       } catch (error) {
         if (cancelled) return
         console.error('Failed to fetch notifications:', error)
-        toast.error('Failed to load notifications')
+        toast.error(latestTranslations.current('notifications.loadFailed'))
       } finally {
         if (!cancelled) setIsLoading(false)
       }
@@ -77,7 +81,7 @@ export function NotificationBell({ userId }: NotificationBellProps) {
       setUnreadCount((prev) => Math.max(0, prev - 1))
     } catch (error) {
       console.error('Failed to mark as read:', error)
-      toast.error('Failed to mark notification as read')
+      toast.error(latestTranslations.current('notifications.markReadFailed'))
     }
   }
 
@@ -91,10 +95,10 @@ export function NotificationBell({ userId }: NotificationBellProps) {
       )
       setUnreadCount(0)
 
-      toast.success(`Marked ${result.count} notifications as read`)
+      toast.success(latestTranslations.current('notifications.markedAllRead', { count: result.count }))
     } catch (error) {
       console.error('Failed to mark all as read:', error)
-      toast.error('Failed to mark all as read')
+      toast.error(latestTranslations.current('notifications.markAllReadFailed'))
     }
   }
 
@@ -115,10 +119,15 @@ export function NotificationBell({ userId }: NotificationBellProps) {
     <>
       <Popover open={isOpen} onOpenChange={setIsOpen}>
         <PopoverTrigger asChild>
-          <Button variant="ghost" size="icon" className="relative">
-            <Bell className="h-5 w-5" />
+          <Button
+            variant="ghost"
+            size="icon"
+            className="relative"
+            aria-label={unreadCount > 0 ? t('notifications.unread', { count: unreadCount }) : t('notifications.heading')}
+          >
+            <Bell className="h-5 w-5" aria-hidden="true" />
             {unreadCount > 0 && (
-              <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs text-white">
+              <span aria-hidden="true" className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs text-white">
                 {unreadCount > 9 ? '9+' : unreadCount}
               </span>
             )}
@@ -127,7 +136,7 @@ export function NotificationBell({ userId }: NotificationBellProps) {
         <PopoverContent className="w-96 p-0" align="end">
           {isLoading ? (
             <div className="flex items-center justify-center py-12">
-              <div className="text-sm text-gray-500">Loading...</div>
+              <div className="text-sm text-gray-500">{t('notifications.loading')}</div>
             </div>
           ) : (
             <NotificationList

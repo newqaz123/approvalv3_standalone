@@ -215,6 +215,7 @@ describe('post-commit plan has no department target', () => {
     title: 'Rejected',
     message: 'Returned.',
     requestId: 'request-1',
+    display: { key: 'finalApprovalRejected', values: { requestTitle: 'Fixture request', reason: 'Needs work' } } as const,
   }
 
   it('commits before starting independent user dispatches', async () => {

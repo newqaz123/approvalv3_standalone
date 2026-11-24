@@ -1,6 +1,7 @@
 'use server'
 
 import type { MessageKey } from '@/lib/i18n/messages'
+import { notificationDisplayFields } from '@/lib/notification-display'
 import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
 import { RequestStatus, type Prisma } from '@prisma/client'
@@ -26,6 +27,7 @@ import {
   runTransactionWithPostCommitNotifications,
   type PostCommitNotificationCollector,
   type NotificationPayload,
+  type UserNotification,
 } from '@/lib/post-commit-notifications'
 import {
   createPrismaNotificationRecipientDb,
@@ -339,13 +341,7 @@ export async function submitSolution(input: SubmitSolutionActionInput) {
     uploadSessionId: validated.inlineImageSessionId,
   })
 
-  const pendingNotifications: Array<{
-    userId: string
-    type: 'approval_needed' | 'solution_ready'
-    title: string
-    message: string
-    requestId: string
-  }> = []
+  const pendingNotifications: UserNotification[] = []
 
   // Transaction: Create solution, approval attempt, and update request status.
   // Attempt creation runs SERIALIZABLE; serialization failures translate
@@ -452,6 +448,7 @@ export async function submitSolution(input: SubmitSolutionActionInput) {
           type: 'approval_needed',
           title: 'Solution Submitted for Approval',
           message: `📤 Solution Submitted: "${request.title}" has a new solution ready for your approval.`,
+          display: { key: 'solutionSubmitted', values: { requestTitle: request.title } },
           requestId: request.id,
         })
       }
@@ -497,6 +494,7 @@ export async function submitSolution(input: SubmitSolutionActionInput) {
               type: 'solution_ready',
               title: 'Solution Ready for Review',
               message: `Engineering solution for "${request.title}" is ready for your review.`,
+              display: { key: 'solutionAutoReady', values: { requestTitle: request.title } },
               requestId: validated.requestId,
             })
           }
@@ -509,6 +507,7 @@ export async function submitSolution(input: SubmitSolutionActionInput) {
             type: 'approval_needed',
             title: 'Solution Submitted for Approval',
             message: `📤 Solution Submitted: "${request.title}" has a new solution ready for your approval.`,
+            display: { key: 'solutionSubmitted', values: { requestTitle: request.title } },
             requestId: request.id,
           })
         }
@@ -697,6 +696,7 @@ export async function approveSolution(solutionId: string, comments?: string, exp
             type: 'solution_ready',
             title: 'Solution Ready for Review',
             message: `📤 Ready for Review: "${request.title}" has been completed and awaits your department's final review.`,
+            display: { key: 'solutionReady', values: { requestTitle: request.title } },
             requestId: solution.requestId,
           },
         )
@@ -859,6 +859,7 @@ export async function rejectSolution(solutionId: string, comments: string, expec
           type: 'approval_rejected',
           title: 'Solution Rejected',
           message: `❌ Solution Rejected: "${solutionData.title}" was rejected and returned to engineering for revision. Reason: "${comments}"`,
+          display: { key: 'solutionRejected', values: { solutionTitle: solutionData.title, reason: comments } },
           requestId: solution.requestId,
         },
       )
@@ -907,6 +908,7 @@ async function queueNextSolutionApproverNotifications(
     type: 'approval_needed',
     title: 'Solution Approval Needed',
     message: `Solution "${nextApproval.solution.title}" needs your approval.`,
+    display: { key: 'solutionApprovalNeeded', values: { solutionTitle: nextApproval.solution.title } },
     requestId: nextApproval.solution.requestId,
   })
 }
@@ -1028,6 +1030,7 @@ export async function initiateFinalApproval(
         type: 'final_approval_needed',
         title: 'Final Approval Needed',
         message: `Request "${request.title}" needs your final approval.`,
+        display: { key: 'finalApprovalNeeded', values: { requestTitle: request.title } },
         requestId,
       })
     } else {
@@ -1062,6 +1065,7 @@ export async function initiateFinalApproval(
               type: 'status_changed',
               title: 'Request Completed',
               message: `Your request "${request.title}" has been completed.`,
+              ...notificationDisplayFields({ key: 'requestAutoCompleted', values: { requestTitle: request.title } }),
               requestId,
             },
           })
@@ -1126,6 +1130,7 @@ async function queueNextFinalApproverNotifications(
     type: 'final_approval_needed',
     title: 'Final Approval Needed',
     message: `Request "${nextApproval.request.title}" needs your final approval.`,
+    display: { key: 'finalApprovalNeeded', values: { requestTitle: nextApproval.request.title } },
     requestId,
   })
 }
@@ -1237,6 +1242,7 @@ export async function approveFinalApproval(requestId: string, comments?: string,
           type: 'approval_granted',
           title: 'Request Completed',
           message: `✅ Request Completed: "${request.title}" has been fully approved and completed.`,
+          display: { key: 'requestCompleted', values: { requestTitle: request.title } },
           requestId,
         },
       )
@@ -1435,6 +1441,7 @@ export async function rejectFinalApproval(requestId: string, comments: string, e
         type: 'approval_rejected',
         title: 'Final Approval Rejected',
         message: `❌ Final Rejection: "${request.title}" was rejected during final approval. Reason: "${comments}". Please revise the solution.`,
+        display: { key: 'finalApprovalRejected', values: { requestTitle: request.title, reason: comments } },
         requestId,
       },
     )
@@ -1729,6 +1736,7 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
             type: 'solution_ready',
             title: 'Solution Ready for Review',
             message: `📤 Ready for Review: "${request.title}" solution has been updated and is ready for your department's final review.`,
+            display: { key: 'solutionRevisionReady', values: { requestTitle: request.title } },
             requestId: validated.requestId,
           },
         )
@@ -1819,6 +1827,7 @@ export async function resubmitSolution(input: ResubmitSolutionActionInput) {
           type: 'approval_needed',
           title: 'Solution Resubmitted',
           message: `📤 Solution resubmitted for "${request.title}". Please review the updated solution.`,
+          display: { key: 'solutionResubmitted', values: { requestTitle: request.title } },
           requestId: request.id,
         })
       }

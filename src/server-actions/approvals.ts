@@ -1,6 +1,7 @@
 'use server'
 
 import type { MessageKey } from '@/lib/i18n/messages'
+import { notificationDisplayFields } from '@/lib/notification-display'
 import { auth } from '@/lib/auth-config'
 import prisma from '@/lib/prisma'
 import type { Prisma } from '@prisma/client'
@@ -318,6 +319,7 @@ export async function rejectRequest(
           type: 'approval_rejected',
           title: 'Request Rejected',
           message: `❌ Request Rejected: Your request "${rejectedRequest.title}" has been rejected. Reason: "${comments}"`,
+          display: { key: 'requestRejected', values: { requestTitle: rejectedRequest.title, reason: comments } },
           requestId,
         }),
       ),
@@ -351,6 +353,7 @@ async function notifyRequestStatusChange(
         type: 'status_changed',
         title: 'Request Status Changed',
         message: `Your request status changed to ${change.toStatus}`,
+        ...notificationDisplayFields({ key: 'requestStatusChanged', values: { status: change.toStatus } }),
         requestId,
       },
     })
@@ -393,6 +396,10 @@ async function notifyNextApprover(requestId: string) {
         type: 'approval_needed',
         title: 'Approval Needed',
         message: `Request "${nextApproval.request.title}" needs your approval`,
+        display: {
+          key: nextApproval.isFinalApproval ? 'finalApprovalNeededFromRequest' : 'requestApprovalNeeded',
+          values: { requestTitle: nextApproval.request.title },
+        },
         requestId,
       }),
     ),

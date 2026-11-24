@@ -300,6 +300,7 @@ export async function createRequest(input: CreateRequestInput) {
         type: 'approval_needed',
         title: 'New Approval Request',
         message: `📋 New Approval Request: "${request.title}" requires your approval.`,
+        display: { key: 'requestSubmitted', values: { requestTitle: request.title } },
         requestId: request.id,
       })
     }
@@ -1991,6 +1992,7 @@ export async function assignEngineers(requestId: string, engineerIds: string[]) 
           type: 'request_assigned',
           title: 'PIC Assignment',
           message: `👤 PIC Assignment: You have been assigned to "${request.title}". Please review and submit your solution.`,
+          display: { key: 'requestAssigned', values: { requestTitle: request.title } },
           requestId,
         }),
       ),

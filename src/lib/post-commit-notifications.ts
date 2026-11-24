@@ -1,3 +1,5 @@
+import type { NotificationDisplay } from './notification-display'
+
 export type WorkflowNotificationType =
   | 'approval_needed'
   | 'approval_granted'
@@ -12,6 +14,7 @@ export interface NotificationPayload {
   title: string
   message: string
   requestId?: string
+  display: NotificationDisplay
 }
 
 export interface UserNotification extends NotificationPayload {

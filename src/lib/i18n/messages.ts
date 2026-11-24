@@ -2,12 +2,13 @@ import { account } from './catalogs/account'
 import { admin } from './catalogs/admin'
 import { common } from './catalogs/common'
 import { insights } from './catalogs/insights'
+import { notifications } from './catalogs/notifications'
 import { requests } from './catalogs/requests'
 import type { Locale } from './locale'
 
 const messages = {
-  en: { ...common.en, ...account.en, ...requests.en, ...insights.en, ...admin.en },
-  th: { ...common.th, ...account.th, ...requests.th, ...insights.th, ...admin.th },
+  en: { ...common.en, ...account.en, ...requests.en, ...insights.en, ...admin.en, ...notifications.en },
+  th: { ...common.th, ...account.th, ...requests.th, ...insights.th, ...admin.th, ...notifications.th },
 }
 
 export type MessageKey = keyof typeof messages.en

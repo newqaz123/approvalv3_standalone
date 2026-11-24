@@ -71,17 +71,19 @@ model inline_description_image_references {
 }
 
 model notifications {
-  id        String           @id @default(uuid())
-  userId    String
-  type      NotificationType
-  title     String
-  message   String
-  requestId String?
-  isRead    Boolean          @default(false)
-  readAt    DateTime?
-  createdAt DateTime         @default(now())
-  request   requests?        @relation(fields: [requestId], references: [id], onDelete: Cascade)
-  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id            String           @id @default(uuid())
+  userId        String
+  type          NotificationType
+  title         String
+  message       String
+  displayKey    String?
+  displayValues Json?
+  requestId     String?
+  isRead        Boolean          @default(false)
+  readAt        DateTime?
+  createdAt     DateTime         @default(now())
+  request       requests?        @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([createdAt])
   @@index([isRead])

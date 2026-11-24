@@ -33,6 +33,7 @@ const payload = {
   title: 'Final Approval Rejected',
   message: 'The request was returned to engineering.',
   requestId: 'request-1',
+  display: { key: 'finalApprovalRejected', values: { requestTitle: 'Fixture request', reason: 'Needs work' } } as const,
 }
 
 describe('post-commit notification transactions', () => {

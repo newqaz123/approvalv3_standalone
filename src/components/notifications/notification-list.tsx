@@ -1,5 +1,9 @@
 'use client'
 import { formatDistanceToNow } from 'date-fns'
+import { enUS } from 'date-fns/locale/en-US'
+import { th } from 'date-fns/locale/th'
+import { useLocale, useTranslations } from '@/lib/i18n/client'
+import { renderNotificationDisplay } from '@/lib/notification-display'
 import {
   Bell,
   CheckCircle,
@@ -18,6 +22,8 @@ interface NotificationListProps {
     type: NotificationType
     title: string
     message: string
+    displayKey: string | null
+    displayValues: unknown
     requestId: string | null
     request?: { title: string } | null
     isRead: boolean
@@ -34,6 +40,8 @@ export function NotificationList({
   onMarkAllAsRead,
   onOpenRequest,
 }: NotificationListProps) {
+  const locale = useLocale()
+  const t = useTranslations()
   const getNotificationIcon = (type: NotificationType) => {
     const iconClass = 'h-5 w-5'
 
@@ -68,7 +76,7 @@ export function NotificationList({
     <div className="flex flex-col">
       {/* Header */}
       <div className="flex items-center justify-between border-b px-4 py-3">
-        <h3 className="font-semibold">Notifications</h3>
+        <h3 className="font-semibold">{t('notifications.heading')}</h3>
         {notifications.length > 0 && (
           <Button
             variant="ghost"
@@ -76,7 +84,7 @@ export function NotificationList({
             onClick={onMarkAllAsRead}
             className="text-xs"
           >
-            Mark all as read
+            {t('notifications.markAllRead')}
           </Button>
         )}
       </div>
@@ -86,52 +94,56 @@ export function NotificationList({
         {notifications.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-gray-500">
             <Bell className="mb-2 h-12 w-12 opacity-20" />
-            <p className="text-sm">No notifications</p>
+            <p className="text-sm">{t('notifications.empty')}</p>
           </div>
         ) : (
           <div className="divide-y">
-            {notifications.map((notification) => (
-              <button
-                key={notification.id}
-                onClick={() => handleNotificationClick(notification)}
-                className="flex w-full gap-3 px-4 py-3 text-left transition-colors hover:bg-gray-50"
-              >
-                <div className="mt-0.5 flex-shrink-0">
-                  {getNotificationIcon(notification.type)}
-                </div>
-
-                <div className="flex-1 overflow-hidden">
-                  <div className="flex items-center gap-2">
-                    <p
-                      className={`text-sm font-medium ${
-                        notification.isRead ? 'text-gray-700' : 'text-gray-900'
-                      }`}
-                    >
-                      {notification.title}
-                    </p>
-                    {!notification.isRead && (
-                      <span className="h-2 w-2 rounded-full bg-blue-600" />
-                    )}
+            {notifications.map((notification) => {
+              const display = renderNotificationDisplay(locale, notification)
+              return (
+                <button
+                  key={notification.id}
+                  onClick={() => handleNotificationClick(notification)}
+                  className="flex w-full gap-3 px-4 py-3 text-left transition-colors hover:bg-gray-50"
+                >
+                  <div className="mt-0.5 flex-shrink-0">
+                    {getNotificationIcon(notification.type)}
                   </div>
 
-                  <p className="line-clamp-2 text-xs text-gray-600">
-                    {notification.message}
-                  </p>
+                  <div className="flex-1 overflow-hidden">
+                    <div className="flex items-center gap-2">
+                      <p
+                        className={`text-sm font-medium ${
+                          notification.isRead ? 'text-gray-700' : 'text-gray-900'
+                        }`}
+                      >
+                        {display.title}
+                      </p>
+                      {!notification.isRead && (
+                        <span className="h-2 w-2 rounded-full bg-blue-600" />
+                      )}
+                    </div>
 
-                  {notification.request && (
-                    <p className="mt-1 text-xs text-gray-500">
-                      Request: {notification.request.title}
+                    <p className="line-clamp-2 text-xs text-gray-600">
+                      {display.message}
                     </p>
-                  )}
 
-                  <p className="mt-1 text-xs text-gray-400">
-                    {formatDistanceToNow(new Date(notification.createdAt), {
-                      addSuffix: true,
-                    })}
-                  </p>
-                </div>
-              </button>
-            ))}
+                    {notification.request && (
+                      <p className="mt-1 text-xs text-gray-500">
+                        {t('notifications.request', { title: notification.request.title })}
+                      </p>
+                    )}
+
+                    <p className="mt-1 text-xs text-gray-400">
+                      {formatDistanceToNow(new Date(notification.createdAt), {
+                        addSuffix: true,
+                        locale: locale === 'th' ? th : enUS,
+                      })}
+                    </p>
+                  </div>
+                </button>
+              )
+            })}
           </div>
         )}
       </ScrollArea>

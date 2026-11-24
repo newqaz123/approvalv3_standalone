@@ -1,6 +1,8 @@
 "use server";
 
 import { auth } from "@/lib/auth-config";
+import { notificationDisplayFields } from "@/lib/notification-display";
+import type { UserNotification } from "@/lib/post-commit-notifications";
 import {
 	renderDescriptionHtml,
 	renderDescriptionPlainText,
@@ -414,22 +416,9 @@ export async function markAllAsRead(userId: string) {
 /**
  * Create a notification (helper function)
  */
-export async function createNotification(data: {
-	userId: string;
-	type:
-		| "approval_needed"
-		| "approval_granted"
-		| "approval_rejected"
-		| "status_changed"
-		| "request_assigned"
-		| "solution_ready"
-		| "final_approval_needed";
-	title: string;
-	message: string;
-	requestId?: string;
-}) {
+export async function createNotification({ display, ...data }: UserNotification) {
 	const notification = await prisma.notifications.create({
-		data,
+		data: { ...data, ...notificationDisplayFields(display) },
 	});
 
 	// Optionally send email notification
