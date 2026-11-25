@@ -35,6 +35,14 @@ select_mode() {
 }
 usage() { printf 'Usage: %s [--online|--offline <package-dir>]\n' "$0"; }
 
+require_deploy_root() {
+	local uid
+	if uid="$(id -u)" && [ "$uid" = 0 ]; then
+		return 0
+	fi
+	fail 'Production deployment must run as root; use an authorized deployment account (see DEPLOY.md).'
+}
+
 require_host_command() {
 	command -v "$1" >/dev/null 2>&1 || {
 		fail "Required host command is not installed: $1"
@@ -116,7 +124,8 @@ online_git_acquire() {
 
 validate_offline_package() {
 	local required
-	for required in VERSION SHA256SUMS docker-compose.prod.yml images/approval-app.tar images/approval-migrate.tar images/postgres.tar scripts/deploy.sh scripts/deploy-offline.sh scripts/backup.sh scripts/restore.sh scripts/rollback.sh scripts/health-check.sh scripts/setup.sh scripts/lib/deploy-common.sh tools/env-check.mjs tools/lib/env.mjs; do
+	local upgrade_artifacts=(docs/upgrade-runbook.md scripts/upgrade/precheck.sql scripts/upgrade/postcheck.sql)
+	for required in VERSION SHA256SUMS docker-compose.prod.yml images/approval-app.tar images/approval-migrate.tar images/postgres.tar scripts/deploy.sh scripts/deploy-offline.sh scripts/backup.sh scripts/restore.sh scripts/rollback.sh scripts/health-check.sh scripts/setup.sh scripts/lib/deploy-common.sh tools/env-check.mjs tools/lib/env.mjs "${upgrade_artifacts[@]}"; do
 		[ -f "$DEPLOY_ROOT/$required" ] || {
 			fail "Offline package is missing: $required"
 			return 1
@@ -130,6 +139,17 @@ validate_offline_package() {
 		fail 'Offline SHA256SUMS is empty'
 		return 1
 	}
+	# The checksum tools only verify listed paths; require these exact paths first.
+	for required in "${upgrade_artifacts[@]}"; do
+		if ! LC_ALL=C awk -v path="$required" '
+			length($1) == 64 && $1 !~ /[^a-fA-F0-9]/ &&
+				substr($0, 65, 2) ~ /^ [ *]$/ && substr($0, 67) == path { found = 1; exit }
+			END { exit !found }
+		' "$DEPLOY_ROOT/SHA256SUMS"; then
+			fail "Offline SHA256SUMS is missing an entry for: $required"
+			return 1
+		fi
+	done
 	if command -v sha256sum >/dev/null 2>&1; then
 		(cd "$DEPLOY_ROOT" && sha256sum -c SHA256SUMS)
 	elif command -v shasum >/dev/null 2>&1; then
@@ -173,11 +193,12 @@ main() {
 		return 1
 		;;
 	esac
+	STAGE=preflight
+	require_deploy_root
 	# Source shared functions only after resolving the package root.
 	# shellcheck source=scripts/lib/deploy-common.sh
 	. "$REPO_ROOT/scripts/lib/deploy-common.sh"
 	export DEPLOY_ROOT ENV_FILE="${DEPLOY_ROOT}/.env.production" PROD_COMPOSE_FILE="${DEPLOY_ROOT}/docker-compose.prod.yml"
-	STAGE=preflight
 	require_host_command docker
 	require_host_command node
 	require_host_command curl

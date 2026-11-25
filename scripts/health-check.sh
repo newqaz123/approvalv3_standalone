@@ -9,6 +9,9 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/lib/deploy-common.sh"
+
 # Colors for output (only for direct execution, suppressed in cron)
 if [ -t 1 ]; then
     RED='\033[0;31m'
@@ -116,25 +119,14 @@ esac
 echo ""
 echo "Checking application API endpoint..."
 
-# Check if jq is available for API JSON parsing
-if command -v curl &>/dev/null; then
-    HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$HEALTH_CHECK_URL" 2>/dev/null || echo "000")
-
-    case "$HTTP_STATUS" in
-        200)
-            echo -e "${GREEN}✓${NC} API health endpoint: responding (200 OK)"
-            ;;
-        000)
-            echo -e "${YELLOW}⚠${NC} API health endpoint: no response (may be starting)"
-            ALL_HEALTHY=false
-            ;;
-        *)
-            echo -e "${RED}✗${NC} API health endpoint: HTTP $HTTP_STATUS"
-            ALL_HEALTHY=false
-            ;;
-    esac
+if ! command -v curl &>/dev/null || ! command -v node &>/dev/null; then
+    echo -e "${RED}✗${NC} API readiness check requires curl and Node.js"
+    ALL_HEALTHY=false
+elif api_reports_connected "$HEALTH_CHECK_URL"; then
+    echo -e "${GREEN}✓${NC} API readiness: database connected"
 else
-    echo -e "${YELLOW}⚠${NC} curl not available, skipping API health check"
+    echo -e "${RED}✗${NC} API readiness: no successful response with a connected database"
+    ALL_HEALTHY=false
 fi
 
 # ==============================================

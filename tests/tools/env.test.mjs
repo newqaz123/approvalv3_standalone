@@ -186,6 +186,39 @@ test("createRuntimeReport accepts the Docker production contract", () => {
 	assert.deepEqual(report.issues, []);
 });
 
+for (const [label, databaseName] of [
+	["equals sign", "fixture=data"],
+	["postgresql URI prefix", "postgresql://"],
+	["postgres URI prefix", "postgres://"],
+]) {
+	test(`createRuntimeReport rejects a matching database name containing ${label}`, () => {
+		const report = createRuntimeReport({
+			DATABASE_URL: `postgresql://app-user:strong-password@db:5432/${databaseName}?schema=public`,
+			POSTGRES_USER: "app-user",
+			POSTGRES_PASSWORD: "strong-password",
+			POSTGRES_DB: databaseName,
+			UPLOAD_DIR: "/app/uploads",
+			NEXTAUTH_SECRET: "a-production-secret-with-32-characters",
+			CRON_SECRET: "another-production-secret-value",
+		});
+		assert.deepEqual(report.issues, [
+			"POSTGRES_DB must be a literal database name, not a connection string",
+		]);
+	});
+}
+
+test("createRuntimeReport rejects embedded NUL in the database name and role", () => {
+	const report = createRuntimeReport({
+		DATABASE_URL: "postgresql://app%00user:strong-password@db:5432/fixture_data",
+		POSTGRES_USER: "app\0user",
+		POSTGRES_PASSWORD: "strong-password",
+		POSTGRES_DB: "fixture\0data",
+		UPLOAD_DIR: "/app/uploads",
+	});
+	assert.ok(report.issues.includes("POSTGRES_USER must not contain a NUL byte"));
+	assert.ok(report.issues.includes("POSTGRES_DB must be a literal database name, not a connection string"));
+});
+
 test("createRuntimeReport rejects unsafe Docker paths and database drift", () => {
 	const report = createRuntimeReport({
 		DATABASE_URL: "postgresql://other:wrong@localhost:5432/other_db",
